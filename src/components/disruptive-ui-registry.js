@@ -5638,6 +5638,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     revise: { head: 'Revise this article', button: 'Rewrite it', busy: 'Rewriting — about a minute…' },
     // Blog Studio's "Add pictures".
     pictures: { head: 'Add pictures to this article', button: 'Add pictures', busy: 'Finding pictures — about a minute…' },
+    // Blog Studio's keyword box (save-blog-draft { tags }).
+    keywords: { head: 'Change this article’s keywords', button: 'Use these keywords', busy: 'Saving…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -5658,6 +5660,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const at = fmt(ui.scheduleAt);
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
     const canOpen = typeof window.openBlogStudio === 'function';
+    const kwChips = (list) => (Array.isArray(list) && list.length ? list.map((k) => `<span class="inline-block bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-full px-2 py-0.5 text-xs mr-1 mb-1">${esc(String(k))}</span>`).join('') : '<span class="text-xs text-gray-500">none</span>');
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
@@ -5685,6 +5688,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           ? 'The picture you selected is swapped for the new one, in the same place. The words aren’t changed, and the old picture stays in your library.'
           : 'Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.'}</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'keywords' ? `
+        <p class="text-xs font-bold text-gray-700 mt-3">Keywords now</p><div class="mt-1">${kwChips(ui.currentKeywords)}</div>
+        <p class="text-xs font-bold text-gray-700 mt-2">New keywords</p><div class="mt-1">${kwChips(ui.keywords)}</div>
+        <p class="text-xs text-gray-600 mt-2">${ui.status === 'published' ? 'This article is live, so readers see the new keywords straight away. ' : ''}Readers browse your blog by these, and search engines read them. Change them any time in Blog Studio.</p>` : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
         <textarea id="bap-reason-${postId}" data-bap-reason rows="2" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.reason || '')}</textarea>
@@ -5726,6 +5733,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
           source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
           replaceAsset,
+          keywords: ui.action === 'keywords' && Array.isArray(ui.keywords) ? ui.keywords : null,
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {
@@ -5740,6 +5748,65 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
 
   register('blog_action_proposal', renderBlogActionProposalCard);
+
+  // ── Built-in: Blog Keyword Proposal Card (Blog Writer chat) ────────────────
+  // { type: 'blog_keyword_proposal', op: 'rename'|'remove', from, to, merge, articles, published, blocked, settled? }
+  //
+  // A keyword on EVERY article — Blog setup ▸ Keywords from the chat. The counts were read from the
+  // blog by the orchestrator (src/utils/chat-blog-keywords.ts), never taken from the model. The click
+  // dispatches `blog:keywords`; chat-session.js POSTs to blog-keywords, the endpoint that list uses.
+  function renderBlogKeywordProposalCard(ui, esc) {
+    const op = ui.op === 'rename' || ui.op === 'remove' ? ui.op : null;
+    const from = String(ui.from || '');
+    if (!op || !from || (op === 'rename' && !ui.to)) return null;
+    const to = String(ui.to || '');
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const n = Number(ui.articles) || 0, live = Number(ui.published) || 0;
+    const onWhat = `${n} article${n === 1 ? '' : 's'}${live ? ` (${live} live)` : ''}`;
+    const head = op === 'remove' ? 'Remove a keyword everywhere' : ui.merge ? 'Merge two keywords' : 'Rename a keyword everywhere';
+    const button = op === 'remove' ? 'Remove keyword' : ui.merge ? 'Merge them' : 'Rename it';
+    const chipOf = (k) => `<span class="inline-block bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-full px-2 py-0.5 text-xs">${esc(k)}</span>`;
+    const what = op === 'remove'
+      ? `Takes ${chipOf(from)} off ${esc(onWhat)}. The articles stay; only the keyword goes.`
+      : ui.merge
+        ? `${chipOf(from)} becomes ${chipOf(to)}, a keyword you already use, on ${esc(onWhat)}. Articles that had both keep one.`
+        : `${chipOf(from)} becomes ${chipOf(to)} on ${esc(onWhat)}.`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>`
+        : `<p class="text-sm text-gray-800 mt-3 leading-7">${what}</p>
+           <p class="text-xs text-gray-600 mt-2">${live ? 'Live articles change straight away. ' : ''}You can also do this in Blog setup ▸ Keywords on the Blogs tab.</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-bkp-go class="${op === 'remove' ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(button)}</button>
+        <button type="button" data-bkp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-bkp-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-bkp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-bkp-go], [data-bkp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bkp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-bkp-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('blog:keywords', {
+        bubbles: true,
+        detail: {
+          op, from, to: op === 'rename' ? to : null, merge: !!ui.merge,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('blog_keyword_proposal', renderBlogKeywordProposalCard);
 
   // ── Built-in: Email Action Proposal Card (Email Marketing chat) ────────────
   // { type: 'email_action_proposal', action: 'approve'|'schedule'|'reject', issueId, subject, status,

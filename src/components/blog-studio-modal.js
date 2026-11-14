@@ -83,6 +83,7 @@
     el('bs-reject-go').textContent = redraft ? 'Reject and redraft' : 'Reject (no redraft)';
   }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   // Coloured success/error banner — the Create Post sheet's gpSetPanelStatus, ported. Replaces the
   // grey one-liners and alert()s so a failure actually reads as one.
@@ -301,8 +302,8 @@
     // Setup vs post (2026-10-21). Search Console and the widget are set once per business, so a
     // post's editor no longer carries them as sections 7 and 8 — a link at the foot of its rail opens
     // "Blog setup", which is this same panel showing only those two.
-    + '#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=search],#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=widget]{display:none;}'
-    + '#bms-blog-backdrop.bs-setup .bs-sec:not([data-bs-sec=search]):not([data-bs-sec=widget]){display:none;}'
+    + '#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=search],#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=widget],#bms-blog-backdrop:not(.bs-setup) [data-bs-sec=keywords]{display:none;}'
+    + '#bms-blog-backdrop.bs-setup .bs-sec:not([data-bs-sec=search]):not([data-bs-sec=widget]):not([data-bs-sec=keywords]){display:none;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace{grid-template-columns:minmax(0,1fr);max-width:680px;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace > div:nth-child(2),#bms-blog-backdrop.bs-setup #bs-setup-link,#bms-blog-backdrop.bs-setup .bs-sec-num{display:none;}'
     + '#detail-rq-blog-setup .bs-sec-num{display:none;}'
@@ -380,6 +381,19 @@
     + '.bs-hook-h1{font-size:15px;font-weight:700;color:#111827;margin:0 0 4px;}'
     + '.bs-hook-intro{font-size:13px;color:#4b5563;margin:0;line-height:1.5;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
+    // Keywords (src/utils/blog-keywords.ts): chips with a remove button, and an add box.
+    + '.bs-kw-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;}'
+    + '.bs-kw-chip{display:inline-flex;align-items:center;gap:4px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:999px;padding:3px 4px 3px 10px;font-size:13px;}'
+    + '.bs-kw-chip button{background:none;border:0;color:#047857;cursor:pointer;font-size:15px;line-height:1;width:22px;height:22px;border-radius:999px;}'
+    + '.bs-kw-chip button:hover,.bs-kw-chip button:focus-visible{background:#d1fae5;}'
+    + '.bs-kw-add{display:flex;gap:6px;}'
+    + '.bs-kw-add input,.bs-kw-edit input{flex:1;min-width:0;font-size:13px;}'
+    + '.bs-kw-table{width:100%;border-collapse:collapse;font-size:13px;}'
+    + '.bs-kw-table td{padding:8px 4px;border-top:1px solid #f3f4f6;vertical-align:middle;}'
+    + '.bs-kw-table td.bs-kw-n{color:#6b7280;font-size:12px;white-space:nowrap;}'
+    + '.bs-kw-table td.bs-kw-act{text-align:right;white-space:nowrap;}'
+    + '.bs-kw-edit{display:flex;gap:6px;flex-wrap:wrap;}'
+    + '.bs-kw-edit input{min-width:140px;}'
     + '.bs-linkbtn:hover{color:#ec4899;}'
     // Feedback + composer affordances brought over from the Create Post sheet.
     + '.bs-banner{font-size:13px;border-radius:10px;padding:10px 12px;border:1px solid;margin-top:12px;}'
@@ -533,9 +547,20 @@
     // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
     // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
     + '      <details class="bs-sec" data-bs-sec="seo">'
-    + '<summary class="bs-sec-head"><span class="bs-sec-num">4</span><span class="bs-sec-titles"><span class="bs-sec-title">SEO &amp; social preview</span><span class="bs-sec-sub">How the post looks in Google and when shared</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">4</span><span class="bs-sec-titles"><span class="bs-sec-title">Keywords, SEO &amp; social preview</span><span class="bs-sec-sub">Keywords, and how the post looks in Google and when shared</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
     + '        <div class="bs-row" style="margin-bottom:10px;"><button id="bs-generate-seo" class="bs-btn bs-btn-ghost bs-btn-sm">Generate SEO</button></div>'
+    // Keywords — this article's blog_posts.tags. Shown first: they're what readers browse by, and
+    // until 2026-11-14 nobody could see or change them.
+    + '        <div class="bs-field" id="bs-kw-field"><label for="bs-kw-input">Keywords <span id="bs-kw-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <div id="bs-kw-list" class="bs-kw-list" aria-live="polite"></div>'
+    + '          <div class="bs-kw-add" id="bs-kw-add"><input id="bs-kw-input" list="bs-kw-suggest" maxlength="40" autocomplete="off" placeholder="Add a keyword">'
+    + '            <button id="bs-kw-add-btn" type="button" class="bs-btn bs-btn-ghost bs-btn-sm">Add</button></div>'
+    + '          <div id="bs-kw-full" class="bs-status bs-hidden">That\u2019s the most an article can have. Remove one to add another.</div>'
+    + '          <datalist id="bs-kw-suggest"></datalist>'
+    + '          <div class="bs-status" style="font-size:11px;margin-top:4px;">Up to 3. Readers can browse your blog by these, and search engines read them. '
+    + 'To rename or remove one on every article, use <button type="button" id="bs-kw-setup-link" class="bs-linkbtn">Blog setup › Keywords</button>.</div>'
+    + '          <span id="bs-kw-status" class="bs-status"></span></div>'
     + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
     + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
     + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
@@ -625,6 +650,16 @@
     + '        </div>'
     + '        </div>'
     + '      </details>'
+    // Blog-wide keywords (Blog setup only): every keyword the blog uses, with rename / merge / remove.
+    + '      <details class="bs-sec" data-bs-sec="keywords">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">6</span><span class="bs-sec-titles"><span class="bs-sec-title">Keywords</span><span class="bs-sec-sub">The words readers browse your blog by — change one on every article at once</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <div class="bs-status" style="margin-bottom:8px;">Each article has up to 3 keywords. Rename one here and it changes on every article; rename it to a keyword you already use and the two are merged. '
+    + 'To change what new articles are about, edit your assistant\'s <strong>Topics &amp; themes</strong> — new keywords follow those.</div>'
+    + '        <div id="bs-kwm-body" class="bs-status">Loading&hellip;</div>'
+    + '        <span id="bs-kwm-status" class="bs-status" role="status"></span>'
+    + '        </div>'
+    + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="search">'
     + '<summary class="bs-sec-head"><span class="bs-sec-num">7</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console, for spotting posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
@@ -691,7 +726,7 @@
     + '        </div>'
     + '      </details>'
     + '      <button type="button" id="bs-setup-link" class="bs-setup-link">Blog setup \u203A'
-    + '<span>Google Search Console, the blog widget, embed code and RSS feed \u2014 set once for your whole blog.</span></button>'
+    + '<span>Keywords, Google Search Console, the blog widget, embed code and RSS feed \u2014 set once for your whole blog.</span></button>'
     + '    </div>'
     + '    <div>'
     // The buttons here do nothing of their own: each presses its twin in "Approve & publish", so
@@ -1022,6 +1057,23 @@
     aiDraftBusy(true);
     setBanner('bs-action-status', 'Your assistant is working on this article\u2026 about a minute.', 'info');
     d.ready = flushDraft();
+  });
+  // A keyword card pressed in chat (chat-session.js). One article's card carries its saved keywords;
+  // a blog-wide rename/remove carries none, so the open article and Blog setup's list are re-read.
+  document.addEventListener('blog:keywordsChanged', function (e) {
+    var d = e.detail || {};
+    if (d.postId != null && Number(d.postId) === Number(state.postId) && Array.isArray(d.tags)) {
+      setKeywords(d.tags);
+      setStatus('bs-kw-status', 'Updated from chat');
+    } else if (d.postId == null) {
+      var id = state.postId;
+      if (id) api('blog-posts?id=' + encodeURIComponent(id), { method: 'GET' }).then(function (res) {
+        var post = res && res.ok && res.body && res.body.post;
+        if (post && state.postId === id) setKeywords(post.tags);
+      });
+      loadKeywordSuggestions();
+      if (el('bs-kwm-body') && el('bs-kwm-body').isConnected && (el('bms-blog-backdrop').classList.contains('bs-setup') || setupTab.host)) loadKeywordManager();
+    }
   });
   document.addEventListener('blog:rewriteFinished', function (e) {
     var d = e.detail || {};
@@ -1501,6 +1553,7 @@
       if (!res.ok) { setStatus('bs-seo-status', 'SEO not written yet \u2014 press Generate SEO to try again.'); return; }
       if (res.body.metaTitle && !el('bs-meta-title').value.trim()) el('bs-meta-title').value = res.body.metaTitle;
       if (res.body.metaDescription && !el('bs-meta-desc').value.trim()) el('bs-meta-desc').value = res.body.metaDescription;
+      if (Array.isArray(res.body.tags) && !(state.keywords || []).length) setKeywords(res.body.tags);
       refreshSeoCounts();
       syncSeoButton();
       setStatus('bs-seo-status', 'SEO written by ' + (assistantName() || 'your assistant') + ' \u2014 edit it if you like.');
@@ -1739,6 +1792,75 @@
     el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
     refreshSeoCounts();
     syncSeoButton();
+    setKeywords(post && post.tags);
+    setStatus('bs-kw-status', '');
+    loadKeywordSuggestions();
+  }
+
+  // ── Keywords (blog_posts.tags) ─────────────────────────────────────────────────────────────────
+  // The same rules as the server (src/utils/blog-keywords.ts — tests/blog-keywords.test.ts keeps the
+  // two in step): trimmed, lowercase, single-spaced, at most 40 characters, no duplicates, up to 3.
+  var KW_MAX = 3, KW_LEN = 40;
+  function cleanKeyword(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().replace(/^[#,;.\s]+|[,;.\s]+$/g, '').toLowerCase().slice(0, KW_LEN).trim();
+  }
+  function setKeywords(list) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (k) { k = cleanKeyword(k); if (k && out.indexOf(k) < 0 && out.length < KW_MAX) out.push(k); });
+    state.keywords = out;
+    renderKeywords();
+  }
+  function renderKeywords() {
+    var list = el('bs-kw-list'); if (!list) return;
+    var kws = state.keywords || [];
+    list.innerHTML = kws.length
+      ? kws.map(function (k) {
+          return '<span class="bs-kw-chip">' + esc(k) + '<button type="button" data-kw-remove="' + esc(k) + '" aria-label="Remove keyword ' + esc(k) + '" title="Remove">\u00D7</button></span>';
+        }).join('')
+      : '<span class="bs-status">No keywords yet.</span>';
+    var full = kws.length >= KW_MAX;
+    el('bs-kw-count').textContent = kws.length + '/' + KW_MAX;
+    // Full: the add box gives way to a sentence saying why, rather than sitting there greyed out.
+    el('bs-kw-add').classList.toggle('bs-hidden', full);
+    el('bs-kw-full').classList.toggle('bs-hidden', !full);
+  }
+  function saveKeywords(next, okMsg) {
+    if (!state.postId) return;
+    var id = state.postId, before = (state.keywords || []).slice();
+    setKeywords(next);
+    setStatus('bs-kw-status', 'Saving\u2026');
+    api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: id, tags: state.keywords }) }).then(function (res) {
+      if (state.postId !== id) return;
+      if (!res.ok) { setKeywords(before); setStatus('bs-kw-status', (res.body && res.body.error) || 'Not saved \u2014 try again.'); return; }
+      if (res.body && Array.isArray(res.body.tags)) setKeywords(res.body.tags);
+      setStatus('bs-kw-status', okMsg || 'Saved');
+    }).catch(function () { setKeywords(before); setStatus('bs-kw-status', 'Not saved \u2014 try again.'); });
+  }
+  function addKeywordFromInput() {
+    var input = el('bs-kw-input');
+    // A comma-separated paste adds each one.
+    var adds = String(input.value || '').split(',').map(cleanKeyword).filter(Boolean);
+    if (!adds.length) return;
+    var kws = (state.keywords || []).slice(), skipped = 0;
+    adds.forEach(function (k) {
+      if (kws.indexOf(k) >= 0) return;
+      if (kws.length >= KW_MAX) { skipped++; return; }
+      kws.push(k);
+    });
+    input.value = '';
+    if (kws.length === (state.keywords || []).length) {
+      setStatus('bs-kw-status', skipped ? 'This article already has 3 keywords \u2014 remove one first.' : 'That keyword is already on this article.');
+      return;
+    }
+    saveKeywords(kws, skipped ? 'Saved \u2014 only 3 fit, so ' + skipped + ' wasn\u2019t added.' : 'Saved');
+  }
+  // The blog's keywords as suggestions, so a new article reuses "retirement" rather than adding "retiring".
+  function loadKeywordSuggestions() {
+    var dl = el('bs-kw-suggest'); if (!dl) return;
+    api('blog-keywords', { method: 'GET' }).then(function (res) {
+      var rows = (res && res.ok && res.body && res.body.keywords) || [];
+      dl.innerHTML = rows.map(function (r) { return '<option value="' + esc(r.keyword) + '"></option>'; }).join('');
+    }).catch(function () {});
   }
 
   // Autopilot drafts now arrive WITH metadata (process-blog-jobs calls generateBlogSeo as soon as
@@ -1751,8 +1873,8 @@
     var has = !!(el('bs-meta-title').value || '').trim() || !!(el('bs-meta-desc').value || '').trim();
     btn.textContent = has ? 'Regenerate SEO' : 'Generate SEO';
     btn.title = has
-      ? 'Rewrite the search title, description and tags from the current draft.'
-      : 'Write a search title, description, slug and tags from this draft.';
+      ? 'Rewrite the search title, description and keywords from the current draft.'
+      : 'Write a search title, description, web address and keywords from this draft.';
   }
 
   // ── Headline A/B test (US 5.2) ────────────────────────────────────────────────────────────────
@@ -2700,7 +2822,10 @@
       api('generate-seo', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
         if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate SEO.', 'error'); return; }
         var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
-        setBanner('bs-action-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        var kwN = (res.body.tags || []).length;
+        setBanner('bs-action-status', 'SEO ready — ' + slugPart + kwN + (kwN === 1 ? ' keyword' : ' keywords'));
+        // The SEO step rewrites the keywords too — show the new ones so they can be changed straight away.
+        if (Array.isArray(res.body.tags)) { setKeywords(res.body.tags); setStatus('bs-kw-status', 'New keywords suggested \u2014 change them if they don\u2019t fit.'); }
         // Surface the freshly generated meta in the editable panel so the author can tweak it.
         if (res.body.metaTitle) el('bs-meta-title').value = res.body.metaTitle;
         if (res.body.metaDescription) el('bs-meta-desc').value = res.body.metaDescription;
@@ -2890,6 +3015,25 @@
     el('bs-meta-title').addEventListener('input', seoChanged);
     el('bs-meta-desc').addEventListener('input', seoChanged);
     el('bs-robots').addEventListener('change', saveSeo);
+
+    // ── Keywords — saved the moment one is added or removed ─────────────────────────────────────
+    el('bs-kw-add-btn').addEventListener('click', addKeywordFromInput);
+    el('bs-kw-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addKeywordFromInput(); }
+    });
+    el('bs-kw-list').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-kw-remove]') : null;
+      if (!b) return;
+      var k = b.getAttribute('data-kw-remove');
+      saveKeywords((state.keywords || []).filter(function (x) { return x !== k; }), 'Removed \u201C' + k + '\u201D');
+      // The add box is back now there's room — put the cursor there.
+      setTimeout(function () { var i = el('bs-kw-input'); if (i && !el('bs-kw-add').classList.contains('bs-hidden')) i.focus(); }, 0);
+    });
+    el('bs-kwm-body').addEventListener('click', onKeywordManagerClick);
+    el('bs-kw-setup-link').addEventListener('click', function () {
+      state.openKeywordsSetup = true;
+      el('bs-setup-link').click();
+    });
 
     mediaEls = {
       preview: el('bs-feature-preview'), drop: el('bs-feature-drop'), remove: el('bs-feature-remove'),
@@ -3265,8 +3409,10 @@
       el('bs-workspace').classList.remove('bs-hidden');
       loadWidget();
       loadSearchConsole();
+      loadKeywordManager();
       var gsc = document.querySelector('#bms-blog-backdrop [data-bs-sec="search"]');
       if (gsc) gsc.open = true;
+      revealKeywordsIfAsked();
       return;
     }
     // Resolve AI image generation before the author can reach for it. Reset to "no" first and paint
@@ -3343,6 +3489,111 @@
     if (back && back.isConnected && typeof back.focus === 'function') back.focus();
   }
 
+  // ── Blog setup ▸ Keywords: every keyword the blog uses, renamed / merged / removed everywhere ───
+  // blog-keywords.ts does the work on the server; this only draws the list and asks before changing
+  // more than one article.
+  var kwm = { rows: [], editing: null, removing: null };
+  function loadKeywordManager() {
+    var body = el('bs-kwm-body'); if (!body) return;
+    kwm.editing = null; kwm.removing = null;
+    setStatus('bs-kwm-status', '');
+    body.textContent = 'Loading\u2026';
+    api('blog-keywords', { method: 'GET' }).then(function (res) {
+      if (!res.ok) { body.textContent = 'Couldn\u2019t load your keywords \u2014 try again in a moment.'; return; }
+      kwm.rows = (res.body && res.body.keywords) || [];
+      renderKeywordManager();
+    }).catch(function () { body.textContent = 'Couldn\u2019t load your keywords \u2014 try again in a moment.'; });
+  }
+  function articlesText(r) {
+    var n = r.articles + (r.articles === 1 ? ' article' : ' articles');
+    return r.published ? n + ' \u00B7 ' + r.published + ' live' : n;
+  }
+  function renderKeywordManager() {
+    var body = el('bs-kwm-body'); if (!body) return;
+    if (!kwm.rows.length) {
+      body.innerHTML = '<span class="bs-status">No keywords yet. They\u2019re added to each article when it\u2019s written, and you can change them in the article\u2019s <strong>Keywords, SEO &amp; social preview</strong> section.</span>';
+      return;
+    }
+    body.innerHTML = '<table class="bs-kw-table"><tbody>' + kwm.rows.map(function (r, i) {
+      var k = esc(r.keyword);
+      if (kwm.editing === r.keyword) {
+        return '<tr><td colspan="3"><div class="bs-kw-edit">'
+          + '<label class="bs-hidden" for="bs-kwm-input">New keyword for ' + k + '</label>'
+          + '<input id="bs-kwm-input" maxlength="40" value="' + k + '" list="bs-kwm-suggest" autocomplete="off">'
+          + '<button type="button" class="bs-btn bs-btn-primary bs-btn-sm" data-kwm="save" data-i="' + i + '">Save</button>'
+          + '<button type="button" class="bs-linkbtn" data-kwm="cancel">Cancel</button></div>'
+          + '<div id="bs-kwm-hint" class="bs-status" style="font-size:11px;margin-top:4px;">Changes \u201C' + k + '\u201D on ' + articlesText(r) + '.</div></td></tr>';
+      }
+      if (kwm.removing === r.keyword) {
+        return '<tr><td colspan="3"><div class="bs-status" style="color:#374151;margin-bottom:6px;">Remove \u201C' + k + '\u201D from ' + articlesText(r) + '? The articles stay; only the keyword goes.</div>'
+          + '<button type="button" class="bs-btn bs-btn-danger bs-btn-sm" data-kwm="confirm-remove" data-i="' + i + '">Remove keyword</button> '
+          + '<button type="button" class="bs-linkbtn" data-kwm="cancel">Cancel</button></td></tr>';
+      }
+      return '<tr><td>' + k + '</td><td class="bs-kw-n">' + articlesText(r) + '</td>'
+        + '<td class="bs-kw-act"><button type="button" class="bs-linkbtn" data-kwm="rename" data-i="' + i + '" aria-label="Rename ' + k + '">Rename</button>'
+        + ' \u00B7 <button type="button" class="bs-linkbtn" data-kwm="remove" data-i="' + i + '" aria-label="Remove ' + k + '">Remove</button></td></tr>';
+    }).join('') + '</tbody></table>'
+      + '<datalist id="bs-kwm-suggest">' + kwm.rows.map(function (r) { return '<option value="' + esc(r.keyword) + '"></option>'; }).join('') + '</datalist>';
+    var input = el('bs-kwm-input');
+    if (input) {
+      input.focus(); input.select();
+      input.addEventListener('input', syncRenameHint);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); var b = body.querySelector('[data-kwm="save"]'); if (b) b.click(); }
+        if (e.key === 'Escape') { e.preventDefault(); kwm.editing = null; renderKeywordManager(); }
+      });
+    }
+  }
+  // Renaming onto a keyword the blog already uses merges the two — say so before the click, not after.
+  function syncRenameHint() {
+    var input = el('bs-kwm-input'), hint = el('bs-kwm-hint'), btn = el('bs-kwm-body').querySelector('[data-kwm="save"]');
+    if (!input || !hint || !btn) return;
+    var from = kwm.editing, to = cleanKeyword(input.value);
+    var row = kwm.rows.filter(function (r) { return r.keyword === from; })[0];
+    var target = kwm.rows.filter(function (r) { return r.keyword === to && to !== from; })[0];
+    btn.textContent = target ? 'Merge' : 'Save';
+    hint.textContent = !to ? 'Type the new keyword.'
+      : target ? 'Merges \u201C' + from + '\u201D into \u201C' + to + '\u201D, which you already use \u2014 articles with both keep one.'
+      : 'Changes \u201C' + from + '\u201D on ' + articlesText(row) + '.';
+  }
+  function keywordChange(payload, done) {
+    setStatus('bs-kwm-status', 'Saving\u2026');
+    api('blog-keywords', { method: 'POST', body: JSON.stringify(payload) }).then(function (res) {
+      if (!res.ok) { setStatus('bs-kwm-status', (res.body && res.body.error) || 'Not saved \u2014 try again.'); return; }
+      kwm.rows = res.body.keywords || [];
+      kwm.editing = null; kwm.removing = null;
+      renderKeywordManager();
+      var n = res.body.articles || 0;
+      setStatus('bs-kwm-status', done + ' on ' + n + (n === 1 ? ' article.' : ' articles.'));
+    }).catch(function () { setStatus('bs-kwm-status', 'Not saved \u2014 try again.'); });
+  }
+  function onKeywordManagerClick(e) {
+    var b = e.target.closest ? e.target.closest('[data-kwm]') : null;
+    if (!b) return;
+    var what = b.getAttribute('data-kwm'), row = kwm.rows[Number(b.getAttribute('data-i'))];
+    if (what === 'cancel') { kwm.editing = null; kwm.removing = null; setStatus('bs-kwm-status', ''); renderKeywordManager(); return; }
+    if (!row) return;
+    if (what === 'rename') { kwm.editing = row.keyword; kwm.removing = null; renderKeywordManager(); return; }
+    if (what === 'remove') { kwm.removing = row.keyword; kwm.editing = null; renderKeywordManager(); return; }
+    if (what === 'confirm-remove') { keywordChange({ action: 'remove', keyword: row.keyword }, 'Removed \u201C' + row.keyword + '\u201D'); return; }
+    if (what === 'save') {
+      var to = cleanKeyword(el('bs-kwm-input').value);
+      if (!to) { syncRenameHint(); return; }
+      if (to === row.keyword) { kwm.editing = null; renderKeywordManager(); return; }
+      var merging = kwm.rows.some(function (r) { return r.keyword === to; });
+      keywordChange({ action: 'rename', from: row.keyword, to: to }, (merging ? 'Merged into \u201C' : 'Renamed to \u201C') + to + '\u201D');
+    }
+  }
+  // "Blog setup › Keywords" from an article: open setup with the Keywords section open and in view.
+  function revealKeywordsIfAsked() {
+    if (!state.openKeywordsSetup) return;
+    state.openKeywordsSetup = false;
+    var sec = document.querySelector('[data-bs-sec="keywords"]');
+    if (!sec) return;
+    sec.open = true;
+    setTimeout(function () { if (sec.scrollIntoView) sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+  }
+
   // The two pure functions behind the "Where this post gets published" panel's copy.
   // tests/blog-destinations-panel-copy.test.ts calls them directly — the claims they make about
   // WHEN a post is sent and WHO releases it are the kind that render perfectly while being false.
@@ -3358,10 +3609,11 @@
   function mountBlogSetup(host, assistantId) {
     inject();
     if (!setupTab.sections) {
+      var keywords = document.querySelector('#bms-blog-backdrop [data-bs-sec="keywords"]');
       var search = document.querySelector('#bms-blog-backdrop [data-bs-sec="search"]');
       var widget = document.querySelector('#bms-blog-backdrop [data-bs-sec="widget"]');
-      if (!search || !widget) return;
-      setupTab.sections = [search, widget];
+      if (!keywords || !search || !widget) return;
+      setupTab.sections = [keywords, search, widget];
       setupTab.home = widget.parentNode;
       setupTab.before = widget.nextSibling;
     }
@@ -3371,6 +3623,8 @@
     setupTab.sections.forEach(function (s) { s.open = true; host.appendChild(s); });
     loadWidget();
     loadSearchConsole();
+    loadKeywordManager();
+    revealKeywordsIfAsked();
   }
   function unmountBlogSetup() {
     if (!setupTab.host) return;

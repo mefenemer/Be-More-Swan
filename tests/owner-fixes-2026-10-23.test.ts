@@ -34,8 +34,10 @@ const slice = (src: string, a: string, b: string) => {
 check('blog categories: the SEO step is shown the categories in use and keeps to three', () => {
     const seo = read('src/utils/blog-seo-generate.ts');
     assert.ok(seo.includes('const existing = await existingCategories(db, organisationId, id);'));
-    assert.ok(seo.includes('REUSE one of these existing categories'));
-    assert.ok(seo.includes('const MAX_CATEGORIES = 3;') && seo.includes('.slice(0, MAX_CATEGORIES)'));
+    // Since 2026-11-14 the categories in use are offered to avoid near-duplicates, after the blog's
+    // current topics, never as words to reuse because they exist (tests/blog-keywords.test.ts).
+    assert.ok(seo.includes('reuse one only if it truly describes this post'));
+    assert.ok(seo.includes('const MAX_CATEGORIES = MAX_KEYWORDS;') && seo.includes('const tags = normalizeKeywords('), 'still at most three');
     assert.ok(!seo.includes('3-6 short lowercase strings'), 'the old "invent 3–6" instruction is gone');
 });
 

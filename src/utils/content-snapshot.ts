@@ -30,6 +30,8 @@ import { platformName } from './team-activity';
 import { diagnosePostFailure } from './post-failure-diagnosis';
 import { openWarnings, readCachedReview } from './post-quality-review';
 import { loadBlogReaders, renderReadersForChat } from './blog-readers';
+import { listBlogKeywords } from './blog-keywords';
+import { renderBlogKeywordsForChat } from './chat-blog-keywords';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -238,15 +240,24 @@ export function blogNotes(r: { status: string; hasBody: boolean; failureReason?:
         : 'Why it stopped: the article has no body text, so there was nothing to publish. What to do: write the article in Blog Studio, then pick a new time.'];
 }
 
+/** "keywords: retirement, money" / "no keywords" — one article's keywords on its snapshot line. Pure. */
+export function blogKeywordsExtra(tags: unknown): string {
+    const list = (Array.isArray(tags) ? tags : []).map((t) => String(t ?? '').trim()).filter(Boolean);
+    return list.length ? `keywords: ${list.join(', ')}` : 'no keywords';
+}
+
 export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssistantId: number, timezone?: string | null): Promise<string | null> {
     try {
         const scope = and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId));
         const cols = {
             id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate, publishedAt: blogPosts.publishedAt, title: blogPosts.title,
             hasBody: sql<boolean>`btrim(coalesce(${blogPosts.bodyMarkdown}, '')) <> ''`, failureReason: blogPosts.failureReason,
+            tags: blogPosts.tags,
         };
-        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string; hasBody: boolean; failureReason: string | null };
-        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title, notes: blogNotes(r) });
+        type Row = { id: number; status: string; publishDate: Date | null; publishedAt: Date | null; title: string; hasBody: boolean; failureReason: string | null; tags: unknown };
+        // Each article's keywords ride on its line, so "change the keywords on #12" is answered from
+        // what #12 really carries (blog-keywords.ts; the blog_action_proposal "keywords" action).
+        const map = (r: Row): SnapshotItem => ({ ref: r.id, when: r.publishedAt ?? r.publishDate, where: '', status: r.status, text: r.title, extra: blogKeywordsExtra(r.tags), notes: blogNotes(r) });
         const col = (where: SQL | undefined, order: SQL, title: string) => column(
             db.select({ n: sql<number>`count(*)::int` }).from(blogPosts).where(and(scope, where)),
             db.select(cols).from(blogPosts).where(and(scope, where)).orderBy(order).limit(SNAPSHOT_LIMIT),
@@ -263,7 +274,11 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
         const readers = await loadBlogReaders(db, organisationId, aiAssistantId)
             .then((r) => renderReadersForChat(r))
             .catch((err) => { console.error('[content-snapshot] blog readers read failed (non-fatal)', err); return 'READERS: could not be read this turn — say so; never estimate a number.'; });
-        return `${renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone })}\n\n${readers}`;
+        // And the blog's keywords as a whole, for "rename / remove a keyword everywhere" (chat-blog-keywords.ts).
+        const keywords = await listBlogKeywords(db, organisationId)
+            .then(renderBlogKeywordsForChat)
+            .catch((err) => { console.error('[content-snapshot] blog keywords read failed (non-fatal)', err); return 'YOUR BLOG\'S KEYWORDS: could not be read this turn — say so; never guess them.'; });
+        return `${renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone })}\n\n${readers}\n\n${keywords}`;
     } catch (err) {
         console.error('[content-snapshot] blog read failed (non-fatal)', err);
         return null;
