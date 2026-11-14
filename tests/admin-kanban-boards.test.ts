@@ -123,4 +123,20 @@ check('items added by hand land in the first bucket (owner 2026-11-13)', () => {
     assert.strictEqual(ctx.frColumnOf({ status: 'pending_review' }), 'review');
 });
 
+check('Feature board: a held request in Building shows an On hold pill (owner 2026-11-14)', () => {
+    const c: any = {
+        _frItems: [], IR_CLAUDE_PILL: '<CLAUDE>', prPills: () => '', prApproveButton: () => '',
+        FR_PRIORITY_CLS: {}, FR_PRIORITY_LABEL: {}, FR_ITEM_TYPE_CLS: {}, FR_ITEM_TYPE_LABEL: {}, FR_CATEGORY_LABEL: {},
+    };
+    vm.createContext(c);
+    vm.runInContext(`${between('function _esc(s)', '\n')}\n${between('function _escH(s)', '\n')}\n${between('function frBoardCard(it)', 'const _frDistinct')}; this.frBoardCard = frBoardCard;`, c);
+    const card = (proof: any) => c.frBoardCard({ id: 13, title: 'T', status: 'in_progress', priority: 'medium', category: 'app_core', proof });
+    const held = card({ goLiveHold: 'Waits for "3 Dec" <date>', liveAt: null });
+    assert.ok(held.includes('data-fr-hold-pill') && held.includes('⏸️ On hold'), 'held card has the pill');
+    assert.ok(held.includes('&quot;3 Dec&quot; &lt;date&gt;'), 'reason in the tooltip, escaped');
+    assert.ok(!card({ goLiveHold: null }).includes('data-fr-hold-pill'), 'not held → no pill');
+    assert.ok(!card(null).includes('data-fr-hold-pill'), 'no proof row → no pill');
+    assert.ok(!card({ goLiveHold: 'x', liveAt: '2026-12-03' }).includes('data-fr-hold-pill'), 'already live → no pill');
+});
+
 console.log(`\n${passed} passed`);
