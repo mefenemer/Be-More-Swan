@@ -468,6 +468,23 @@ async function draftMediaLine(db: Db, orgId: number, assistantId: number): Promi
     }
 }
 
+/**
+ * FR#28-style visibility for the Website Assistant (FR#18, owner 2026-11-14): each card of a features or steps
+ * section with its number and picture, so "swap the picture on the second card" names a real card and a
+ * site_picture card can carry its itemIndex. Pure, exported for tests/site-card-pictures.test.ts.
+ */
+export function cardPicturesLine(items: unknown[], max = 12): string {
+    const list = items.slice(0, max).map((raw, i) => {
+        const it = (raw && typeof raw === 'object' ? raw : {}) as { title?: unknown; image?: { assetId?: unknown; alt?: unknown } | null };
+        const title = typeof it.title === 'string' && it.title.trim() ? `"${clip(it.title.trim(), 40)}"` : '(no title)';
+        const img = it.image && typeof it.image === 'object' && it.image.assetId
+            ? `picture #${Number(it.image.assetId)}${typeof it.image.alt === 'string' && it.image.alt ? ` "${clip(it.image.alt, 40)}"` : ''}`
+            : 'no picture';
+        return `card ${i} ${title} (${img})`;
+    });
+    return list.length ? ` · cards (itemIndex, title, picture): ${list.join('; ')}${items.length > max ? `; and ${items.length - max} more` : ''}` : '';
+}
+
 export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     const [site] = await db.select().from(sites).where(and(eq(sites.aiAssistantId, assistantId), eq(sites.organisationId, orgId))).limit(1);
     if (!site) return 'YOUR SITE RIGHT NOW: not started. The first time the Website tab opens it starts from their business details; or propose a site_draft_request to draft the whole site.';
@@ -498,7 +515,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         if (!p.sections.length) lines.push('    (no sections)');
         for (const s of p.sections) {
             const pr = s.props as unknown as Record<string, unknown>;
-            const items = Array.isArray(pr.items) ? ` · ${pr.items.length} item(s)` : '';
+            const items = Array.isArray(pr.items) ? ` · ${pr.items.length} item(s)${s.type === 'features' || s.type === 'steps' ? cardPicturesLine(pr.items) : ''}` : '';
             const main = pr.headline ?? pr.heading ?? '';
             const lk = s.look && (s.look.background !== 'auto' || s.look.columns !== 'auto' || s.look.menuLabel)
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';

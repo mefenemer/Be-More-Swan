@@ -111,9 +111,10 @@ export async function notifyIssueUser(
 
     // Status-specific call to action.
     const cta =
-        variant === 'live'               ? "The fix is live now. Could you give it another try? If it's still not right, just reply and we'll pick it straight back up. If we don't hear from you, it closes on its own in 7 days." :
-        variant === 'auto_closed'        ? "We've closed this as we haven't heard back in 7 days since the fix went out. If it's still not working, reply and we'll reopen it." :
-        status === 'fixed_ready_to_test' ? "We've pushed a fix — could you give it another try and let us know how it goes?" :
+        // FR#23 (owner 2026-11-14): never ask a paying customer to test or confirm a fix.
+        variant === 'live'               ? "It's fixed and live now — there's nothing you need to do. If anything still isn't right, just reply and we'll pick it straight back up." :
+        variant === 'auto_closed'        ? "We've closed this — the fix went out a week ago. If anything still isn't right, reply and we'll reopen it." :
+        status === 'fixed_ready_to_test' ? "We've pushed a fix — there's nothing you need to do. If anything still isn't right, just reply and we'll pick it straight back up." :
         status === 'more_info_required'  ? "We'd love to help, but we need a bit more detail from you first." :
         status === 'investigating'       ? "We're looking into this now to find out what's causing it." :
         status === 'fix_in_progress'     ? "We've picked this up and are working on a fix now." :
@@ -126,7 +127,7 @@ export async function notifyIssueUser(
     const title =
         variant === 'live'               ? `✅ Issue #${issueId} is fixed and live` :
         variant === 'auto_closed'        ? `Issue #${issueId} closed` :
-        status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
+        status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed` :
         status === 'more_info_required'  ? `❓ Issue #${issueId} — more info needed` :
         status === 'investigating'       ? `🔎 Issue #${issueId}: we're investigating` :
         status === 'on_hold'             ? `⏸️ Issue #${issueId}: waiting on others` :
@@ -227,7 +228,7 @@ export async function maybeAdvanceToReadyToTest(
         issueId,
         authorType: 'admin',
         authorId: null,
-        body: "✅ Good news — the fix is live on staging now, ready for you to test.",
+        body: "✅ Good news — the fix is out. There's nothing you need to do; if anything still isn't right, just reply here.",
         status: 'fixed_ready_to_test',
     });
 

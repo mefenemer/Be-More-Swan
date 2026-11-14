@@ -32,6 +32,7 @@ import { openWarnings, readCachedReview } from './post-quality-review';
 import { loadBlogReaders, renderReadersForChat } from './blog-readers';
 import { listBlogKeywords } from './blog-keywords';
 import { renderBlogKeywordsForChat } from './chat-blog-keywords';
+import { loadBlogPictureUse, renderPictureUseForChat } from './blog-picture-use';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -278,7 +279,11 @@ export async function buildBlogSnapshot(db: Db, organisationId: number, aiAssist
         const keywords = await listBlogKeywords(db, organisationId)
             .then(renderBlogKeywordsForChat)
             .catch((err) => { console.error('[content-snapshot] blog keywords read failed (non-fatal)', err); return 'YOUR BLOG\'S KEYWORDS: could not be read this turn — say so; never guess them.'; });
-        return `${renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone })}\n\n${readers}\n\n${keywords}`;
+        // Which article uses which picture (FR#28, blog-picture-use.ts): "has this picture been used already?"
+        const pictures = await loadBlogPictureUse(db, organisationId, aiAssistantId)
+            .then(renderPictureUseForChat)
+            .catch((err) => { console.error('[content-snapshot] blog picture use read failed (non-fatal)', err); return 'PICTURES IN YOUR ARTICLES: could not be read this turn — say so; never guess whether a picture was used.'; });
+        return `${renderContentSnapshot({ noun: 'articles', tab: 'Blogs', sections, stateWords: BLOG_WORDS, timezone })}\n\n${readers}\n\n${keywords}\n\n${pictures}`;
     } catch (err) {
         console.error('[content-snapshot] blog read failed (non-fatal)', err);
         return null;

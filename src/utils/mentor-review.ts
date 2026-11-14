@@ -60,6 +60,7 @@ import { shortQuestion } from './mentor-jobs';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
 import { OUTSIDE_PRODUCTS_RULE } from '../constants/assistant-shared-prompts';
+import { loadBlogPillarWeek, blogPillarText, renderBlogPillarsForMentor, type BlogPillarWeek } from './mentor-blog-pillars';
 
 type Db = any;
 
@@ -126,6 +127,8 @@ export interface ReviewInputs {
     customers: CustomersView | null;
     /** §6.1 content checks; null when they couldn't be read. Optional so older callers and tests still fit. */
     content?: ContentCheckInputs | null;
+    /** FR#21: last week's blog articles matched to the Social pillars; null when unreadable. Optional for older callers. */
+    blogPillars?: BlogPillarWeek | null;
 }
 
 /** Pure: is there anything that reaches its minimum sample? Otherwise the review says "not enough data yet". */
@@ -209,11 +212,13 @@ export async function readReviewInputs(db: Db, orgId: number, userId: number, no
         };
     });
     const content = await loadContentChecks(db, orgId, data);
-    return { data, proposals, figures, commitments, record, customers, content };
+    const blogPillars = await loadBlogPillarWeek(db, orgId, data.team, now)
+        .catch((err: unknown) => { console.error('[mentor-review] last week\'s articles unreadable (non-fatal)', err instanceof Error ? err.message : err); return null; });
+    return { data, proposals, figures, commitments, record, customers, content, blogPillars };
 }
 
 /** Pure: the "not enough data yet" review, written in code (no model call, nothing charged). */
-export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | 'commitments' | 'customers' | 'content'>, now = new Date()): { summary: string; sections: Array<{ title: string; text: string }> } {
+export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | 'commitments' | 'customers' | 'content' | 'blogPillars'>, now = new Date()): { summary: string; sections: Array<{ title: string; text: string }> } {
     const thin: string[] = [];
     if (!i.figures.length) thin.push('no assistant is active yet, so there are no results to compare');
     else thin.push(`your assistants produced ${i.figures.reduce((s, f) => s + f.thisWeek + f.lastWeek, 0)} items in two weeks — under ${MIN_WORK} each is too few to call a trend`);
@@ -231,6 +236,8 @@ export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | '
         sections: [
             { title: 'What I can’t judge yet', text: `I won’t invent a trend: ${thin.join('; ')}.` },
             ...(checks ? [{ title: 'Worth fixing in your set-up', text: checks }] : []),
+            // FR#21: last week's articles and their pillars are worth saying even in a thin week — code, no cost.
+            ...(blogPillarText(i.blogPillars ?? null) && i.blogPillars?.articles.length ? [{ title: 'Last week’s articles', text: blogPillarText(i.blogPillars ?? null)! }] : []),
             { title: 'This week', text: question },
         ],
     };
@@ -552,10 +559,11 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 renderTrackRecordForMentor(inputs.record).join('\n'),
                 renderCustomersForMentor(inputs.customers).join('\n'),
                 renderContentChecksForMentor(inputs.content ?? null).join('\n'),
+                renderBlogPillarsForMentor(inputs.blogPillars ?? null).join('\n'),
                 `SUGGESTIONS LEFT THIS WEEK: ${left}.`,
                 waitingLine,
                 reviewCardsPrompt(),
-                `Return STRICT JSON only: {"summary": "<two sentences: the headline of the week>", "sections": [{"title": "What went well", "text": "..."}, {"title": "What needs attention", "text": "..."}, {"title": "Since my last suggestions", "text": "..."}, {"title": "Commitments", "text": "..."}, {"title": "Your customers", "text": "..."}], "proposals": [<0 to ${left} cards>], "commitments": ["<1 to 3 small things for this week, the same ones you suggest under Commitments>"]}. Leave out a section with nothing true to say. "commitments" is saved only if they choose, from a card under the review.`,
+                `Return STRICT JSON only: {"summary": "<two sentences: the headline of the week>", "sections": [{"title": "What went well", "text": "..."}, {"title": "What needs attention", "text": "..."}, {"title": "Since my last suggestions", "text": "..."}, {"title": "Commitments", "text": "..."}, {"title": "Your customers", "text": "..."}, {"title": "Last week’s articles", "text": "<one line per article: “title” → pillar>"}], "proposals": [<0 to ${left} cards>], "commitments": ["<1 to 3 small things for this week, the same ones you suggest under Commitments>"]}. Leave out a section with nothing true to say. "commitments" is saved only if they choose, from a card under the review.`,
             ].join('\n\n');
             const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
             const { response, model } = await withRoleModel(
