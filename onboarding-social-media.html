@@ -387,36 +387,32 @@
           <h3 class="font-bold text-gray-900 mb-3 text-lg">2. Who provides the raw inputs? *</h3>
           <div class="space-y-4 mb-2">
             <label class="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-emerald-300 transition">
-              <input type="radio" name="content_source" value="client_provided" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300" onchange="toggleContentSourceDetails()">
+              <input type="radio" name="content_source" value="client_provided" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300">
               <div class="ml-4 w-full">
                 <span class="block font-bold text-gray-900">I will provide the raw inputs</span>
                 <span class="block text-sm text-gray-500 mb-2">I will supply the drafts, data, or notes. The assistant just processes it.</span>
-                <div class="content-source-detail hidden mt-3">
-                  <input type="text" id="source_client" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm" placeholder="Where should it look? (e.g., A Notion board, Google Drive folder...)">
-                </div>
               </div>
             </label>
             <label class="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-emerald-300 transition">
-              <input type="radio" name="content_source" value="assistant_generated" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300" onchange="toggleContentSourceDetails()">
+              <input type="radio" name="content_source" value="assistant_generated" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300">
               <div class="ml-4 w-full">
                 <span class="block font-bold text-gray-900">The assistant should generate it</span>
                 <span class="block text-sm text-gray-500 mb-2">The assistant will create the content or gather the data from scratch.</span>
-                <div class="content-source-detail hidden mt-3">
-                  <input type="text" id="source_ai" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm" placeholder="Any specific websites or feeds to monitor?">
-                </div>
               </div>
             </label>
             <label class="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-emerald-300 transition">
-              <input type="radio" name="content_source" value="hybrid" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300" onchange="toggleContentSourceDetails()">
+              <input type="radio" name="content_source" value="hybrid" class="mt-1 h-5 w-5 text-emerald-700 focus:ring-emerald-700 border-gray-300">
               <div class="ml-4 w-full">
                 <span class="block font-bold text-gray-900">A mix of both (Hybrid)</span>
                 <span class="block text-sm text-gray-500 mb-2">I will provide a brief or bullet points, and the assistant will expand it.</span>
-                <div class="content-source-detail hidden mt-3">
-                  <input type="text" id="source_hybrid" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm" placeholder="Explain how you will collaborate (e.g., I drop a voice note, it writes the post...)">
-                </div>
               </div>
             </label>
           </div>
+          <!-- The old follow-up boxes ("Where should it look? A Notion board…", "Any websites or feeds
+               to monitor?") were retired 2026-11-14: nothing can read those places, drafting ignored
+               the answer, and chat obeyed it as a rule nobody could edit afterwards. Material to work
+               from belongs on Inspo / Your brand, which drafting does read. -->
+          <p class="text-xs text-gray-500 mb-2">Got notes, links or posts you'd like it to work from? Add them on its <strong>Inspo</strong> tab or under <strong>Your brand</strong> once it's set up — it reads both when it drafts.</p>
           <span id="error-source" class="error-msg hidden text-red-500 text-xs font-bold mb-4 block">Please select who will provide the raw input content.</span>
         </div>
 
@@ -1308,7 +1304,6 @@
           // generic hydrator above cannot restore them.
           hydrateScheduleControls(data);
           toggleScheduleDetails();
-          toggleContentSourceDetails();
           PLATFORM_CODES.forEach(p => {
             const chk = document.getElementById(`chk_${p}`);
             if(chk) toggleHandleInput(`${p}_handle_container`, chk.checked);
@@ -1582,7 +1577,8 @@
    * on value keys, so "On a Schedule" never matched `scheduled` and "I will provide the raw inputs"
    * never matched `client_provided` — the Operational Setup section came up blank for five of the
    * six options. The free-text follow-ups (timezone, and where the assistant should look for
-   * inputs) were collected on screen and then dropped entirely.
+   * inputs) were collected on screen and then dropped entirely. (Both follow-ups were later retired,
+   * 2026-11-14 — see the return below.)
    *
    * These go into onboardingContext, which is what blueprint section 6 reads — configuration.inputs
    * is not on that path.
@@ -1590,16 +1586,13 @@
   function collectOperationalSetup() {
     const trigger = document.querySelector('input[name="trigger_type"]:checked')?.value || null;
     const source = document.querySelector('input[name="content_source"]:checked')?.value || null;
-    // Each content-source option has its own follow-up box; only the selected one is meaningful.
-    const detailId = { client_provided: 'source_client', assistant_generated: 'source_ai', hybrid: 'source_hybrid' }[source];
-    const val = (id) => (id && document.getElementById(id)?.value?.trim()) || null;
+    // Only the two choices are saved. The schedule's frequency and timezone are saved ONCE, as the
+    // Posting Schedule (posting_* in collectPostingSchedule) — the old trigger_schedule_frequency /
+    // trigger_timezone copies went stale on the first schedule edit. The content source's free-text
+    // follow-up was retired (see step 3's markup).
     return {
       trigger_type: trigger,
-      // Only asked for (and only meaningful on) the scheduled branch.
-      trigger_schedule_frequency: trigger === 'scheduled' ? val('schedule_frequency') : null,
-      trigger_timezone: trigger === 'scheduled' ? val('schedule_timezone') : null,
       content_source: source,
-      content_source_detail: val(detailId),
     };
   }
 
@@ -2225,12 +2218,6 @@
   function toggleScheduleDetails() {
     const triggerEl = document.querySelector('input[name="trigger_type"][value="scheduled"]');
     document.getElementById('schedule_detail')?.classList.toggle('hidden', !(triggerEl && triggerEl.checked));
-  }
-
-  function toggleContentSourceDetails() {
-    document.querySelectorAll('.content-source-detail').forEach(el => el.classList.add('hidden'));
-    const checked = document.querySelector('input[name="content_source"]:checked');
-    if(checked) checked.closest('label').querySelector('.content-source-detail').classList.remove('hidden');
   }
 
   function toggleAccordion(id, icon) {

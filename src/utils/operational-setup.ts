@@ -58,10 +58,9 @@ export interface OperationalSetupSource {
  * Pass the LIVE onboarding_context first so a profile edit applies without a blueprint recompile;
  * `fallback` is the recompiled copy from blueprint section 6.
  *
- * NOTE: content_source_detail ("a Notion board", "these feeds to monitor") is deliberately not
- * surfaced here. It names a location the generation worker cannot read, and telling the model about
- * a source it has no access to invites it to write as though it had consulted one. It stays in the
- * blueprint for the human reading it.
+ * NOTE: content_source_detail ("a Notion board", "these feeds to monitor") was never surfaced here —
+ * it named a location the generation worker cannot read — and was retired altogether on 2026-11-14
+ * (src/constants/retired-setup-answers.ts).
  */
 export function operationalSetupLines(
     live: OperationalSetupSource | null | undefined,
