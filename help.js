@@ -322,9 +322,16 @@
     // newest first. Each half loads on its own — one queue being down still shows the other.
     let _myTickets = [];
     let _listErrors = [];
-    async function loadMyReports() {
+    // The list's load in flight, so a ticket opened from a notification waits for its row (issue #59).
+    let _myListLoad = null;
+    function loadMyReports() {
+        _myListLoad = loadMyReportsNow();
+        return _myListLoad;
+    }
+    async function loadMyReportsNow() {
         const list = document.getElementById('ri-my-list');
         if (!list) return;
+        parkTicketThread();
         list.innerHTML = 'Loading…';
         _listErrors = [];
         const [issues, tickets] = await Promise.all([
@@ -346,7 +353,30 @@
             ..._myTickets.map((t) => ({ kind: 'ticket', at: t.createdAt, waiting: t.status === 'pending_customer' || t.status === 'pending', html: renderTicketCard(t) })),
         ].sort((a, b) => (Number(b.waiting) - Number(a.waiting)) || (new Date(b.at || 0) - new Date(a.at || 0)));
         const err = _listErrors.length ? `<p class="text-red-600 text-xs">Couldn't load your ${esc(_listErrors.join(' or '))} — try again in a moment.</p>` : '';
+        parkTicketThread();
         list.innerHTML = err + (items.length ? items.map((x) => x.html).join('') : '<p class="text-gray-400">Nothing yet — anything you send appears here, with our replies.</p>');
+        placeTicketThread();
+    }
+
+    // Issue #59: one ticket's conversation opens directly under its own row. It used to sit below the
+    // whole list, so with a long list (or a list still loading when a notification opened it) it was
+    // off screen and the user had to scroll through every request to find it. The box is moved back
+    // out of the list before the list is redrawn, so a redraw never deletes it, then put back.
+    function parkTicketThread() {
+        const box = document.getElementById('ticket-thread');
+        const list = document.getElementById('ri-my-list');
+        if (box && list && list.contains(box)) list.after(box);
+    }
+    function placeTicketThread() {
+        const box = document.getElementById('ticket-thread');
+        const id = box && !box.classList.contains('hidden') ? box.getAttribute('data-open-ticket') : null;
+        document.querySelectorAll('#ri-my-list [data-ticket-id]').forEach((el) => {
+            const on = id != null && el.getAttribute('data-ticket-id') === String(id);
+            el.classList.toggle('ring-2', on);
+            el.classList.toggle('ring-emerald-500', on);
+            if (on) el.after(box);
+        });
+        return box;
     }
 
     function renderTicketCard(t) {
@@ -486,9 +516,16 @@
     async function openTicket(id) {
         const box = document.getElementById('ticket-thread');
         if (!box) return;
+        box.setAttribute('data-open-ticket', String(id));
         box.classList.remove('hidden');
         box.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';
-        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Wait for the list (a notification opens the tab and the ticket together), so the rows
+        // above don't arrive afterwards and push the conversation off screen.
+        if (_myListLoad) await _myListLoad.catch(() => {});
+        if (box.getAttribute('data-open-ticket') !== String(id)) return; // another ticket was opened meanwhile
+        placeTicketThread();
+        const row = document.querySelector(`#ri-my-list [data-ticket-id="${CSS.escape(String(id))}"]`);
+        (row || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
         try {
             const res = await fetch(`/.netlify/functions/support-tickets?ticketId=${encodeURIComponent(id)}`);
             const d = await res.json().catch(() => ({}));
@@ -559,7 +596,7 @@
     document.addEventListener('click', (e) => {
         const row = e.target.closest && e.target.closest('#ri-my-list [data-ticket-id]');
         if (row) { openTicket(row.getAttribute('data-ticket-id')); return; }
-        if (e.target.closest && e.target.closest('[data-ticket-close]')) { document.getElementById('ticket-thread')?.classList.add('hidden'); return; }
+        if (e.target.closest && e.target.closest('[data-ticket-close]')) { document.getElementById('ticket-thread')?.classList.add('hidden'); placeTicketThread(); return; }
         const r = e.target.closest && e.target.closest('[data-ticket-reply]');
         if (r) sendTicketReply(r.getAttribute('data-ticket-reply'), r);
     });
