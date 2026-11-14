@@ -49,7 +49,10 @@ export const TAKE_ME_THERE_PLACES: Readonly<Record<string, TakeMeTherePlace>> = 
     assistant_what_i_post_about: { label: 'the assistant\'s What I post about card (content pillars, content mix, message)', assistantTab: 'strategy' },
     assistant_platforms: { label: 'the assistant\'s Platforms card', assistantTab: 'platforms' },
     assistant_rules: { label: 'the assistant\'s Rules (Do\'s and don\'ts)', assistantTab: 'rules' },
-    assistant_how_i_work: { label: 'the assistant\'s How I work card (schedule and settings)', assistantTab: 'operation' },
+    // The card's title depends on the role: "When and how I post" for the Social Media assistant,
+    // "When and how I work" for every other — a customer was sent looking for a "How I work" card
+    // that didn't exist (2026-11-14).
+    assistant_how_i_work: { label: 'the assistant\'s "When and how I post" card ("When and how I work" on assistants that don\'t post) — schedule and settings', assistantTab: 'operation' },
     assistant_briefs: { label: 'the Brand Designer\'s Briefs tab', assistantTab: 'briefs' },
     assistant_inspo: { label: 'the assistant\'s Inspo tab', assistantTab: 'inspo' },
     assistant_website: { label: 'the Website Assistant\'s Website tab', assistantTab: 'sitebuilder' },

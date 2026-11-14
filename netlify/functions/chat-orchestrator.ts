@@ -21,6 +21,7 @@ import { getTaskCosts } from '../../src/utils/task-costs';
 import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE, specialCategoryRuleFor } from '../../src/constants/special-category-rule';
+import { isRetiredSetupAnswer } from '../../src/constants/retired-setup-answers';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
 import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT } from '../../src/constants/mentor-craft';
@@ -393,7 +394,9 @@ function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown,
     })}\n\n${baseSystemPrompt}`;
 
     const entries = ctxRecord
-        ? Object.entries(ctxRecord).filter(([, v]) => v !== null && v !== undefined && v !== '')
+        // Retired set-up answers never reach the model: an old row's weekday topic plan, saved once at
+        // hire and uneditable, kept steering chat as a MUST-obey rule (src/constants/retired-setup-answers.ts).
+        ? Object.entries(ctxRecord).filter(([k, v]) => v !== null && v !== undefined && v !== '' && !isRetiredSetupAnswer(k))
         : [];
     // Every role, live turn and handoff alike — src/constants/special-category-rule.ts. `rule` is the
     // general SPECIAL_CATEGORY_RULE for every role but the Email Assistant (specialCategoryRuleFor).
