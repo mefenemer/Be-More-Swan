@@ -69,6 +69,12 @@ function fakeGh(cmp: string | number) {
         const r = { ...base, devMergedAt: '2026-11-13 10:00', devStagingCiStatus: 'passed', devStagingLiveAt: '2026-11-13 10:20' };
         assert.strictEqual(featureChecklist(r).ready, true);
     });
+    await check('checklist: "including the proof test" only when there is one', () => {
+        const r = { ...base, devMergedAt: 'x', devStagingCiStatus: 'passed' };
+        const detail = (x: FeatureProofRow) => featureChecklist(x).items.find((i) => i.key === 'tests_staging')!.detail;
+        assert.strictEqual(detail(r), 'CI passed on the merge commit.');
+        assert.match(detail({ ...r, devRepro: { test: 't.ts', kind: 'node', before: { exit: 1 }, after: { exit: 0 } } }), /including the proof test/);
+    });
     await check('checklist: SQL not on staging (or changed since) blocks; not-additive SQL is a fail', () => {
         const merged = { ...base, devMergedAt: 'x', devStagingCiStatus: 'passed', devStagingLiveAt: 'y', devSql: SQL };
         assert.strictEqual(featureChecklist(merged).ready, false);

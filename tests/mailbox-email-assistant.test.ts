@@ -219,9 +219,19 @@ check('the Outlook grant is delegated mail read/write + send, with offline_acces
 });
 
 check('the return URL never echoes state: only a positive integer assistant id survives', () => {
-    assert.strictEqual(mailboxReturnUrl('12', { ok: true }), '/workspace.html?assistantId=12&tab=datahub&mailbox=connected');
+    // view=assistant-detail is what opens the assistant; without it the page showed the Dashboard.
+    assert.strictEqual(mailboxReturnUrl('12', { ok: true }), '/workspace.html?view=assistant-detail&assistantId=12&tab=datahub&mailbox=connected');
     assert.strictEqual(mailboxReturnUrl('12"><script>', { ok: true }), '/integrations.html?mailbox=connected');
     assert.strictEqual(mailboxReturnUrl(null, { error: 'a b' }), '/integrations.html?mailbox_error=a%20b');
+});
+
+check('the connect outcome survives workspace.html clearing the query string', () => {
+    const ws = read('workspace.html');
+    const block = ws.slice(ws.indexOf("viewParam === 'assistant-detail' && qs.get('assistantId')"));
+    const clear = block.indexOf("history.replaceState(null, '', window.location.pathname)");
+    const lift = block.indexOf('window._mailboxConnectOutcome = {');
+    assert.ok(clear > 0 && lift > clear && lift < 1500, 'lifted in the same deep-link block');
+    assert.ok(/const lifted = window\._mailboxConnectOutcome;/.test(read('src/components/assistant-mailbox.js')));
 });
 
 check('Microsoft\'s "needs admin approval" is told apart from the user pressing Cancel', () => {

@@ -50,9 +50,13 @@
   }
 
   function showConnectOutcome() {
+    // workspace.html lifts these off the URL (it clears the query string when it opens an assistant);
+    // the URL is read too, for a page that keeps it.
+    const lifted = window._mailboxConnectOutcome;
+    window._mailboxConnectOutcome = null;
     const qp = new URLSearchParams(location.search);
-    const ok = qp.get('mailbox') === 'connected';
-    const err = qp.get('mailbox_error');
+    const ok = (lifted && lifted.connected) || qp.get('mailbox') === 'connected';
+    const err = (lifted && lifted.error) || qp.get('mailbox_error');
     if (!ok && !err) return;
     if (ok) toast('Mailbox connected. Your Email Assistant is sorting the last 14 days now — it takes a minute or two.');
     else if (window.alertModal) window.alertModal(CONNECT_ERRORS[err] || 'Connecting the mailbox did not work. Please try again.', { title: 'Mailbox not connected' });
