@@ -22,9 +22,8 @@ export interface BlogPillarWeek { from: string; to: string; articles: WeekArticl
 /** The previous Monday–Sunday (UK) before the week `now` is in, as YYYY-MM-DD. Pure. */
 export function lastUkWeek(now = new Date()): { from: string; to: string } {
     const monday = new Date(`${weekStartUk(now)}T12:00:00Z`);
-    const from = new Date(monday.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
-    const to = new Date(monday.getTime() - 86_400_000).toISOString().slice(0, 10);
-    return { from, to };
+    const day = (msBack: number) => new Date(monday.getTime() - msBack).toISOString().slice(0, 10);
+    return { from: day(7 * 86_400_000), to: day(86_400_000) };
 }
 
 const STOP = new Set('a an and are as at be but by for from has have how in into is it its of on or our so that the their this to was we what when where which who why will with you your yours'.split(' '));
