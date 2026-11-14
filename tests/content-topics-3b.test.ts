@@ -71,7 +71,7 @@ const help = read('db/z-content-topics-help-2026-11-11.sql');
 
 check('orchestrator: the card on Social, Blog and Email routes; kept through the Blog and Email rebuilds', () => {
     assert.match(orch, /const ownRoute = route === ROUTES\.social_media_manager \|\| route === ROUTES\.blog_writer \|\| route === ROUTES\.newsletter_editor;/);
-    assert.match(orch, /: blogAction \?\? blogBlockEdit \?\? pillarCard \?\? profileCard;/);
+    assert.match(orch, /: blogAction \?\? blogKeyword \?\? blogBlockEdit \?\? pillarCard \?\? profileCard;/);
     assert.match(orch, /: emailAction \?\? emailPartCard \?\? audienceCard \?\? reviewsCard \?\? pillarCard \?\? profileCard;/);
     assert.ok((orch.match(/!pillarCard && replyClaimsPostSaved\(content\)|!profileCard && !pillarCard\) \{/g) || []).length >= 3, 'no false "nothing was saved" apology');
 });

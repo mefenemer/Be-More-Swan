@@ -44,7 +44,9 @@ export async function recordCardOutcome(db: any, orgId: number, userId: number, 
     return rows.length > 0;
 }
 
-/** Pure: the line the model reads under an earlier reply that carried a card; null when it carried none. */
+/** Pure: the line the model reads under an earlier reply that carried a card; null when it carried none.
+ *  Fix pipeline #58: the model copied this bracketed shape into its own replies as "[Card: …]" text instead of
+ *  a card, so the line now says it is the system's. */
 export function cardOutcomeLine(uiElement: unknown): string | null {
     if (!uiElement || typeof uiElement !== 'object') return null;
     const ui = uiElement as { type?: unknown; summary?: unknown; outcome?: CardOutcomeRecord; answered?: unknown };
@@ -57,5 +59,5 @@ export function cardOutcomeLine(uiElement: unknown): string | null {
             : status === 'not_now' ? 'the user chose "Not now", so nothing changed.'
                 : status === 'dismissed' ? 'the user dismissed it, so nothing changed.'
                     : 'the user has not answered it yet, so nothing has changed.';
-    return `[Card under this reply: ${what} — ${said} Trust this over your own guess about what happened.]`;
+    return `[Card under this reply: ${what} — ${said} Trust this over your own guess about what happened. (Added by the system, never by you: a card only ever reaches the user as uiElement — never write a "[Card: …]" line yourself.)]`;
 }

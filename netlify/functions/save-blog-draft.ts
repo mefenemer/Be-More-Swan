@@ -19,6 +19,7 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isBlogDestinationId } from '../../src/utils/blog-destinations';
+import { normalizeKeywords, syncSwanIndexKeywords } from '../../src/utils/blog-keywords';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -43,7 +44,9 @@ export default withLambda(async (event: HandlerEvent) => {
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (typeof body.title === 'string') updates.title = body.title.slice(0, 500);
     if (typeof body.bodyMarkdown === 'string') updates.bodyMarkdown = body.bodyMarkdown;
-    if (Array.isArray(body.tags)) updates.tags = body.tags.slice(0, 25);
+    // Keywords (src/utils/blog-keywords.ts): cleaned and capped exactly as the SEO step writes them,
+    // so a keyword typed in Blog Studio or set from chat looks the same as one the AI chose.
+    if (Array.isArray(body.tags)) updates.tags = normalizeKeywords(body.tags);
     // SEO overrides. Clamp to the same limits generate-seo targets (≤60 title, ≤155 description);
     // '' clears an override back to the post's own title/excerpt at render time.
     if (typeof body.metaTitle === 'string') updates.metaTitle = body.metaTitle.slice(0, 120) || null;
@@ -72,6 +75,8 @@ export default withLambda(async (event: HandlerEvent) => {
         .returning({ id: blogPosts.id, updatedAt: blogPosts.updatedAt });
 
     if (!updated) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+    // A live article's Swan Index copy follows its keywords (blog-keywords.ts).
+    if (Array.isArray(body.tags)) await syncSwanIndexKeywords(db, ctx.organisationId, [updated.id]);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, updatedAt: updated.updatedAt }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, updatedAt: updated.updatedAt, ...(Array.isArray(body.tags) ? { tags: updates.tags } : {}) }) };
 });

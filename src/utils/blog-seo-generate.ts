@@ -22,27 +22,54 @@ import { excerpt } from './markdown-render';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 import { adaptForModel, replyText } from '../config/model-options';
+import { MAX_KEYWORDS, normalizeKeywords, syncSwanIndexKeywords } from './blog-keywords';
+import { derivedPillarNames, listPillars } from './content-pillars-store';
 
 type Db = ReturnType<typeof getDb>;
 
 const MODEL = 'claude-haiku-5-5';
 
-/** Categories per post. More than this and the blog's category menu grows by a few every post. */
-const MAX_CATEGORIES = 3;
+/** Categories per post — the same cap as a keyword typed by hand (blog-keywords.ts). */
+const MAX_CATEGORIES = MAX_KEYWORDS;
 
 /** The categories this workspace's OTHER posts already use, most-used first. */
+// Most RECENTLY used first, not most used, and never from archived or turned-down articles. Ordered
+// by count, a blog that changed direction kept being handed its old subject's keywords — they had the
+// most articles behind them — and every new article was told to reuse them (2026-11-14).
 async function existingCategories(db: Db, organisationId: number, excludeId: number): Promise<string[]> {
     try {
         const r: any = await db.execute(sql`
             SELECT t.tag AS value
               FROM blog_posts p, jsonb_array_elements_text(CASE WHEN jsonb_typeof(p.tags) = 'array' THEN p.tags ELSE '[]'::jsonb END) AS t(tag)
              WHERE p.organisation_id = ${organisationId} AND p.id <> ${excludeId} AND btrim(t.tag) <> ''
-             GROUP BY t.tag ORDER BY count(*) DESC, t.tag LIMIT 25`);
+               AND p.status NOT IN ('archived', 'rejected')
+             GROUP BY t.tag ORDER BY max(coalesce(p.published_at, p.updated_at)) DESC, count(*) DESC, t.tag LIMIT 15`);
         const rows: any[] = Array.isArray(r) ? r : r?.rows || [];
         return rows.map((x) => String(x.value));
     } catch {
         return [];   // a hint, not a requirement — SEO still runs without it
     }
+}
+
+// The blog's own Topics & themes (switched on), which say what the blog is about NOW. Null-safe: an
+// article with no assistant, or a workspace without topic records, just goes without.
+async function currentTopics(db: Db, organisationId: number, assistantId: number | null): Promise<string[]> {
+    if (!assistantId) return [];
+    try { return derivedPillarNames((await listPillars(db, organisationId, assistantId)) ?? []).slice(0, 12); }
+    catch { return []; }
+}
+
+/**
+ * The keyword instruction. Pure (tests/blog-keywords.test.ts). The keywords must describe THIS
+ * article: the blog's current topics are offered first, keywords already in use second, and only as
+ * a way to avoid near-duplicates — never as words to reuse because they exist.
+ */
+export function keywordRule(existing: string[], topics: string[]): string {
+    const base = `tags (array of 1-${MAX_CATEGORIES} short, broad lowercase keywords a reader could browse by, describing THIS post — e.g. "marketing", not "five instagram tips for bakers")`;
+    const parts = [base];
+    if (topics.length) parts.push(`The blog's current topics are ${topics.map((t) => JSON.stringify(t)).join(', ')}; prefer a keyword that names the topic this post belongs to`);
+    if (existing.length) parts.push(`keywords already used on recent posts are ${existing.map((t) => JSON.stringify(t)).join(', ')} — reuse one only if it truly describes this post (to avoid near-duplicates like "retirement" vs "retirement tips"), never just because it exists`);
+    return parts.join('. ');
 }
 
 export interface BlogSeoResult {
@@ -74,7 +101,7 @@ export async function generateBlogSeo(
     const { blogPostId: id, organisationId, userId } = opts;
 
     const [post] = await db
-        .select({ id: blogPosts.id, title: blogPosts.title, bodyMarkdown: blogPosts.bodyMarkdown, status: blogPosts.status })
+        .select({ id: blogPosts.id, title: blogPosts.title, bodyMarkdown: blogPosts.bodyMarkdown, status: blogPosts.status, assistantId: blogPosts.assistantId })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)))
         .limit(1);
@@ -86,9 +113,8 @@ export async function generateBlogSeo(
     // "marketing tips"). The model now sees the categories in use and reuses them, adding a new
     // one only when nothing fits.
     const existing = await existingCategories(db, organisationId, id);
-    const categoryRule = existing.length
-        ? `tags (array of 1-3 short lowercase category names; REUSE one of these existing categories wherever it fits: ${existing.map((t) => JSON.stringify(t)).join(', ')} — add a new category only when none of them describes the post)`
-        : 'tags (array of 1-3 short, broad lowercase category names a reader could browse by — e.g. "marketing", not "five instagram tips for bakers")';
+    const topics = await currentTopics(db, organisationId, post.assistantId);
+    const categoryRule = keywordRule(existing, topics);
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create(adaptForModel({
@@ -113,9 +139,7 @@ export async function generateBlogSeo(
 
     const metaTitle = String(parsed.metaTitle || post.title).slice(0, 70);
     const metaDescription = String(parsed.metaDescription || '').slice(0, 160);
-    const tags = Array.isArray(parsed.tags)
-        ? [...new Set(parsed.tags.map((t: any) => String(t).toLowerCase().trim().slice(0, 40)).filter(Boolean))].slice(0, MAX_CATEGORIES)
-        : [];
+    const tags = normalizeKeywords(Array.isArray(parsed.tags) ? parsed.tags : []);
 
     // Slug: use the model's suggestion, sanitised; keep an already-published slug stable, because
     // changing it after publication breaks every link anyone has already shared.
@@ -138,6 +162,8 @@ export async function generateBlogSeo(
     if (urlSlug) updates.slug = urlSlug;
     await db.update(blogPosts).set(updates)
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)));
+    // Regenerate SEO on a published article rewrites its keywords — its Swan Index copy follows.
+    await syncSwanIndexKeywords(db, organisationId, [id]);
 
     return { metaTitle, metaDescription, urlSlug, tags };
 }

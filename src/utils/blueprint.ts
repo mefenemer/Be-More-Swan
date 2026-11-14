@@ -41,6 +41,7 @@ import {
 import { checkProhibitedUsePatterns } from './tos-gate';
 import { dpaAcceptedVersionClause } from '../../netlify/functions/accept-dpa';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
+import { withoutRetiredSetupAnswers } from '../constants/retired-setup-answers';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 import { buildGoalDirective, renderGoalDirective } from './goal-directive';
 import { buildCampaignDirective, directiveInputFrom } from './campaign-directive';
@@ -297,12 +298,14 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         typeof v === 'string' && allowed.includes(v) ? v : null;
     const s6operational = {
         triggerType: oneOf(onboardingCtx.trigger_type, OPERATIONAL_TRIGGERS),
-        scheduleFrequency: (onboardingCtx.trigger_schedule_frequency as string | null) ?? (onboardingCtx.posting_frequency as string | null) ?? null,
-        scheduleTimezone: (onboardingCtx.trigger_timezone as string | null) ?? (onboardingCtx.posting_timezone as string | null) ?? null,
+        // The Posting Schedule is the one schedule. The wizard's old trigger_* copies were never
+        // updated after hire and used to win here — see src/constants/retired-setup-answers.ts.
+        scheduleFrequency: (onboardingCtx.posting_frequency as string | null) ?? null,
+        scheduleTimezone: (onboardingCtx.posting_timezone as string | null) ?? null,
         contentSource: oneOf(onboardingCtx.content_source, OPERATIONAL_SOURCES),
-        contentSourceDetail: (onboardingCtx.content_source_detail as string | null) ?? null,
     };
-    const s6content = { answers: onboardingCtx, operational: s6operational };
+    // Retired answers are dropped here so nothing reading `.answers` can pass them on.
+    const s6content = { answers: withoutRetiredSetupAnswers(onboardingCtx), operational: s6operational };
     const hasAnswers = Object.keys(onboardingCtx).length > 0;
     if (!hasAnswers) missing.push({ section: '6-onboarding', field: 'onboardingContext', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning', owner: 'customer', remedy: { label: 'Complete your assistant\u2019s setup answers', where: WHERE.operationalSetup } });
     // Warning, not blocking: assistants hired before onboarding stored these answers must stay

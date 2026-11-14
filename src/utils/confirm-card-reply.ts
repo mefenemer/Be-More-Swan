@@ -33,6 +33,18 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
 }
 
 /**
+ * A "[Card: …]" line the model wrote as text where a card should be (Fix pipeline #58). Three Mentor replies
+ * in one chat ended that way, so the user read "[Card: …]" and saw no card. It is taken out of what is
+ * shown, and counts as pointing at a card.
+ */
+const CARD_PLACEHOLDER_SOURCE = /\[\s*card(?: under this reply)?\s*:[^\]\n]{0,400}\]?/.source;
+const CARD_PLACEHOLDER_LINES = new RegExp(`\\n*[ \\t]*${CARD_PLACEHOLDER_SOURCE}[ \\t]*`, 'gi');
+export function withoutCardPlaceholder(content: string): string {
+    const out = content.replace(CARD_PLACEHOLDER_LINES, '').replace(/\n{3,}/g, '\n\n').trim();
+    return out === content.trim() ? content : out;
+}
+
+/**
  * A reply that points at a card when none came with it (Business Mentor rubric W6, staging
  * 2026-10-26: "I've added a card that looks up the up-to-date rules" over no card at all). The prompt
  * can't hold this either, so the server says so plainly beside the reply.
@@ -55,6 +67,11 @@ const POINTS_AT_CARD = new RegExp([
     /\b(?:below|above) for you to (?:approve|confirm|save|accept|review)\b/.source,
     /\b(?:the|that|this) (?:change|suggestion|update) (?:below|above)\b/.source,
     /\b(?:approve|confirm|save|accept) (?:it|that|this|them) (?:below|above)\b/.source,
+    // Fix pipeline #58 (prod 2026-11-14, org 40, Business Mentor): "Sorry … Here it is now, below this message."
+    /\bhere it is(?: now)?,? (?:just )?(?:below|above)\b/.source,
+    // …ending in a bracketed "[Card: Update the Blog Writing Assistant's topics…]" written as TEXT, the shape
+    // of the "[Card under this reply: …]" line the history shows under earlier cards. That is never a card.
+    CARD_PLACEHOLDER_SOURCE,
 ].join('|'), 'i');
 
 export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
@@ -72,7 +89,9 @@ const POINTS_AT_CARD_ALL = new RegExp(POINTS_AT_CARD.source, 'gi');
 export function replyPointsAtCard(content: string): boolean {
     for (const m of content.matchAll(POINTS_AT_CARD_ALL)) {
         const upTo = content.slice(0, m.index);
-        const sentenceStart = Math.max(upTo.lastIndexOf('.'), upTo.lastIndexOf('!'), upTo.lastIndexOf('?'), upTo.lastIndexOf('\n')) + 1;
+        // A colon or semicolon ends the clause too (Fix pipeline #58): "What I can do is look it up: the card
+        // below runs a background search" is a claim of a card, not an offer — the "I can" is a different clause.
+        const sentenceStart = Math.max(upTo.lastIndexOf('.'), upTo.lastIndexOf('!'), upTo.lastIndexOf('?'), upTo.lastIndexOf('\n'), upTo.lastIndexOf(':'), upTo.lastIndexOf(';')) + 1;
         if (!OFFER_BEFORE.test(upTo.slice(sentenceStart))) return true;
     }
     return false;
@@ -80,8 +99,10 @@ export function replyPointsAtCard(content: string): boolean {
 
 /** The reply, with NO_CARD_NOTE added when it points at a card that isn't there. */
 export function missingCardReply(content: string, hasCard: boolean): string {
-    if (hasCard || !replyPointsAtCard(content) || content.includes(NO_CARD_NOTE)) return content;
-    return `${content}\n\n${NO_CARD_NOTE}`;
+    // A "[Card: …]" line never stays in what is shown, card or not (#58).
+    const shown = withoutCardPlaceholder(content);
+    if (hasCard || !replyPointsAtCard(content) || shown.includes(NO_CARD_NOTE)) return shown;
+    return `${shown}\n\n${NO_CARD_NOTE}`;
 }
 
 /**
@@ -111,7 +132,7 @@ export function cardRetryTimeoutMs(t: { requestElapsedMs: number; replyElapsedMs
 }
 
 /** The one follow-up turn sent when proseReplyLostItsCard: model-only, never stored or shown. */
-export const CARD_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text, so the card it mentions never reached them: they would see "the card below" and no card. Send that reply again as the JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>}} — and nothing else. If no card fits after all, send {"reply": "<your words, without mentioning a card>", "uiElement": null}.';
+export const CARD_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text, so the card it mentions never reached them: they would see "the card below" and no card. A "[Card: …]" line in text is not a card. Send that reply again as the JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>}} — and nothing else. If no card fits after all, send {"reply": "<your words, without mentioning a card>", "uiElement": null}.';
 
 /**
  * What to keep when a reply points at a card that was not drawn (Fix pipeline #33, prod 2026-11-10).

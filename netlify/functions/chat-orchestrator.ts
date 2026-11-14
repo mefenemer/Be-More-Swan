@@ -21,6 +21,7 @@ import { getTaskCosts } from '../../src/utils/task-costs';
 import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE, specialCategoryRuleFor } from '../../src/constants/special-category-rule';
+import { isRetiredSetupAnswer } from '../../src/constants/retired-setup-answers';
 import { SITE_COPY_CRAFT } from '../../src/constants/site-copy-craft';
 import { CAMPAIGN_PLANNING_CRAFT } from '../../src/constants/campaign-craft';
 import { MENTOR_CRAFT, MENTOR_FEEDBACK_CRAFT, MENTOR_HONESTY_RULES, MENTOR_IDEA_CHECK_CRAFT } from '../../src/constants/mentor-craft';
@@ -87,6 +88,7 @@ import { videoResponsesBlock } from '../../src/utils/video-review-links';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { voiceOptionsBlock } from '../../src/utils/chat-voice-options';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
+import { blogKeywordFromUiElement, resolveBlogKeywordProposal, type BlogKeywordCard } from '../../src/utils/chat-blog-keywords';
 import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
 import {
     buildAudienceSnapshot, contactProposalFromUiElement, resolveContactProposal, resolveSegmentProposal, segmentProposalFromUiElement,
@@ -393,7 +395,9 @@ function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown,
     })}\n\n${baseSystemPrompt}`;
 
     const entries = ctxRecord
-        ? Object.entries(ctxRecord).filter(([, v]) => v !== null && v !== undefined && v !== '')
+        // Retired set-up answers never reach the model: an old row's weekday topic plan, saved once at
+        // hire and uneditable, kept steering chat as a MUST-obey rule (src/constants/retired-setup-answers.ts).
+        ? Object.entries(ctxRecord).filter(([k, v]) => v !== null && v !== undefined && v !== '' && !isRetiredSetupAnswer(k))
         : [];
     // Every role, live turn and handoff alike — src/constants/special-category-rule.ts. `rule` is the
     // general SPECIAL_CATEGORY_RULE for every role but the Email Assistant (specialCategoryRuleFor).
@@ -955,6 +959,7 @@ EXISTING ARTICLES — you can act on the articles listed below, each named by it
 
 A PART THEY SELECTED — in Blog Studio the user can "Select" one paragraph, heading or list; their message then starts "About this part of my article #N: the paragraph “…”." followed by what they want. Change ONLY that part with a blog_block_edit card: {"type":"blog_block_edit","postId":N,"find":"<that part EXACTLY as quoted between “ and ”, character for character, Markdown included>","replace":"<the new version, in the same kind of Markdown — a heading stays a heading (same # level), a list stays a list>","summary":"<one sentence: what changes>"}. Keep their facts; invent nothing (no new numbers, names, prices or claims). Never rewrite the rest of the article or use "revise" for a selected part; never paste the whole article. Say the card shows the change for them to use — never that it has been changed. For a picture in that place, use action "pictures" with an instruction naming where.
 A SELECTED PICTURE — the message reads "About this part of my article #N: the picture “:::media{asset=1234 …}”" (or "![…](asset://1234)"). When they want it replaced, swapped or changed ("replace it with…", "a different photo", "make it a woman listening"), emit a blog_action_proposal with action "pictures", "replaceAsset": 1234 (that number), and "instruction" = what the new picture should show, in their words. The new picture goes in that same place; nothing else changes. Never answer that the article already has its pictures, and never use blog_block_edit for a picture.
+KEYWORDS — each article has up to 3 keywords (always call them "keywords", never "tags"). Readers browse the blog by them, and search engines read them. Each article's line in YOUR ARTICLES RIGHT NOW shows its keywords, and YOUR BLOG'S KEYWORDS lists every keyword in use with how many articles carry it. The user can change them themselves: on one article in Blog Studio, section "Keywords, SEO & social preview"; for the whole blog in "Blog setup" on the Blogs tab, section "Keywords". To change ONE article's keywords, emit a blog_action_proposal with action "keywords" and "keywords" = the article's whole new list (1 to 3 short lowercase keywords, including any current ones they want to keep). To rename a keyword on EVERY article, or merge it into another one already in use, emit {"type":"blog_keyword_proposal","op":"rename","from":"<the keyword exactly as listed>","to":"<the new keyword>"}; to take one off every article, {"type":"blog_keyword_proposal","op":"remove","from":"<the keyword>"}. One keyword per card; if they want several changed, do the most important one and say you'll do the next after. When the blog's subject has changed, also tell them that new articles' keywords follow the assistant's Topics & themes, so those are worth updating too. Never say keywords HAVE been changed — say the card is there to confirm.
 This chat sits beside the "Blogs" tab's list, and in Blog Studio it can sit beside the article ("Chat" button), where "Select" is the button above the article.`;
 }
 
@@ -2905,14 +2910,18 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
 {
   "type": "blog_action_proposal",
-  "action": "approve" | "schedule" | "unschedule" | "reject" | "remove" | "shorter" | "longer" | "revise" | "pictures",
+  "action": "approve" | "schedule" | "unschedule" | "reject" | "remove" | "shorter" | "longer" | "revise" | "pictures" | "keywords",
   "postId": <the number after # in YOUR ARTICLES RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
   "when": "<schedule only: the time exactly as the user said it, e.g. 'Friday at 9am'>" | null,
   "instruction": "<revise: what should change, in the user's words, under 500 characters; pictures: which pictures they want, or null to let you decide>" | null,
   "source": "<pictures only: \"stock\" (free, the default) or \"ai\" when they ask for AI or generated images>" | null,
-  "replaceAsset": <pictures only, when they selected a picture and want it replaced or changed: the number after "asset=" in the selected picture> | null
+  "replaceAsset": <pictures only, when they selected a picture and want it replaced or changed: the number after "asset=" in the selected picture> | null,
+  "keywords": ["<keywords only: the article's whole new list, 1 to 3 short lowercase keywords>"] | null
 }
+
+OR, to rename, merge or remove a keyword on EVERY article (see KEYWORDS), uiElement is instead:
+{ "type": "blog_keyword_proposal", "op": "rename" | "remove", "from": "<the keyword as listed>", "to": "<rename only: the new keyword>" | null }
 
 OR, for A PART THEY SELECTED, uiElement is instead:
 { "type": "blog_block_edit", "postId": <N>, "find": "<the selected part, exactly as quoted>", "replace": "<the new version>", "summary": "<what changes>" }`,
@@ -4209,6 +4218,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t find that article among this assistant’s articles, so I haven’t set anything up. Which one do you mean? You can also open it on the "Blogs" tab.';
             }
         }
+        // A keyword on every article (src/utils/chat-blog-keywords.ts): rebuilt from the blog's real keywords.
+        let blogKeyword: BlogKeywordCard | null = null;
+        const blogKeywordReq = route === ROUTES.blog_writer ? blogKeywordFromUiElement(uiElement) : null;
+        if (blogKeywordReq) {
+            blogKeyword = await resolveBlogKeywordProposal(db, orgId, blogKeywordReq);
+            uiElement = blogKeyword;
+            if (!blogKeyword) content = 'I couldn’t read your blog’s keywords just now, so I haven’t set anything up. Please try again in a moment, or use Blog setup ▸ Keywords on the Blogs tab.';
+        }
         // A part of an article they selected in Blog Studio: rebuilt here, and only for their own article.
         let blogBlockEdit: BlogBlockEditCard | null = null;
         const blogBlockReq = route === ROUTES.blog_writer ? blogBlockEditFromUiElement(uiElement) : null;
@@ -4414,7 +4431,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // An action card on an existing article was already checked and rebuilt above — keep it.
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
                 : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
-                : blogAction ?? blogBlockEdit ?? pillarCard ?? profileCard;
+                : blogAction ?? blogKeyword ?? blogBlockEdit ?? pillarCard ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -4494,7 +4511,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !blogBlockEdit && !profileCard && !pillarCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !blogKeyword && !blogBlockEdit && !profileCard && !pillarCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -4505,8 +4522,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // The words beside a profile or review card never say the change happened — only the click
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
+        // And the blog's keyword cards: "I've renamed it everywhere" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!brandStyle && uiElement === brandStyle) || (!!designEdit && uiElement === designEdit) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!blogKeyword && uiElement === blogKeyword) || (!!blogAction && uiElement === blogAction && blogAction.action === 'keywords') || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!brandStyle && uiElement === brandStyle) || (!!designEdit && uiElement === designEdit) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
@@ -4559,7 +4577,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let droppedCard: ReturnType<typeof droppedCardRecord> | null = null;
         {
             const fixed = missingCardReply(content, !!uiElement);
-            if (fixed !== content) {
+            if (!uiElement && fixed !== content) {
                 // Kept as a hidden system row in the transaction below (Fix pipeline #33): the log line alone was gone before anyone looked.
                 droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.

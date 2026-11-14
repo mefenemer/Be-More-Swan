@@ -63,10 +63,7 @@ export const SOCIAL_WIZARD_EXCLUDED: Readonly<Record<string, string>> = {
     posting_times: 'Part of the Posting Schedule (schedule card).',
     posting_timezone: 'Part of the Posting Schedule (schedule card).',
     trigger_type: 'How posts are triggered — "When and how I post" on the profile; changing it alone would leave the schedule inconsistent.',
-    trigger_schedule_frequency: 'Set with trigger_type on the profile.',
-    trigger_timezone: 'Set with trigger_type on the profile.',
-    content_source: 'Where content comes from — set on the profile with its detail.',
-    content_source_detail: 'Set with content_source on the profile.',
+    content_source: 'Where content comes from — the three choices under "When and how I post" on the profile.',
     primary_platforms: 'Which platforms it posts to — the platform switches card (chat-platforms.ts).',
     platform_strategy: 'A per-platform object (hashtags, algorithm notes) edited on the profile, not one value.',
 };

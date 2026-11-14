@@ -646,7 +646,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             : '';
 
         // Operational Setup (onboarding step 3) as explicit directives — see operational-setup.ts
-        // for what each answer means and why content_source_detail is withheld. Read LIVE from
+        // for what each answer means (content_source_detail is retired — retired-setup-answers.ts). Read LIVE from
         // onboardingContext (like brand hashtags and platform strategy above) so a profile edit
         // applies without a blueprint recompile; section 6's copy is the fallback.
         const operationalLines = operationalSetupLines(brandCtx, answers);
