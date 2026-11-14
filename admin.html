@@ -7341,6 +7341,9 @@ const frColumnOf = (it) => FR_COLUMN_OF_STATUS[it.status] || 'review';
 function frBoardCard(it) {
   const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
   const badges = [
+    // Built but switched off (scripts/feature-requests.ts hold; owner 2026-11-14): the go-live check skips it,
+    // so it sits in Building until the owner switches it on. Reason in the tooltip.
+    (it.proof && it.proof.goLiveHold && !it.proof.liveAt) ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300" data-fr-hold-pill title="${_escH('On hold, switched off: ' + it.proof.goLiveHold)}">⏸️ On hold</span>` : '',
     // Claude building it from a session (scripts/feature-requests.ts; src/utils/claude-work.ts).
     it.claudeWorking ? IR_CLAUDE_PILL : '',
     prPills(it.devPrUrl, it.prodPrUrl),
