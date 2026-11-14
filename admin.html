@@ -7867,6 +7867,21 @@ async function loadRewardAudits() {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
+// Two cards, each opening its board. Null (the read failed) → dashes, never a made-up zero.
+function dashDeliveryCards(m) {
+  const card = (label, icon, value, sub, view) => `
+      <button type="button" onclick="adminNav('${view}')" class="text-left bg-white rounded-2xl border border-gray-200 p-5 hover:border-emerald-300 transition" data-dash-delivery="${view}">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-2xl">${icon}</span>
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">${label}</span>
+        </div>
+        <div class="text-3xl font-extrabold text-gray-900">${value}</div>
+        <div class="text-xs text-gray-500 mt-1">${sub}</div>
+      </button>`;
+  const n = (v) => (m ? String(Number(v) || 0) : '—');
+  return card('Issues resolved', '✅', n(m && m.issuesResolved), m ? `${Number(m.issuesResolved30d) || 0} in the last 30 days` : 'Could not be read', 'issue-reports')
+    + card('Features released', '🚀', n(m && m.featuresReleased), m ? `${Number(m.featuresReleased30d) || 0} in the last 30 days` : 'Could not be read', 'feature-roadmap');
+}
 async function loadDashboard() {
   try {
     const d = await api('/.netlify/functions/admin-api?resource=dashboard');
@@ -7937,7 +7952,9 @@ async function loadDashboard() {
           </div>`;
     } catch { /* non-fatal */ }
 
-    document.getElementById('kpi-grid').innerHTML = kpiCards + tierCard + storageCard;
+    // FR#29 (owner 2026-11-14): what we delivered — issues resolved and features released (src/utils/delivery-metrics.ts).
+    const deliveryCards = dashDeliveryCards(d.delivery);
+    document.getElementById('kpi-grid').innerHTML = kpiCards + deliveryCards + tierCard + storageCard;
 
     // Waiting on us — the Inbox's count and its five most recent (questions, problems, enquiries).
     try {
