@@ -41,7 +41,7 @@ import {
 } from '../../db/schema';
 import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { loadInbox, ticketToIssue, issueToTicket, ticketToFeature } from '../../src/utils/support-inbox';
+import { loadInbox, ticketToIssue, issueToTicket, ticketToFeature, inboxDismissalsReady, setDismissed, DISMISSAL_KINDS, type InboxKind } from '../../src/utils/support-inbox';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { loginLinkParams } from '../../src/utils/login-link';
@@ -435,6 +435,26 @@ export default withLambda(async (event) => {
             if (!scope.tickets && !scope.issues && !scope.enquiries) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
             const items = await loadInbox(db, scope);
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, scope }) };
+        }
+
+        // POST ?resource=inbox-dismiss { kind, id, undo? } — "Ignore": no reply needed, so it moves to Done
+        // (FR#22). Nothing is sent and the request itself is unchanged; it comes back if the person writes again.
+        if (event.httpMethod === 'POST' && resource === 'inbox-dismiss') {
+            const b = JSON.parse(event.body || '{}');
+            const id = Number(b.id);
+            const kind = b.kind as InboxKind;
+            if (!Number.isInteger(id) || id <= 0 || !DISMISSAL_KINDS.includes(kind)) {
+                return { statusCode: 400, body: JSON.stringify({ error: 'kind (ticket|issue|enquiry) and id required.' }) };
+            }
+            const denied = requirePermission(adminRole, kind === 'ticket' ? 'view_tickets' : kind === 'issue' ? 'view_issue_reports' : 'view_billing_history');
+            if (denied) return denied;
+            if (!(await inboxDismissalsReady(db))) return { statusCode: 409, body: JSON.stringify({ error: 'Ignore needs db/z-inbox-dismissals.sql on this database first.' }) };
+            await setDismissed(db, kind, id, adminId, b.undo === true);
+            await insertAdminAuditLog({
+                adminId, action: b.undo === true ? 'inbox_undismiss' : 'inbox_dismiss', targetType: kind, targetId: id,
+                newState: { dismissed: b.undo !== true }, ipAddress: getAdminIp(event.headers),
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true }) };
         }
 
         // POST ?resource=inbox-reroute { kind: 'ticket' | 'issue', id, to?: 'feature' } — the customer
