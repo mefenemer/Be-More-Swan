@@ -160,6 +160,7 @@ import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
+import { linkedPagesBlock } from '../../src/utils/chat-links';
 import { loadRecentArticles, renderRecentArticlesForChat, RECENT_ARTICLE_DAYS } from '../../src/utils/blog-to-social';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-5-5';
@@ -3647,6 +3648,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
     }
 
+    // FR#25: the pages the user linked to, read now (at most two, ~6 s each, in parallel) and added to this turn
+    // only, as third-party content (src/utils/chat-links.ts). Never saved as their message; never throws.
+    const linkContext = typed ? await linkedPagesBlock(typed).catch(() => '') : '';
+
     // `history` is already role-filtered and capped by the query above.
     // ⚠️ The model is sent the TEXT of its earlier replies, never the card under them — so on the
     // newsletter route it could not see the campaign plan it had just proposed. Asked to "write it",
@@ -3670,6 +3675,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })),
         { role: 'user' as const, content: [
             recordContext,
+            linkContext,
             // Where this message came from, for the model only (the transcript keeps their words).
             teamNote
                 ? `[Sent to you on the Team page${teamNote.campaignId ? `, on the thread for the campaign "${teamNote.campaignObjective ?? `#${teamNote.campaignId}`}" — a note there is also added to that campaign's brief, which you follow in everything you draft for it` : ''}. Your reply appears there, under their note, with any card you include.]`
