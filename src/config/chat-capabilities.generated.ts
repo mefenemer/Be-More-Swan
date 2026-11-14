@@ -28,7 +28,9 @@ export const GENERATED_CHAT_MANIFEST = {
                 "blog_block_edit",
                 "blog_keyword_proposal"
             ],
-            "craftInChat": []
+            "craftInChat": [
+                "blog_craft"
+            ]
         },
         "brand_designer": {
             "flags": [
@@ -177,7 +179,9 @@ export const GENERATED_CHAT_MANIFEST = {
                 "newsletter_campaign_draft",
                 "newsletter_issue_draft"
             ],
-            "craftInChat": []
+            "craftInChat": [
+                "email_craft"
+            ]
         },
         "social_media_manager": {
             "flags": [
@@ -193,7 +197,9 @@ export const GENERATED_CHAT_MANIFEST = {
                 "share_for_review_proposal",
                 "social_post_draft"
             ],
-            "craftInChat": []
+            "craftInChat": [
+                "platform_craft"
+            ]
         },
         "tier1_support_agent": {
             "flags": [
