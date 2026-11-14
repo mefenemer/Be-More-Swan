@@ -10,11 +10,12 @@
 // 1. LIVE CHECK. For each merged fix not yet confirmed live, ask GitHub whether the PR's merge commit
 //    is inside BUILD_COMMIT — the commit THIS deploy was built from (src/generated/build-commit.ts).
 //    Prod runs it against the prod database and staging against staging's, so each reporter hears
-//    when the fix reached the site they use. Only then: status 'fixed_ready_to_test', a thread note,
-//    and one "fixed and live" notification.
-// 2. AUTO-CLOSE. An issue still at 'fixed_ready_to_test' 7 days after fixed_at, with no reply from
-//    the reporter since, is closed with a note and one last notification. A reply before then
-//    already reopens it (issue-reports.ts → 'reported'), which takes it out of this query.
+//    when the fix reached the site they use. Only then: status 'closed', a thread note and one "fixed
+//    and live — nothing you need to do" notification (FR#23, owner 2026-11-14: never ask a customer to
+//    test or confirm a fix). A reply reopens it (issue-reports.ts → 'reported').
+// 2. AUTO-CLOSE. An issue set to 'fixed_ready_to_test' by hand, 7 days after fixed_at with no reply from
+//    the reporter since, is closed quietly (no note, no notification). A reply before then already
+//    reopens it, which takes it out of this query.
 //
 // ── Safety ──────────────────────────────────────────────────────────────────────────────────────
 // • Nothing here trusts a caller: the deployed commit is baked in at build, and inclusion is
@@ -200,6 +201,9 @@ export async function runFixLiveCheck(db: Db, opts: {
     return result;
 }
 
+/** What the customer reads when their fix reaches production (FR#23): fixed, nothing to do, reply if not. */
+export const LIVE_FIX_MESSAGE = "✅ This is fixed and live now — thank you for reporting it. There's nothing you need to do. If anything still isn't right, just reply here and we'll pick it straight back up.";
+
 async function confirmLiveFixes(
     db: Db,
     o: { deployedSha: string; token: string; repo: string; fetchImpl?: FetchLike },
@@ -238,7 +242,7 @@ async function confirmLiveFixes(
         // Compare-and-swap on the PR we checked: a second run, or a new fix landing meanwhile, misses.
         const claimed = await db.execute(sql`
             UPDATE issue_reports
-               SET status = 'fixed_ready_to_test', fixed_at = now(), live_at = now(),
+               SET status = 'closed', fixed_at = now(), live_at = now(), resolved_at = now(),
                    live_pr_url = ${row.dev_pr_url}, updated_at = now()
              WHERE id = ${row.id}
                AND dev_pr_url = ${row.dev_pr_url}
@@ -248,12 +252,14 @@ async function confirmLiveFixes(
         if (!claimed.length) continue;
         result.live++;
 
+        // FR#23 (owner 2026-11-14): a fix in production has been tested — customers are not our testers. Tell them
+        // it is fixed and close it; never ask them to confirm. A reply still reopens it (issue-reports.ts).
         await db.insert(issueReportMessages).values({
             issueId: row.id, authorType: 'admin', authorId: null,
-            body: `✅ The fix is live now. Could you give it another try? If it's still not right, just reply here and we'll pick it straight back up. If we don't hear from you, this closes on its own in ${AUTO_CLOSE_DAYS} days.`,
-            status: 'fixed_ready_to_test',
+            body: LIVE_FIX_MESSAGE,
+            status: 'closed',
         });
-        await notifyIssueUser(db, { userId: row.user_id, issueId: row.id, status: 'fixed_ready_to_test', variant: 'live' })
+        await notifyIssueUser(db, { userId: row.user_id, issueId: row.id, status: 'closed', variant: 'live' })
             .catch((e) => console.error('[issue-fix-live] live notify failed:', e?.message || e));
     }
 }
@@ -280,14 +286,7 @@ async function autoCloseQuietFixes(db: Db): Promise<number> {
            AND i.status = 'fixed_ready_to_test'
         RETURNING i.id, i.user_id`) as Array<{ id: number; user_id: number | null }>;
 
-    for (const row of closed) {
-        await db.insert(issueReportMessages).values({
-            issueId: row.id, authorType: 'admin', authorId: null,
-            body: `We've closed this as we haven't heard back in ${AUTO_CLOSE_DAYS} days since the fix went out. If it's still not working, reply here and we'll reopen it.`,
-            status: 'closed',
-        });
-        await notifyIssueUser(db, { userId: row.user_id, issueId: row.id, status: 'closed', variant: 'auto_closed' })
-            .catch((e) => console.error('[issue-fix-live] auto-close notify failed:', e?.message || e));
-    }
+    // FR#23: closed quietly. The customer was already told it was fixed and was never asked to reply, so a
+    // "we haven't heard back" message would read as if we had been waiting on them.
     return closed.length;
 }

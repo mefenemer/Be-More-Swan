@@ -6302,7 +6302,7 @@ const IR_BOARD_COLUMNS = [
   { key: 'fixing', label: 'Investigating & fixing', hint: 'Claude is finding the cause or writing the fix' },
   { key: 'review', label: 'Review & merge', hint: 'PR, SQL or merge waiting on you' },
   { key: 'golive', label: 'Waiting to go live', hint: 'Merged; moves when the deploy has it' },
-  { key: 'live', label: 'Live, awaiting reply', hint: 'Closes itself after 7 quiet days' },
+  { key: 'live', label: 'Fixed (set by hand)', hint: 'Customer told, never asked to confirm; closes itself after 7 days' },
   { key: 'closed', label: 'Closed', hint: 'Closed or on the roadmap', folded: true },
 ];
 const IR_REVIEW_MERGE = ['ready', 'queued', 'merging', 'failed', 'conflict_queued', 'conflict_resolving'];
