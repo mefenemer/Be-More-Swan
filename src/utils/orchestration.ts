@@ -31,6 +31,7 @@ import { draftIssueFromPost } from './newsletter-from-post';
 import { hasTaskCapacity, recordCompletedWork } from './work-metering';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import { getActiveTierKeyByOrg } from './plan-features';
+import { blogHandoffContext, loadArticleForHandoff } from './blog-to-social';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -248,7 +249,13 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
             if (bp) {
                 jobId = randomUUID();
                 const snippet = (sourceCaption || '').trim().slice(0, 300);
-                const contextPrompt = `${link.targetAction}. Context from ${sourceName}'s post${snippet ? `: "${snippet}"` : ''}.`.slice(0, 500);
+                // FR#12: from a blog article, the draft gets the article's words, summary and link — not just its
+                // title (blog-to-social.ts). A read failure falls back to the title, never breaks the hand-off.
+                const article = sourcePostKind === 'blog_post' && sourcePostId
+                    ? await loadArticleForHandoff(db, orgId, sourcePostId).catch(() => null) : null;
+                const contextPrompt = article
+                    ? blogHandoffContext(link.targetAction, sourceName, article)
+                    : `${link.targetAction}. Context from ${sourceName}'s post${snippet ? `: "${snippet}"` : ''}.`.slice(0, 500);
                 await db.insert(contentGenerationJobs).values({
                     jobId,
                     blueprintId:    bp.id,
