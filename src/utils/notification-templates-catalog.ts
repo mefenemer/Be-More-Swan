@@ -1886,11 +1886,11 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
     // ── Issue reports (one key per status — the status-specific CTA is the copy) ──
     {
         templateKey: 'issue_fixed_ready_to_test',
-        name: 'Issue fixed — ready to test',
+        name: 'Issue fixed',
         category: 'Support',
         type: 'issue_update',
-        title: '✅ Issue #{{issue.id}} fixed — ready to test',
-        message: 'We\'ve pushed a fix — could you give it another try and let us know how it goes?{{issue.admin_message}}',
+        title: '✅ Issue #{{issue.id}} fixed',
+        message: 'We\'ve pushed a fix — there\'s nothing you need to do. If anything still isn\'t right, just reply and we\'ll pick it straight back up.{{issue.admin_message}}',
         variables: [
             v('issue.id', 'Issue ID', '129'),
             v('issue.admin_message', 'Admin note (may be empty)', ' — “Fixed in today\'s release.”'),
@@ -1991,7 +1991,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Support',
         type: 'issue_update',
         title: '✅ Issue #{{issue.id}} is fixed and live',
-        message: 'The fix is live now. Could you give it another try? If it\'s still not right, just reply and we\'ll pick it straight back up. If we don\'t hear from you, it closes on its own in 7 days.',
+        message: 'It\'s fixed and live now — there\'s nothing you need to do. If anything still isn\'t right, just reply and we\'ll pick it straight back up.',
         variables: [
             v('issue.id', 'Issue ID', '129'),
         ],
@@ -2002,7 +2002,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Support',
         type: 'issue_update',
         title: 'Issue #{{issue.id}} closed',
-        message: 'We\'ve closed this as we haven\'t heard back in 7 days since the fix went out. If it\'s still not working, reply and we\'ll reopen it.',
+        message: 'We\'ve closed this — the fix went out a week ago. If anything still isn\'t right, reply and we\'ll reopen it.',
         variables: [
             v('issue.id', 'Issue ID', '129'),
         ],

@@ -33,10 +33,10 @@ check('tickets: a customer reply reopens to open = us; pending_customer = them; 
     for (const s of ['resolved', 'closed']) assert.strictEqual(ticketWaitingOn(s), 'done', s);
 });
 
-check('issues: new = us, asked/ready-to-test = them, pipeline = being fixed, and a customer comment always = us', () => {
+check('issues: new = us, asked = them, fixed = done, pipeline = being fixed, and a customer comment always = us', () => {
     assert.strictEqual(issueWaitingOn('reported', false), 'us');
     assert.strictEqual(issueWaitingOn('more_info_required', false), 'customer');
-    assert.strictEqual(issueWaitingOn('fixed_ready_to_test', false), 'customer');
+    assert.strictEqual(issueWaitingOn('fixed_ready_to_test', false), 'done');   // FR#23: a fixed issue never waits on the customer
     for (const s of ['investigating', 'on_hold', 'fix_in_progress', 'merge']) assert.strictEqual(issueWaitingOn(s, false), 'fixing', s);
     assert.strictEqual(issueWaitingOn('fix_in_progress', true), 'us', 'their newest message needs reading');
     assert.strictEqual(issueWaitingOn('more_info_required', true), 'us', 'they answered our question');

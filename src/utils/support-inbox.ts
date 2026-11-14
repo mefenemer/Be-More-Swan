@@ -51,7 +51,8 @@ export function issueWaitingOn(status: string, lastFromUser: boolean): WaitingOn
     if (status === 'closed' || status === 'roadmap') return 'done';
     if (lastFromUser) return 'us';
     if (status === 'reported') return 'us';
-    if (status === 'more_info_required' || status === 'fixed_ready_to_test') return 'customer';
+    if (status === 'fixed_ready_to_test') return 'done';   // FR#23: fixed; the customer is never asked to confirm
+    if (status === 'more_info_required') return 'customer';
     return 'fixing';   // investigating · on_hold (waiting on others) · fix_in_progress · merge
 }
 
