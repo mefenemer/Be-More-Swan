@@ -2548,6 +2548,8 @@
           <div class="flex items-center gap-2 pt-1">
             <button onclick="submitRoadmapForm()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save</button>
             <button onclick="closeRoadmapForm()" class="btn-secondary px-4 py-2 border text-sm font-semibold rounded-lg transition">Cancel</button>
+            <!-- FR#24 (owner 2026-11-14): delete from the edit panel, so the Board can delete too, not only the List. -->
+            <button id="fr-form-delete" onclick="deleteRoadmapFromForm()" class="hidden ml-auto px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition">Delete request</button>
           </div>
         </div>
 
@@ -7458,6 +7460,7 @@ function openRoadmapAdd() {
   _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, 'app_core');
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, 'medium');
   document.getElementById('fr-form-status-wrap').classList.add('hidden');
+  document.getElementById('fr-form-delete').classList.add('hidden');
   document.getElementById('fr-form-brief-wrap').classList.add('hidden');
   _frResetEnhance();
   document.getElementById('fr-form').classList.remove('hidden');
@@ -7477,6 +7480,7 @@ function openRoadmapEdit(id) {
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, it.priority);
   _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
   document.getElementById('fr-form-status-wrap').classList.remove('hidden');
+  document.getElementById('fr-form-delete').classList.remove('hidden');
   document.getElementById('fr-form-brief-wrap').classList.remove('hidden');
   // Claude's notes and pull request (read-only; scripts/feature-requests.ts writes them).
   const dev = document.getElementById('fr-form-dev');
@@ -7560,11 +7564,18 @@ async function submitRoadmapForm() {
 }
 
 async function deleteRoadmapItem(id) {
-  if (!(await window.confirmModal('', { title: 'Permanently delete this request?' }))) return;
+  if (!(await window.confirmModal('Its votes go too. This cannot be undone.', { title: `Permanently delete request #${Number(id)}?`, confirmLabel: 'Delete', cancelLabel: 'Keep it' }))) return false;
   try {
     await api(`${FR_API}?id=${id}`, { method: 'DELETE' });
     loadFeatureRoadmap();
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+    return true;
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); return false; }
+}
+// The edit panel's Delete (FR#24): same confirm and API as the List's bin; closes the panel once deleted.
+async function deleteRoadmapFromForm() {
+  const id = Number(document.getElementById('fr-form-id').value);
+  if (!id) return;
+  if (await deleteRoadmapItem(id)) { closeRoadmapForm(); window.showToast?.(`Request #${id} deleted.`, { icon: '🗑️' }); }
 }
 
 // ── Roadmap Gantt (US05) — drag from Backlog onto a quarter ──────────────────
@@ -8184,8 +8195,24 @@ function inboxRender() {
       <td class="px-5 py-3 whitespace-nowrap text-right">
         <button onclick="inboxOpen('${x.kind}', ${Number(x.id)}, ${x.contactId == null ? 'null' : Number(x.contactId)})" class="text-xs text-emerald-600 font-semibold hover:underline">Open →</button>
         ${x.kind !== 'enquiry' && x.contactId ? `<button onclick="inboxOpenContact(${Number(x.contactId)})" class="ml-3 text-xs text-gray-500 font-semibold hover:underline">Contact</button>` : ''}
+        ${inboxIgnoreButton(x)}
       </td></tr>`;
   }).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Nothing here.</td></tr>');
+}
+// FR#22 (owner 2026-11-14): Ignore a message that needs no reply. It moves to Done; nothing is sent and the
+// request itself is unchanged (support_inbox_dismissals). It comes back if the person writes again. Undo on Done.
+function inboxIgnoreButton(x) {
+  const args = `'${x.kind}', ${Number(x.id)}`;
+  if (x.dismissedAt) return `<span class="ml-3 text-[11px] text-gray-400" data-inbox-ignored>Ignored</span><button onclick="inboxIgnore(${args}, true)" class="ml-2 text-xs text-gray-500 font-semibold hover:underline">Undo</button>`;
+  if (x.waitingOn === 'done') return '';
+  return `<button onclick="inboxIgnore(${args}, false)" class="ml-3 text-xs text-gray-500 font-semibold hover:underline" data-inbox-ignore title="No reply needed: move it to Done without telling anyone. It comes back if they write again.">Ignore</button>`;
+}
+async function inboxIgnore(kind, id, undo) {
+  try {
+    await api('/.netlify/functions/admin-api?resource=inbox-dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, undo }) });
+    window.showToast?.(undo ? 'Back in the Inbox.' : 'Ignored — moved to Done. Nothing was sent.', { icon: undo ? '↩️' : '✅' });
+    loadInbox();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 // Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket / ticketToFeature).
 async function inboxReroute(kind, id, to) {
