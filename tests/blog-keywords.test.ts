@@ -82,3 +82,16 @@ test('Blog setup has a Keywords section that renames, merges and removes on ever
     assert.ok(studio.includes("{ action: 'rename', from: row.keyword, to: to }"));
     assert.ok(studio.includes('Topics &amp; themes'), 'points to where new articles\' subjects are set');
 });
+
+test('a keyword change reaches the article\'s Swan Index copy — keywords only, never the editors\' choices', () => {
+    const util = read('src/utils/blog-keywords.ts');
+    const fn = util.slice(util.indexOf('export async function syncSwanIndexKeywords'));
+    assert.ok(fn.includes('SET tags = p.tags, updated_at = now()'), 'copies the article\'s keywords');
+    assert.ok(!/SET[^;]*\b(section|slug|status|robots|title)\s*=/.test(fn), 'touches nothing else');
+    assert.ok(fn.includes('AND s.organisation_id = ${organisationId}') && fn.includes('AND p.organisation_id = ${organisationId}'), 'workspace-scoped');
+    assert.ok(fn.includes("console.error('[blog-keywords] could not update the Swan Index copy (non-fatal)'"), 'never throws');
+    // Every place keywords change: one article, blog-wide rename and remove, and Regenerate SEO.
+    assert.equal(util.split('if (rows.length) await syncSwanIndexKeywords(db, organisationId, rows.map').length - 1, 2);
+    assert.ok(read('netlify/functions/save-blog-draft.ts').includes('if (Array.isArray(body.tags)) await syncSwanIndexKeywords(db, ctx.organisationId, [updated.id]);'));
+    assert.ok(read('src/utils/blog-seo-generate.ts').includes('await syncSwanIndexKeywords(db, organisationId, [id]);'));
+});
