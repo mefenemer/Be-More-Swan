@@ -1,6 +1,7 @@
 # New Business Alert — PLAN (feature request #30)
 
-2026-11-14. **Nothing built.** For the owner to review and decide (§7).
+2026-11-14. **Nothing built.** For the owner to review and decide (§8). UK first; the US is §7 (owner: "do something
+similar for the US").
 
 The ask: *"Review approvalfeed.com/products/new-companies and produce a plan to incorporate this into the lead
 generator in some way. Every time a new company is set up we can introduce them to Be More Swan, it could be the
@@ -103,7 +104,63 @@ registered office. Needs a letter template per customer, a return address, and t
 | Volume (2,500+ a day UK-wide) | Customers only see their trades and area; Admin list is filterable |
 | Companies House changes or rate-limits | One call a day for the list; officers only for matches; failure = a missed day, re-run next morning |
 
-## 7. Decisions for the owner
+## 7. The US version
+
+The US has **no Companies House**: companies are formed state by state, and each state publishes (or doesn't) in its
+own way. Checked live on 2026-11-14 (state open-data APIs); sources in the research notes on FR#30.
+
+### 7.1 Where the data comes from
+
+| State | Feed | How fresh | What it gives | Cost / licence |
+| --- | --- | --- | --- | --- |
+| **Connecticut** | data.ct.gov Business Master (`n7gp-d28j`, Socrata API) | Daily | Name, type, registration date, office address, **NAICS code (trade)**, **business email** (on almost every new one) | Free, public domain |
+| **New York** | data.ny.gov Daily Corporation Filings (`k4vb-judh`, Socrata) | Daily, rolling 30 days | Name, type, filing date, **county only**, filer and service-of-process address. No trade. ~700–950 a weekday | Free; reuse terms not stated (check) |
+| **Colorado** | data.colorado.gov Business Entities (`4ykn-tg5h`, Socrata) | Daily (~4-day lag) | Name, type, formation date, **principal address**, registered agent. No trade. ~550–700 a weekday | Free, public domain |
+| **Florida** | Sunbiz daily data file (fixed-width text) | Every work day | Large volume; principal address, agent, officers (field layout to confirm). No trade | Free, "as is" |
+| Texas | SOS bulk order | Weekly ($20) or daily ($60/day) | New filings, JSON | Paid, cheap weekly |
+| Oregon / Pennsylvania | data.oregon.gov / data.pa.gov | Weekly / monthly | Addresses, officers | Free — fine for slower alerts |
+| **Avoid** | **Washington** (law bars lists of individuals for commercial use), **South Carolina** (bars commercial solicitation with SOS personal data). **California, Delaware**: no usable free bulk feed. | | | |
+
+Paid aggregators exist (OpenCorporates API from £225/month, share-alike licence unless you buy out; Cobalt
+Intelligence, verification only, from ~$1,000) — **not needed to start**: CT, NY and CO are all the same kind of
+open-data API, so **one connector** (like the UK Companies House poller) covers them; Florida's file is a second, simple
+one.
+
+### 7.2 What is different from the UK
+
+- **Trade:** only Connecticut records an industry code. Elsewhere the trade is guessed from the company name (a cheap
+  model call per match, or keyword rules) and shown as a guess — customers filtering by trade get fewer, less certain
+  matches outside CT.
+- **Address:** about a quarter of new Colorado companies use a commercial registered agent (Northwest, Registered Agents
+  Inc, CSC…), and New York gives only a county and a service address. Filter "where" on principal/office address and
+  county, and **drop known agent addresses** (the same idea as the UK formation-agent flag).
+- **Email:** Connecticut supplies one — usable straight away. Everywhere else, enrichment as in the UK (day 14, day 45).
+
+### 7.3 US rules
+
+- **Email — CAN-SPAM** (applies to B2B): no prior consent needed, but honest headers and subject, a clear "this is an
+  ad", a **physical postal address**, a working opt-out honoured **within 10 business days**. Fines up to ~$53k per
+  email. Our footer already adds the opt-out link and postal address on US sends (`outreach-footer.ts`).
+- **Calls and texts — TCPA:** **no automated calls or texts to mobiles without written consent**, B2B included; new
+  one-person LLCs mostly list a mobile. Out of scope, as in the UK.
+- **California (CCPA/CPRA):** the B2B exemption ended in 2023, so business contacts there have rights to know, delete
+  and opt out. Our opt-out and data-export paths cover it; add CA wording to the privacy notice.
+- **States that restrict marketing use of their filing data:** Washington and South Carolina — excluded (§7.1).
+- **Look-alike official mail:** many states (Colorado, Tennessee, Kansas, Mississippi, Rhode Island) warn new LLCs about
+  official-looking letters selling "certificates of good standing"; Ohio now regulates such solicitations. Same answer as
+  the UK: plainly branded, no fees, no official look.
+- **Get US counsel to check** the TCPA position and New York / Oregon reuse terms before launch.
+
+### 7.4 US build — fits into the phases above
+
+- **Phase 1 US:** `new_companies` gains `country` and `state`; one Socrata connector for **Connecticut, New York and
+  Colorado** (daily), then Florida's daily file. Same Admin list, filterable by state.
+- **Phase 2 US:** the same "New businesses" lead source, with the area resolved to US state/county (the Lead Generator
+  already works out `us` searches), trade from NAICS in CT and a name-based guess elsewhere, and the US footer.
+- **Start with Connecticut** for the first customer test: trade + email out of the box, so it shows the feature at its
+  best with no enrichment cost. Volume is small (~170 a day).
+
+## 8. Decisions for the owner
 
 1. **Who first:** customers' lead source (A), Be More Swan's own marketing (B), or both? *Recommendation: Phase 1
    Admin list first, then A.*
@@ -111,3 +168,5 @@ registered office. Needs a letter template per customer, a return address, and t
 3. **Wait before first contact:** 14 days? (Long enough to beat the scam flood and let a website appear.)
 4. **Plans:** which plans get the source, and does each enriched new-business lead cost the normal research task?
 5. **For our own marketing (B):** which trades count as "would use Be More Swan" (we propose a SIC list for review)?
+6. **US:** start with Connecticut, New York and Colorado (free, daily), add Florida next, and leave Texas (paid)
+   for later? And get US counsel to check the TCPA and state reuse terms before any US sending?
