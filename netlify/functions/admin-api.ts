@@ -52,6 +52,7 @@ import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
 import { withSpecialCategoryClause } from '../../src/utils/special-category-clause';
 import { deleteUserAndSoleOrgs } from '../../src/utils/user-deletion';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { loadDeliveryMetrics } from '../../src/utils/delivery-metrics';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@bemoreswan.com';
@@ -149,6 +150,8 @@ export default withLambda(async (event) => {
             const [pausedAssistants]= await db.select({ c: count() }).from(aiAssistants).where(eq(aiAssistants.isActive, false));
             const [activePlans]     = await db.select({ c: count() }).from(plans).where(eq(plans.status, 'active'));
             const [openTickets]     = await db.select({ c: count() }).from(supportTickets).where(eq(supportTickets.status, 'open'));
+            // FR#29 (owner 2026-11-14): issues resolved and feature requests released, all time and last 30 days.
+            const delivery = await loadDeliveryMetrics(db).catch((err) => { console.error('[admin-api] delivery metrics failed (non-fatal)', err); return null; });
 
             // Subscription tier breakdown (US6 Sc4)
             const tierBreakdown = await db
@@ -177,6 +180,7 @@ export default withLambda(async (event) => {
                     openTickets: openTickets.c,
                     tierBreakdown,
                     waitlistCounts,
+                    delivery,
                 }),
             };
         }
