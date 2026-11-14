@@ -4,6 +4,8 @@
 // GET                       → { assistants: [...] }  every role: status, counts, and how many checks fail
 // GET  ?id=N                → { assistant, status, checks, blockers: { coming_soon, beta, live } }
 // GET  ?mentorActivity=1    → { measures, workspaces }  Business Mentor ▸ Activity (src/utils/mentor-activity.ts)
+// GET  ?chatCapabilities=1  → what every role's chat knows, reads, can and can't do (FR#17,
+//                             src/utils/assistant-chat-capabilities.ts). Read-only.
 // POST ?id=N&action=status  → { status, reason? }    the ONLY way a role's status changes
 // POST ?id=N&action=suggest → { key }               a Fix or a drafted Suggestion for one failing check
 // POST ?id=N&action=apply   → { key, value }        write an approved fix (validated by go-live-fixes.ts)
@@ -40,6 +42,7 @@ import { MODEL_OPTIONS, THINKING_LEVELS, effectiveThinking, estimateCallUsd, mod
 import { CHAT_DEFAULT_MODEL, ROLE_MODEL_PATHS, promptLayersFor } from '../../src/config/assistant-prompt-layers';
 import { clearRoleModelCache } from '../../src/utils/assistant-model';
 import { loadMentorActivity } from '../../src/utils/mentor-activity';
+import { chatCapabilitiesPage } from '../../src/utils/assistant-chat-capabilities';
 
 
 const pgCode = (err: unknown) => (err as { code?: string; cause?: { code?: string } })?.code
@@ -113,6 +116,25 @@ export default withLambda(async (event) => {
                 if (pgCode(err) === '42P01') return json(200, { needsSetup: true, measures: null, workspaces: [] });
                 throw err;
             }
+        }
+
+        // Chat capabilities (FR#17): every role, live first. Words and code-derived lists only; the one
+        // database read is the catalogue (status, hired count) and the chat model chosen per role.
+        if (event.httpMethod === 'GET' && q.chatCapabilities === '1') {
+            const [rows, hired, { rows: choices }] = await Promise.all([
+                db.select().from(masterAssistants).orderBy(masterAssistants.name),
+                db.select({ id: aiAssistants.masterAssistantId, n: count() }).from(aiAssistants)
+                    .where(ne(aiAssistants.lifecycleStatus, 'archived')).groupBy(aiAssistants.masterAssistantId),
+                loadModelChoices(db),
+            ]);
+            const hiredBy = new Map(hired.map((h) => [h.id, Number(h.n)]));
+            const choiceBy = new Map(choices.map((c) => [c.role_key, c.model]));
+            const order: Record<string, number> = { live: 0, beta: 1, coming_soon: 2, hidden: 3, retired: 4 };
+            const roles = rows.map((r) => ({
+                id: r.id, roleKey: r.roleKey, name: r.name, status: statusOf(r), hiredCount: hiredBy.get(r.id) ?? 0,
+                chatModel: choiceBy.has(r.roleKey) ? modelOption(choiceBy.get(r.roleKey)!)?.label ?? choiceBy.get(r.roleKey)! : null,
+            })).sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.name.localeCompare(b.name));
+            return json(200, { ...chatCapabilitiesPage(roles, process.env.COMMIT_REF ?? null), chatDefaultModel: modelOption(CHAT_DEFAULT_MODEL)?.label ?? CHAT_DEFAULT_MODEL });
         }
 
         if (event.httpMethod === 'GET' && !id) {
