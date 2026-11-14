@@ -32,6 +32,8 @@ export interface InboxItem {
     waitingOn: WaitingOn;
     createdAt: string;
     lastActivityAt: string;
+    /** Ignored from the Inbox without a reply (FR#22): shown under Done until the person writes again. */
+    dismissedAt?: string | null;
 }
 
 // ── Who is it waiting on? Pure, so tests/support-inbox.test.ts pins every status. ─────────────
@@ -51,7 +53,8 @@ export function issueWaitingOn(status: string, lastFromUser: boolean): WaitingOn
     if (status === 'closed' || status === 'roadmap') return 'done';
     if (lastFromUser) return 'us';
     if (status === 'reported') return 'us';
-    if (status === 'more_info_required' || status === 'fixed_ready_to_test') return 'customer';
+    if (status === 'fixed_ready_to_test') return 'done';   // FR#23: fixed; the customer is never asked to confirm
+    if (status === 'more_info_required') return 'customer';
     return 'fixing';   // investigating · on_hold (waiting on others) · fix_in_progress · merge
 }
 
@@ -170,7 +173,55 @@ export async function loadInbox(db: Db, scope: InboxScope): Promise<InboxItem[]>
         }
     }
 
-    return items.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+    const sorted = items.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+    return (await inboxDismissalsReady(db)) ? applyDismissals(sorted, await loadDismissals(db)) : sorted;
+}
+
+// ── Ignore without replying (FR#22, owner 2026-11-14; db/z-inbox-dismissals.sql) ─────────────
+
+export const DISMISSAL_KINDS: InboxKind[] = ['ticket', 'issue', 'enquiry'];
+export type Dismissals = Map<string, string>;   // `${kind}:${id}` → dismissed_at (ISO)
+export const dismissalKey = (kind: InboxKind, id: number) => `${kind}:${id}`;
+
+/**
+ * Pure, pinned by tests/support-inbox.test.ts. An ignored item counts as Done while nothing has happened on
+ * it since; any newer activity (the person wrote again) puts it back where it was. Ignored items drop off
+ * after DONE_WINDOW_DAYS like any other Done item.
+ */
+export function applyDismissals(items: InboxItem[], dismissals: Dismissals, now = new Date()): InboxItem[] {
+    const cutoff = now.getTime() - DONE_WINDOW_DAYS * 86_400_000;
+    const out: InboxItem[] = [];
+    for (const it of items) {
+        const at = dismissals.get(dismissalKey(it.kind, it.id));
+        if (at && Date.parse(it.lastActivityAt) <= Date.parse(at)) {
+            if (Date.parse(at) < cutoff) continue;
+            out.push({ ...it, waitingOn: 'done', dismissedAt: at });
+        } else out.push(it);
+    }
+    return out;
+}
+
+/** False until db/z-inbox-dismissals.sql has run on this DB: the Inbox then works as before, without Ignore. */
+export async function inboxDismissalsReady(db: Db): Promise<boolean> {
+    const r = await db.execute<{ ok: boolean }>(sql`SELECT to_regclass('public.support_inbox_dismissals') IS NOT NULL AS ok`);
+    return Boolean((r as unknown as Array<{ ok: boolean }>)[0]?.ok);
+}
+
+export async function loadDismissals(db: Db): Promise<Dismissals> {
+    const rows = await db.execute<{ kind: string; item_id: number; at: Date }>(sql`
+        SELECT kind, item_id, dismissed_at AS at FROM support_inbox_dismissals`);
+    return new Map((rows as unknown as Array<Record<string, any>>).map((r) => [dismissalKey(r.kind, Number(r.item_id)), iso(r.at)]));
+}
+
+/** Ignore (or, with undo, un-ignore) one item. Changes nothing on the ticket / issue / enquiry and tells no one. */
+export async function setDismissed(db: Db, kind: InboxKind, id: number, adminId: number, undo = false): Promise<void> {
+    if (undo) {
+        await db.execute(sql`DELETE FROM support_inbox_dismissals WHERE kind = ${kind} AND item_id = ${id}`);
+        return;
+    }
+    await db.execute(sql`
+        INSERT INTO support_inbox_dismissals (kind, item_id, dismissed_at, dismissed_by) VALUES (${kind}, ${id}, now(), ${adminId})
+        ON CONFLICT (kind, item_id) DO UPDATE SET dismissed_at = now(), dismissed_by = EXCLUDED.dismissed_by`);
 }
 
 /** How many are waiting on us, per source — the Dashboard's "Waiting on us" card. */

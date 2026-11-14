@@ -73,7 +73,7 @@
         on_hold:             ['Waiting on Others', 'bg-orange-100 text-orange-700'],
         fix_in_progress:     ['Fix In Progress', 'bg-blue-100 text-blue-700'],
         merge:               ['Merge', 'bg-indigo-100 text-indigo-700'],
-        fixed_ready_to_test: ['Fixed & Ready to Test', 'bg-emerald-100 text-emerald-700'],
+        fixed_ready_to_test: ['Fixed', 'bg-emerald-100 text-emerald-700'],
         more_info_required:  ['More Info Required', 'bg-amber-100 text-amber-800'],
         closed:              ['Closed', 'bg-gray-200 text-gray-500'],
         roadmap:             ['On Roadmap', 'bg-violet-100 text-violet-700'],
@@ -349,7 +349,8 @@
         const list = document.getElementById('ri-my-list');
         if (!list) return;
         const items = [
-            ..._myReports.map((i) => ({ kind: 'issue', at: i.createdAt, waiting: i.status === 'fixed_ready_to_test' || i.status === 'more_info_required', html: renderIssueCard(i) })),
+            // A fixed issue never waits on the customer (FR#23): only a request for more detail does.
+            ..._myReports.map((i) => ({ kind: 'issue', at: i.createdAt, waiting: i.status === 'more_info_required', html: renderIssueCard(i) })),
             ..._myTickets.map((t) => ({ kind: 'ticket', at: t.createdAt, waiting: t.status === 'pending_customer' || t.status === 'pending', html: renderTicketCard(t) })),
         ].sort((a, b) => (Number(b.waiting) - Number(a.waiting)) || (new Date(b.at || 0) - new Date(a.at || 0)));
         const err = _listErrors.length ? `<p class="text-red-600 text-xs">Couldn't load your ${esc(_listErrors.join(' or '))} — try again in a moment.</p>` : '';
@@ -402,11 +403,8 @@
           </div>`).join('');
         let actions = '';
         if (i.status === 'fixed_ready_to_test') {
-            actions = `
-            <div class="mt-3 flex gap-2 flex-wrap">
-              <button type="button" onclick="window.riConfirmFixed(${i.id})" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Confirm fix works</button>
-              <button type="button" onclick="window.riToggleReply(${i.id})" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg">Still broken — reply</button>
-            </div>`;
+            // FR#23 (owner 2026-11-14): nothing to confirm — they are customers, not testers. A reply reopens it.
+            actions = `<div class="mt-3"><button type="button" onclick="window.riToggleReply(${i.id})" class="btn-utility px-2 py-1 text-xs font-semibold rounded-lg">Still not right? Reply</button></div>`;
         } else if (i.status === 'more_info_required') {
             actions = `<div class="mt-3"><button type="button" onclick="window.riToggleReply(${i.id})" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Provide more info</button></div>`;
         } else if (i.status === 'closed') {

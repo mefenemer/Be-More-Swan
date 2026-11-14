@@ -110,7 +110,7 @@ async function main() {
             if (!test || before == null || after == null) throw new Error('proof needs --test <path> --before <exit> --after <exit> --file <evidence>.');
             const evidence = readFile('evidence');
             const repro = { test, kind: /\.spec\.ts$/.test(test) ? 'browser' : 'node', before: { exit: Number(before) }, after: { exit: Number(after) }, flags: [] };
-            await sql`UPDATE feature_requests SET dev_repro = ${sql.json(repro)}, updated_at = now() WHERE id = ${id}`;
+            await sql`UPDATE feature_requests SET dev_repro = ${JSON.stringify(repro)}::jsonb, updated_at = now() WHERE id = ${id}`;
             const good = Number(before) !== 0 && Number(after) === 0;
             await note(`Proof test ${test}: on the old code exit ${before}, with the feature exit ${after}${good ? ' ✓' : ' (does NOT prove the feature)'}.\n\n${evidence}`);
             console.log(`#${id}: proof recorded${good ? '' : ' (warning: it does not fail before and pass after)'}.`);

@@ -4194,7 +4194,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const sectionId = str(ui.sectionId, 80);
     if (!pageId || !sectionId) return null;
     const label = str(ui.sectionLabel, 120) || 'this section';
-    const place = ui.place === 'after' ? 'after' : 'in';
+    // FR#18: one card of a features / steps section — the picture becomes that card's picture (never a video).
+    const itemIndex = Number.isInteger(ui.itemIndex) && ui.itemIndex >= 0 ? ui.itemIndex : null;
+    const place = itemIndex !== null ? 'in' : ui.place === 'after' ? 'after' : 'in';
     // 'library': one of their own, from My Content (owner, 2026-11-10: the chat couldn't open it).
     let source = ui.source === 'stock' ? 'stock' : ui.source === 'library' ? 'library' : 'ai';
     // Picture or video (owner, 2026-11-05: "do the same for videos"). A video plays silently on a loop
@@ -4354,7 +4356,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           assetId = res.body.assetId; alt = alt || `A picture for ${label}`;
         }
         await new Promise((resolve, reject) => el.dispatchEvent(new CustomEvent('site:picturePlace', {
-          bubbles: true, detail: { pageId, sectionId, place, assetId, alt, video, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
+          bubbles: true, detail: { pageId, sectionId, place, itemIndex, assetId, alt, video, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
         })));
         grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
         say(`Done — it's ${place === 'after' ? 'after' : 'in'} “${label}” in your draft. Nothing is live until you publish.`);
