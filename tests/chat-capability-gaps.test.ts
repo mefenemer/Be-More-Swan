@@ -97,18 +97,21 @@ check('hidden or retired but still hired: a note, so its words stay current', ()
 });
 
 check('next best actions: live/beta only, high and medium only, same fix grouped, ordered by severity then workspaces', () => {
+    // Fixed-shape gaps only (no route; no snapshot of its own work), so closing a craft gap elsewhere can't break this.
+    const fake = (roleKey: string, hiredCount: number, gaps: Gap[]) => ({ roleKey, name: roleKey, status: 'live', hiredCount, gaps });
+    const gap = (key: Gap['key'], severity: Gap['severity'], title: string): Gap => ({ key, severity, title, why: 'w', action: `Fix it for ${title}.` });
     const roles = [
-        { roleKey: 'social_media_manager', name: 'Social', status: 'live', hiredCount: 2 },
-        { roleKey: 'newsletter_editor', name: 'Email', status: 'live', hiredCount: 9 },
-        { roleKey: 'inbox_manager', name: 'Inbox', status: 'live', hiredCount: 1 },
-        { roleKey: 'crm_enricher', name: 'CRM', status: 'hidden', hiredCount: 50 },
-    ].map((r) => ({ ...r, gaps: chatGapsFor(r.roleKey, r.status, r.hiredCount) }));
+        fake('few', 2, [gap('blind_to_own_work', 'medium', 'few'), gap('no_attachments_with_media', 'low', 'low one')]),
+        fake('many', 9, [gap('no_craft_standard', 'medium', 'many')]),
+        { roleKey: 'inbox_manager', name: 'Inbox', status: 'live', hiredCount: 1, gaps: chatGapsFor('inbox_manager', 'live', 1) },
+        { roleKey: 'crm_enricher', name: 'CRM', status: 'hidden', hiredCount: 50, gaps: chatGapsFor('crm_enricher', 'hidden', 50) },
+    ];
     const acts = nextBestActions(roles);
     assert.strictEqual(acts[0].severity, 'high');
-    assert.ok(acts.every((a) => a.severity === 'high' || a.severity === 'medium'));
+    assert.ok(acts.every((a) => a.severity === 'high' || a.severity === 'medium'), 'low gaps are never a next action');
     assert.ok(!acts.some((a) => a.roles.some((x) => x.roleKey === 'crm_enricher')), 'hidden roles are never a next action');
-    const meds = acts.filter((a) => a.severity === 'medium');
-    assert.ok(meds.findIndex((a) => a.roles[0].roleKey === 'newsletter_editor') < meds.findIndex((a) => a.roles[0].roleKey === 'social_media_manager'), 'more workspaces first');
+    const meds = acts.filter((a) => a.severity === 'medium').map((a) => a.roles[0].roleKey);
+    assert.deepStrictEqual(meds, ['many', 'few'], 'more workspaces first');
     // Grouping: the same gap on two live roles is one action naming both.
     const two = nextBestActions(['accounts_receivable_clerk', 'crm_enricher'].map((k) => ({ roleKey: k, name: k, status: 'live', hiredCount: 1, gaps: chatGapsFor(k, 'live', 1) })));
     const blind = two.find((a) => a.key === 'blind_to_own_work')!;
@@ -133,7 +136,10 @@ check('an accepted gap is shown as accepted and never suggested; every acceptanc
 });
 
 check('the page carries gaps per role and the next actions; the UI shows them', () => {
-    const page = chatCapabilitiesPage([{ id: 1, roleKey: 'newsletter_editor', name: 'Email', status: 'live', hiredCount: 5, chatModel: null }]);
+    const page = chatCapabilitiesPage([
+        { id: 1, roleKey: 'inbox_manager', name: 'Inbox', status: 'live', hiredCount: 5, chatModel: null },
+        { id: 2, roleKey: 'newsletter_editor', name: 'Email', status: 'live', hiredCount: 5, chatModel: null },
+    ]);
     assert.ok(page.roles[0].gaps.length > 0 && page.nextActions.length > 0);
     const js = read('src/components/admin-chat-capabilities.js');
     assert.ok(js.includes('7 · Gaps and next best actions') && js.includes('function nextActionsBox(d)') && js.includes('${nextActionsBox(d)}'));

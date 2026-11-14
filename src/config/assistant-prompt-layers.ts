@@ -51,7 +51,7 @@ const CHAT_LAYERS: PromptLayer[] = [
 
 const SOCIAL: PromptLayer[] = [
     { key: 'standards', title: 'Content quality standards', kind: 'rule', usedBy: 'Drafting posts', source: 'src/constants/content-quality.ts', text: CONTENT_QUALITY_STANDARDS },
-    { key: 'platform_craft', title: 'Platform craft', kind: 'craft', usedBy: 'Drafting posts', source: 'src/constants/platform-craft.ts',
+    { key: 'platform_craft', title: 'Platform craft', kind: 'craft', usedBy: 'Drafting posts (autopilot and chat)', source: 'src/constants/platform-craft.ts',
       text: platformCraftBlock(['instagram', 'linkedin', 'facebook', 'x', 'threads']) },
     { key: 'shapes', title: `Post shapes (${SOCIAL_POST_SHAPES.length}, one per post in turn)`, kind: 'rotation', usedBy: 'Drafting posts', source: 'src/utils/content-shapes.ts',
       text: SOCIAL_POST_SHAPES.map((s) => `${s.label} — ${s.brief}`).join('\n\n') },
@@ -62,7 +62,7 @@ const SOCIAL: PromptLayer[] = [
 ];
 
 const EMAIL: PromptLayer[] = [
-    { key: 'email_craft', title: 'Email craft', kind: 'craft', usedBy: 'Newsletters and welcome emails', source: 'src/constants/email-craft.ts', text: emailCraftBlock('{business name}') },
+    { key: 'email_craft', title: 'Email craft', kind: 'craft', usedBy: 'Newsletters and welcome emails, and emails written in chat', source: 'src/constants/email-craft.ts', text: emailCraftBlock('{business name}') },
     { key: 'email_openings', title: `Subject lines (${EMAIL_SUBJECT_STYLES.length}) and openings (${LONG_FORM_OPENINGS.length}), in turn`, kind: 'rotation', usedBy: 'Newsletters and welcome emails', source: 'src/config/hook-styles.ts',
       text: `Subject line:\n${list(EMAIL_SUBJECT_STYLES)}\n\nFirst line:\n${list(LONG_FORM_OPENINGS)}` },
     { key: 'cta_email', title: 'Call to action is binding', kind: 'rule', usedBy: 'Newsletters and welcome emails', source: 'src/config/call-to-action.ts', text: CTA_BINDING_RULE },
@@ -72,7 +72,7 @@ const EMAIL: PromptLayer[] = [
 ];
 
 const BLOG: PromptLayer[] = [
-    { key: 'blog_craft', title: 'Blog craft and accuracy', kind: 'craft', usedBy: 'Drafting articles', source: 'src/constants/blog-craft.ts', text: BLOG_CRAFT },
+    { key: 'blog_craft', title: 'Blog craft and accuracy', kind: 'craft', usedBy: 'Drafting articles, and article parts written in chat', source: 'src/constants/blog-craft.ts', text: BLOG_CRAFT },
     { key: 'article_types', title: `Article types (${BLOG_ARTICLE_TYPES.length}, in turn)`, kind: 'rotation', usedBy: 'Drafting articles', source: 'src/utils/content-shapes.ts',
       text: BLOG_ARTICLE_TYPES.map((t) => `${t.label} — ${t.brief}`).join('\n\n') },
     { key: 'blog_openings', title: `Openings (${LONG_FORM_OPENINGS.length}, in turn)`, kind: 'rotation', usedBy: 'Drafting articles', source: 'src/config/hook-styles.ts', text: list(LONG_FORM_OPENINGS) },
