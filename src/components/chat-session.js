@@ -2114,6 +2114,17 @@
         if (!pg || at < 0) throw new Error('That section isn\'t on your site any more.');
         const sec = pg.sections[at];
         const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || (d.video ? 'A video' : 'A picture')).slice(0, 150), ...(d.video ? { video: true } : {}) };
+        // FR#18: ONE card of a features / steps section — that card's picture only; the other cards stay as they are.
+        if (Number.isInteger(d.itemIndex) && (sec.type === 'features' || sec.type === 'steps')) {
+          const items = Array.isArray(sec.props.items) ? sec.props.items : [];
+          if (!items[d.itemIndex]) throw new Error('That card isn\'t in the section any more.');
+          if (d.video) throw new Error('A card holds a picture, not a video. Switch the card to Picture.');
+          const next = items.map((it, i) => (i === d.itemIndex ? { ...it, image: { assetId: img.assetId, url: '', alt: img.alt } } : it));
+          const r1 = await sitePost({ action: 'apply', assistantId, ops: [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { items: next } }] });
+          respond({ ok: true, warnings: r1.warnings || [] });
+          siteChanged();
+          return;
+        }
         // A video plays in a hero, a text section or a gallery — never on a sign-up form (markVideos).
         const holdsOne = (d.video ? ['hero', 'text'] : ['hero', 'text', 'signup']).includes(sec.type);
         const ops = d.place !== 'after' && holdsOne ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }]

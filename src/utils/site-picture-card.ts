@@ -16,6 +16,8 @@ export interface SitePictureSection {
     place: 'in' | 'after';
     description: string;
     alt: string;
+    /** FR#18: one card of a features / steps section (0-based, as the site snapshot numbers them). */
+    itemIndex?: number;
 }
 
 const str = (v: unknown, n: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
@@ -32,6 +34,7 @@ function section(v: unknown): SitePictureSection | null {
         place: o.place === 'after' ? 'after' : 'in',
         description: str(o.description, 600),
         alt: str(o.alt, 150),
+        ...(Number.isInteger(o.itemIndex) && (o.itemIndex as number) >= 0 && (o.itemIndex as number) < 50 ? { itemIndex: o.itemIndex as number } : {}),
     };
 }
 
@@ -50,7 +53,7 @@ export function normaliseSitePictureCard(ui: unknown): Record<string, unknown> |
     const list: SitePictureSection[] = [];
     for (const s of all) {
         if (!s) continue;
-        const key = `${s.pageId}\u0000${s.sectionId}`;
+        const key = `${s.pageId}\u0000${s.sectionId}\u0000${s.itemIndex ?? ''}`;
         if (seen.has(key)) continue;
         seen.add(key);
         list.push(s);
