@@ -12,7 +12,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "maxTokens": 1536,
             "cards": [
                 "aging_invoices_table"
-            ]
+            ],
+            "craftInChat": []
         },
         "blog_writer": {
             "flags": [
@@ -26,7 +27,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "blog_batch_proposal",
                 "blog_block_edit",
                 "blog_keyword_proposal"
-            ]
+            ],
+            "craftInChat": []
         },
         "brand_designer": {
             "flags": [
@@ -44,7 +46,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "visual_brief_edit",
                 "visual_brief_proposal",
                 "visual_option_review"
-            ]
+            ],
+            "craftInChat": []
         },
         "business_mentor": {
             "flags": [
@@ -71,6 +74,10 @@ export const GENERATED_CHAT_MANIFEST = {
                 "mentor_take_me_there",
                 "setup_field_proposal",
                 "strategy_proposal"
+            ],
+            "craftInChat": [
+                "mentor_craft",
+                "mentor_idea_check"
             ]
         },
         "campaign_orchestrator": {
@@ -86,6 +93,9 @@ export const GENERATED_CHAT_MANIFEST = {
                 "campaign_learning_proposal",
                 "campaign_strategy_proposal",
                 "campaign_task_update"
+            ],
+            "craftInChat": [
+                "campaign_craft"
             ]
         },
         "crm_enricher": {
@@ -95,7 +105,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "maxTokens": 1536,
             "cards": [
                 "data_diff_view"
-            ]
+            ],
+            "craftInChat": []
         },
         "email_assistant": {
             "flags": [
@@ -104,7 +115,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "contentSnapshot": null,
             "offersOwnCards": true,
             "maxTokens": 1200,
-            "cards": []
+            "cards": [],
+            "craftInChat": []
         },
         "lead_qualifier": {
             "flags": [
@@ -118,7 +130,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "handoff_proposal",
                 "lead_action_proposal",
                 "lead_scoring_card"
-            ]
+            ],
+            "craftInChat": []
         },
         "meeting_note_taker": {
             "flags": [],
@@ -127,7 +140,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "maxTokens": 2048,
             "cards": [
                 "action_item_assignment"
-            ]
+            ],
+            "craftInChat": []
         },
         "mystery_shopper": {
             "flags": [
@@ -144,7 +158,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "site_audit_item_check",
                 "site_audit_settings",
                 "site_audit_website_request"
-            ]
+            ],
+            "craftInChat": []
         },
         "newsletter_editor": {
             "flags": [
@@ -161,7 +176,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "email_action_proposal",
                 "newsletter_campaign_draft",
                 "newsletter_issue_draft"
-            ]
+            ],
+            "craftInChat": []
         },
         "social_media_manager": {
             "flags": [
@@ -176,7 +192,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "redraft_upcoming_proposal",
                 "share_for_review_proposal",
                 "social_post_draft"
-            ]
+            ],
+            "craftInChat": []
         },
         "tier1_support_agent": {
             "flags": [
@@ -187,7 +204,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "maxTokens": 1024,
             "cards": [
                 "ticket_triage_view"
-            ]
+            ],
+            "craftInChat": []
         },
         "video_producer": {
             "flags": [
@@ -212,7 +230,8 @@ export const GENERATED_CHAT_MANIFEST = {
                 "video_script_proposal",
                 "video_share_review_proposal",
                 "video_tidy_proposal"
-            ]
+            ],
+            "craftInChat": []
         },
         "website_assistant": {
             "flags": [
@@ -243,6 +262,9 @@ export const GENERATED_CHAT_MANIFEST = {
                 "stay_block",
                 "stay_damage",
                 "stay_setup"
+            ],
+            "craftInChat": [
+                "site_copy"
             ]
         }
     },

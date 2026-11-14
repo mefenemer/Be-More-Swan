@@ -139,7 +139,8 @@ check('the lists say what the code does (spot checks against the real role lists
     assert.ok(mentor.canDo.cards.some((c) => c.type === 'rule_proposal'), 'but it sets workspace-wide rules');
     const mail = chatCapabilitiesFor('email_assistant');
     assert.ok(mail.cannot.some((s) => s.includes('attached to the chat')) && mail.doesNotRead.includes('Products & Services') === false);
-    assert.ok(mail.cannot.some((s) => s.includes("Do's and don'ts")), 'email_assistant is not in RULE_READING_ROLES');
+    // Not in RULE_READING_ROLES, but its rules list ("ON rules are the ones you follow") reaches its chat.
+    assert.ok(!mail.cannot.some((s) => s.includes("Do's and don'ts")), 'email_assistant follows its rules through the rules list');
     const social = chatCapabilitiesFor('social_media_manager');
     assert.ok(social.canDo.cards.some((c) => c.type === 'post_text_edit') && social.canDo.cards.some((c) => c.type === 'pillar_proposal') && social.canDo.cards.some((c) => c.type === 'inspo_proposal'));
     assert.ok(chatCapabilitiesFor('newsletter_editor').canDo.cards.some((c) => c.type === 'email_edit'));

@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROUTES } from '../netlify/functions/chat-orchestrator';
 import { resolveTaskCosts } from '../src/utils/task-costs';
+import { promptLayersFor } from '../src/config/assistant-prompt-layers';
 
 const ROOT = join(__dirname, '..');
 export const MANIFEST_PATH = 'src/config/chat-capabilities.generated.ts';
@@ -41,6 +42,8 @@ export interface RouteManifest {
     maxTokens: number;
     /** Card types (drawn by the browser) that the role prompt names. */
     cards: string[];
+    /** Keys of this role's craft layers (assistant-prompt-layers.ts) whose text is IN its chat prompt. */
+    craftInChat: string[];
 }
 
 export interface ChatManifest {
@@ -130,12 +133,14 @@ export function buildChatManifest(): ChatManifest {
     const routes: Record<string, RouteManifest> = {};
     for (const key of Object.keys(ROUTES).sort()) {
         const r = ROUTES[key] as unknown as Record<string, unknown> & (typeof ROUTES)[string];
+        const prompt = r.buildRolePrompt(rc);
         routes[key] = {
             flags: routeFlags.filter((f) => r[f] === true),
             contentSnapshot: typeof r.contentSnapshot === 'string' ? r.contentSnapshot : null,
             offersOwnCards: !noCards.has(key),
             maxTokens: r.maxTokens,
-            cards: cardsNamedIn(r.buildRolePrompt(rc), uiCards),
+            cards: cardsNamedIn(prompt, uiCards),
+            craftInChat: promptLayersFor(key).filter((l) => l.kind === 'craft' && prompt.includes(l.text.trim().slice(0, 120))).map((l) => l.key),
         };
     }
     return {
