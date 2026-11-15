@@ -2254,6 +2254,15 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A shop_settings card — sites.ts shop_settings, the Orders tab form's same save.
+    function onShopSettings(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'shop_settings', assistantId, settings: d.settings || {} })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2650,6 +2659,7 @@
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
     container.addEventListener('site:importProducts', onSiteImportProducts);
+    container.addEventListener('site:shopSettings', onShopSettings);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -2778,6 +2788,7 @@
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
         container.removeEventListener('site:importProducts', onSiteImportProducts);
+        container.removeEventListener('site:shopSettings', onShopSettings);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

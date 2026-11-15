@@ -2813,6 +2813,56 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('site_import_products', renderSiteImportProductsCard);
 
+  // { type: 'shop_settings', settings: {…} } — the shop's Delivery & returns details (online shop
+  // Phase 0, shop-settings.ts): sites.ts shop_settings, the Orders tab form's same save. Shows only the
+  // fields the chat proposes; nothing is saved until they click.
+  const SHOP_LABELS = { traderName: 'Business or trading name', traderAddress: 'Business address', contactEmail: 'Email for customers', contactPhone: 'Phone', deliveryText: 'How and when you deliver', vatNumber: 'VAT number', returnsDays: 'Days buyers have to cancel', returnPostage: 'Who pays return postage', exceptions: 'Can\'t be returned for a change of mind', extraTerms: 'Anything else buyers should know' };
+  const SHOP_EX = { personalised: 'Personalised or made-to-order items', perishable: 'Items that go off quickly', sealed_hygiene: 'Sealed hygiene items once opened', sealed_media: 'Sealed recordings or software once opened', mixed: 'Items mixed with other things after delivery' };
+  function renderShopSettingsCard(data) {
+    const settings = (data && data.settings && typeof data.settings === 'object') ? data.settings : {};
+    const keys = Object.keys(SHOP_LABELS).filter((k) => Object.prototype.hasOwnProperty.call(settings, k));
+    const show = (k, v) => {
+      if (k === 'returnPostage') return v === 'seller' ? 'We do' : 'The buyer';
+      if (k === 'returnsDays') return `${Number(v) || 14} days`;
+      if (k === 'exceptions') return (Array.isArray(v) && v.length) ? v.map((x) => SHOP_EX[x] || x).join('; ') : 'None';
+      return v == null || v === '' ? '(left empty)' : String(v);
+    };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Delivery &amp; returns details</p>
+      <p class="text-xs text-gray-700 mt-2">Buyers see these on your Delivery &amp; returns page, beside the Pay button and in their order email. Check them before saving.</p>
+      <dl class="mt-3 space-y-2">${keys.map((k) => `<div><dt class="text-xs font-bold text-gray-700">${escapeHtml(SHOP_LABELS[k])}</dt><dd class="text-xs text-gray-900 whitespace-pre-line">${escapeHtml(show(k, settings[k]))}</dd></div>`).join('') || '<p class="text-xs text-gray-500">No details to save.</p>'}</dl>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-shs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${keys.length ? '' : 'disabled'}>Save details</button>
+        <button type="button" data-shs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-shs-status role="status"></p>`;
+    const status = el.querySelector('[data-shs-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-shs-cancel]')) { setBusy(true); say('Nothing saved.'); return; }
+      if (!e.target.closest('[data-shs-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      const clean = {};
+      keys.forEach((k) => { clean[k] = settings[k]; });
+      el.dispatchEvent(new CustomEvent('site:shopSettings', {
+        bubbles: true,
+        detail: {
+          settings: clean,
+          respond({ ok, error, message }) {
+            if (!ok) { setBusy(false); say(error || 'That didn\'t work — nothing was saved.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('shop_settings', renderShopSettingsCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
