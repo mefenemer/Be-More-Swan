@@ -134,7 +134,49 @@ async function get(path: string, timeoutMs: number, _usage?: Usage): Promise<{ o
     }
 }
 
-interface SearchItem { number: string; name: string; status: string; postcode: string | null }
+interface SearchItem { number: string; name: string; status: string; postcode: string | null; type?: string | null }
+
+async function searchCompanies(name: string, timeoutMs: number, usage?: Usage): Promise<{ ok: true; items: SearchItem[] } | { ok: false; reason: string }> {
+    const found = await get(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=20`, timeoutMs, usage);
+    if (!found.ok) return found;
+    const rawItems = (found.body as { items?: unknown } | null)?.items;
+    const items: SearchItem[] = (Array.isArray(rawItems) ? rawItems : [])
+        .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
+        .map((i) => ({
+            number: String(i.company_number ?? ''),
+            name: String(i.title ?? ''),
+            status: String(i.company_status ?? ''),
+            postcode: normalisePostcode((i.address as Record<string, unknown> | undefined)?.postal_code),
+            type: typeof i.company_type === 'string' ? i.company_type : null,
+        }))
+        .filter((i) => /^[A-Z0-9]{6,10}$/i.test(i.number));
+    return { ok: true, items };
+}
+
+/**
+ * Buying triggers (docs/buying-triggers-plan.md §3, §4): which registered company, if any, trades under
+ * this name at this postcode? Same match rules as lookupCompaniesHouse (exact name, active, postcode or
+ * the only active match), ONE request, and no officers: the trigger only needs the company type, because
+ * PECR lets a Ltd / PLC / LLP be emailed and a sole trader not. NEVER THROWS.
+ */
+export async function findCompanyByName(
+    name: string,
+    postcodes: string[],
+    opts: { timeoutMs?: number } = {},
+): Promise<
+    | { status: 'hit'; company: { number: string; name: string; type: string | null; postcode: string | null; matchedBy: CompaniesHouseCompany['matchedBy'] } }
+    | { status: 'miss' }
+    | { status: 'error'; reason: string }
+> {
+    if (!isCompaniesHouseConfigured()) return { status: 'error', reason: 'not_configured' };
+    const lookup = companyNameForLookup(name);
+    if (normaliseCompanyName(lookup).length < 3) return { status: 'miss' };
+    const found = await searchCompanies(lookup, Math.min(opts.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS));
+    if (!found.ok) return { status: 'error', reason: found.reason };
+    const chosen = chooseCompany(lookup, found.items, postcodes);
+    if (!chosen) return { status: 'miss' };
+    return { status: 'hit', company: { number: chosen.number, name: chosen.name, type: chosen.type ?? null, postcode: chosen.postcode, matchedBy: chosen.matchedBy } };
+}
 
 /**
  * Choose the register entry that IS this lead, or null. Pure — exported for the tests.
@@ -169,18 +211,9 @@ export async function lookupCompaniesHouse(
     const timeoutMs = Math.min(opts.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS);
     if (timeoutMs <= 0) return { status: 'error', reason: 'no_budget' };
 
-    const found = await get(`/search/companies?q=${encodeURIComponent(name)}&items_per_page=20`, timeoutMs, opts.usage);
+    const found = await searchCompanies(name, timeoutMs, opts.usage);
     if (!found.ok) return { status: 'error', reason: found.reason };
-    const rawItems = (found.body as { items?: unknown } | null)?.items;
-    const items: SearchItem[] = (Array.isArray(rawItems) ? rawItems : [])
-        .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
-        .map((i) => ({
-            number: String(i.company_number ?? ''),
-            name: String(i.title ?? ''),
-            status: String(i.company_status ?? ''),
-            postcode: normalisePostcode((i.address as Record<string, unknown> | undefined)?.postal_code),
-        }))
-        .filter((i) => /^[A-Z0-9]{6,10}$/i.test(i.number));
+    const items = found.items;
 
     const chosen = chooseCompany(name, items, sitePostcodes);
     if (!chosen) return { status: 'miss' };

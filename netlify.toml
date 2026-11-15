@@ -1035,6 +1035,15 @@ node_bundler = "esbuild"
 [functions.dispatch-discussion-scans]
   schedule = "50 6 * * *"
 
+# Buying triggers Phase 1 (docs/buying-triggers-plan.md §5, src/utils/trigger-engine.ts): reads every
+# council's FSA "Awaiting Inspection" list and records the new food and drink premises, then matches
+# them to Companies House. ADMIN ONLY (Admin ▸ Assistants ▸ Buying triggers). The work runs in
+# run-trigger-poll-background (minutes). 04:25 UTC — the FSA refreshes its list overnight, and this is
+# clear of the :00/:15/:20/:30/:40/:45/:50 batch. Staging is poked via run-trigger-poll-dispatch
+# (staging-crons.yml). Off with TRIGGER_SOURCE_FSA_FHRS=off.
+[functions.dispatch-trigger-polls]
+  schedule = "25 4 * * *"
+
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
 #
