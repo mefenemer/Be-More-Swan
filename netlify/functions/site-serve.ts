@@ -259,7 +259,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (path === FORM_SENT_PATH) {
         const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));
         const m = await sentMessage(db, site, definition, q);
-        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, m.title, m.message, { label: 'Back to the site', path: m.back }) };
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'no-store'), body: renderSiteNotice(definition, ctx, m.title, m.message, { label: 'Back to the site', path: m.back }, m.link) };
     }
 
     if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots(origin, false) };

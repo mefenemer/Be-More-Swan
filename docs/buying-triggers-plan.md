@@ -1,6 +1,7 @@
 # Buying triggers — PLAN (feature request #36)
 
-2026-11-15. **Nothing built.** For the owner to review and decide (§10). UK first, then the US.
+2026-11-15. **Phase 1 built (engine + FSA feed, Admin only); nothing else built.** For the owner to review and decide
+(§10). UK first, then the US.
 **Is it disruptive, is it worth building, will it bring leads?** See §9 (added 2026-11-15).
 
 The ask: *"What are your thoughts on this? I want the biggest value items to consider building into Be More Swan
@@ -138,6 +139,19 @@ Phase 1 (`whyNow` + timing fade) is needed before any trigger shows in the table
 **Phase 1: engine + FSA (Admin only).** `trigger_events`, adapter interface, FHRS daily poller (diff by FHRSID, new
 *Awaiting Inspection* = event), Admin ▸ Lead Generator ▸ **Triggers** list with counts by area and kind. Measure the
 daily volume and how many match a Ltd before any customer sees it.
+
+> **Built 2026-11-15** (branch `feat/buying-triggers-phase1`). `db/z-trigger-events.sql` (trigger_sources,
+> trigger_seen, trigger_events; apply on both DBs), `src/lib/triggers/` (types + FSA adapter),
+> `src/utils/trigger-engine.ts`, daily `dispatch-trigger-polls` (04:25 UTC) → `run-trigger-poll-background`,
+> staging poke `run-trigger-poll-dispatch`, Admin ▸ Assistants ▸ **Buying triggers** (`admin-triggers.ts`).
+> Built ahead of #30 Phase 1 and why-now Phase 1: Phase 1 is Admin only, so it needs neither.
+> What it does: reads each of the 363 councils' *Awaiting Inspection* lists one at a time (the FSA firewall
+> answers bursts with 403/429; ~2.5 min for all 35,593), diffs by FHRSID, and matches new premises to Companies
+> House (name + postcode, up to 600 a day, only if `COMPANIES_HOUSE_API_KEY` is set). First look per council is
+> silent; a council re-keying its records (more than max(50, 25%) new at once) is reported, not counted;
+> "address published" needs a street line and a full postcode (home businesses show only "DE55").
+> The page shows new premises per day, by council and kind, % reachable (address or company), % company
+> (emailable under PECR), and the latest 200. Off switch: `TRIGGER_SOURCE_FSA_FHRS=off`. Events kept 90 days.
 
 **Phase 2: Watch list + CH streaming.** Streaming worker (filings, officers, charges, PSC) matched to `lead_watch`.
 Watch list gains customers (won leads) and manual additions (GUI + chat). PSC01/PSC07 changes become "New owner /

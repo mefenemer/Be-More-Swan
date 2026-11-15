@@ -7323,6 +7323,14 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <ul class="text-[11px] text-gray-600 mb-3 space-y-0.5">
         ${def.fields.map((f) => `<li><span class="font-bold">${esc(f.label)}</span>${f.required ? ' (required)' : ''} → ${esc(where(f))}</li>`).join('')}
       </ul>
+      ${def.quiz && Array.isArray(def.quiz.results) ? `<div class="bg-white border border-indigo-100 rounded-lg p-3 mb-3" data-afd-quiz>
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider mb-1">🧩 Quiz results</p>
+        <ul class="text-[11px] text-gray-700 space-y-1">${def.quiz.results.map((r) => {
+          // How many answers point to this result — a result nothing points to can never be shown.
+          const n = def.fields.reduce((a, f) => a + (f.options || []).filter((o) => o.scores && o.scores[r.id]).length, 0);
+          return `<li><span class="font-bold">${esc(r.title)}</span> · ${esc(n === 1 ? '1 answer points here' : `${n} answers point here`)}${r.body ? `<span class="block text-gray-500">${esc(r.body)}</span>` : ''}</li>`;
+        }).join('')}</ul>
+      </div>` : ''}
       ${warnings.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
         <p class="text-[11px] font-bold text-amber-900 mb-0.5">We tidied this before showing it</p>
         <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>

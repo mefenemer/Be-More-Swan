@@ -31,7 +31,7 @@ export type FieldType = typeof FIELD_TYPES[number];
 export const CONTACT_COLUMNS = ['email', 'first_name', 'last_name', 'company', 'phone'] as const;
 export type ContactColumn = typeof CONTACT_COLUMNS[number];
 
-export const FORM_PURPOSES = ['newsletter', 'lead_magnet', 'waitlist', 'event', 'enquiry', 'onboarding', 'custom'] as const;
+export const FORM_PURPOSES = ['newsletter', 'lead_magnet', 'waitlist', 'event', 'enquiry', 'onboarding', 'quiz', 'custom'] as const;
 export const FONTS = ['inherit', 'system', 'serif', 'rounded', 'mono'] as const;
 export const RADII = ['none', 'small', 'large'] as const;
 export const LAYOUTS = ['stacked', 'inline'] as const;
@@ -39,6 +39,11 @@ export const LAYOUTS = ['stacked', 'inline'] as const;
 export const MAX_FIELDS = 12;
 export const MAX_OPTIONS = 20;
 export const MAX_TAGS = 10;
+/** A quiz (FR#43, docs/claude-artifacts-review.md): 2–5 results; each choice adds points to results. */
+export const MIN_QUIZ_RESULTS = 2;
+export const MAX_QUIZ_RESULTS = 5;
+export const MAX_QUIZ_POINTS = 10;
+export const QUIZ_RESULT_ID_RE = /^r_[a-z0-9_]{1,24}$/i;
 
 export type FieldTarget =
     | { kind: 'contact'; column: ContactColumn }
@@ -52,8 +57,23 @@ export interface FormField {
     placeholder: string;
     help: string;
     required: boolean;
-    options: { value: string; label: string }[];
+    /** `scores` only on a quiz's choice questions: points this choice adds to each result, by result id. */
+    options: { value: string; label: string; scores?: Record<string, number> }[];
     target: FieldTarget;
+}
+
+/**
+ * One quiz result — what the visitor sees after answering, and the tag their contact gets. The text is
+ * the business's own words, drawn escaped; `ctaUrl` passed the same http(s) check as a redirect.
+ */
+export interface QuizResult {
+    id: string;
+    title: string;
+    body: string;
+    /** Applied to the contact like any form tag. Defaults to the title. */
+    tag: string;
+    ctaLabel: string;
+    ctaUrl: string | null;
 }
 
 export interface FormStyle {
@@ -90,6 +110,13 @@ export interface FormDefinition {
      * (form-reward.ts). Verified to belong to the org at save time, like the logo. Optional.
      */
     reward?: { assetId: number; label: string } | null;
+    /**
+     * A quiz (FR#43): the form's choice questions score towards one of these results, which is shown
+     * instead of the plain thank-you and tags the contact. Absent/null = an ordinary form. The scoring
+     * runs on the SERVER against this stored definition (quizResultFor) — the browser never sees the
+     * points, and never decides the result.
+     */
+    quiz?: { results: QuizResult[] } | null;
 }
 
 export const DEFAULT_STYLE: FormStyle = {
@@ -116,6 +143,7 @@ const pick = <T extends string>(v: unknown, allowed: readonly T[], dflt: T): T =
 const hex = (v: unknown, dflt: string) => (typeof v === 'string' && HEX.test(v.trim()) ? v.trim().toLowerCase() : dflt);
 
 export const newFieldId = () => 'f_' + randomBytes(5).toString('hex');
+export const newQuizResultId = () => 'r_' + randomBytes(5).toString('hex');
 
 function slugifyKey(label: string): string {
     const k = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'f_$1').slice(0, 40);
@@ -131,6 +159,75 @@ function normaliseTarget(raw: unknown, type: FieldType, label: string): FieldTar
     if (t.kind === 'tag' && (type === 'select' || type === 'radio' || type === 'checkbox')) return { kind: 'tag' };
     const key = typeof t.key === 'string' && CUSTOM_KEY_RE.test(t.key) ? t.key : slugifyKey(label);
     return key ? { kind: 'custom', key } : null;
+}
+
+function normaliseQuiz(raw: unknown, warnings: string[]): { results: QuizResult[] } | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const list = Array.isArray((raw as Record<string, unknown>).results) ? (raw as Record<string, unknown[]>).results : [];
+    const results: QuizResult[] = [];
+    const seen = new Set<string>();
+    for (const x of list.slice(0, MAX_QUIZ_RESULTS * 2)) {
+        if (!x || typeof x !== 'object') continue;
+        const q = x as Record<string, unknown>;
+        const title = str(q.title, 120);
+        if (!title) continue;
+        let id = typeof q.id === 'string' && QUIZ_RESULT_ID_RE.test(q.id) ? q.id : newQuizResultId();
+        if (seen.has(id)) id = newQuizResultId();
+        seen.add(id);
+        const ctaRaw = str(q.ctaUrl, 500);
+        const ctaUrl = validateRedirectUrl(ctaRaw);
+        if (ctaRaw && !ctaUrl) warnings.push(`The link on the result "${title}" was not a full http(s) address, so it was removed.`);
+        results.push({
+            id, title,
+            body: str(q.body, 1200),
+            tag: str(q.tag, 40) || title.slice(0, 40),
+            ctaLabel: ctaUrl ? (str(q.ctaLabel, 40) || 'Find out more') : '',
+            ctaUrl,
+        });
+        if (results.length >= MAX_QUIZ_RESULTS) break;
+    }
+    if (results.length < MIN_QUIZ_RESULTS) {
+        warnings.push(`A quiz needs at least ${MIN_QUIZ_RESULTS} results, so it was saved as an ordinary form.`);
+        return null;
+    }
+    return { results };
+}
+
+/** Whole points 1–MAX_QUIZ_POINTS, only towards results that exist; null when nothing is left. */
+function normaliseScores(raw: unknown, resultIds: Set<string>): Record<string, number> | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const out: Record<string, number> = {};
+    for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+        const n = Math.round(Number(v));
+        if (!resultIds.has(id) || !Number.isFinite(n) || n <= 0) continue;
+        out[id] = Math.min(n, MAX_QUIZ_POINTS);
+    }
+    return Object.keys(out).length ? out : null;
+}
+
+/**
+ * The result a set of answers earns: the most points wins; a tie goes to the result listed first
+ * (the owner's order), and so does "no points at all" — a quiz always gives an answer.
+ * `chosen` is each field's chosen option VALUES, already checked against the definition.
+ */
+export function quizResultFor(def: FormDefinition, chosen: Record<string, string[]>): QuizResult | null {
+    const results = def.quiz?.results ?? [];
+    if (!results.length) return null;
+    const totals = new Map(results.map((x) => [x.id, 0]));
+    for (const f of def.fields) {
+        for (const v of chosen[f.id] ?? []) {
+            const o = f.options.find((x) => x.value === v);
+            for (const [id, n] of Object.entries(o?.scores ?? {})) if (totals.has(id)) totals.set(id, totals.get(id)! + n);
+        }
+    }
+    let best = results[0];
+    for (const x of results) if (totals.get(x.id)! > totals.get(best.id)!) best = x;
+    return best;
+}
+
+/** What the visitor is shown — never the tag or anything else internal. */
+export function publicQuizResult(x: QuizResult) {
+    return { id: x.id, title: x.title, body: x.body, ctaLabel: x.ctaLabel, ctaUrl: x.ctaUrl };
 }
 
 export interface NormaliseContext {
@@ -151,6 +248,10 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
     const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
     const warnings: string[] = [];
 
+    // ── Quiz results (read first: a choice's points may only name a result that exists) ──────────
+    const quiz = normaliseQuiz(r.quiz, warnings);
+    const resultIds = new Set((quiz?.results ?? []).map((x) => x.id));
+
     // ── Fields ────────────────────────────────────────────────────────────────────────────────
     const seenIds = new Set<string>();
     const seenTargets = new Set<string>();
@@ -168,7 +269,7 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
         if (target.kind === 'custom' && SENSITIVE.test(`${target.key} ${label}`)) {
             warnings.push(`"${label}" looks like sensitive information. A sign-up form cannot protect it — consider removing it.`);
         }
-        let options: { value: string; label: string }[] = [];
+        let options: FormField["options"] = [];
         if (type === 'select' || type === 'radio' || type === 'checkbox') {
             const seen = new Set<string>();
             for (const o of (Array.isArray(f.options) ? f.options : []).slice(0, MAX_OPTIONS)) {
@@ -176,7 +277,8 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
                 const val = str(typeof o === 'string' ? o : o?.value, 80) || lab;
                 if (!lab || seen.has(val)) continue;
                 seen.add(val);
-                options.push({ value: val, label: lab });
+                const scores = quiz && o && typeof o === 'object' ? normaliseScores((o as Record<string, unknown>).scores, resultIds) : null;
+                options.push(scores ? { value: val, label: lab, scores } : { value: val, label: lab });
             }
             // A single checkbox ("Yes, I'd like the guide") is legitimate; a choice needs two.
             if (type !== 'checkbox' && options.length < 2) {
@@ -285,7 +387,11 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
             if (!rw || !(assetId > 0)) return null;
             return { assetId, label: str(rw.label, 80) || 'your free download' };
         })(),
+        quiz,
     };
+    if (quiz && !fields.some((f) => f.options.some((o) => o.scores && Object.keys(o.scores).length))) {
+        warnings.push('No answer adds points to a result yet, so everyone will see the first result. Choose which result each answer points to.');
+    }
     return { definition, warnings: [...new Set(warnings)] };
 }
 
@@ -341,7 +447,9 @@ export function publicDefinition(def: FormDefinition, extra: { logoUrl: string |
     return {
         version: def.version,
         content: def.content,
-        fields: def.fields.map(({ id, type, label, placeholder, help, required, options }) => ({ id, type, label, placeholder, help, required, options })),
+        // A quiz's points stay on the server: the visitor gets the choices, never what each one scores.
+        fields: def.fields.map(({ id, type, label, placeholder, help, required, options }) => ({ id, type, label, placeholder, help, required, options: options.map(({ value, label: l }) => ({ value, label: l })) })),
+        quiz: !!def.quiz,
         consent: def.consent,
         style: { ...def.style, logo: undefined, logoUrl: extra.logoUrl },
         senderName: extra.senderName,
@@ -349,7 +457,7 @@ export function publicDefinition(def: FormDefinition, extra: { logoUrl: string |
 }
 
 export function definitionHash(def: FormDefinition): string {
-    return createHash('sha256').update(JSON.stringify({ c: def.content, f: def.fields, k: def.consent })).digest('hex');
+    return createHash('sha256').update(JSON.stringify({ c: def.content, f: def.fields, k: def.consent, ...(def.quiz ? { q: def.quiz } : {}) })).digest('hex');
 }
 
 export interface ValidatedAnswers {
@@ -359,6 +467,8 @@ export interface ValidatedAnswers {
     tags: string[];
     /** Answers that are not contact columns, keyed by field id — stored on the submission. */
     stored: Record<string, string | string[]>;
+    /** A quiz's result for these answers (its tag is already in `tags`); null on an ordinary form. */
+    quizResult: QuizResult | null;
 }
 
 /**
@@ -368,7 +478,8 @@ export interface ValidatedAnswers {
 export function validateAnswers(def: FormDefinition, raw: unknown):
     { ok: true; answers: ValidatedAnswers } | { ok: false; error: string } {
     const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const out: ValidatedAnswers = { email: '', contact: {}, custom: {}, tags: [], stored: {} };
+    const out: ValidatedAnswers = { email: '', contact: {}, custom: {}, tags: [], stored: {}, quizResult: null };
+    const chosen: Record<string, string[]> = {};
     for (const f of def.fields) {
         const v = input[f.id];
         let values: string[] = [];
@@ -382,6 +493,7 @@ export function validateAnswers(def: FormDefinition, raw: unknown):
         }
         if (f.required && !values.length) return { ok: false, error: `Please answer "${f.label}".` };
         if (!values.length) continue;
+        if (f.options.length) chosen[f.id] = values;
 
         if (f.type === 'phone' && !/^[+()\d\s.-]{5,30}$/.test(values[0])) return { ok: false, error: `"${f.label}" does not look like a phone number.` };
 
@@ -397,6 +509,12 @@ export function validateAnswers(def: FormDefinition, raw: unknown):
             out.tags.push(...values.map((x) => f.options.find((o) => o.value === x)?.label ?? x));
             out.stored[f.id] = values;
         }
+    }
+    out.quizResult = quizResultFor(def, chosen);
+    if (out.quizResult) {
+        out.tags.push(out.quizResult.tag);
+        // Kept with the submission, so the owner can see which result each person got.
+        out.stored.quiz_result = out.quizResult.id;
     }
     out.tags = [...new Set([...def.audience.tags, ...out.tags].map((t) => t.slice(0, 40)))].slice(0, MAX_TAGS * 2);
     return { ok: true, answers: out };

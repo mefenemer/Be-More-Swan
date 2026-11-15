@@ -2759,7 +2759,13 @@ FORM RULES
   • Consent: always a plain sentence saying what they will receive and that they can unsubscribe at any time. Keep double opt-in ON unless they ask otherwise.
   • Colours are #rrggbb only. Never invent a URL; a redirect only if they gave you one.
   • Never choose a segment or an email flow for a form, even one you can see in YOUR AUDIENCE. Say that they link the form to an email flow in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
-  • Saving a form from this card saves it SWITCHED OFF. Never say a form is live, published or collecting sign-ups; say they publish it in the form builder (Audience → Sign-up forms).`,
+  • Saving a form from this card saves it SWITCHED OFF. Never say a form is live, published or collecting sign-ups; say they publish it in the form builder (Audience → Sign-up forms).
+
+QUIZZES — a form can be a QUIZ ("Which treatment suits you?", "Which package is right for you?"): visitors answer multiple-choice questions and, when they press the button, see ONE result the business wrote, instead of the thank-you message. Each result tags the contact. Build one when they ask for a quiz, or offer one when they want a lead magnet and sell a few distinct things.
+  • Set "purpose": "quiz" and add "quiz": { "results": [ ... ] } with 2–5 results. Each result: { "id": "r_<short>", "title": "...", "body": "<2–4 sentences: why it suits them and what to do next>", "tag": "<short tag, or omit to use the title>", "ctaLabel": "<button words or omit>", "ctaUrl": "<a URL they gave you, else null>" }.
+  • The scored questions are "radio" or "select" fields, 3–6 of them, each with 2–5 options. On each option put "scores": { "<result id>": 1 } for the result that answer points to (an answer may point to none). The result with the most points wins; a tie goes to the result listed first.
+  • Save quiz answers as { "kind": "custom", "key": "<snake_case>" } targets, not tags — the RESULT is the tag. Still ask for the email (last is fine), and a button such as "See my result".
+  • Never invent prices, products or claims for a result; use what you know of their business, or keep it general and say they can edit it. Never give health, legal or financial advice as a result.`,
             // The one thing this route must never get wrong. The card is an OFFER, so a reply
             // that reports the issue as filed is false at the exact moment the user reads it.
             `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the email or flow on screen underneath your reply with buttons to keep it or discard it. Until they press one, it exists only in this conversation.
@@ -2875,7 +2881,7 @@ A sign-up form:
   "type": "audience_form_draft",
   "form": {
     "name": "<internal name>",
-    "purpose": "newsletter" | "lead_magnet" | "waitlist" | "event" | "enquiry" | "onboarding" | "custom",
+    "purpose": "newsletter" | "lead_magnet" | "waitlist" | "event" | "enquiry" | "onboarding" | "quiz" | "custom",
     "content": { "headline": "...", "intro": "...", "buttonLabel": "...", "successMessage": "...", "redirectUrl": null },
     "fields": [ { "id": "f_email", "type": "email", "label": "Email", "required": true, "target": { "kind": "contact", "column": "email" } },
                 { "id": "f_<short>", "type": "...", "label": "...", "placeholder": "", "help": "", "required": false, "options": [ { "value": "...", "label": "..." } ], "target": { ... } } ],
@@ -2883,9 +2889,11 @@ A sign-up form:
     "style": { "useBrandKit": true, "accent": "#rrggbb", "background": "#ffffff", "text": "#111827", "pageBackground": "#f9fafb", "font": "system" | "serif" | "rounded" | "mono" | "inherit", "radius": "none" | "small" | "large", "layout": "stacked" | "inline" },
     "delivery": { "embed": { "enabled": true, "allowedOrigins": null }, "hosted": { "enabled": <true if it gets its own page>, "slug": "<short-address or null>" } },
     "audience": { "doubleOptIn": true, "segmentId": null, "tags": [ "<optional tag every sign-up gets>" ] },
-    "campaign": { "sequenceId": null, "skipWelcome": false }
+    "campaign": { "sequenceId": null, "skipWelcome": false },
+    "quiz": null | { "results": [ { "id": "r_<short>", "title": "...", "body": "...", "tag": "...", "ctaLabel": "...", "ctaUrl": null } ] }
   }
-}`,
+}
+(On a quiz, each scored option also carries "scores": { "r_<short>": 1 }.)`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },

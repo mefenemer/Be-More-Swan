@@ -150,7 +150,7 @@
         <div id="fb-warnings"></div>
         <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2">
           <div class="min-h-0 overflow-auto border-r border-gray-100">
-            <div class="flex gap-1 px-6 pt-4 border-b border-gray-100" role="tablist" id="fb-tabs"></div>
+            <div class="flex gap-1 px-6 pt-4 border-b border-gray-100 overflow-x-auto" role="tablist" id="fb-tabs"></div>
             <div id="fb-panel" class="p-6"></div>
           </div>
           <div class="min-h-0 overflow-auto bg-gray-50 p-6">
@@ -187,16 +187,20 @@
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 
-  const TABS = [['questions', 'Questions'], ['look', 'Look'], ['words', 'Words'], ['share', 'Sharing'], ['after', 'After sign-up']];
+  const TABS = [['questions', 'Questions'], ['quiz', 'Quiz'], ['look', 'Look'], ['words', 'Words'], ['share', 'Sharing'], ['after', 'After sign-up']];
+  const MAX_QUIZ_RESULTS = 5;
+  const rid = () => 'r_' + Math.random().toString(36).slice(2, 12);
+  const blankResult = (n) => ({ id: rid(), title: `Result ${n}`, body: '', tag: '', ctaLabel: '', ctaUrl: null });
 
   function renderPanel() {
     if (!S) return;
     $('fb-tabs').innerHTML = TABS.map(([k, l]) => `<button type="button" role="tab" data-fb-tab="${k}" aria-selected="${S.tab === k}"
-      class="px-3 py-2 text-sm font-bold border-b-2 cursor-pointer ${S.tab === k ? 'border-emerald-600 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}">${l}</button>`).join('');
+      class="px-3 py-2 text-sm font-bold whitespace-nowrap border-b-2 cursor-pointer ${S.tab === k ? 'border-emerald-600 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}">${l}</button>`).join('');
     $('fb-preview-as').innerHTML = [['hosted', 'Sign-up page'], ['embed', 'On your website']].map(([k, l]) =>
       `<button type="button" data-fb-preview-as="${k}" class="px-2.5 py-1 text-xs font-bold rounded-lg cursor-pointer ${S.previewAs === k ? 'bg-white border border-gray-300 text-gray-900' : 'text-gray-500 hover:text-gray-800'}">${l}</button>`).join('');
     const p = $('fb-panel');
     p.innerHTML = S.tab === 'questions' ? panelQuestions()
+      : S.tab === 'quiz' ? panelQuiz()
       : S.tab === 'look' ? panelLook()
       : S.tab === 'words' ? panelWords()
       : S.tab === 'share' ? panelShare()
@@ -265,6 +269,55 @@
           </select>
           ${where === 'custom' ? `<p class="text-[11px] text-gray-400 mb-2">Saved as <span class="font-mono">${esc(t.key || keyFrom(f.label) || '—')}</span> — you can filter and personalise on it.</p>` : ''}`}
       </div>`;
+  }
+
+  // A quiz (FR#43): 2–5 results; each answer to a choice question points to one result. The server
+  // adds up the points from the STORED definition and shows the winner — nothing here is trusted.
+  function panelQuiz() {
+    const q = S.def.quiz;
+    if (!q) {
+      return `
+        <p class="text-sm text-gray-700 mb-2"><span class="font-bold" data-explain="form-quiz">Turn this form into a quiz</span></p>
+        <p class="text-sm text-gray-500 mb-4">Visitors answer your multiple-choice questions and get a result — "Which treatment suits you?", "Which package is right for you?". Each result tags the contact, so you can send them the right emails.</p>
+        <button type="button" data-fb-quiz-on class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Make it a quiz</button>`;
+    }
+    const results = q.results;
+    const choiceQs = S.def.fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.type === 'radio' || f.type === 'select') && (f.options || []).length);
+    const resultRows = results.map((r, j) => `
+      <div class="rounded-xl border border-gray-200 bg-white p-3 mb-2" data-fb-result-row="${j}">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs font-bold text-gray-500 uppercase tracking-wide flex-1">Result ${j + 1}</span>
+          ${results.length > 2 ? `<button type="button" data-fb-result-remove="${j}" aria-label="Remove result" class="p-1 text-gray-400 hover:text-red-600 cursor-pointer">✕</button>` : ''}
+        </div>
+        ${label('Title', 'form-quiz-result-title')}${input(`data-fb-result="${j}" data-k="title" maxlength="120" placeholder="e.g. The deep-clean facial"`, r.title)}
+        ${label('What they read', 'form-quiz-result-body')}<textarea data-fb-result="${j}" data-k="body" rows="3" maxlength="1200" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc(r.body)}</textarea>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+          <div>${label('Button (optional)', 'form-quiz-result-button')}${input(`data-fb-result="${j}" data-k="ctaLabel" maxlength="40" placeholder="Book this"`, r.ctaLabel)}</div>
+          <div>${label('Button link', 'form-quiz-result-link')}${input(`data-fb-result="${j}" data-k="ctaUrl" maxlength="500" placeholder="https://…"`, r.ctaUrl || '')}</div>
+        </div>
+        ${label('Tag the contact', 'form-quiz-result-tag')}${input(`data-fb-result="${j}" data-k="tag" maxlength="40" placeholder="${esc(r.title.slice(0, 40))}"`, r.tag === r.title.slice(0, 40) ? '' : r.tag)}
+      </div>`).join('');
+    const pointRows = choiceQs.length ? choiceQs.map(({ f, i }) => `
+      <div class="mb-3">
+        <p class="text-sm font-bold text-gray-900 mb-1">${esc(f.label)}</p>
+        ${f.options.map((o, k) => {
+          const cur = o.scores ? Object.keys(o.scores)[0] || '' : '';
+          return `<label class="flex items-center gap-2 text-sm text-gray-700 mb-1"><span class="flex-1 min-w-0 truncate">${esc(o.label)}</span>
+            <select data-fb-points="${i}" data-o="${k}" class="w-48 px-2 py-1 rounded-lg border border-gray-300 text-sm">
+              <option value="">No points</option>
+              ${results.map((r) => `<option value="${esc(r.id)}" ${cur === r.id ? 'selected' : ''}>→ ${esc(r.title)}</option>`).join('')}
+            </select></label>`;
+        }).join('')}
+      </div>`).join('')
+      : '<p class="text-sm text-amber-700 mb-3">Add a multiple-choice or dropdown question on the Questions tab — those are the answers that point to a result.</p>';
+    return `
+      <p class="text-sm text-gray-500 mb-4">The result with the most answers pointing to it is shown after they press the button. A tie goes to the result higher up.</p>
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2"><span data-explain="form-quiz-results">Results</span></p>
+      ${resultRows}
+      ${results.length < MAX_QUIZ_RESULTS ? '<button type="button" data-fb-result-add class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer mb-5">+ Add a result</button>' : '<div class="mb-5"></div>'}
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2"><span data-explain="form-quiz-points">Which result each answer points to</span></p>
+      ${pointRows}
+      <button type="button" data-fb-quiz-off class="mt-3 text-xs font-bold text-red-600 cursor-pointer">Stop being a quiz</button>`;
   }
 
   function colour(k, v, title) {
@@ -446,6 +499,7 @@
         style: { ...d.style, logoUrl: null }, senderName: 'Your business',
       }, $('fb-preview'), {
         surface: 'preview', previewAs: S.previewAs, preview: true,
+        previewResult: d.quiz && d.quiz.results && d.quiz.results[0] ? d.quiz.results[0] : null,
         // The library thumbnail stands in for the logo: an unsaved logo has no signed path yet.
         previewLogoUrl: img ? img.url : null,
       });
@@ -481,6 +535,27 @@
     if (mv && !mv.disabled) { move(Number(mv.getAttribute('data-fb-move')), Number(mv.getAttribute('data-dir'))); return; }
     const rm = t.closest('[data-fb-remove]');
     if (rm) { S.def.fields.splice(Number(rm.getAttribute('data-fb-remove')), 1); touched(); renderPanel(); renderPreview(); return; }
+    if (t.closest('[data-fb-quiz-on]')) {
+      S.def.quiz = { results: [blankResult(1), blankResult(2)] };
+      if (S.def.purpose === 'newsletter') S.def.purpose = 'quiz';
+      if (S.def.content.buttonLabel === 'Subscribe') S.def.content.buttonLabel = 'See my result';
+      touched(); renderPanel(); renderPreview(); return;
+    }
+    if (t.closest('[data-fb-quiz-off]')) {
+      S.def.quiz = null;
+      S.def.fields.forEach((f) => (f.options || []).forEach((o) => { delete o.scores; }));
+      touched(); renderPanel(); renderPreview(); return;
+    }
+    if (t.closest('[data-fb-result-add]') && S.def.quiz && S.def.quiz.results.length < MAX_QUIZ_RESULTS) {
+      S.def.quiz.results.push(blankResult(S.def.quiz.results.length + 1));
+      touched(); renderPanel(); return;
+    }
+    const rrm = t.closest('[data-fb-result-remove]');
+    if (rrm && S.def.quiz && S.def.quiz.results.length > 2) {
+      const [gone] = S.def.quiz.results.splice(Number(rrm.getAttribute('data-fb-result-remove')), 1);
+      S.def.fields.forEach((f) => (f.options || []).forEach((o) => { if (o.scores && o.scores[gone.id]) delete o.scores; }));
+      touched(); renderPanel(); renderPreview(); return;
+    }
     const rw = t.closest('[data-fb-reward]');
     if (rw) { S.def.reward = null; touched(); renderPanel(); return; }
     const logo = t.closest('[data-fb-logo]');
@@ -542,7 +617,12 @@
       const k = t.getAttribute('data-k');
       if (!f) return;
       if (k === 'required') f.required = t.checked;
-      else if (k === 'options') f.options = opts(t.value.split('\n').map((x) => x.trim()).filter(Boolean)).slice(0, 20);
+      else if (k === 'options') {
+        // Keep a quiz answer's points when its wording is unchanged (matched by label).
+        const before = new Map((f.options || []).map((o) => [o.label, o.scores]));
+        f.options = opts(t.value.split('\n').map((x) => x.trim()).filter(Boolean)).slice(0, 20)
+          .map((o) => (before.get(o.label) ? Object.assign(o, { scores: before.get(o.label) }) : o));
+      }
       else if (k === 'where') { f.target = t.value === 'tag' ? { kind: 'tag' } : { kind: 'custom', key: keyFrom(f.label) }; touched(); renderPanel(); renderPreview(); return; }
       else f[k] = t.value;
       // A custom field's key follows the label until the form is saved once — renaming the
@@ -551,6 +631,25 @@
       touched(); renderPreview();
       if (e.type === 'change' && (k === 'label' || k === 'required')) renderPanel();
       return;
+    }
+    if (t.hasAttribute('data-fb-result') && d.quiz) {
+      const r = d.quiz.results[Number(t.getAttribute('data-fb-result'))];
+      const k = t.getAttribute('data-k');
+      if (!r) return;
+      if (k === 'ctaUrl') r.ctaUrl = t.value.trim() || null;
+      else if (k === 'tag') r.tag = t.value.trim();
+      else r[k] = t.value;
+      touched(); renderPreview();
+      // The answer menus name each result by its title — refresh them once the title is done.
+      if (e.type === 'change' && k === 'title') renderPanel();
+      return;
+    }
+    if (t.hasAttribute('data-fb-points')) {
+      const f = d.fields[Number(t.getAttribute('data-fb-points'))];
+      const o = f && f.options[Number(t.getAttribute('data-o'))];
+      if (!o) return;
+      if (t.value) o.scores = { [t.value]: 1 }; else delete o.scores;
+      touched(); return;
     }
     if (t.hasAttribute('data-fb-style')) {
       const k = t.getAttribute('data-fb-style');

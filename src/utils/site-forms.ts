@@ -93,8 +93,9 @@ export function safeBackPath(def: SiteDefinition, raw: unknown): string {
     return known.has(p) ? p : '/';
 }
 
-export function sentLocation(kind: 'contact' | 'signup', sectionId: string, back: string): string {
-    return `${FORM_SENT_PATH}?k=${kind}&s=${encodeURIComponent(sectionId)}&b=${encodeURIComponent(back)}`;
+/** `resultId`: a quiz result's id (FR#43) — only an id; /_sent reads its words from the stored form. */
+export function sentLocation(kind: 'contact' | 'signup', sectionId: string, back: string, resultId?: string | null): string {
+    return `${FORM_SENT_PATH}?k=${kind}&s=${encodeURIComponent(sectionId)}&b=${encodeURIComponent(back)}${resultId ? `&r=${encodeURIComponent(resultId)}` : ''}`;
 }
 
 /** `a_<fieldId>` inputs → the answers object audience-public validates (checkboxes may repeat). */
@@ -117,7 +118,7 @@ export interface SiteFormRequest {
     userAgent: string | null;
     now?: number;
     /** audience-public's subscribe, called in-process (site-serve.ts). */
-    subscribe: (payload: Record<string, unknown>, meta: { origin: string; ip: string; userAgent: string | null }) => Promise<{ status: number; body: { error?: string } }>;
+    subscribe: (payload: Record<string, unknown>, meta: { origin: string; ip: string; userAgent: string | null }) => Promise<{ status: number; body: { error?: string; result?: { id?: unknown } } }>;
 }
 
 export async function handleSiteForm(db: Db, req: SiteFormRequest): Promise<FormOutcome> {
@@ -155,7 +156,10 @@ export async function handleSiteForm(db: Db, req: SiteFormRequest): Promise<Form
         hp: '', ms: elapsed, surface: 'embed',
         url: `${req.origin}${back}`,
     }, { origin: req.origin, ip: req.ip, userAgent: req.userAgent });
-    if (result.status === 200) return { kind: 'sent', location: sentLocation('signup', sectionId, back) };
+    if (result.status === 200) {
+        const rid = typeof result.body?.result?.id === 'string' ? result.body.result.id : null;
+        return { kind: 'sent', location: sentLocation('signup', sectionId, back, rid) };
+    }
     const message = typeof result.body?.error === 'string' && result.body.error ? result.body.error : 'Something went wrong. Please try again in a minute.';
     const status = result.status === 429 ? 429 : result.status === 404 ? 404 : 400;
     return { kind: 'error', status, title: 'You\'re not signed up yet', message, backPath: back };
@@ -232,7 +236,7 @@ ${joined ? '<p>They asked to receive your news and offers, so they are now in yo
 }
 
 /** What /_sent says, read from the published site (never from the query string). */
-export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q: URLSearchParams): Promise<{ title: string; message: string; back: string }> {
+export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q: URLSearchParams): Promise<{ title: string; message: string; back: string; link?: { label: string; url: string } | null }> {
     const back = safeBackPath(def, q.get('b'));
     if (q.get('k') === 'booking') {
         if (q.get('st') === 'cancelled') return { title: 'Your booking is cancelled', message: 'We\'ve emailed you to confirm. Thanks for letting us know.', back };
@@ -253,6 +257,19 @@ export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q:
         const formId = s?.type === 'signup' ? s.props.formId : null;
         const form = formId ? (await loadSiteForms(db, site.organisationId, def))[formId] : undefined;
         const message = form?.def.content.successMessage || (form?.def.audience.doubleOptIn === false ? SINGLE_OPT_IN_SUCCESS_MESSAGE : DEFAULT_SUCCESS_MESSAGE);
+        // A quiz result (FR#43): the id from the address picks one of THIS form's stored results; an
+        // id that isn't one of them is ignored. Anyone can type ?r= — all it can show is a result the
+        // business wrote for everyone, which is what a quiz result is.
+        const rid = q.get('r');
+        const res = rid ? form?.def.quiz?.results.find((x) => x.id === rid) : undefined;
+        if (res) {
+            return {
+                title: res.title,
+                message: [res.body, message].filter(Boolean).join('\n\n'),
+                back,
+                link: res.ctaUrl ? { label: res.ctaLabel || 'Find out more', url: res.ctaUrl } : null,
+            };
+        }
         return { title: 'Thank you for signing up', message, back };
     }
     return { title: 'Thank you — your message has been sent', message: 'We\'ll get back to you as soon as we can.', back };

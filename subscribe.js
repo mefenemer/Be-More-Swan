@@ -83,6 +83,9 @@
       '.bms-c{font-size:.75rem;opacity:.7;margin:.75rem 0 0}' +
       '.bms-m{font-size:.875rem;margin:.75rem 0 0}.bms-m:empty{display:none}' +
       '.bms-ok{color:#065f46}.bms-err{color:#b91c1c}' +
+      '.bms-r{margin:0 0 .25rem}.bms-rt{font-size:1.2rem;font-weight:700;margin:0 0 .5rem}' +
+      '.bms-rb{font-size:.95rem;white-space:pre-line;margin:0 0 1rem}' +
+      '.bms-rc{display:inline-block;text-decoration:none;font-weight:700;font-size:.9375rem;color:#fff;background:' + accent + ';border-radius:' + radius + ';padding:.7rem 1.15rem}' +
       '.bms-foot{text-align:center;font-size:.7rem;opacity:.5;margin:1.25rem 0 0}' +
       /* The honeypot. Off-screen rather than display:none — some bots skip hidden fields but fill
          everything else, and a field that is not rendered at all catches nobody. */
@@ -224,6 +227,21 @@
 
     function say(text, ok) { msg.textContent = text; msg.className = 'bms-m ' + (ok ? 'bms-ok' : 'bms-err'); }
 
+    // A quiz's result (FR#43), as the SERVER worked it out from the stored definition. Its words are
+    // the business's own, so escaped; its link is drawn only if it is http(s) — the server checked it
+    // too, but this snippet runs on somebody else's website and trusts nothing it did not need to.
+    var resultBox = document.createElement('div');
+    resultBox.className = 'bms-r';
+    msg.parentNode.insertBefore(resultBox, msg);
+    function showResult(r) {
+      if (!r || !r.title) return false;
+      var link = typeof r.ctaUrl === 'string' && /^https?:\/\//i.test(r.ctaUrl) ? r.ctaUrl : '';
+      resultBox.innerHTML = '<p class="bms-rt">' + esc(r.title) + '</p>' +
+        (r.body ? '<p class="bms-rb">' + esc(r.body) + '</p>' : '') +
+        (link ? '<a class="bms-rc" href="' + esc(link) + '" target="_top" rel="noopener">' + esc(r.ctaLabel || 'Find out more') + '</a>' : '');
+      return true;
+    }
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       say('', true);
@@ -240,7 +258,12 @@
       var consentBox = shadow.querySelector('[name="bms-consent"]');
       if (consentBox && !consentBox.checked) { say('Please tick the box to agree before signing up.', false); return; }
 
-      if (opts.preview) { say(content.successMessage || 'Thanks — you are subscribed.', true); return; }
+      if (opts.preview) {
+        // The builder passes a quiz's first result as a stand-in: no answers are scored in a preview.
+        if (opts.previewResult && showResult(opts.previewResult)) form.style.display = 'none';
+        say(content.successMessage || 'Thanks — you are subscribed.', true);
+        return;
+      }
 
       var tz = '';
       try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (tzErr) { tz = ''; }
@@ -276,6 +299,7 @@
           return;
         }
         form.style.display = 'none';
+        showResult(out.data.result);
         say(out.data.message || 'Thanks — please check your inbox.', true);
         // Only ever a URL the server handed back (validated http(s)) — never one read from this
         // page, which would make the snippet an open redirect.

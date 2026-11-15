@@ -1153,6 +1153,62 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
+      <!-- ── Buying triggers — Admin → Assistants → Lead Generator (admin-triggers.ts) ─────────
+           FR#36 Phase 1 (docs/buying-triggers-plan.md §5): new food and drink premises from the FSA
+           list, read daily, matched to Companies House. ADMIN ONLY: measure volume and reachability
+           before any customer sees a trigger (§9.3 gate). -->
+      <section id="view-buying-triggers" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+          <p class="text-sm text-gray-500 max-w-2xl">New food and drink businesses, read every morning from the FSA's public ratings list (premises "Awaiting Inspection" that weren't there yesterday, often before they open) and matched to Companies House. <strong>Only you can see this.</strong> It's here to measure how many there are and how many can be reached before any customer is offered it.</p>
+          <button type="button" id="bt-run-btn" onclick="btRunNow()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border" title="Reads every council's list again now. Takes a few minutes.">Run now</button>
+        </div>
+        <div id="bt-not-setup" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 mb-5">
+          <strong>Not set up on this database yet.</strong> Apply <span class="font-mono">db/z-trigger-events.sql</span> in the Neon SQL Editor, then reload this page.
+        </div>
+        <p id="bt-error" class="hidden text-sm font-semibold text-red-600 mb-4"></p>
+        <p id="bt-note" class="hidden text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-4"></p>
+        <div id="bt-body" class="hidden space-y-6">
+          <div id="bt-status" class="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-700"></div>
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label for="bt-days" class="text-xs font-bold text-gray-500 uppercase">Period</label>
+              <select id="bt-days" onchange="loadBuyingTriggers()" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                <option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option>
+              </select>
+            </div>
+            <div>
+              <label for="bt-area" class="text-xs font-bold text-gray-500 uppercase">Council</label>
+              <select id="bt-area" onchange="loadBuyingTriggers()" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm min-w-[12rem]"></select>
+            </div>
+            <div>
+              <label for="bt-trade" class="text-xs font-bold text-gray-500 uppercase">Kind of business</label>
+              <select id="bt-trade" onchange="loadBuyingTriggers()" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm min-w-[12rem]"></select>
+            </div>
+          </div>
+          <div id="bt-tiles" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-4">
+            <p class="text-sm font-bold text-gray-900 mb-3">New premises per day</p>
+            <div id="bt-chart" class="flex items-end gap-1 h-32" role="img" aria-label="New premises per day"></div>
+          </div>
+          <div class="grid lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+              <p class="text-sm font-bold text-gray-900 mb-1">By council</p>
+              <p class="text-xs text-gray-500 mb-3">Proposed gate (plan §9.3): at least 15 a month and 35% reachable, in 3 large councils.</p>
+              <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1 pr-2">Council</th><th class="py-1 pr-2 text-right">New</th><th class="py-1 pr-2 text-right">Reachable</th><th class="py-1 text-right">Company</th></tr></thead><tbody id="bt-areas"></tbody></table>
+            </div>
+            <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+              <p class="text-sm font-bold text-gray-900 mb-3">By kind of business</p>
+              <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1 pr-2">Kind</th><th class="py-1 pr-2 text-right">New</th><th class="py-1 pr-2 text-right">Reachable</th><th class="py-1 text-right">Company</th></tr></thead><tbody id="bt-trades"></tbody></table>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+            <p class="text-sm font-bold text-gray-900 mb-3">Latest new premises <span id="bt-events-count" class="font-normal text-gray-500"></span></p>
+            <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1 pr-2">Seen</th><th class="py-1 pr-2">Business</th><th class="py-1 pr-2">Kind</th><th class="py-1 pr-2">Address</th><th class="py-1">Companies House</th></tr></thead><tbody id="bt-events"></tbody></table>
+          </div>
+          <p class="text-xs text-gray-400">"Reachable" = an address was published or a company was matched. "Company" = matched to a Ltd, PLC, LLP or other corporate body on Companies House: only these may be emailed (PECR). Contains public sector information licensed under the Open Government Licence v3.0 (Food Standards Agency).</p>
+        </div>
+      </section>
+
       <!-- ── AI Visibility — Admin → Growth → Reputation (admin-ai-visibility.ts) ──────────────
            When a prospect asks an AI assistant for help, does Be More Swan come up? The same
            questions, asked of each assistant, monthly. The answer form (#aiv-modal) lives OUTSIDE
@@ -3436,6 +3492,7 @@ const VIEW_LABELS = {
   'hosted-sites': 'Hosted sites',
   'ai-visibility': 'AI visibility',
   'platform-reviews': 'Reviews',
+  'buying-triggers': 'Buying triggers',
 };
 
 // Category → child items mapping.
@@ -3503,6 +3560,8 @@ const ADMIN_CATS = {
     // What the post editor offers as music — and the only place a community-shared track that
     // should not be in the library can be taken out.
     { view: 'music-library',        icon: '🎵', label: 'Music library',       perm: 'platform_config',   group: 'Library' },
+    // FR#36 Phase 1: what the buying-trigger engine sees (admin-triggers.ts). Admin only, measured first.
+    { view: 'buying-triggers',      icon: '⚡', label: 'Buying triggers',     perm: 'platform_config',   group: 'Lead Generator' },
   ]},
   // Talking to people, and how Be More Swan looks from outside. The Swan Index (the editorial desk
   // for theswanindex.com) is a group here; a curator holding only curate_swan_index sees just that
@@ -3906,6 +3965,7 @@ function adminNav(view) {
   if (view === 'swan-optouts')        loadSwanOptouts();
   if (view === 'music-library')       loadMusicLibrary();
   if (view === 'ai-visibility')       loadAiVisibility();
+  if (view === 'buying-triggers')     loadBuyingTriggers();
 }
 
 // ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
@@ -10916,6 +10976,106 @@ async function _pmCancel(payload, what) {
 }
 function pmCancel(id) { return _pmCancel({ ids: [id] }, 'this move'); }
 function pmCancelBatch(batchId) { return _pmCancel({ batchId }, 'every move in this batch that has not started'); }
+
+// ── Buying triggers (admin-triggers.ts) ──────────────────────────────────────
+// FR#36 Phase 1: the FSA's new food and drink premises, read daily (run-trigger-poll-background.ts) and
+// matched to Companies House. Admin only — measures volume and reachability before customers see it.
+const BT_API = '/.netlify/functions/admin-triggers';
+const _btEsc = (v) => escAdm(v == null ? '' : String(v));
+const _btPct = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}%` : '—');
+// The API sends UTC ISO strings ("2026-11-15T04:25:00Z"); shown in the admin's own time.
+const _btWhen = (iso) => { if (!iso) return 'never'; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+
+function _btMsg(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+async function loadBuyingTriggers() {
+  _btMsg('bt-error', '');
+  const days = document.getElementById('bt-days').value || '30';
+  const area = document.getElementById('bt-area').value || '';
+  const trade = document.getElementById('bt-trade').value || '';
+  try {
+    const d = await api(`${BT_API}?days=${encodeURIComponent(days)}&area=${encodeURIComponent(area)}&trade=${encodeURIComponent(trade)}`);
+    const notSetUp = d.setUp === false;
+    document.getElementById('bt-not-setup').classList.toggle('hidden', !notSetUp);
+    document.getElementById('bt-body').classList.toggle('hidden', notSetUp);
+    document.getElementById('bt-run-btn').disabled = notSetUp;
+    if (notSetUp) return;
+    btRender(d);
+  } catch (e) {
+    _btMsg('bt-error', e.message);
+  }
+}
+
+function btRender(d) {
+  const s = d.source, r = s.lastResult || {}, m = d.measures;
+  const status = [];
+  if (!s.enabled) status.push('<span class="font-bold text-red-600">Switched off</span> (TRIGGER_SOURCE_FSA_FHRS=off).');
+  status.push(`Last run: <strong>${_btEsc(_btWhen(s.lastRunAt))}</strong>${s.lastRunAt && r.ok === false ? ' <span class="font-bold text-red-600">(failed)</span>' : ''}.`);
+  if (r.error) status.push(`<span class="text-red-600">${_btEsc(r.error)}</span>`);
+  if (r.councils) status.push(`${r.councilsRead} of ${r.councils} councils read${(r.failedCouncils || []).length ? ` (failed: ${_btEsc(r.failedCouncils.slice(0, 8).join(', '))}${r.failedCouncils.length > 8 ? '…' : ''})` : ''}; ${Number(r.listed || 0).toLocaleString('en-GB')} premises awaiting inspection; ${r.newEvents ?? 0} new.`);
+  if (!s.baselineDoneAt) status.push('<span class="font-bold text-amber-700">First look not finished.</span> The first read of each council is recorded silently (it is a backlog, not news), so new premises start appearing from the following day.');
+  if ((r.bulkSkipped || []).length) status.push(`Bulk re-imports ignored: ${_btEsc(r.bulkSkipped.map((b) => `${b.area} (${b.count})`).join(', '))}.`);
+  if (!s.companiesHouseConfigured) status.push('<span class="text-amber-700">COMPANIES_HOUSE_API_KEY is not set, so no premises are matched to a company.</span>');
+  else if (r.companyChecks) status.push(`Companies House: ${r.companyChecks.checked} checked last run, ${r.companyChecks.hits} matched${r.companyChecks.stoppedBy ? ` (stopped: ${_btEsc(r.companyChecks.stoppedBy)})` : ''}.`);
+  document.getElementById('bt-status').innerHTML = status.join(' ');
+
+  const fill = (id, items, current, allLabel) => {
+    const el = document.getElementById(id);
+    el.innerHTML = `<option value="">${allLabel}</option>` + items.map((i) => `<option value="${_btEsc(i.value)}"${i.value === current ? ' selected' : ''}>${_btEsc(i.label)}</option>`).join('');
+  };
+  fill('bt-area', d.areas.map((a) => ({ value: a, label: a })), d.filters.area || '', 'All councils');
+  fill('bt-trade', d.trades.map((t) => ({ value: t.code, label: t.label })), d.filters.trade || '', 'All kinds');
+
+  const perMonth = d.filters.days ? Math.round((m.total / d.filters.days) * 30) : m.total;
+  const tile = (label, value, sub) => `<div class="bg-white rounded-2xl border border-gray-200 p-4"><p class="text-xs font-bold text-gray-500 uppercase">${label}</p><p class="text-2xl font-black text-gray-900">${value}</p><p class="text-xs text-gray-500">${sub}</p></div>`;
+  document.getElementById('bt-tiles').innerHTML = [
+    tile('New premises', m.total.toLocaleString('en-GB'), `about ${perMonth.toLocaleString('en-GB')} a month`),
+    tile('Reachable', _btPct(m.reachable, m.total), 'address published or company found'),
+    tile('Address published', _btPct(m.hasAddress, m.total), `${m.hasAddress} of ${m.total}`),
+    tile('Company (can email)', _btPct(m.corporate, m.checked), `${m.corporate} of ${m.checked} checked on Companies House`),
+    tile('Name says Ltd', _btPct(m.nameCorporate, m.total), 'from the trading name alone'),
+  ].join('');
+
+  const max = Math.max(1, ...d.perDay.map((p) => p.count));
+  document.getElementById('bt-chart').innerHTML = d.perDay.length
+    ? d.perDay.map((p) => `<div class="flex-1 bg-indigo-400 rounded-t min-w-[4px]" style="height:${Math.max(2, Math.round((p.count / max) * 100))}%" title="${_btEsc(p.day)}: ${p.count}"></div>`).join('')
+    : '<p class="text-xs text-gray-500 self-center">Nothing yet. New premises appear after the first look has finished.</p>';
+
+  const rowsFor = (items, labelOf) => items.length ? items.map((x) => `<tr class="border-t border-gray-100"><td class="py-1 pr-2">${_btEsc(labelOf(x))}</td><td class="py-1 pr-2 text-right font-semibold">${x.count}</td><td class="py-1 pr-2 text-right">${_btPct(x.reachable, x.count)}</td><td class="py-1 text-right">${x.corporate}</td></tr>`).join('') : '<tr><td colspan="4" class="py-2 text-xs text-gray-500">None in this period.</td></tr>';
+  document.getElementById('bt-areas').innerHTML = rowsFor(d.byArea, (x) => x.area || 'Unknown');
+  document.getElementById('bt-trades').innerHTML = rowsFor(d.byTrade, (x) => x.label || x.code);
+
+  document.getElementById('bt-events-count').textContent = d.events.length >= 200 ? '(latest 200)' : `(${d.events.length})`;
+  document.getElementById('bt-events').innerHTML = d.events.length ? d.events.map((e) => {
+    const ch = e.company
+      ? `<a href="${_btEsc(e.company.url)}" target="_blank" rel="noopener" class="text-indigo-600 underline">${_btEsc(e.company.number)}</a> <span class="text-xs ${e.company.corporate ? 'text-green-700' : 'text-gray-500'}">${_btEsc(e.company.type || '')}</span>`
+      : `<span class="text-xs text-gray-400">${e.companyChecked ? 'No match' : 'Not checked yet'}</span>`;
+    return `<tr class="border-t border-gray-100 align-top" title="${_btEsc(e.label)}">
+      <td class="py-1 pr-2 whitespace-nowrap">${_btEsc(e.occurredOn)}</td>
+      <td class="py-1 pr-2"><a href="${_btEsc(e.fsaUrl)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 hover:underline">${_btEsc(e.name || '(no name)')}</a><div class="text-xs text-gray-500">${_btEsc(e.area || '')}</div></td>
+      <td class="py-1 pr-2 text-xs">${_btEsc(e.businessType || '')}</td>
+      <td class="py-1 pr-2 text-xs">${e.hasAddress ? _btEsc([e.address, e.postcode].filter(Boolean).join(', ')) : '<span class="text-gray-400">Withheld</span>'}</td>
+      <td class="py-1">${ch}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="py-2 text-xs text-gray-500">None in this period.</td></tr>';
+}
+
+async function btRunNow() {
+  const btn = document.getElementById('bt-run-btn');
+  btn.disabled = true;
+  _btMsg('bt-error', '');
+  try {
+    await api(BT_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'run_now' }) });
+    _btMsg('bt-note', 'Started. Reading every council takes a few minutes, and matching to Companies House a few more. Reload this page later.');
+  } catch (e) {
+    _btMsg('bt-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ── AI Visibility (admin-ai-visibility.ts) ────────────────────────────────────
 // Monthly runs of the same prospect questions, per assistant. Claude, ChatGPT and Gemini are fetched
