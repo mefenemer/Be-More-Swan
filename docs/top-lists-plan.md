@@ -1,6 +1,7 @@
 # Top lists (listicles) — PLAN (feature request #34)
 
-2026-11-15. **Nothing built.**
+2026-11-15. **All six decisions agreed by the owner (2026-11-15) — see §8. Phase 1 BUILT 2026-11-15 (uncommitted on
+the working tree; see §9). Phases 2–3 not started.**
 
 The ask: *"Top n lists of something is a very popular technique I believe on line to get people to read. I think
 because people are curious to see or it helps their research. Is this something we should build into Be More Swan
@@ -93,13 +94,34 @@ item has real substance. They fail as filler or as a "we're #1" ad.
   seconds of compute and a little storage. Decision 4 covers whether to charge it.
 - **Build:** about 2–3 days for Phase 1, 2–3 for Phase 2, and 3–4 for Phase 3, including tests.
 
-## 8. Decisions for the owner
+## 8. Decisions — all agreed by the owner (2026-11-15)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 | --- | --- | --- |
-| 1 | Build lists into the existing assistants rather than as a new "Top lists" assistant? | **Yes**, format only. |
-| 2 | Default share of list pieces: keep today's ~1 in 8–11, or raise it? | **Keep.** Offer "More lists" (max 1 in 4) as an opt-in. |
-| 3 | Social list posts become carousels: automatically, or only on "Make it a carousel"? | **On request** at first, then automatic once we've watched results. |
-| 4 | Charge carousel slides as tasks? | **One task per carousel**, not per slide. |
-| 5 | Allow comparison lists that name competitors (honestly, us included)? | **Yes, blog only**, with the §5.3 rules. Never "best in town" with us at #1. |
-| 6 | Which order: Blog + Social (Phase 1–2) first, then Email/Video/Mentor? | **Yes.** |
+| 1 | Build lists into the existing assistants rather than as a new "Top lists" assistant? | ✅ **Agreed: yes**, format only. No new assistant. |
+| 2 | Default share of list pieces: keep today's ~1 in 8–11, or raise it? | ✅ **Agreed: keep.** Offer "More lists" (max 1 in 4) as an opt-in in Content mix. |
+| 3 | Social list posts become carousels: automatically, or only on "Make it a carousel"? | ✅ **Agreed: on request** at first; switch to automatic only after we've watched results. |
+| 4 | Charge carousel slides as tasks? | ✅ **Agreed: one task per carousel**, not per slide. |
+| 5 | Allow comparison lists that name competitors (honestly, us included)? | ✅ **Agreed: yes, blog only**, with the §5.3 rules. Never "best in town" with us at #1. |
+| 6 | Which order: Blog + Social (Phase 1–2) first, then Email/Video/Mentor? | ✅ **Agreed: yes.** Phase 1 → Phase 2 → Phase 3. |
+
+## 9. Phase 1 — what was built (2026-11-15)
+
+- `src/utils/top-lists.ts`: `TOP_LIST_RULES` (the §5 guardrails, written into every list brief), the item counters and
+  `fixListCount` / `fixCaptionListCount` / `fixArticleListCount`. The title's count is computed from the items written.
+  It never touches a year, a price, "24/7", or a title with no number.
+- `content-shapes.ts`: the existing `list` shape and `list` article type are now **"Top list"** (edited in place: 11 social
+  shapes, 8 article types). `MORE_LISTS_EVERY = 4`. A forced shape is supported (`socialShapeBlock`, `socialShapeByKey`).
+- Drafters: `process-content-jobs.ts` honours "More lists" and a picked shape, then fixes the caption and card headline
+  count. `blog-generate.ts` honours "More lists" and fixes the post title plus the body's H1.
+- **New post ▸ Shape** (`workspace.html` `#gen-post-shape`) → `generate-post.ts` `shape` → `content_generation_jobs.post_shape`.
+- **Content mix ▸ More lists** (`assistant-detail.html` / `assistants.js`) → `onboardingContext.list_frequency = 'more'`,
+  carried across whole-context saves.
+- Chat: a social draft may carry `"shape": "list"`, and its count is fixed before saving. A blog batch topic may carry
+  `articleType` (validated) through `generate-blog.ts` to the writer. Chat manifest unchanged (no new block or card).
+- ⚠️ **SQL: `db/z-post-shape.sql` on BOTH DBs.** Safe in either order: the drainer reads the column through `to_jsonb`
+  and generate-post writes it in a best-effort UPDATE. Until it runs, a picked shape is ignored.
+  It is deliberately not in `db/schema.ts`: Drizzle would add it to every job INSERT.
+- Tests: `tests/top-lists.test.ts` (18 checks). Three older source-scan tests were updated to the new lines.
+- Not done in Phase 1: Shape on the post editor's "Draft with AI" button. Not checked in a browser yet.
+

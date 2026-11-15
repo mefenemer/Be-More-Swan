@@ -94,10 +94,11 @@ export default withLambda(async (event) => {
             // so a partial save from any other surface must not erase them.
             // allowed_post_shapes / allowed_article_types (profile ▸ Content mix) for the same reason:
             // re-running the setup wizard must not quietly reset which kinds of content are allowed.
+            // list_frequency (Content mix ▸ "More lists", FR#34) rides with them.
             // content_pillars, blogTopics and newsletterTopics too: they are DERIVED from the pillar / topic
             // records (src/utils/content-pillars-store.ts) and the settings page no longer sends them, so a
             // whole-context save must not drop them.
-            const CARRY_ACROSS = ['content_pillars', 'blogTopics', 'newsletterTopics', 'publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types', 'voice'];
+            const CARRY_ACROSS = ['content_pillars', 'blogTopics', 'newsletterTopics', 'publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types', 'list_frequency', 'voice'];
             const mergedContext = { ...newContext };
             const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
             for (const key of CARRY_ACROSS) {

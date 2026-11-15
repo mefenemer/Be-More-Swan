@@ -8347,9 +8347,24 @@ function _renderContentMix(data) {
                 <span class="block text-xs text-gray-500 mt-0.5">${esc(i.summary)}</span>
             </span>
         </label>`).join('');
+    // "More lists" — only meaningful while the Top list kind is ticked.
+    const more = document.getElementById('edit_mix_more_lists');
+    if (more) more.checked = (data.context || {}).list_frequency === 'more';
+    _syncMoreListsRow();
     card.classList.remove('hidden');
     card.style.display = '';
 }
+
+// Top lists (FR#34): the "More lists" row shows only while "Top list" (key 'list') is ticked.
+function _syncMoreListsRow() {
+    const row = document.getElementById('content-mix-more-lists-row');
+    if (!row) return;
+    const listBox = document.querySelector('#content-mix-list [data-content-mix="list"]');
+    row.classList.toggle('hidden', !listBox || !listBox.checked);
+}
+document.addEventListener('change', (e) => {
+    if (e.target.closest?.('[data-content-mix="list"]')) _syncMoreListsRow();
+});
 
 // At least one kind must stay on. Bound once, on document — the list re-renders on every hydrate.
 document.addEventListener('change', (e) => {
@@ -8614,7 +8629,10 @@ function _collectContentMix(currentData) {
     const boxes = [...document.querySelectorAll('#content-mix-list [data-content-mix]')];
     if (!cfg || !boxes.length) return null;
     const on = boxes.filter((b) => b.checked).map((b) => b.dataset.contentMix);
-    return { key: cfg.key, value: on.length === boxes.length || !on.length ? null : on };
+    // "More lists" counts only while the Top list is allowed; otherwise it is cleared, not kept dormant.
+    const more = document.getElementById('edit_mix_more_lists');
+    const moreLists = !!(more && more.checked && on.includes('list'));
+    return { key: cfg.key, value: on.length === boxes.length || !on.length ? null : on, listFrequency: moreLists ? 'more' : null };
 }
 
 // ── Strict Rules: one row per rule ────────────────────────────────────────────
@@ -8751,7 +8769,7 @@ function _detailCollect(currentData) {
     // stored value rides through untouched on the spread above. All ticked is saved as null = "every
     // kind", so a shape added to the product later is included rather than silently left out.
     const mix = _collectContentMix(currentData);
-    if (mix) newContext[mix.key] = mix.value;
+    if (mix) { newContext[mix.key] = mix.value; newContext.list_frequency = mix.listFrequency; }
     // Voice builder — only when its card is on the page; otherwise the stored value rides through.
     const vb = document.getElementById('edit_voice_json');
     if (vb && vb.value && !document.getElementById('module-voice-builder')?.classList.contains('hidden')) {

@@ -3,7 +3,7 @@
 // GET ?jobId=<uuid> polls status for on-demand generation.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { aiBlueprints, aiAssistants, contentGenerationJobs } from '../../db/schema';
@@ -15,6 +15,7 @@ import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { linkOutcomeJob } from '../../src/utils/mentor-outcomes';
+import { socialShapeByKey } from '../../src/utils/content-shapes';
 
 
 export default withLambda(async (event) => {
@@ -61,6 +62,8 @@ export default withLambda(async (event) => {
         triggerType?: string;
         /** A Business Mentor post request (mentor-draft-request.ts): the suggestion this draft answers. */
         mentorProposalId?: number;
+        /** New post ▸ Shape: a SOCIAL_POST_SHAPES key ('list' = Top list). Absent = the usual rotation. */
+        shape?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
@@ -89,6 +92,13 @@ export default withLambda(async (event) => {
 
     if (!assistantId) {
         return { statusCode: 400, body: JSON.stringify({ error: 'assistantId is required.' }) };
+    }
+
+    // A shape picked for this one post. An unknown key is refused rather than silently ignored, so a
+    // caller never believes it asked for a Top list and got the rotation.
+    const pickedShape = body.shape == null || body.shape === '' ? null : socialShapeByKey(body.shape);
+    if (body.shape != null && body.shape !== '' && !pickedShape) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Unknown post shape.' }) };
     }
 
     if (contextPrompt && contextPrompt.length > 500) {
@@ -174,6 +184,16 @@ export default withLambda(async (event) => {
         // manual, chat) collapsed correctly. This was the only job creator that omitted it.
         crosspostGroupId: platforms.length > 1 ? randomUUID() : null,
     });
+
+    // The picked shape rides on the job (db/z-post-shape.sql). A separate, best-effort write: on a
+    // database without that column the post is still drafted, in the usual rotation.
+    if (pickedShape) {
+        try {
+            await db.execute(sql`UPDATE content_generation_jobs SET post_shape = ${pickedShape.key} WHERE job_id = ${jobId}`);
+        } catch (err) {
+            console.warn('[generate-post] could not store the picked shape (is db/z-post-shape.sql applied?)', err instanceof Error ? err.message : err);
+        }
+    }
 
     // The Business Mentor asked for this post: link it to the suggestion, so the draft carries
     // "Requested by <Mentor>" (src/utils/requested-by.ts) and joins its track record. Never blocks the draft.

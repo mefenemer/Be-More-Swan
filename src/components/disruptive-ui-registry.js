@@ -7337,7 +7337,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('blog_post_draft', renderBlogPostDraftCard);
 
   // ── Built-in: several articles at once (Blog Writer chat, owner 2026-10-27) ──
-  // { type: 'blog_batch_proposal', topics: [{ title, brief }], more, assistantId }
+  // { type: 'blog_batch_proposal', topics: [{ title, brief, articleType? }], more, assistantId }
+  // articleType 'list' (Top lists, FR#34) shows a "Top list" tag and rides to generate-blog.
   // src/utils/blog-chat-batch.ts. One button queues every article through generate-blog.ts (the
   // background worker); the click dispatches `blog:batch` and chat-session.js makes the call.
   function renderBlogBatchProposalCard(ui, esc) {
@@ -7349,7 +7350,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${n === 1 ? 'Write this article' : `Write ${n} articles`} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
       <ol class="mt-3 space-y-2 list-decimal pl-5">
-        ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
+        ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.articleType === 'list' ? ' <span class="ml-1 inline-block align-middle text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">Top list</span>' : ''}${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
       </ol>
       ${ui.more ? `<p class="text-xs text-amber-800 mt-2">${esc(String(ui.more))} more were asked for — ask again once these are written.</p>` : ''}
       <p class="text-xs text-gray-600 mt-3">${n === 1 ? 'It’s written in the background — usually a minute or two — and lands in the Review column of the Blogs tab. Nothing is published, and it counts as one task.' : 'Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.'}</p>
@@ -7370,7 +7371,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         bubbles: true,
         detail: {
           assistantId: Number(ui.assistantId) || null,
-          topics: topics.map((t) => ({ title: t.title, brief: t.brief || null })),
+          topics: topics.map((t) => ({ title: t.title, brief: t.brief || null, articleType: t.articleType || undefined })),
           respond({ ok, message, error }) {
             if (ok) { say(message || 'Started.'); return; }
             setBusy(false);

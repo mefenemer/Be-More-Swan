@@ -55,6 +55,7 @@ import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
 import { blogBatchFromUiElement } from '../../src/utils/blog-chat-batch';
+import { TOP_LIST_RULES, countCaptionItems, fixCaptionListCount, fixListCount } from '../../src/utils/top-lists';
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../../src/utils/newsletter-campaign-chat-draft';
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
@@ -1114,8 +1115,16 @@ function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string 
     if (!uiElement || typeof uiElement !== 'object') return null;
     const ui = uiElement as Record<string, unknown>;
     if (ui.type !== 'social_post_draft') return null;
-    const caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
+    let caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
     if (!caption) return null;
+    // Top list (FR#34): the model marks a list post with "shape": "list", and the opening line's count
+    // is then computed from the items it actually wrote — never trusted. Written back onto the
+    // uiElement too, so the card in the chat shows exactly what was saved.
+    const isList = ui.shape === 'list';
+    if (isList) {
+        caption = fixCaptionListCount(caption);
+        ui.caption = caption;
+    }
     const platforms = forcePlatform ? [forcePlatform] : (Array.isArray(ui.platforms)
         ? [...new Set(ui.platforms.map(p => normalizePlatform(p)).filter((p): p is SocialPlatform => !!p))]
         : []);
@@ -1125,7 +1134,11 @@ function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string 
     // by the renderer, which is where it belongs (this module deliberately does not import
     // brand-card; see attachBrandCardToDrafts). An absent or blank field is not an error: the card
     // path falls back to headlineFromCaption(), exactly as the scheduled drafter does.
-    const rawHeadline = typeof ui.cardHeadline === 'string' ? ui.cardHeadline.trim() : '';
+    let rawHeadline = typeof ui.cardHeadline === 'string' ? ui.cardHeadline.trim() : '';
+    if (isList && rawHeadline) {
+        rawHeadline = fixListCount(rawHeadline, countCaptionItems(caption));
+        ui.cardHeadline = rawHeadline;
+    }
     const cardHeadline = rawHeadline ? rawHeadline.slice(0, 300) : null;
     return { platforms, caption, hashtags, cardHeadline, replacesPrevious: ui.replacesPrevious === true };
 }
@@ -2899,6 +2912,8 @@ If what they want is too vague to title (just "write me a blog"), ask one short 
 
 WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
+TOP LISTS — when the user asks for a list article ("a top 7 on…", "10 ways to…", "turn that into a list"), set "articleType": "list" on that topic, and give it a title with the count in it. The writer then writes it as a Top list and corrects the count to the items it really wrote. ${TOP_LIST_RULES}
+
 NEVER claim you have written a post unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
             // The blog drafter's standard (blog-generate.ts), for what this chat writes itself: a changed part
             // of an article, a title, a brief.
@@ -2913,11 +2928,11 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
   "reply": "your conversational message to the user",
   "uiElement": {                      // or null when there is nothing to start yet
     "type": "blog_batch_proposal",
-    "topics": [{ "title": "<the article's headline, plain text>", "brief": "<the angle, who it is for and the user's own specifics — a few sentences>" }]
+    "topics": [{ "title": "<the article's headline, plain text>", "brief": "<the angle, who it is for and the user's own specifics — a few sentences>", "articleType": "list" }]
   }
 }
 
-(One entry in "topics" per article they asked for — see HOW A NEW ARTICLE GETS WRITTEN.)
+(One entry in "topics" per article they asked for — see HOW A NEW ARTICLE GETS WRITTEN. "articleType" is ONLY for a Top list — see TOP LISTS — and is left out for every other article.)
 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
 {
@@ -2992,6 +3007,8 @@ Read which way the feedback points before you rewrite. "Be careful about X", "wa
 
 Never describe this business's product or service as doing something on its own that its rules, setup or the user say a person approves or controls. If the business's rules say a human reviews or approves work before it goes out, the copy must not imply otherwise (no "sends while you sleep" or "posts without you lifting a finger" for things a person signs off).
 
+TOP LISTS. When the user asks for a list post ("make this a top 5", "turn that into a list", "5 tips for…"), write it as a Top list: the opening line names the real count and topic, then the items numbered "1.", "2.", "3." — one full line each, 3–7 items — and set "shape": "list" on the draft. ${TOP_LIST_RULES} Leave "shape" out for any other post.
+
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 mediaLine,
@@ -3012,7 +3029,8 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
     "platforms": ["facebook" | "instagram" | "linkedin" | "x", ...],
     "caption": "<the finished, ready-to-post caption>",
     "hashtags": "<space-separated hashtags>" | null,
-    "replacesPrevious": true | false  // true ONLY when this revises the draft from your previous reply${canCard ? `,
+    "replacesPrevious": true | false, // true ONLY when this revises the draft from your previous reply
+    "shape": "list"                   // ONLY on a Top list (see TOP LISTS); leave it out otherwise${canCard ? `,
     "cardHeadline": "<the branded card's single line of type — see BRAND CARDS above>"` : ''}
   }
 }

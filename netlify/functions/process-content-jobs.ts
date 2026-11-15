@@ -23,7 +23,8 @@ import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { explainGenerationFailure } from '../../src/utils/generation-failure';
 import { voiceDirective, findNeverSay, normaliseVoice } from '../../src/utils/voice-profile';
-import { socialShapeLine } from '../../src/utils/content-shapes';
+import { socialShapeBlock } from '../../src/utils/content-shapes';
+import { countCaptionItems, fixCaptionListCount, fixListCount } from '../../src/utils/top-lists';
 import { loadDraftPillars, pillarPromptText } from '../../src/utils/content-pillars-store';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
@@ -148,10 +149,15 @@ export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Pr
         context_prompt: string | null; trigger_type: string | null; platform: string | null;
         admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
         platforms: string[] | null; revised_from_post_id: number | null; created_at: string;
+        post_shape: string | null;
     }>(
+        // post_shape (db/z-post-shape.sql): a shape picked for this one post (New post ▸ Shape). Read
+        // through to_jsonb so this query still runs on a database where that SQL has not been applied
+        // yet — a missing column then reads as null (the normal rotation), never a failed drain.
         `SELECT id, job_id, blueprint_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
                 context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id,
-                platforms, revised_from_post_id, created_at
+                platforms, revised_from_post_id, created_at,
+                to_jsonb(content_generation_jobs) ->> 'post_shape' AS post_shape
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'social'
@@ -207,6 +213,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
     platforms: string[] | null; revised_from_post_id: number | null; created_at?: string;
+    post_shape?: string | null;
 }, now: Date, imageWriter: boolean) {
     // Claim the job ATOMICALLY. `AND status = 'queued'` is the whole guard: the SELECT above uses
     // FOR UPDATE SKIP LOCKED, but it runs as a standalone statement, so postgres-js autocommits and
@@ -663,7 +670,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // SHAPE — which kind of post this slot is (story, short thought, opinion, list…) and how long.
         // Assigned per slot like the hook, so a feed stops being the same template every day.
         // Restricted to the shapes the owner allows (profile ▸ Content mix); all of them when unset.
-        const shapeLine = socialShapeLine(job.target_publish_date, brandCtx.allowed_post_shapes);
+        // "More lists" weights the Top list to 1 in 4; a shape picked for this post (job.post_shape) wins.
+        const { shape: postShape, line: shapeLine } = socialShapeBlock(job.target_publish_date, brandCtx.allowed_post_shapes, {
+            listFrequency: brandCtx.list_frequency,
+            forced: job.post_shape,
+        });
 
         const baseInstruction = [
             `You are ${assistantName}, a social media assistant for ${businessName}.`,
@@ -928,7 +939,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // long-form source that fitForPlatform trims per platform. The disclosure footer (EU AI Act
         // Art. 50) is appended deterministically inside fitForPlatform for each platform, so every
         // stored caption — long or short — carries it, and the per-post opt-out still strips it.
-        const rawCaption = String(generated.caption ?? '').trim();
+        // Top list (FR#34): the opening line's count is made to match the items actually written.
+        const isListPost = postShape.key === 'list';
+        const rawCaption = isListPost
+            ? fixCaptionListCount(String(generated.caption ?? '').trim())
+            : String(generated.caption ?? '').trim();
         // captionFor(platform, credit?) → the platform-fit caption + hashtags for one post. Short-form
         // platforms (X/Threads) get generated.captionShort (or a derived trim), clamped to the limit;
         // long-form platforms get the full caption. Credit line (stock attribution) rides after the footer.
@@ -1111,7 +1126,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // or refund — the only way it fails is a missing headline or unconfigured R2, both of
                 // which throw and drop through to the next source.
                 const renderCard = async (): Promise<number> => {
-                    const headline = (generated.cardHeadline || '').trim() || headlineFromCaption(rawCaption) || '';
+                    const rawHeadline = (generated.cardHeadline || '').trim() || headlineFromCaption(rawCaption) || '';
+                    // A list post's card says the same count as the caption ("5 ways…"), never the model's guess.
+                    const headline = isListPost ? fixListCount(rawHeadline, countCaptionItems(rawCaption)) : rawHeadline;
                     if (!headline) throw new Error('no_card_headline');
 
                     // Derives the kit from the org's own website the first time a card is needed

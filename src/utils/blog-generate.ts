@@ -23,6 +23,7 @@ import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { voiceDirective } from './voice-profile';
 import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor, type ArticleType } from './content-shapes';
+import { fixArticleListCount } from './top-lists';
 import { blogOpeningBlock } from '../config/hook-styles';
 import { CTA_BINDING_RULE, ctaBriefLine } from '../config/call-to-action';
 import { loadCtaForAssistant } from './call-to-action';
@@ -304,6 +305,8 @@ export async function generateBlogBody(
     let timezone = resolvePostingSchedule(null).timezone;
     // The assistant's Content mix (profile) — which article types it may rotate through.
     let allowedTypes: unknown = undefined;
+    // Content mix ▸ "More lists" (onboardingContext.list_frequency) — lists 1 in 4 instead of 1 in 8.
+    let listFrequency: unknown = undefined;
     // The owner's Voice builder settings (profile), when set.
     let voiceSettings: unknown = undefined;
     if (post.assistantId) {
@@ -316,6 +319,7 @@ export async function generateBlogBody(
         if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
         if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
         allowedTypes = actx.allowed_article_types;
+        listFrequency = actx.list_frequency;
         voiceSettings = actx.voice;
         timezone = resolvePostingSchedule(actx).timezone;
     }
@@ -340,7 +344,7 @@ export async function generateBlogBody(
     } catch { /* fall back to the id — still varies, just less evenly */ }
     // A type the author chose for THIS post wins — even one outside the assistant's usual mix,
     // because they asked for it by name.
-    const articleType = articleTypeByKey(opts.articleType) ?? blogArticleTypeFor(sequence, allowedTypes);
+    const articleType = articleTypeByKey(opts.articleType) ?? blogArticleTypeFor(sequence, allowedTypes, listFrequency);
 
     // Business grounding (cheap, materially improves relevance).
     const [org] = await db
@@ -514,6 +518,16 @@ export async function generateBlogBody(
 
     if (!bodyMarkdown.trim()) throw new Error('Empty draft.');
 
+    // Top list (FR#34): the title's count is computed from the items actually written, never taken
+    // from the model — asked for "7 ways" with five real items, it writes five and leaves the 7.
+    // Both the post's title and the body's level-1 heading are fixed, so they never disagree.
+    let fixedTitle: string | null = null;
+    if (articleType.key === 'list') {
+        const fixed = fixArticleListCount(post.title ?? '', bodyMarkdown);
+        bodyMarkdown = fixed.bodyMarkdown;
+        if (fixed.title && fixed.title !== post.title) fixedTitle = fixed.title;
+    }
+
     // Stamp the body AND the provenance marker in one write, so a machine-drafted post can never
     // exist without the flag the AI transparency badge reads (src/utils/blog-ai-assisted.ts).
     // COALESCE, not a plain set: the autopilot worker inserts 'autopilot_schedule' and then calls
@@ -521,6 +535,7 @@ export async function generateBlogBody(
     await db.update(blogPosts)
         .set({
             bodyMarkdown,
+            ...(fixedTitle ? { title: fixedTitle } : {}),
             generationReason: sql`COALESCE(${blogPosts.generationReason}, ${ASSISTANT_DRAFT_REASON})`,
             updatedAt: new Date(),
         })
