@@ -1,5 +1,10 @@
 # New Business Alert — PLAN (feature request #30)
 
+> **⏸ ON HOLD (owner, 2026-11-15): undecided.** Nothing to build until the owner reopens it. Open concerns: most
+> new companies are not real prospects, few can be reached by day 14 (contact rate unmeasured), and volume per
+> customer is small (0–3 a day). If reopened, the suggested first step is Phase 1 only plus a ~200-company enrichment
+> sample to measure the reachable share, then decide on Phase 2.
+
 2026-11-14. **Nothing built.** Owner answered §8 on 2026-11-15 (decisions 2, 3, 6 agreed; 4 and 5 taken on the
 recommendation below; 1 still open). UK first; the US is §7 (owner: "do something
 similar for the US").
