@@ -1,6 +1,7 @@
 # Buying triggers — PLAN (feature request #36)
 
-2026-11-15. **Nothing built.** For the owner to review and decide (§9). UK first, then the US.
+2026-11-15. **Nothing built.** For the owner to review and decide (§10). UK first, then the US.
+**Is it disruptive, is it worth building, will it bring leads?** See §9 (added 2026-11-15).
 
 The ask: *"What are your thoughts on this? I want the biggest value items to consider building into Be More Swan
 assistants"*, about a long list of buying-trigger signals and tools, plus the Autobound article on trigger tools.
@@ -188,7 +189,92 @@ All new keys go through `getTaskCosts()`; no constants.
 #30 Phase 1 → why-now Phase 1 → this Phase 1 (FSA) → why-now Phase 2 together with this Phase 2 (one `lead_watch`
 SQL file covering both) → Phases 3–6.
 
-## 9. Decisions for the owner
+## 9. Is it disruptive? Is it worth building? Will it bring leads?
+
+Added 2026-11-15 at the owner's request. **Short verdict: worth building in stages, and only past a measured gate.
+The trigger data on its own is not disruptive. What we do with it can be.** The Watch list for *customers* is worth
+building whatever happens. "Find new leads from triggers" has to prove itself on real numbers first (Phase 1), because
+the hard part is reaching these businesses, not finding them.
+
+### 9.1 Is it disruptive?
+
+**Not the data.** Every source in §1 is public. Anyone can poll the FSA or Companies House, and ApprovalFeed already
+sells the incorporation list as an email. Trigger-based selling itself is old news in enterprise sales (Autobound,
+UserGems, 6sense). If we ship "a list of businesses that just did X", we are one more list. That is not disruptive.
+
+**What could make it disruptive**, in order of strength:
+
+1. **The whole loop, not a list.** Trigger → research → draft → the customer approves → sent (email or post) →
+   follow-up → booking or reply logged → Results card. Today a small business gets a spreadsheet (ApprovalFeed) or
+   a £15k tool built for a sales team. We would give a café's sign maker a finished, timed, approved action every
+   morning. Nobody serves that customer with that workflow. This is classic low-end disruption: an enterprise
+   technique made "good enough" and cheap for people the incumbents ignore. We already have most of the loop:
+   lead research, drafting, approval, the Inbox, follow-ups, booking links, Results.
+2. **Getting there first, by post.** An FSA registration often appears weeks *before* the premises opens. Most of
+   these businesses can't legally be emailed (sole traders, §4), but a **letter or postcard** can be sent, and almost
+   no competitor does post because it's a chore. A welcome card that arrives *before opening day*, with a QR code to
+   the sender's own page (we already have `/card` QR pages and the Website Assistant) and a first-customer offer
+   (we already have the intro offer setting), turns the PECR limit into an edge. Scans are trackable, so the sender
+   can see it worked. This depends on #30 Phase 3 (letters).
+3. **Learning what works, across all workspaces.** Every trigger lead ends as replied, won or ignored. Pooled and
+   anonymised (counts by trigger kind × trade × region, never one workspace's leads shown to another), this tells
+   each customer "accountants win 1 in 9 new-café leads; sign makers 1 in 4". It also ranks each morning's
+   triggers by real outcomes. A rival copying the data feed doesn't get this, so this is the moat. It needs a privacy
+   page line and a DPIA note before it starts.
+4. **The same engine watching customers, not just prospects.** "Your client Acme Ltd has a new director / has moved /
+   registered a charge / is entering liquidation" is account news that small firms never get today. For an
+   accountant or IT support firm, that is retention and credit-risk warning in one. Cheap, because Companies House
+   streaming is free and the contact details are already held.
+
+What it should **not** claim: "AI finds you leads automatically" in public copy, before §9.3's gate is passed.
+
+### 9.2 Will it bring leads? Real numbers checked today (FSA API, 2026-11-15)
+
+| Check | Result | What it means |
+| --- | --- | --- |
+| UK premises at *Awaiting Inspection* | **35,593** | A big pool, but it's a *stock*: councils have inspection backlogs, so many have been waiting months. Only the daily *new* entries are triggers. Assuming a 3–6 month wait, that's roughly **1,400–2,700 new a week UK-wide** (estimate, measured in Phase 1). |
+| Same, by council | Leeds 1,898 · Birmingham 1,491 · Manchester 1,255 · **Bristol 3** | Coverage depends on the council. Some don't publish unrated premises at all, so the source works by area, not everywhere. |
+| Leeds sample (500): kind | Retail 29% · other catering 28% (largely home and event caterers) · restaurant/café 16% · mobile caterer 11% | Good targets for local suppliers, signs, insurance, accountants and web, but many are tiny. |
+| Leeds sample: name says Ltd/PLC/LLP | **5%** (24 of 500) | Trading names hide some companies, so the Companies House match will find more, but **most look like sole traders: no email allowed (§4).** |
+| Leeds sample: no address published | **50%** | Home-based businesses have their address withheld. Half can't even be written to from this source alone. |
+
+So the honest picture for a typical customer (one trade, one city):
+
+- **Finding:** plenty. In a large city, an accountant or sign maker filtering for relevant types might see
+  **10–40 new premises a month** (estimate).
+- **Reaching:** the bottleneck. Perhaps a quarter to a half can be contacted at all (address published, or a
+  company/website found by enrichment), and only the corporate minority by email.
+- **Converting:** trigger-timed, relevant messages do better than cold ones. Vendors claim 2–5× the reply rate, which
+  is plausible but **not independently checked**. Illustration only: 20 relevant a month → ~8 reachable → 10–15%
+  reply → about 1 conversation a month → a customer every 1–3 months.
+
+**Whether that is worth it depends on the trade's deal size.** For an accountant (a client is worth £1–3k a year),
+a sign or fit-out firm (£500–£5k a job) or an insurer, one win a quarter pays for the plan many times over. For a
+low-ticket seller (a £30 service) it does not, and we should not market it to them.
+
+**Companies House (#30) and website/hiring triggers** look better on reachability: companies by definition, and a
+website or job advert means a published contact. The *Watch* list has no reach problem at all, since the customer
+already knows them.
+
+### 9.3 Worth building? Yes, staged, with a stop/go gate
+
+| Part | Worth it? | Why |
+| --- | --- | --- |
+| Watch list for **customers** (CH streaming, Phase 2) | **Yes, regardless** | Free data, contacts already known, retention + credit warning, no PECR problem |
+| Engine + FSA feed in **Admin only** (Phase 1) | **Yes: cheap test** | £0 data, about 1–2 weeks; tells us volume, Ltd share, address share, by council |
+| Find-from-triggers for customers (Phase 3) | **Only if Phase 1 passes the gate** | Reachability is the risk |
+| Letters (#30 Phase 3) | **Yes, if Phase 3 goes ahead** | It's what makes sole-trader leads usable, and it's the disruptive edge (§9.1.2) |
+| Website changed (Phase 4) | Yes | Cheap (our own fingerprint), contactable leads |
+| Hiring (Phase 5), Maps (Phase 6) | Later | Terms risk (Reed, Serper) and lower value |
+
+**Gate after Phase 1 (proposed, the owner to set):** in at least 3 large councils, for one realistic trade filter,
+(a) at least 15 new premises a month, and (b) at least 35% reachable within 21 days (address published or company /
+website found). Then a **6-week pilot**: Be More Swan's own marketing (#30 B) plus 3–5 friendly customers in
+high-ticket trades, against a cold-list baseline. Go if trigger leads get **at least 2× the reply rate** and at least
+one real meeting per pilot customer. If it fails, keep the Watch list and the Admin feed, and stop there: very
+little is wasted.
+
+## 10. Decisions for the owner
 
 1. **Top five as ranked?** FSA premises, Companies House stream (leads + customers), website changed, hiring, Maps.
    Or reorder?
@@ -206,3 +292,6 @@ SQL file covering both) → Phases 3–6.
    every Lead Generator.)
 8. **US:** add health-inspection and permit datasets to the #30 Socrata connector for the same states (CT, NY, CO
    first), after each dataset's terms are checked?
+9. **The §9.3 gate and pilot:** agree the thresholds (15 a month, 35% reachable, 2× reply rate, one meeting per
+   pilot customer), and that Be More Swan's own marketing is the first pilot? Also: OK to start pooled, anonymised
+   outcome learning (§9.1.3) once there is enough data, after a privacy page line and a DPIA note?
