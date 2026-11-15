@@ -73,6 +73,7 @@ export type AdminAction =
     // AI Visibility: editing the question list, opening or deleting a run, starting an API fetch.
     // Per-cell answers are not logged — they are the admin's own notes, not a change to anything.
     | 'ai_visibility_change'
+    | 'trigger_poll_run'
     // Deleting a track outright (bulk, from the admin list). Records whether its file was removed
     // or kept because a workspace's post still plays it.
     | 'music_library_delete'

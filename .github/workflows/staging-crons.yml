@@ -123,6 +123,8 @@ jobs:
           # workspace per local day (mentor_mornings latch); only 07:00–11:59 local is a sending window.
           # `run-discussion-scan-dispatch` (6h) starts the Lead Generator's daily Discussions scans. Idempotent
           # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
+          # `run-trigger-poll-dispatch` (24h) starts the buying triggers' daily FSA read (trigger-engine.ts),
+          # Admin only. A second run in a day only finds the few premises added since; daily matches production.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
           # a workspace is due only a week after its last read.
           # `run-video-autopilot` (6h) writes the Video Producer's weekly storyboards (video-autopilot.ts).
@@ -161,6 +163,7 @@ jobs:
           run-mentor-review-dispatch 21600  120
           run-mentor-morning-dispatch 3600  120
           run-discussion-scan-dispatch 21600 120
+          run-trigger-poll-dispatch 86400  120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-partner-sweep         86400   120
