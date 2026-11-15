@@ -2576,6 +2576,7 @@
               <option value="planned">Planned</option>
               <option value="brief_ready">Brief Ready</option>
               <option value="in_progress">In Progress</option>
+              <option value="on_hold">On Hold</option>
               <option value="released">Released</option>
               <option value="declined">Declined</option>
               <option value="duplicate">Duplicate</option>
@@ -7230,16 +7231,16 @@ const FR_ITEM_TYPE_CLS = {
   user_story: 'bg-teal-100 text-teal-700', acceptance_criteria: 'bg-gray-100 text-gray-600',
 };
 // Full lifecycle (KEEP IN SYNC with src/utils/feature-requests.ts).
-const FR_STATUSES = ['pending_review','under_review','open','planned','brief_ready','in_progress','released','declined','duplicate'];
+const FR_STATUSES = ['pending_review','under_review','open','planned','brief_ready','in_progress','on_hold','released','declined','duplicate'];
 const FR_STATUS_LABEL = {
   pending_review: 'Pending Review', under_review: 'Under Review', open: 'Open', planned: 'Planned',
-  brief_ready: 'Brief Ready', in_progress: 'In Progress', released: 'Released', declined: 'Declined', duplicate: 'Duplicate',
+  brief_ready: 'Brief Ready', in_progress: 'In Progress', on_hold: 'On Hold', released: 'Released', declined: 'Declined', duplicate: 'Duplicate',
 };
 const FR_STATUS_CLS = {
   pending_review: 'bg-amber-100 text-amber-800', under_review: 'bg-amber-100 text-amber-700',
   open: 'bg-gray-100 text-gray-600', planned: 'bg-blue-100 text-blue-700',
   brief_ready: 'bg-violet-100 text-violet-700',
-  in_progress: 'bg-amber-100 text-amber-700', released: 'bg-emerald-100 text-emerald-700',
+  in_progress: 'bg-amber-100 text-amber-700', on_hold: 'bg-amber-100 text-amber-800', released: 'bg-emerald-100 text-emerald-700',
   declined: 'bg-red-100 text-red-600', duplicate: 'bg-gray-200 text-gray-500',
 };
 let _frItems = [];
@@ -7336,11 +7337,11 @@ async function frSetStatus(id, status) {
 
 
 // ── Feature requests board (src/components/admin-board.js) ─────────────────────────────────────
-// Five columns over the nine statuses. A drop is a status change, which notifies the submitter and
+// Six columns over the ten statuses. A drop is a status change, which notifies the submitter and
 // voters (admin-feature-requests.ts), so Released and Declined ask first.
 const FR_BOARD_COLUMNS = [
   { key: 'review', label: 'To review', hint: 'New ideas, not public yet' },
-  { key: 'backlog', label: 'Backlog', hint: 'Accepted, collecting votes' },
+  { key: 'backlog', label: 'Backlog', hint: 'Accepted, collecting votes, or on hold' },
   { key: 'planned', label: 'Planned' },
   { key: 'building', label: 'Building', hint: 'Brief ready or in progress' },
   { key: 'released', label: 'Released' },
@@ -7348,7 +7349,7 @@ const FR_BOARD_COLUMNS = [
 ];
 const FR_COLUMN_OF_STATUS = {
   pending_review: 'review', under_review: 'backlog', open: 'backlog', planned: 'planned',
-  brief_ready: 'building', in_progress: 'building', released: 'released', declined: 'closed', duplicate: 'closed',
+  brief_ready: 'building', in_progress: 'building', on_hold: 'backlog', released: 'released', declined: 'closed', duplicate: 'closed',
 };
 const FR_STATUS_FOR_COLUMN = { review: 'pending_review', backlog: 'open', planned: 'planned', building: 'in_progress', released: 'released', closed: 'declined' };
 const FR_PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -7359,6 +7360,8 @@ function frBoardCard(it) {
     // Built but switched off (scripts/feature-requests.ts hold; owner 2026-11-14): the go-live check skips it,
     // so it sits in Building until the owner switches it on. Reason in the tooltip.
     (it.proof && it.proof.goLiveHold && !it.proof.liveAt) ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300" data-fr-hold-pill title="${_escH('On hold, switched off: ' + it.proof.goLiveHold)}">⏸️ On hold</span>` : '',
+    // Parked: the owner is undecided, nothing is built until they reopen it (status on_hold, owner 2026-11-15).
+    it.status === 'on_hold' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300" data-fr-status-hold-pill title="On hold: undecided, nothing is built until it is reopened">⏸️ On hold</span>' : '',
     // Claude building it from a session (scripts/feature-requests.ts; src/utils/claude-work.ts).
     it.claudeWorking ? IR_CLAUDE_PILL : '',
     prPills(it.devPrUrl, it.prodPrUrl),

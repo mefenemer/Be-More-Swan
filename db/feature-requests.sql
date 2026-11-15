@@ -104,7 +104,7 @@ ALTER TABLE feature_requests DROP CONSTRAINT IF EXISTS feature_requests_status_c
 ALTER TABLE feature_requests
   ADD CONSTRAINT feature_requests_status_check
   CHECK (status IN ('pending_review', 'under_review', 'open', 'planned', 'brief_ready',
-                    'in_progress', 'released', 'declined', 'duplicate'));
+                    'in_progress', 'on_hold', 'released', 'declined', 'duplicate'));
 
 DO $$
 BEGIN

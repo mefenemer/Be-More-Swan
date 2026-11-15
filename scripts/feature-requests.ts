@@ -27,7 +27,7 @@
 //   npx tsx scripts/feature-requests.ts --env prod unhold <id>                   (ONLY when the owner has switched it on)
 //   npx tsx scripts/feature-requests.ts --env prod shipped <id> --pr <url into main> --file <note.md>
 //                                         (record work already merged into main, e.g. built before these checks)
-//   npx tsx scripts/feature-requests.ts --env prod status <id> <planned|brief_ready|in_progress|released|declined|duplicate|open> --file <why.md>
+//   npx tsx scripts/feature-requests.ts --env prod status <id> <planned|brief_ready|in_progress|on_hold|released|declined|duplicate|open> --file <why.md>
 //   npx tsx scripts/feature-requests.ts --env prod release <id>                  (clear the pill)
 //   npx tsx scripts/feature-requests.ts --env prod prod-pr <id> --pr <url>       (record the PR into main: "Prod PR" pill)
 //   npx tsx scripts/feature-requests.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
@@ -45,7 +45,7 @@ import { stagingCiState, fetchStagingCommit } from '../src/utils/issue-fix-proof
 import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
 
 const arg = (a: string[], n: string) => { const i = a.indexOf(n); return i !== -1 ? a[i + 1] : undefined; };
-const STATUSES = ['open', 'planned', 'brief_ready', 'in_progress', 'released', 'declined', 'duplicate'];
+const STATUSES = ['open', 'planned', 'brief_ready', 'in_progress', 'on_hold', 'released', 'declined', 'duplicate'];
 const DEFAULT_LIST = ['open', 'planned', 'brief_ready', 'in_progress'];
 
 async function main() {
