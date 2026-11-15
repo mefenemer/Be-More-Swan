@@ -45,7 +45,7 @@ import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isValidTimezone } from '../../src/utils/newsletter-schedule';
 import {
-    definitionHash, legacyToDefinition, normaliseFormDefinition, publicDefinition, validateAnswers, SLUG_RE,
+    definitionHash, legacyToDefinition, normaliseFormDefinition, publicDefinition, publicQuizResult, validateAnswers, SLUG_RE,
     type FormDefinition,
 } from '../../src/utils/form-definition';
 import { signAssetId } from '../../src/utils/newsletter-media-url';
@@ -477,7 +477,7 @@ export default withLambda(async (event: HandlerEvent) => {
         message: form.successMessage
             || (form.doubleOptIn ? DEFAULT_SUCCESS_MESSAGE : SINGLE_OPT_IN_SUCCESS_MESSAGE),
         redirectUrl: form.redirectUrl || null,
-    };
+    } as { ok: true; message: string; redirectUrl: string | null; result?: ReturnType<typeof publicQuizResult> };
 
     // Honeypot and timing. Both answer with the SAME success body — a bot that learns it was
     // caught is a bot that comes back without the tell.
@@ -516,6 +516,12 @@ export default withLambda(async (event: HandlerEvent) => {
     const checked = validateAnswers(def, rawAnswers);
     if (!checked.ok) return json(400, { error: checked.error }, origin);
     const answers = checked.answers;
+    // A quiz answers with the visitor's result (its words only — never its tag), and every success
+    // from here on carries it: a visitor whose address is suppressed or already pending must see the
+    // same page as anyone else, or the page would tell a stranger something about that address.
+    // A result replaces the redirect: the result IS the page they came for, and its button is the way on.
+    const quizResult = answers.quizResult ? publicQuizResult(answers.quizResult) : null;
+    if (quizResult) Object.assign(successBody, { result: quizResult, redirectUrl: null });
 
     const email = normaliseEmail(answers.email);
     if (!looksLikeEmail(email)) return json(400, { error: 'Enter a valid email address.' }, origin);

@@ -878,11 +878,16 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 }
 
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
-export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
+/**
+ * `link`: an optional way on to another address (a quiz result's button) — only ever an http(s) URL
+ * read from the stored form definition, never from the query string; drawn before the back button.
+ */
+export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }, link?: { label: string; url: string } | null): string {
     mapPath = ctx.pagePath ?? ((p) => p);
     setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
-    const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
+    const onward = link && /^https?:\/\//i.test(link.url) ? `<a class="btn" href="${esc(link.url)}">${esc(link.label)}</a> ` : '';
+    const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p>${onward}<a class="btn${onward ? ' s' : ''}" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
