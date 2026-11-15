@@ -161,6 +161,11 @@ import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 import { linkedPagesBlock } from '../../src/utils/chat-links';
+// The craft standards the background drafters use, now in the chats that write the same thing (FR#17 gaps,
+// owner 2026-11-14): a post, email or article part written in chat is held to the same expert standard.
+import { platformCraftBlock } from '../../src/constants/platform-craft';
+import { emailCraftBlock } from '../../src/constants/email-craft';
+import { BLOG_CRAFT } from '../../src/constants/blog-craft';
 import { loadRecentArticles, renderRecentArticlesForChat, RECENT_ARTICLE_DAYS } from '../../src/utils/blog-to-social';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-5-5';
@@ -2760,6 +2765,8 @@ NEVER claim you have written something unless THIS reply carries the draft objec
             `WHAT YOU CANNOT SEE — results and the welcome sequence: not what was opened, clicked or unsubscribed from a particular email. If they ask, say plainly that you cannot see it from here and point them at the Email Studio and the "Email Flows" tab. Never guess at a number.`,
             `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text; those are added automatically to every email. Do not invent statistics, customer numbers, testimonials, prices, discounts, deadlines or dates: if the brief does not give you a fact, write around it. Do not invent links: only use a URL they have given you. If an email needs one you do not have, leave its callToAction "url" null and tell them which link to add.`,
             `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
+            // The newsletter drafter's standard (newsletter-generate.ts), for the emails this chat writes itself.
+            emailCraftBlock(rc.business.name),
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
             // must not be the last thing shaping the reply's SHAPE.
             rc.inspoBlock ?? '',
@@ -2893,6 +2900,9 @@ If what they want is too vague to title (just "write me a blog"), ask one short 
 WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
 NEVER claim you have written a post unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
+            // The blog drafter's standard (blog-generate.ts), for what this chat writes itself: a changed part
+            // of an article, a title, a brief.
+            `Whenever you write or change any part of an article here (a block edit, a title, a brief), hold it to the same standard the article writer uses:\n${BLOG_CRAFT}`,
             blogSurfaces(),
             rc.contentSnapshot ?? 'YOUR ARTICLES — your list of articles could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing article, say you cannot see it right now and point them to the "Blogs" tab.',
             // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
@@ -2985,6 +2995,9 @@ Never describe this business's product or service as doing something on its own 
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 mediaLine,
+                // Same craft as autopilot (process-content-jobs.ts), for the platforms this post is for; every
+                // platform when none are configured (as Admin ▸ Model & rules shows it).
+                platformCraftBlock(platforms.length ? platforms : ['instagram', 'linkedin', 'facebook', 'x', 'threads']),
                 socialSurfaces(rc.taskCosts),
                 rc.contentSnapshot ?? 'YOUR POSTS — your list of posts could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing post, say you cannot see it right now and point them to the "Posts" tab.',
                 // Before the JSON contract, deliberately. The block ends with up to four excerpts
