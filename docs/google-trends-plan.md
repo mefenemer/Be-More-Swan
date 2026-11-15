@@ -1,6 +1,6 @@
 # Google Trends — PLAN (feature request #31)
 
-2026-11-15. **Nothing built.** For the owner to review and decide (§9).
+2026-11-15. **Nothing built.** Owner answered every §9 question on 2026-11-15 (§10): Phase 0 approved, DataForSEO chosen.
 
 The ask: *"Look into whether we can connect to Google Trends to find out what people are searching about - this could
 be useful to some of the assistants".*
@@ -116,7 +116,7 @@ than 'urgent plumber' in your region"*.
   requests a month, **≈ $27 a month** on DataForSEO Standard. SerpApi would need its $150 plan.
 - A chat "check this term now" uses Live: $0.011 a time.
 - **Tasks:** the shared weekly refresh is our cost, not the customer's. Reading cached trends inside a draft adds no
-  task. Proposed: an on-demand chat look-up of a new term costs one task, priced through `getTaskCosts()` (§9 Q5).
+  task. Decided: an on-demand chat look-up is free under a daily fair-use cap (§10 Q5).
   Choosing terms is one small model call at set-up.
 
 ## 7. Risks
@@ -148,3 +148,63 @@ could be a later plan). No competitor tracking. No forecasting beyond "last year
 7. **Daily "Trending now" feed:** leave it out (recommended), or offer it to Social as an opt-in with a strict
    relevance filter?
 8. **Search Console queries (Phase 1b):** do it first, since it is free and uses data customers already connect?
+
+## 10. Owner decisions (2026-11-15)
+
+| # | Decision |
+| --- | --- |
+| 1 | **Go ahead with Phase 0** and apply for the Google alpha |
+| 2 | **DataForSEO** |
+| 3 | **Business Mentor + Blog Writer first**, then Social and Email Marketing |
+| 4 | **One workspace list** of tracked terms, **auto-suggested then approved** by the owner |
+| 5 | **Both free** (owner asked for a recommendation; see below) |
+| 6 | **Every plan** |
+| 7 | **"Trending now" feed left out** |
+| 8 | **Search Console queries (Phase 1b) go first** |
+
+**Q5 — tasks.** Since the single task allowance went live (2026-10-17, both DBs), chat and editing helpers cost no
+tasks; they sit under per-workspace daily fair use (`src/utils/fair-use.ts`). Charging one task for a chat look-up
+would be the only chat action that does, and would contradict the pricing page's promise. So:
+- The shared weekly refresh is our cost and free to customers (≈ $27 a month at 300 workspaces, §6).
+- An on-demand chat look-up of a new term is **free**, but goes through `meterInteraction` and gets its own fair-use
+  cap: `fair_use_trends_lookups_per_day`, **10 per workspace** in `platform_config`. At $0.011 (DataForSEO Live) that
+  caps one workspace at 11p a day. Over the cap, chat says it will look the term up in the next weekly refresh and
+  adds it to the tracked list for approval.
+- A looked-up term lands in the shared `search_trend_terms` cache, so a second workspace asking the same thing that
+  week costs nothing.
+- Spend is logged per call like other providers, so Admin ▸ System Map shows if the cap needs changing.
+
+**What this changes in the plan.** Phase 1b (Search Console queries) moves ahead of Phase 0/1, since it needs no
+provider and no spend. §6's "on-demand look-up costs one task" is replaced by the fair-use cap above.
+
+**Phase 0 kit (2026-11-15).** `scripts/trends-phase0.ts` + `scripts/trends-phase0-terms.json` (60 broad trade
+terms × United Kingdom, Scotland, Wales, United States, Texas). It resolves regions through DataForSEO's free
+locations endpoint, so nations or states it doesn't list are reported and skipped. The run uses Live calls,
+≈ 300 calls, at most ≈ $3. It writes `docs/google-trends-phase0-results.md` (usable share per region, peak month,
+rising queries per term); raw JSON goes to the gitignored `.tmp-trends-phase0/`. SerpApi's free tier is dropped from
+Phase 0 now that DataForSEO is chosen. Sign-up (checked 2026-11-15): app.dataforseo.com/register gives a **$1 trial balance**; the minimum top-up is
+**$50** (not ~£20), by card, PayPal or Amazon Pay, and it never expires. The API password is separate from the login
+password and is shown only for the first 24 hours (later: "Send by e-mail" on API Access). Owner steps first: DataForSEO account, `DATAFORSEO_LOGIN` /
+`DATAFORSEO_PASSWORD` in `.env`, and the Google Trends API alpha application.
+
+**Phase 0 first read (5 terms × 5 regions, 2026-11-15, $0.36 of the $1 trial).** Raw replies in `.tmp-trends-phase0/`,
+table in `docs/google-trends-phase0-results.md`.
+- **Data holds up at country level:** UK and US 5/5 usable. Nations and states are patchier: Scotland 4/5, Texas 4/5,
+  Wales 3/5 (it lost "emergency plumber" and "roofer"). Offer country by default, nation/state only where the term
+  passes.
+- **Peaks look right:** boiler service and roofer peak in October in the UK; US trades peak May–June.
+- **Rising queries are noisy and need a filter before anyone sees them.** Examples: "oak furnitureland" under boiler
+  service, "ford electrician fired" (news), "what is a double boiler" (cooking), other towns' plumbers. Phase 1 needs a
+  cheap relevance pass (Haiku) that keeps only questions a customer could write about, and drops brands, news, people
+  and other places. Without it the Blog "Write about this" buttons would suggest nonsense.
+- DataForSEO names nations/states as "Scotland,United Kingdom"; the script now matches that.
+
+**Phase 0 result (2026-11-15): GO.** Full table and verdict: `docs/google-trends-phase0-results.md`. 60 terms ×
+UK/Scotland/US on the Standard queue. Phase 0 cost $0.81 in all, from the $1 trial, with no top-up. Usable: UK
+60/60, US 57/60, Scotland 51/60. Conditions carried into Phase 1:
+(1) country by default, nation/state per term only if it passes;
+(2) report peak *months* (averaged), not a single peak week;
+(3) a Haiku relevance filter on rising queries before they reach any surface. Only 5% are question-shaped, and the
+rest include brands, news, trivia and other towns.
+Standard answers came back in 1–4 minutes. The $50 top-up is needed before Phase 1's weekly refresh; $0.19 of the
+trial is left.
