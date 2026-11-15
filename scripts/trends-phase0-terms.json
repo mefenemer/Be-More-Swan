@@ -1,0 +1,18 @@
+{
+  "_note": "Phase 0 test terms for docs/google-trends-plan.md. Broad phrases people type, one per trade a small-business customer might run. Edit freely; the script reads every string in `terms`.",
+  "terms": [
+    "boiler service", "emergency plumber", "heat pump", "electrician", "roofer",
+    "loft insulation", "solar panels", "kitchen fitter", "bathroom renovation", "window cleaner",
+    "landscaping", "garden design", "driveway", "tree surgeon", "carpet cleaning",
+    "wedding venue", "wedding photographer", "florist", "wedding cake", "event catering",
+    "hair salon", "barber", "nail salon", "eyelash extensions", "massage",
+    "personal trainer", "yoga classes", "pilates", "physiotherapy", "counselling",
+    "dog grooming", "dog walker", "cat sitter", "vet", "dog training",
+    "accountant", "tax return", "bookkeeping", "solicitor", "will writing",
+    "estate agent", "holiday cottage", "glamping", "bed and breakfast", "cafe",
+    "restaurant", "takeaway", "afternoon tea", "cocktail bar", "birthday cake",
+    "tutor", "driving lessons", "music lessons", "nursery", "childminder",
+    "web design", "marketing agency", "printing", "removals", "storage unit"
+  ],
+  "regions": ["United Kingdom", "Scotland", "Wales", "United States", "Texas"]
+}
