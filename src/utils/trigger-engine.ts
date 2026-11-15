@@ -153,7 +153,19 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
     return out;
 }
 
-async function markSeen(db: Db, rows: Array<{ id: string; baseline: boolean }>): Promise<void> {
+/**
+ * One row per id. ⚠️ Load-bearing: an INSERT … ON CONFLICT DO UPDATE that names the same key twice fails
+ * the whole statement ("cannot affect row a second time"), and the FSA lists some premises under two
+ * councils. The first write wins (it is the one that decided event vs baseline).
+ */
+export function dedupeSeen(rows: Array<{ id: string; baseline: boolean }>): Array<{ id: string; baseline: boolean }> {
+    const byId = new Map<string, { id: string; baseline: boolean }>();
+    for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, r);
+    return [...byId.values()];
+}
+
+async function markSeen(db: Db, all: Array<{ id: string; baseline: boolean }>): Promise<void> {
+    const rows = dedupeSeen(all);
     for (let i = 0; i < rows.length; i += 5000) {
         const chunk = JSON.stringify(rows.slice(i, i + 5000));
         await db.execute(sql`

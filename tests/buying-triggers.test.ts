@@ -21,7 +21,7 @@ import {
     isFsaSourceEnabled, type FhrsEstablishment,
 } from '../src/lib/triggers/fsa-fhrs';
 import {
-    councilVerdict, isBaselined, parseState, splitNew, ukDay, isCorporateCompanyType,
+    councilVerdict, isBaselined, parseState, splitNew, ukDay, isCorporateCompanyType, dedupeSeen,
 } from '../src/utils/trigger-engine';
 import { chooseCompany } from '../src/lib/companies-house';
 
@@ -131,6 +131,10 @@ check('only unseen premises are new, and one listed twice counts once', () => {
     const seen = new Set(['1964256']);
     const out = splitNew([SLICE, HOME, { ...HOME }], seen);
     assert.deepStrictEqual(out.map((e) => e.FHRSID), [42]);
+});
+check('the seen upsert never names one premises twice (Postgres would reject the whole batch)', () => {
+    const out = dedupeSeen([{ id: '1', baseline: false }, { id: '2', baseline: true }, { id: '1', baseline: true }]);
+    assert.deepStrictEqual(out, [{ id: '1', baseline: false }, { id: '2', baseline: true }]);
 });
 check('the day is the UK day', () => {
     assert.strictEqual(ukDay(new Date('2026-07-01T23:30:00Z')), '2026-07-02');
