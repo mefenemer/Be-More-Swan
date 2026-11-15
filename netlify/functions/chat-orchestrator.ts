@@ -119,6 +119,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
+import { buildSearchQueriesBlock } from '../../src/utils/chat-search-queries';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
 import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
@@ -3614,6 +3615,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
     // prompt carries its own. Null for every other role; never throws.
     const reviewsBlock = offersOwnCards ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    // "Searches that found you" from their own Search Console (src/utils/chat-search-queries.ts) — the
+    // Blog Writer and the Business Mentor; the same list as Blog setup ▸ Search performance. Never throws.
+    const searchQueriesBlock = await buildSearchQueriesBlock(db, orgId, assistantRow.roleKey);
     // What the directory last read, what is left out, and the site_directory card that re-reads the
     // site or leaves a page out — the same action as Business Information ▸ Website Pages
     // (src/utils/chat-site-directory.ts). Structured routes only; never throws.
@@ -3640,7 +3644,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,

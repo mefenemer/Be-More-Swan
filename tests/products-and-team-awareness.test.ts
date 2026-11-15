@@ -188,7 +188,8 @@ check('chat: every role gets products, the handoff call too', () => {
     // The site page directory and its card joined it 2026-10-31 (docs/site-directory-plan.md).
     // What is in My Content joined it 2026-11-10 (src/utils/chat-my-content.ts).
     // A Social assistant's content pillars and their card joined it 2026-11-11 (src/utils/chat-pillar-card.ts, null elsewhere).
-    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]/.test(src), 'not on every route');
+    // "Searches that found you" joined it 2026-11-15 (src/utils/chat-search-queries.ts, Blog Writer + Mentor, null elsewhere).
+    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]/.test(src), 'not on every route');
     assert.ok(/buildRolePrompt\(\{[\s\S]{0,400}\}\) \+ \(productsBlock/.test(src), 'the handoff target writes without them');
 });
 
