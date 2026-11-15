@@ -142,12 +142,29 @@ export default withLambda(async (event: HandlerEvent) => {
             } catch (err) {
                 console.error('[audience-forms] form stats unavailable', err);
             }
+            // A quiz's results (FR#43): how many people got each one, from the result id kept on
+            // each submission. Same best-effort contract as the counts above.
+            const quizCounts = new Map<number, Record<string, number>>();
+            try {
+                const rows = await db.execute(sql`
+                    SELECT form_id AS "formId", answers->>'quiz_result' AS rid, count(*)::int AS n
+                      FROM audience_form_submissions
+                     WHERE organisation_id = ${ctx.organisationId} AND answers ? 'quiz_result'
+                     GROUP BY form_id, answers->>'quiz_result'`);
+                for (const r of (rows as unknown as { rows?: any[] }).rows ?? (rows as unknown as any[])) {
+                    const m = quizCounts.get(Number(r.formId)) ?? {};
+                    m[String(r.rid)] = Number(r.n);
+                    quizCounts.set(Number(r.formId), m);
+                }
+            } catch (err) {
+                console.error('[audience-forms] quiz result counts unavailable', err);
+            }
             // Every form carries a definition, whatever era it was saved in, so the builder has one shape.
             return json(200, {
                 forms: forms.map((f) => ({
                     ...f,
                     definition: f.definition ? normaliseFormDefinition(f.definition).definition : legacyToDefinition(f),
-                    stats: stats.get(f.id) ?? { submissions: 0, subscribed: 0, last30: 0 },
+                    stats: { ...(stats.get(f.id) ?? { submissions: 0, subscribed: 0, last30: 0 }), quizResults: quizCounts.get(f.id) ?? {} },
                 })),
             });
         } catch (err) {

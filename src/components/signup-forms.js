@@ -108,6 +108,7 @@
               <span class="ml-1 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${live ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${live ? 'Live' : 'Off'}</span></p>
             <p class="text-[11px] text-gray-500">${esc(where)} · ${esc(String((d.fields || []).length || 1))} question${(d.fields || []).length === 1 ? '' : 's'}</p>
             <p class="text-[11px] text-gray-500">${esc(String(st.submissions))} sign-up${st.submissions === 1 ? '' : 's'} · ${esc(String(st.subscribed))} subscribed now · ${esc(String(st.last30))} in the last 30 days</p>
+            ${d.quiz && d.quiz.results ? `<p class="text-[11px] text-gray-500" data-sf-quiz-results>🧩 Quiz results: ${d.quiz.results.map((r) => `${esc(r.title)} ${esc(String((st.quizResults || {})[r.id] || 0))}`).join(' · ')}</p>` : ''}
           </div>
           <button type="button" data-sf-open="${f.id}" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer border">Open</button>
         </div>
