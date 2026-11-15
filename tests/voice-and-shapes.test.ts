@@ -85,7 +85,7 @@ check('social: a run of daily slots cycles every shape; two slots on one day dif
 
 check('social: the shape is in the prompt, and the standards no longer ask every post to be a list', () => {
     const jobs = read('netlify/functions/process-content-jobs.ts');
-    assert.match(jobs, /const shapeLine = socialShapeLine\(job\.target_publish_date, brandCtx\.allowed_post_shapes\);/);
+    assert.match(jobs, /const \{ shape: postShape, line: shapeLine \} = socialShapeBlock\(job\.target_publish_date, brandCtx\.allowed_post_shapes, \{/);
     assert.match(jobs, /formatBlock,\s*shapeLine,/);
     const q = read('src/constants/content-quality.ts');
     assert.doesNotMatch(q, /list\/step formats/);
@@ -124,7 +124,7 @@ check('Blog Studio\'s article type survives the job queue and wins over the rota
     assert.strictEqual(articleTypeByKey('story')?.key, 'story');
     assert.strictEqual(articleTypeByKey('<script>'), null);
     assert.match(read('netlify/functions/process-blog-jobs.ts'), /articleType = brief\?\.articleType;/);
-    assert.match(read('src/utils/blog-generate.ts'), /articleTypeByKey\(opts\.articleType\) \?\? blogArticleTypeFor\(sequence, allowedTypes\)/);
+    assert.match(read('src/utils/blog-generate.ts'), /articleTypeByKey\(opts\.articleType\) \?\? blogArticleTypeFor\(sequence, allowedTypes, listFrequency\)/);
     assert.match(read('src/components/blog-studio-modal.js'), /articleType: \(el\('bs-ai-type'\)/);
 });
 
@@ -132,7 +132,7 @@ check('the profile setting is saved under the keys the generators read, and surv
     const a = read('assistants.js');
     assert.match(a, /key: 'allowed_post_shapes'/);
     assert.match(a, /key: 'allowed_article_types'/);
-    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_post_shapes', 'allowed_article_types', 'voice'\]/);
+    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_post_shapes', 'allowed_article_types', 'list_frequency', 'voice'\]/);
     assert.match(read('src/generated/platform-constants.js'), /window\.ContentShapes = \{/);
 });
 

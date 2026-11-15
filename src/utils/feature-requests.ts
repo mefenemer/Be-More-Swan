@@ -43,7 +43,7 @@ export const isFeatureItemType = (v: unknown): v is FeatureItemType =>
 // ── Status ────────────────────────────────────────────────────────────────────
 export const FR_STATUSES = [
     'pending_review', 'under_review', 'open', 'planned', 'brief_ready',
-    'in_progress', 'released', 'declined', 'duplicate',
+    'in_progress', 'on_hold', 'released', 'declined', 'duplicate',
 ] as const;
 export type FeatureStatus = (typeof FR_STATUSES)[number];
 
@@ -54,6 +54,8 @@ export const FR_STATUS_LABEL: Record<FeatureStatus, string> = {
     planned: 'Planned',
     brief_ready: 'Brief Ready',
     in_progress: 'In Progress',
+    // Parked: the owner is undecided, so nothing is built until they reopen it (owner, 2026-11-15).
+    on_hold: 'On Hold',
     released: 'Released',
     declined: 'Declined',
     duplicate: 'Duplicate',
@@ -63,7 +65,8 @@ export const isFeatureStatus = (v: unknown): v is FeatureStatus =>
     typeof v === 'string' && (FR_STATUSES as readonly string[]).includes(v);
 
 // Statuses that appear on the PUBLIC board (US02): approved/visible to everyone.
-export const PUBLIC_STATUSES: readonly FeatureStatus[] = ['open', 'planned', 'brief_ready', 'in_progress', 'released'];
+// on_hold stays visible so voters still see it; it is not on the roadmap.
+export const PUBLIC_STATUSES: readonly FeatureStatus[] = ['open', 'planned', 'brief_ready', 'in_progress', 'on_hold', 'released'];
 // Statuses that appear on the read-only ROADMAP / Gantt (US03/US05).
 export const ROADMAP_STATUSES: readonly FeatureStatus[] = ['planned', 'brief_ready', 'in_progress'];
 

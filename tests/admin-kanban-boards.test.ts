@@ -49,11 +49,11 @@ check('Fix pipeline: statuses and dev fields land in the right column', () => {
     assert.strictEqual(c({ status: 'roadmap' }), 'closed');
 });
 
-check('Feature requests: nine statuses fold into six columns, and each column has a status to drop to', () => {
+check('Feature requests: ten statuses fold into six columns, and each column has a status to drop to', () => {
     const c = ctx.frColumnOf;
     assert.deepStrictEqual(
-        ['pending_review', 'under_review', 'open', 'planned', 'brief_ready', 'in_progress', 'released', 'declined', 'duplicate'].map((s) => c({ status: s })),
-        ['review', 'backlog', 'backlog', 'planned', 'building', 'building', 'released', 'closed', 'closed']);
+        ['pending_review', 'under_review', 'open', 'planned', 'brief_ready', 'in_progress', 'on_hold', 'released', 'declined', 'duplicate'].map((s) => c({ status: s })),
+        ['review', 'backlog', 'backlog', 'planned', 'building', 'building', 'backlog', 'released', 'closed', 'closed']);
     for (const col of ['review', 'backlog', 'planned', 'building', 'released', 'closed']) {
         const st = ctx.FR_STATUS_FOR_COLUMN[col];
         assert.ok(st, col);
@@ -137,6 +137,30 @@ check('Feature board: a held request in Building shows an On hold pill (owner 20
     assert.ok(!card({ goLiveHold: null }).includes('data-fr-hold-pill'), 'not held → no pill');
     assert.ok(!card(null).includes('data-fr-hold-pill'), 'no proof row → no pill');
     assert.ok(!card({ goLiveHold: 'x', liveAt: '2026-12-03' }).includes('data-fr-hold-pill'), 'already live → no pill');
+    // The On Hold STATUS (owner undecided, 2026-11-15) has its own pill, separate from "built but switched off".
+    const parked = c.frBoardCard({ id: 30, title: 'T', status: 'on_hold', priority: 'medium', category: 'app_core', proof: null });
+    assert.ok(parked.includes('data-fr-status-hold-pill') && parked.includes('⏸️ On hold'), 'on_hold card has the pill');
+    assert.ok(!parked.includes('data-fr-hold-pill'), 'not the switched-off pill');
+    assert.ok(!card(null).includes('data-fr-status-hold-pill'), 'in_progress → no status pill');
+});
+
+check('On Hold status: one list everywhere (TS, admin page, SQL, script, public filter) — owner 2026-11-15', () => {
+    const ts = read('src/utils/feature-requests.ts');
+    const statusList = ts.slice(ts.indexOf('export const FR_STATUSES'), ts.indexOf('] as const;', ts.indexOf('export const FR_STATUSES')));
+    assert.ok(statusList.includes("'on_hold'"), 'FR_STATUSES has on_hold');
+    assert.ok(/on_hold: 'On Hold'/.test(ts), 'TS label');
+    assert.ok(/PUBLIC_STATUSES[^\n]*'on_hold'/.test(ts), 'still on the public board');
+    assert.ok(!/ROADMAP_STATUSES[^\n]*'on_hold'/.test(ts), 'not on the roadmap');
+    assert.ok(between('const FR_STATUSES = [', '\n').includes("'on_hold'"), 'admin FR_STATUSES');
+    assert.ok(html.includes("on_hold: 'On Hold'") && html.includes('<option value="on_hold">On Hold</option>'), 'admin label + filter');
+    for (const f of ['db/feature-requests.sql', 'db/z-feature-on-hold-status.sql']) {
+        const s = read(f);
+        const chk = s.slice(s.lastIndexOf('feature_requests_status_check'));
+        assert.ok(chk.includes("'on_hold'"), `${f} CHECK allows on_hold`);
+    }
+    assert.ok(/const STATUSES = \[[^\]]*'on_hold'/.test(read('scripts/feature-requests.ts')), 'script accepts on_hold');
+    const help = read('help-content.html');
+    assert.ok(help.includes('<option value="on_hold">On Hold</option>') && help.includes("'On Hold':"), 'public board filter + style');
 });
 
 console.log(`\n${passed} passed`);

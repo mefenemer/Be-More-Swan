@@ -68,7 +68,7 @@ check('every generator passes the stored voice; social re-asks once on a never-s
     assert.match(read('netlify/functions/process-content-jobs.ts'), /const hits = findNeverSay\(/);
     assert.match(read('src/utils/blog-generate.ts'), /voice: voiceSettings \}\)/);
     assert.strictEqual((read('src/utils/newsletter-generate.ts').match(/fallback: DEFAULT_TONE, voice \}\)/g) || []).length, 3);
-    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_article_types', 'voice'\]/);
+    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_article_types', 'list_frequency', 'voice'\]/);
     assert.match(read('src/generated/platform-constants.js'), /window\.VoiceBuilder = \{/);
     assert.match(read('assistant-detail.html'), /<input type="hidden" id="edit_voice_json" value="">/);
 });
