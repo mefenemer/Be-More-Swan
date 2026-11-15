@@ -55,6 +55,7 @@ import {
 } from '../../src/config/lead-retention';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { actionItemRowsFromMeeting, summariseActionItemSync } from '../../src/utils/meeting-action-items';
 import { DATED_RECORD_TYPES, recordCalendarDate } from '../../src/utils/record-calendar-dates';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
@@ -120,21 +121,7 @@ async function materialiseActionItems(
 ): Promise<void> {
     if (record.recordType !== 'meeting') return;
     try {
-        const data = (record.data && typeof record.data === 'object') ? record.data as Record<string, unknown> : {};
-        const rawTasks = Array.isArray(data.tasks) ? data.tasks
-            : Array.isArray(data.actionItems) ? data.actionItems : [];
-        const rows = (rawTasks as unknown[])
-            .filter((t): t is Record<string, unknown> =>
-                !!t && typeof t === 'object' && typeof (t as Record<string, unknown>).description === 'string'
-                && String((t as Record<string, unknown>).description).trim() !== '')
-            .map((t) => ({
-                organisationId: orgId,
-                aiAssistantId: record.aiAssistantId,
-                meetingRecordId: record.id,
-                description: String(t.description).trim().slice(0, 2000),
-                assignee: typeof t.assignee === 'string' ? t.assignee.slice(0, 200) : null,
-                dueDate: typeof t.dueDate === 'string' ? t.dueDate.slice(0, 200) : null,
-            }));
+        const rows = actionItemRowsFromMeeting(orgId, record);
         for (const row of rows) {
             await db.insert(actionItems).values(row).onConflictDoUpdate({
                 target: [actionItems.meetingRecordId, actionItems.description],
@@ -188,18 +175,7 @@ async function attachActionItemSync<T extends { id: number; recordType: string }
         return records.map((r) => {
             const its = byMeeting.get(r.id);
             if (!its || its.length === 0) return r;
-            const count = (s: string) => its.filter((i) => i.syncStatus === s).length;
-            return {
-                ...r,
-                actionItemSync: {
-                    total: its.length,
-                    synced: count('synced'),
-                    failed: count('failed'),
-                    pending: count('pending'),
-                    skipped: count('skipped'),
-                    items: its,
-                },
-            };
+            return { ...r, actionItemSync: summariseActionItemSync(its) };
         });
     } catch {
         // Ledger table not applied yet — degrade to no sync state rather than 500 the whole hub.

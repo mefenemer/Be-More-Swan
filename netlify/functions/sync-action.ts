@@ -10,13 +10,13 @@
 //                                → PATCH the matching HubSpot contact/company properties.
 //   xero_log_note              — aging_invoices_table row (accounts_receivable_clerk)
 //                                → push a history note onto the matching Xero invoice.
-//   slack_post_summary         — action_item_assignment (meeting_note_taker)
+//   slack_post_summary         — an approved meeting (meeting_note_taker), via its recipe
 //                                → post the summary + tasks as Block Kit via chat.postMessage.
 //   salesforce_update_record   — data_diff_view (crm_enricher, primaryCrm=salesforce)
 //                                → find the Contact/Account via SOQL, PATCH the enriched fields.
 //   zendesk_add_internal_note  — ticket_triage_view (tier1_support_agent)
 //                                → push a private (internal) comment onto the Zendesk ticket.
-//   notion_create_page         — action_item_assignment (meeting_note_taker, destination=notion)
+//   notion_create_page         — an approved meeting (meeting_note_taker), via its recipe
 //                                → create a Notion page: summary paragraph + to_do blocks.
 //   qbo_log_note               — aging_invoices_table row (accounts_receivable_clerk,
 //                                accountingPlatform=quickbooks) → resolve the QBO invoice
@@ -57,6 +57,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import {
     createAsanaTask as createAsanaTaskShared, createJiraIssue as createJiraIssueShared, type TicketRef,
 } from '../../src/utils/pm-tickets';
+import { createTasksResult, fileTickets, notConnectedResult } from '../../src/utils/meeting-action-items';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -895,10 +896,8 @@ async function handleCreateTasks(
                     eq(actionItems.meetingRecordId, meetingRecordId),
                     inArray(actionItems.syncStatus, SYNCABLE_STATUSES),
                 ));
-            return json(200, {
-                success: true, synced: 0, failed: 0, skipped: rows.length, total: rows.length,
-                message: `${providerLabel(provider)} isn't connected — ${rows.length} action item${rows.length === 1 ? '' : 's'} left unsynced.`,
-            });
+            const r = notConnectedResult(providerLabel(provider), rows.length);
+            return json(r.status, r.body);
         }
         throw err;
     }
@@ -916,32 +915,25 @@ async function handleCreateTasks(
 
     // File one ticket per action item. A single bad task never blocks the rest: its row is
     // stamped 'failed' (auto-retries on the next job attempt) while the others sync.
-    let synced = 0, failed = 0;
-    for (const row of rows) {
-        try {
-            const ticket = provider === 'jira'
-                ? await createJiraIssue(token.accessToken, token.tenantId, siteUrl, payload, row)
-                : await createAsanaTask(token.accessToken, payload, row);
+    const { synced, failed } = await fileTickets(rows, (row) => provider === 'jira'
+        ? createJiraIssue(token.accessToken, token.tenantId, siteUrl, payload, row)
+        : createAsanaTask(token.accessToken, payload, row), async (o) => {
+        if (o.ok) {
             await db.update(actionItems).set({
-                syncStatus: 'synced', provider, externalTicketId: ticket.id, externalUrl: ticket.url,
+                syncStatus: 'synced', provider, externalTicketId: o.ticket.id, externalUrl: o.ticket.url,
                 errorMessage: null, syncedAt: new Date(), updatedAt: new Date(),
-            }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 200 });
-            synced++;
-        } catch (e) {
+            }).where(eq(actionItems.id, o.row.id));
+        } else {
             await db.update(actionItems).set({
-                syncStatus: 'failed', provider,
-                errorMessage: String((e as Error)?.message ?? 'The task tracker rejected the ticket.').slice(0, 500),
-                updatedAt: new Date(),
-            }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 502 });
-            failed++;
+                syncStatus: 'failed', provider, errorMessage: o.error, updatedAt: new Date(),
+            }).where(eq(actionItems.id, o.row.id));
         }
-    }
+        await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: o.ok ? 200 : 502 });
+    });
 
-    const message = `${synced} of ${rows.length} action item${rows.length === 1 ? '' : 's'} filed to ${providerLabel(provider)}${failed ? `, ${failed} failed` : ''}.`;
+    const result = createTasksResult(providerLabel(provider), synced, failed, rows.length);
     // Job-level: succeed if anything synced; total failure surfaces as 502 so the job retries.
-    return json(synced === 0 && failed > 0 ? 502 : 200, { success: synced > 0, synced, failed, skipped: 0, total: rows.length, message });
+    return json(result.status, result.body);
 }
 
 // ── Action registry ────────────────────────────────────────────────────────────

@@ -511,7 +511,7 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
 }
 
 // Display labels for the meeting-note-taker's taskDestination onboarding values
-// (src/config/assistant-onboarding-schemas.js) — shown verbatim in the card's sync button.
+// (src/config/assistant-onboarding-schemas.js) — named in the meeting prompt.
 const TASK_DESTINATION_LABELS: Record<string, string> = {
     notion: 'Notion',
     jira: 'Jira',
@@ -997,7 +997,7 @@ EXISTING EMAILS — you can act on the single emails listed below, each named by
 
 type HubRecord = { recordType: string; title: string; status: string | null; data: unknown };
 
-function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
+export function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
     if (!uiElement || typeof uiElement !== 'object') return [];
     const ui = uiElement as Record<string, unknown>;
     const str = (v: unknown, max = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
@@ -1058,6 +1058,8 @@ type HubLink = { tab: string; label: string; postId?: number };
 function hubLinkFromRecords(records: HubRecord[]): HubLink | null {
     if (records.length === 0) return null;
     if (records.length === 1) {
+        // The meeting role's Review Queue tab is called "Inbox" (assistant-dashboard-registry.js reviewQueue.label).
+        if (records[0].recordType === 'meeting') return { tab: 'review-queue', label: 'Added this meeting to your Inbox — review & approve' };
         const kind = HUB_RECORD_LABELS[records[0].recordType] ?? 'record';
         return { tab: 'review-queue', label: `Added this ${kind} to your Review Queue` };
     }
@@ -1467,8 +1469,9 @@ async function persistHubRecords(
     orgId: number,
     aiAssistantId: number,
     records: HubRecord[],
-): Promise<void> {
-    if (records.length === 0) return;
+): Promise<number[]> {
+    const ids: number[] = [];
+    if (records.length === 0) return ids;
     try {
         for (const rec of records) {
             const [existing] = await db
@@ -1485,8 +1488,9 @@ async function persistHubRecords(
                 await db.update(assistantRecords)
                     .set({ status: rec.status, data: rec.data, source: 'chat', updatedAt: new Date() })
                     .where(eq(assistantRecords.id, existing.id));
+                ids.push(existing.id);
             } else {
-                await db.insert(assistantRecords).values({
+                const [made] = await db.insert(assistantRecords).values({
                     organisationId: orgId,
                     aiAssistantId,
                     recordType: rec.recordType,
@@ -1494,12 +1498,14 @@ async function persistHubRecords(
                     status: rec.status,
                     source: 'chat',
                     data: rec.data,
-                });
+                }).returning({ id: assistantRecords.id });
+                if (made) ids.push(made.id);
             }
         }
     } catch (err) {
         console.error('[chat-orchestrator] hub record persistence failed:', err);
     }
+    return ids;
 }
 
 // ── Knowledge Base retrieval (tier1_support_agent) ────────────────────────────
@@ -2628,13 +2634,14 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
             const meetingPlatform = onboardingValue(rc, 'meetingPlatform');
             const taskDestination = onboardingValue(rc, 'taskDestination');
             const summaryFormat = onboardingValue(rc, 'summaryFormat');
-            // Display label for the sync target — the ActionItemAssignmentCard renders it
-            // verbatim in its "Sync to <destination>" button.
+            // Display label for where the action items go once the meeting is approved.
             const destinationLabel = TASK_DESTINATION_LABELS[String(taskDestination)]
                 ?? (taskDestination ? String(taskDestination) : 'your task tracker');
             return [
                 sharedContextBlock(rc),
-                `You are an executive assistant who turns raw meeting transcripts and messy meeting notes into crisp minutes. When the user pastes a transcript, notes, or a recap, extract four things: a concise executive summary, the concrete decisions the meeting reached, any risks or blockers raised, and every specific action item with its implied owner. Live meeting/task-tool connections are not wired up yet, so work only from the text the user provides.
+                `You are an executive assistant who turns raw meeting transcripts and messy meeting notes into crisp minutes. When the user pastes a transcript, notes, or a recap, extract four things: a concise executive summary, the concrete decisions the meeting reached, any risks or blockers raised, and every specific action item with its implied owner. Work only from the text the user provides; you cannot join a call or listen to a recording.
+
+Nothing leaves the workspace until the user approves the meeting — in the Inbox tab, or with Approve on your card. Approving sends it to the connections switched on for this assistant (for example the follow-up email to attendees, a Slack summary, a Notion page, or one ticket per action item in Jira or Asana). So never say the minutes, the email or the tasks HAVE been sent, posted or synced: say they are waiting for the user's approval. Attendees with no email address will not get the follow-up until the user adds one in the Inbox.
 
 Note-taking policy (from setup):
 - Meeting platform: ${meetingPlatform ?? 'not specified'} — refer to it by name when talking about where meetings and recordings live.
@@ -4671,6 +4678,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             content = fixed;
         }
 
+        // Written before the reply so a meeting card can carry its record's id: its Approve button
+        // uses the Inbox's own PATCH, the one way anything leaves the workspace (finish plan step 3).
+        // The id rides on the card only, after the record's own copy of the card was saved.
+        const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+        if (hubRecords.length === 1 && hubRecords[0].recordType === 'meeting' && hubRecordIds.length === 1
+            && uiElement && typeof uiElement === 'object') {
+            uiElement = { ...(uiElement as Record<string, unknown>), recordId: hubRecordIds[0] };
+        }
+
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
         // transcript and excluded from the LLM window, kept so the handoff's work is
         // auditable) commits together with the final assistant reply, or not at all.
@@ -4707,8 +4723,6 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         });
 
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
-
-        await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
 
         // Off until the switch (docs/basic-work-charging.md). Help-only Mentor replies with no plan stay free. Never throws.
         if (!mentorNoPlan) await chargeChatMessage(db, orgId, session.aiAssistantId);
