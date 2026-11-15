@@ -107,7 +107,8 @@ const BLEND: SiteProduct = { id: 11, name: 'House Blend', description: null, pri
 check('Checkout carries the note when the details are given, and nothing else changes', () => {
     const base = { origin: 'https://willowbrook.bemoreswan.site', site: SITE, sectionId: 's1', product: BLEND, collectAddress: true, backPath: '/shop' };
     const p = checkoutParams({ ...base, shop: READY });
-    assert.ok(String(p.custom_text?.submit?.message).includes('Sold by Willowbrook Coffee Ltd'));
+    const submit = p.custom_text?.submit;
+    assert.ok(submit && typeof submit === 'object' && String(submit.message).includes('Sold by Willowbrook Coffee Ltd'));
     assert.strictEqual(checkoutParams(base).custom_text, undefined);
     assert.ok(!('application_fee_amount' in (p.payment_intent_data ?? {})), 'still no fee to us');
 });
