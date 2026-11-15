@@ -131,6 +131,13 @@
       { title: 'The Morning Scramble', text: 'Every morning I spend half an hour working out which emails actually need me today.' },
     ],
 
+    shopkeeper: [
+      { title: 'The Missed Order', text: 'An order comes in while I am busy and I only notice it days later, so the customer is left waiting.' },
+      { title: 'The Legal Worry', text: 'I am not sure my shop shows everything the law needs, like my address, delivery times and the right to cancel.' },
+      { title: 'The Fee Squeeze', text: 'The shop platforms I have tried take a cut of every sale on top of a monthly fee.' },
+      { title: 'The Scattered Shop', text: 'My orders, payments and customer emails are spread across different apps and I lose track.' },
+    ],
+
     meeting_note_taker: [
       { title: 'The Lost Action Items', text: 'Great decisions get made in meetings, but nobody writes down who owns what, so half the action items are forgotten by the next day.' },
       { title: 'The Note-Taking Distraction', text: 'I’m so busy scribbling notes that I can’t actually focus on the conversation or contribute properly.' },

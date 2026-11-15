@@ -126,7 +126,7 @@ statuses (posted with tracking link, refunded via Stripe's `charge.refunded`), d
 ## 6. Phased build
 
 **Phase 0 — make what we have legal and complete (small).**
-*Status 2026-11-15: the legal pieces below are built (settings on the Website Assistant's Orders tab + its chat card for now); the Shopkeeper shell (§10) is the next PR and takes over that form.*
+*Status 2026-11-15: the legal pieces below are LIVE (PR #624). The Shopkeeper shell (§10) is built, HIDDEN in the catalogue: its Shop tab (`assistant-shop.js` → `netlify/functions/shop.ts`) has Stripe, the Delivery & returns form and the workspace's orders, and its chat reads the shop and offers the same `shop_settings` card. The Website Assistant's Orders tab keeps the same form until the Shopkeeper goes live; both save through the same rows. Before launch: `db/z-shopkeeper.sql` on both DBs, then Admin ▸ Assistants go-live checks.*
 - `shop_settings` per workspace: trader address, returns window and exceptions, who pays returns, VAT number, delivery
   text. GUI in the **Shopkeeper**'s Settings (§10); chat card `shop_settings` (same server action).
 - Generated "Delivery & returns" page; link under Buy buttons; Stripe Checkout `consent_collection.terms_of_service`.

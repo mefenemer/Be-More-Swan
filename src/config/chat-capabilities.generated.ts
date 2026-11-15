@@ -183,6 +183,18 @@ export const GENERATED_CHAT_MANIFEST = {
                 "email_craft"
             ]
         },
+        "shopkeeper": {
+            "flags": [
+                "usesShopSnapshot"
+            ],
+            "contentSnapshot": null,
+            "offersOwnCards": true,
+            "maxTokens": 1200,
+            "cards": [
+                "shop_settings"
+            ],
+            "craftInChat": []
+        },
         "social_media_manager": {
             "flags": [
                 "usesInspo"
@@ -283,6 +295,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesBriefsSnapshot",
         "usesVideosSnapshot",
         "usesMailboxSnapshot",
+        "usesShopSnapshot",
         "usesSiteAuditSnapshot",
         "usesMentorSnapshot",
         "usesSiteSnapshot",

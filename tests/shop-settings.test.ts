@@ -161,7 +161,7 @@ check('the Orders tab form and the chat card send the same sites.ts action', () 
     const sites = read('netlify/functions/sites.ts');
     assert.ok(sites.includes("if (action === 'shop_settings')") && sites.includes('saveShopSettings(db, orgId, userId, input)'));
     assert.ok(read('src/components/assistant-site-editor.js').includes("action: 'shop_settings', assistantId: state.assistantId, settings"));
-    assert.ok(read('src/components/chat-session.js').includes("sitePost({ action: 'shop_settings', assistantId, settings: d.settings || {} })"));
+    assert.ok(read('src/components/chat-session.js').includes("JSON.stringify({ action: 'shop_settings', assistantId, settings: d.settings || {} })"));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('shop_settings', renderShopSettingsCard)"));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"type": "shop_settings"'));
 });

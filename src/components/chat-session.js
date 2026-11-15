@@ -2254,12 +2254,20 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
-    // A shop_settings card — sites.ts shop_settings, the Orders tab form's same save.
+    // A shop_settings card — shop.ts shop_settings (the Website Assistant's and the Shopkeeper's chat
+    // alike), the same save as the Shop tab form and the Website Orders tab form.
     function onShopSettings(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'shop_settings', assistantId, settings: d.settings || {} })
-        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); })
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'shop_settings', assistantId, settings: d.settings || {} }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
