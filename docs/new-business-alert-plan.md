@@ -1,6 +1,7 @@
 # New Business Alert — PLAN (feature request #30)
 
-2026-11-14. **Nothing built.** For the owner to review and decide (§8). UK first; the US is §7 (owner: "do something
+2026-11-14. **Nothing built.** Owner answered §8 on 2026-11-15 (decisions 2, 3, 6 agreed; 4 and 5 taken on the
+recommendation below; 1 still open). UK first; the US is §7 (owner: "do something
 similar for the US").
 
 The ask: *"Review approvalfeed.com/products/new-companies and produce a plan to incorporate this into the lead
@@ -68,7 +69,10 @@ that would use assistants. Phase 2 below. Starts as a **list the owner reviews**
   officers fetched for matches only; enrichment scheduled for day 14.
 - Shown in Leads with its source pill and Why now; approval as today. Chat parity: the Lead Generator chat can turn it
   on/off and change the trades and area (owner rule: every capability = GUI and chat).
-- Task cost: matching is free; enrichment uses the existing research task cost (Admin ▸ Task costs).
+- Task cost (decision 4): each day's match counts as **one `lead_search` task** for the assistant, only on days it
+  delivers at least one new lead (the same unit as a discovery run, read with `getTaskCosts()`); enrichment adds no
+  task and runs inside the existing per-run enrichment cap (`maxEnrichmentCallsPerRun`). New-business leads are capped
+  per assistant per day (start at 25) so the Hunter bill stays bounded.
 
 **Phase 3 (optional) — post.** A "Send a letter" option on a new-business lead through a print-and-post API
 (roughly £0.70–£1.20 a letter, e.g. Stannp / PostGrid — prices to confirm), addressed *"To the Directors"* at the
@@ -162,11 +166,52 @@ one.
 
 ## 8. Decisions for the owner
 
-1. **Who first:** customers' lead source (A), Be More Swan's own marketing (B), or both? *Recommendation: Phase 1
-   Admin list first, then A.*
-2. **Channel:** email only once enrichment finds a business address, or add post (Phase 3)?
-3. **Wait before first contact:** 14 days? (Long enough to beat the scam flood and let a website appear.)
-4. **Plans:** which plans get the source, and does each enriched new-business lead cost the normal research task?
-5. **For our own marketing (B):** which trades count as "would use Be More Swan" (we propose a SIC list for review)?
-6. **US:** start with Connecticut, New York and Colorado (free, daily), add Florida next, and leave Texas (paid)
-   for later? And get US counsel to check the TCPA and state reuse terms before any US sending?
+| # | Question | Decision (2026-11-15) |
+| --- | --- | --- |
+| 1 | **Who first:** customers' lead source (A), Be More Swan's own marketing (B), or both? | **Open.** Recommendation: Phase 1 Admin list first, then A. |
+| 2 | **Channel:** email only once enrichment finds a business address, or add post (Phase 3)? | **Agreed** (see note below). |
+| 3 | **Wait before first contact:** 14 days? | **Agreed: 14 days.** Enrichment from day 14, re-check day 45, then drop. |
+| 4 | **Plans and cost** | **Recommendation taken (below).** |
+| 5 | **Trades for our own marketing (B)** | **Recommendation taken: the list in §9**, for the owner to trim once the Phase 1 Admin list shows real volumes. |
+| 6 | **US:** CT, NY, CO first, Florida next, Texas later; US counsel before any US sending? | **Agreed.** No US email is sent until counsel has checked the TCPA position and the NY / Oregon reuse terms. |
+
+Note on 2: the owner answered "Agreed"; this plan reads it as **email only, sent once enrichment finds a business
+address**, with post (Phase 3) left optional and not built unless asked. Confirm if post was meant.
+
+**Decision 4 — plans and cost.**
+- **Every paid plan that has the Lead Generator** (`saver` £29, `buster` £69, `employee`, `enterprise`). **Not the free
+  trial**: each matched lead can cost us a Hunter lookup, and a trial with a whole-county filter would burn the quota.
+  Beta workspaces get it as a paid plan would.
+- **Charged like a search run, not per lead:** one `lead_search` task per assistant on each day the matcher delivers at
+  least one new lead; no task on empty days. Enrichment adds no task (as today), bounded by the per-run enrichment cap.
+- **Daily cap per assistant: 25 new-business leads** (platform_config, so it can change without a release). Above that,
+  the newest 25 by best SIC match are kept and the count of the rest is shown ("40 more matched today — narrow your
+  trades or area").
+- Why: it matches how customers already pay for lead work (one task per search run), keeps the price simple to explain,
+  and the real cost to us (Hunter lookups) is controlled by the cap rather than by charging per lead.
+
+## 9. Trades for Be More Swan's own marketing (decision 5)
+
+Rule of thumb: a small business that sells to the public or to local firms, needs a steady stream of posts, reviews,
+bookings or enquiries, and has no marketing team. Starting list (UK SIC 2007):
+
+| Group | SIC codes |
+| --- | --- |
+| Food and drink | 56101 licensed restaurants, 56102 unlicensed restaurants and cafés, 56103 takeaways, 56210 event catering, 56302 pubs and bars |
+| Stays (ties in with the holiday-lets work) | 55100 hotels, 55201 holiday centres, 55202 youth hostels, 55209 other holiday accommodation (holiday lets) |
+| Beauty and wellbeing | 96020 hairdressing and beauty, 96040 physical wellbeing (spas, massage), 93130 fitness facilities, 85510 sports and recreation coaching |
+| Health practices | 86230 dental, 86900 other human health (physio, therapists, clinics), 75000 vets |
+| Trades | 41202 domestic building, 43210 electrical, 43220 plumbing and heating, 43320 joinery, 43330 floor and wall covering, 43341 painting, 43390 other building completion, 43999 other specialised construction, 81210 cleaning, 81300 landscaping |
+| Property | 68310 estate agents, 68320 letting and property management |
+| Professional services | 69102 solicitors, 69201 accountants, 69202 bookkeepers, 70229 management consultancy (noisy, see below), 74201 photography, 74100 design |
+| Shops | 47710 clothing, 47760 flowers, plants and pets, 47789 other retail, 47910 online retail |
+| Learning, care and events | 85590 other education (tutors, courses), 88910 childcare, 93290 other recreation (events, venues) |
+
+**Leave out:** 64209 / 64205 holding companies, 70100 head offices, 68100 / 68209 buying, selling or renting own
+property (mostly investment vehicles), 99999 dormant, 82990 "other business support" (the formation agents' default,
+mostly noise), 62012 / 62020 / 73110 / 73120 software, IT and marketing agencies (competitors — but a candidate list
+for the affiliate programme instead).
+
+**Noise check:** 70229 and 74909 are common default picks; keep 70229 only for companies whose name also reads as a
+real practice (a keyword rule in the matcher), and judge the whole list against Phase 1's real daily counts before any
+Phase 4 sending.
