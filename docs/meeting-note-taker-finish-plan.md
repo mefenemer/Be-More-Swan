@@ -1,6 +1,6 @@
 # Meeting Note Taker — what's left (feature request #38)
 
-2026-11-15 · Audit only. **Nothing built in this pass.** No database was queried; SQL status below comes from memory notes and the files in `db/`.
+2026-11-15 · Audit, then steps 2–3 built the same day (branch `feat/meeting-note-taker-finish-1-3`). Step 1 is the owner's. No database was queried; SQL status below comes from memory notes and the files in `db/`.
 
 The assistant is `meeting_note_taker`, shown to customers as **Minute Taker**. Earlier plans: `docs/meeting-note-taker-plan.md` (Phases 0–5) and `docs/meeting-note-taker-phase3-plan.md`.
 
@@ -64,13 +64,13 @@ The assistant is `meeting_note_taker`, shown to customers as **Minute Taker**. E
 
 **A. Launch the text version**
 1. **Prove the database** (you). Done: both checks in §3 return rows on staging and prod. Proof: the two SELECTs.
-2. **Pin the current behaviour with tests.** Add `tests/meeting-note-taker.test.ts`. It should cover: `hubRecordsFromUiElement` for meetings; `buildEmailPayload` and `buildTasksPayload` recipients and targets; `handleCreateTasks` with a stub `fetch` giving synced, failed and skipped results; and the materialise upsert, moved into a pure function. Done: it passes on main.
-3. **One way to send.** Replace the chat card's direct Slack/Notion button with "Review in Inbox" plus "Approve", which uses the same `assistant-records` PATCH as the Inbox. Remove the "direct Jira sync is coming" line and the out-of-date "not wired up yet" sentence in the prompt. Done: nothing leaves the workspace before approval. Proof: a source-scan test that the card never calls `postSyncAction`.
+2. ✅ **Pin the current behaviour with tests.** (Built 2026-11-15: `tests/meeting-note-taker.test.ts`; the pure parts moved to `src/utils/meeting-action-items.ts`, and each ticket's row is now stamped before the next ticket is made.) Add `tests/meeting-note-taker.test.ts`. It should cover: `hubRecordsFromUiElement` for meetings; `buildEmailPayload` and `buildTasksPayload` recipients and targets; `handleCreateTasks` with a stub `fetch` giving synced, failed and skipped results; and the materialise upsert, moved into a pure function. Done: it passes on main.
+3. ✅ **One way to send.** (Built 2026-11-15: the card carries its record's `recordId`; Approve PATCHes `assistant-records`; the Inbox link under the card names the Inbox.) Replace the chat card's direct Slack/Notion button with "Review in Inbox" plus "Approve", which uses the same `assistant-records` PATCH as the Inbox. Remove the "direct Jira sync is coming" line and the out-of-date "not wired up yet" sentence in the prompt. Done: nothing leaves the workspace before approval. Proof: a source-scan test that the card never calls `postSyncAction`.
 4. **Long transcripts.** Turn on attachments for `meeting_note_taker` (.txt, .docx, .pdf, plus .vtt/.srt with timestamps stripped). Raise `maxTokens` to 4096. Done: a 60-minute transcript file makes one record. Proof: a fixture test on the parser and on the attachment acceptance list.
 5. **GUI parity: "New meeting".** Move the prompt and parsing into `src/utils/meeting-minutes.ts`, used by chat and by a new `meeting-minutes.ts` endpoint. Add a paste-or-attach form on the Inbox / Meeting Notes tab. Done: a meeting can be written up without chat. Proof: a test that both paths call the same function.
 6. **Chat parity: review.** Add a meetings snapshot to the chat prompt (recent meetings, waiting ones, attendees with no email) and a `meeting_action_proposal` card (approve, add attendee email, edit the follow-up, reject with a note), all through the same PATCH. Regenerate the chat capabilities manifest and its wording (FR#17 CI). Proof: a capabilities test plus a card test.
 7. **Outlook follow-ups.** Try Gmail, then Outlook (`sendOutlookMessage`), then Resend. Done: an Outlook-only workspace sends from its own inbox. Proof: unit tests with each one stubbed.
-8. **Real-account run on staging.** Connect Slack, Notion, Jira, Asana, Gmail and Outlook, approve one meeting, and record the results. Done: each produces its artefact. Only verified connections get marked Live.
+8. **Real-account run on staging.** Connect Slack, Notion, Jira, Asana, Gmail and Outlook, approve one meeting, and record the results. Done: each produces its artefact. Every connection must pass before any is marked Live (decision 2).
 9. **Go live.** Set the status to Live in Admin → Assistants (one status). Move the verified Minute Taker cards on `connections.html` to Live, update `faq.html:290` and `tests/homepage-faq-2026-11-03.test.ts`, and fix the seed comment. Proof: the public-copy tests pass, and none of the copy mentions recordings or bots.
 
 **B. Recording upload (Phase 4a)**
@@ -85,13 +85,19 @@ The assistant is `meeting_note_taker`, shown to customers as **Minute Taker**. E
 
 ## 5. Decisions for the owner
 
-1. **Launch text-only first?** My recommendation is yes: §4 A, with recording upload as a follow-up. The alternative is to keep it Coming soon until audio works.
-2. **Which connections launch Live:** only those that pass step 8, or hold them all until every one passes?
-3. **Remove the chat card's instant Slack/Notion push** so that approval is the only way anything is sent (step 3)?
-4. **Follow-up with no connected inbox:** keep sending from the Be More Swan domain via Resend, or require Gmail or Outlook?
-5. **Transcription provider:** ElevenLabs Scribe (already in use, about $0.20 per hour of audio) or another?
-6. **Charging:** how many tasks per uploaded hour of audio? Pasted text stays free as chat.
-7. **Retention:** delete audio straight after transcription? How long to keep transcripts?
-8. **Meeting bot:** build it (vendor cost per hour, consent duties, Google Cloud project), or stay upload-only for now?
-9. **Name:** keep "Minute Taker" in the product (the feature request says "Meeting Note Taker")?
-10. **Slack as an action-item destination:** add it to the set-up dropdown, or keep it as a summary-only recipe?
+All answered 2026-11-15. Items 4 and 6–10 were recommendations the owner then agreed.
+
+1. **Launch text-only first?** ✅ **Agreed:** §4 A first, recording upload as a follow-up.
+2. **Which connections launch Live?** ✅ **Hold them all until every one passes step 8.** Step 9 moves every Minute Taker connection to Live together, or none.
+3. **Remove the chat card's instant Slack/Notion push?** ✅ **Agreed.** Done in step 3: the card's only button is Approve, the Inbox's own PATCH.
+4. **Follow-up with no connected inbox:** ✅ **Agreed: keep the Resend fallback, but make it plainly the business's email.** Requiring Gmail or Outlook would block the main thing a new user sees work, and most follow-ups go to colleagues who already expect it. So: the sender *name* is the business, **Reply-To is the approving user's own address** (replies reach them, not us), and the Inbox says "Sent from Be More Swan's address because no inbox is connected — connect Gmail or Outlook to send from your own". Step 7 adds Outlook first, so Gmail → Outlook → Resend. Revisit if Resend shows bounces or complaints from these sends.
+5. **Transcription provider:** ✅ **ElevenLabs Scribe.**
+6. **Charging:** ✅ **Agreed: 1 task per started 10 minutes of audio** (a 1-hour recording = 6 tasks; minimum 1). Our cost is about $0.30 an hour (Scribe ~$0.20 plus the write-up), and a task is worth roughly 2.5p–5p across the plans, so 6 tasks just covers cost on every plan. It is a new cost key (`meeting_audio_per_10_min`) set in Admin → Money → Task costs, never a constant, and quoted in copy with `data-task-cost`. Pasted text and attached transcript files stay free, as chat.
+7. **Retention:** ✅ **Agreed:** delete the **audio as soon as the transcript is saved** (a failed job deletes it after 24 hours). Keep the **raw transcript 90 days**, then delete it automatically; the **minutes** (summary, decisions, tasks, follow-up) stay until the user deletes the meeting or the account. The user can delete a transcript early from the meeting. Written into `privacy.html` and `dpa.html` in step 10.
+8. **Meeting bot:** ✅ **Agreed: stay upload-only for now.** A bot adds a vendor bill per hour, consent duties in every call, and the Google Cloud project still waiting from feature #16. Ship upload (§4 B), see how many people use it, then decide. Phone recordings and Zoom/Teams/Meet "save recording" files already cover most meetings.
+9. **Name:** ✅ **Agreed: rename to Note Taker.** "Minute Taker" is clear in Britain but reads formal or old-fashioned in the US. Options:
+   - **Note Taker** (chosen): short, a job title like the other assistants (Brand Designer, Video Producer), understood everywhere, close to the feature request's "Meeting Note Taker".
+   - **Meeting Secretary**: says exactly what it does; a little formal.
+   - Keep **Minute Taker**: no work, British flavour.
+   Renaming is its own small PR (catalogue row, public pages, help articles, tests), done before step 9 so the launch copy uses the final name.
+10. **Slack for action items:** ✅ **Agreed: keep Slack summary-only.** Slack is where people talk, not where tasks are tracked: a "task" there is just a message nobody can tick off, and the summary post already lists every action item with its owner. Keep the set-up dropdown to trackers (Jira, Asana, Notion) and leave Slack as the summary recipe.
