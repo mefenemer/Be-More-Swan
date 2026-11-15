@@ -1769,6 +1769,16 @@
       </div>
       <div id="content-mix-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
       <p class="text-xs text-gray-500 mt-3">Untick anything you never want. Your assistant rotates through the rest so no two posts in a row share a structure — keep a few ticked for a feed that reads like a person wrote it.</p>
+      <!-- "More lists" (Top lists, FR#34): onboardingContext.list_frequency = 'more' weights the Top list to
+           1 in 4 (src/utils/content-shapes.ts MORE_LISTS_EVERY), never two in a row. Shown only while
+           Top list is ticked; _renderContentMix / _collectContentMix in assistants.js. -->
+      <label id="content-mix-more-lists-row" class="hidden mt-4 flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 has-[:checked]:bg-emerald-50">
+        <input type="checkbox" id="edit_mix_more_lists" data-content-mix-more-lists class="mt-0.5 h-4 w-4 rounded text-emerald-700 focus:ring-emerald-700 border-gray-300">
+        <span class="min-w-0">
+          <span class="block text-sm font-bold text-gray-900">More lists</span>
+          <span class="block text-xs text-gray-500 mt-0.5">Write a Top list more often — up to 1 in every 4, and never two in a row. Off: about 1 in 8 to 11, like any other kind.</span>
+        </span>
+      </label>
     </div>
 
     <!-- Sales Context — feeds the auto-responder objection playbook + DM reply drafting -->

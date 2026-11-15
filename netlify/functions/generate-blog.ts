@@ -142,7 +142,7 @@ export default withLambda(async (event: HandlerEvent) => {
                     maxAttempts: 3,
                     triggerType: 'on_demand',
                     contentType: 'blog',
-                    contextPrompt: encodeInteractiveBrief({ topic: t.title, notes: t.brief ?? undefined }),
+                    contextPrompt: encodeInteractiveBrief({ topic: t.title, notes: t.brief ?? undefined, articleType: t.articleType }),
                     resultBlogPostId: post.id,
                 });
                 jobIds.push(jobId);

@@ -767,6 +767,15 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="gen-post-platforms" class="flex flex-wrap gap-2"></div>
       <p id="gen-post-platform-hint" class="text-xs text-gray-400 mt-1.5">Tap more than one to cross-post the same idea.</p>
     </div>
+    <!-- Shape (Top lists, FR#34): which kind of post THIS one is. Options from window.ContentShapes
+         (src/utils/content-shapes.ts) by gpRenderShapeOptions(); sent to generate-post as `shape`.
+         Blank = your assistant picks, as Autopilot does. The chat route has the same choice. -->
+    <div class="mb-4">
+      <label for="gen-post-shape" class="block text-xs font-semibold text-gray-700 mb-1.5">Shape <span class="font-normal text-gray-400">(optional)</span></label>
+      <select id="gen-post-shape" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+        <option value="">Let your assistant choose</option>
+      </select>
+    </div>
     <!-- Context prompt -->
     <div class="mb-4">
       <label class="block text-xs font-semibold text-gray-700 mb-1.5">Additional context <span class="font-normal text-gray-400">(optional)</span></label>
@@ -20421,6 +20430,7 @@ function gpBackToChooser() {
     // Reset AI mode controls.
     const ctx = document.getElementById('gen-post-context');
     if (ctx) ctx.value = '';
+    gpRenderShapeOptions();
     const ctxCount = document.getElementById('gen-post-ctx-count');
     if (ctxCount) ctxCount.textContent = '0';
     gpSetStatus('');
@@ -20715,6 +20725,16 @@ function gpSetStatus(msg, type) {
     el.textContent = msg;
 }
 
+/** Fill New post ▸ Shape from window.ContentShapes and reset it to "Let your assistant choose". */
+function gpRenderShapeOptions() {
+    const sel = document.getElementById('gen-post-shape');
+    if (!sel) return;
+    const shapes = (window.ContentShapes && window.ContentShapes.socialShapes) || [];
+    sel.replaceChildren(new Option('Let your assistant choose', ''),
+        ...shapes.map(s => new Option(`${s.label} — ${s.summary}`, s.key)));
+    sel.value = '';
+}
+
 async function gpSubmit() {
     if (!_gpCurrentAssistantId) {
         gpSetStatus('No assistant selected. Open an assistant first, then click Generate Post.', 'error');
@@ -20737,6 +20757,7 @@ async function gpSubmit() {
                 platforms: _gpSelectedPlatforms,
                 triggerType: 'on_demand',
                 contextPrompt: contextPrompt || undefined,
+                shape: document.getElementById('gen-post-shape')?.value || undefined,
             }),
         });
         const d = await res.json().catch(() => ({}));

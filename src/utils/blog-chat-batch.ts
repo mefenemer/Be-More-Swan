@@ -11,6 +11,12 @@
 // article is written on the worker's own time budget and lands in Review on the Blogs tab.
 //
 // Kept free of DB/SDK imports so both the orchestrator and the tests can use it.
+//
+// Top lists (FR#34): a topic may carry `articleType` (a BLOG_ARTICLE_TYPES key — 'list' for a Top list),
+// so "write me a top 7 on…" reaches the writer as that type explicitly instead of depending on how
+// the writer reads the title. An unknown key is dropped (the usual rotation), never passed on.
+
+import { articleTypeByKey } from './content-shapes';
 
 export const BLOG_BATCH_PROPOSAL_TYPE = 'blog_batch_proposal';
 
@@ -24,6 +30,8 @@ const MAX_BRIEF = 1500;
 export interface BlogBatchTopic {
     title: string;
     brief: string | null;
+    /** A BLOG_ARTICLE_TYPES key, when the article must be that type ('list' = Top list). */
+    articleType?: string;
 }
 
 export interface BlogBatchCard {
@@ -51,7 +59,8 @@ export function blogBatchFromUiElement(uiElement: unknown): BlogBatchCard | null
         const title = clean(o.title, MAX_TITLE);
         if (!title || seen.has(title.toLowerCase())) continue;
         seen.add(title.toLowerCase());
-        all.push({ title, brief: clean(o.brief, MAX_BRIEF) });
+        const type = articleTypeByKey(o.articleType);
+        all.push({ title, brief: clean(o.brief, MAX_BRIEF), ...(type ? { articleType: type.key } : {}) });
     }
     if (!all.length) return null;
     return {

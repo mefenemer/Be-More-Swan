@@ -17,6 +17,14 @@
 // Length is part of the shape on purpose: identical length is as recognisable as identical structure,
 // and the blog's word target stays explicit per type (see the measured-length note in blog-generate.ts
 // — without a stated target the model thins every section).
+//
+// Top lists (FR#34, docs/top-lists-plan.md, owner agreed 2026-11-15): the 'list' shape and 'list'
+// article type ARE the "Top list" — edited in place, never an extra entry (the social count must stay
+// 11). Their briefs carry TOP_LIST_RULES; the title's count is fixed in code after drafting
+// (src/utils/top-lists.ts). The owner's "More lists" setting (onboardingContext.list_frequency =
+// 'more') weights lists to 1 in 4 — never more, and never two in a row.
+
+import { TOP_LIST_RULES } from './top-lists';
 
 export interface PostShape {
     key: string;
@@ -32,7 +40,7 @@ export interface PostShape {
 export const SOCIAL_POST_SHAPES: PostShape[] = [
     { key: 'one_thought', label: 'Short thought', summary: 'One idea in a few lines', brief: 'A SHORT THOUGHT — one idea in 1–3 sentences (under 280 characters for the main caption). No list, no headings, no setup. Say it and stop.' },
     { key: 'story', label: 'Story', summary: 'A real moment told as a story', brief: 'A TRUE-TO-LIFE STORY — a moment told as a story: a scene, what happened, what changed. Flowing paragraphs, no bullet points. The lesson is implied or one line at the end, never a lecture. Use a real story ONLY if the context gives you one; otherwise tell the business\'s own everyday moment (a morning in the workshop, a delivery, a decision) or a scene plainly framed as hypothetical ("Picture…") — never an invented customer or their result.' },
-    { key: 'list', label: 'List', summary: 'A saveable numbered list', brief: 'A SAVEABLE LIST — a numbered list of 3–7 genuinely useful, specific items with a one-line intro. This is the ONE shape where a list is the point.' },
+    { key: 'list', label: 'Top list', summary: 'A saveable numbered "Top 5"-style list', brief: `A TOP LIST — the opening line names the real count and topic ("5 ways to…", "Top 3…"), then a numbered list of 3–7 genuinely useful, specific items, one full line each, numbered "1.", "2.", "3.". This is the ONE shape where a list is the point. ${TOP_LIST_RULES}` },
     { key: 'opinion', label: 'Opinion', summary: 'A clear position, argued', brief: 'AN OPINION — take a clear position on something in this industry and argue it in 2–4 short paragraphs. Acknowledge the other side in a line, then hold your view. No list.' },
     { key: 'question', label: 'Question', summary: 'A conversation starter', brief: 'A CONVERSATION STARTER — a short, genuine question to the audience with just enough context (2–4 lines) to make it easy and tempting to answer. Ends on the question.' },
     { key: 'behind_scenes', label: 'Behind the scenes', summary: 'How the business really works', brief: 'BEHIND THE SCENES — show something real about how the business works day to day: a decision, a mistake, a process, a small win. Candid, specific, unpolished. No list.' },
@@ -66,20 +74,60 @@ export function allowedSocialShapes(allowed?: unknown): PostShape[] {
     return list.length ? list : SOCIAL_POST_SHAPES;
 }
 
+/** "More lists" (profile ▸ Content mix): at most one list piece in this many, never two in a row. */
+export const MORE_LISTS_EVERY = 4;
+
+/** True when the owner chose "More lists" (onboardingContext.list_frequency). */
+export function wantsMoreLists(listFrequency: unknown): boolean {
+    return listFrequency === 'more';
+}
+
+/** A social shape by key — a shape the user picked for one post. null for anything unknown. */
+export function socialShapeByKey(key: unknown): PostShape | null {
+    return SOCIAL_POST_SHAPES.find((s) => s.key === key) ?? null;
+}
+
+export interface SocialShapeOptions {
+    /** The owner's "More lists" setting (onboardingContext.list_frequency). */
+    listFrequency?: unknown;
+    /** A shape picked for THIS post (New post ▸ Shape). Wins over the rotation and the Content mix. */
+    forced?: unknown;
+}
+
+/**
+ * Pick from `items` for rotation index `i`. With "More lists", every MORE_LISTS_EVERY-th index is
+ * the list and the rest rotate through the others, so lists are 1 in 4 and two consecutive indexes
+ * are never both lists. Without it (or with lists switched off), the plain rotation.
+ */
+function pickWithListWeight<T extends { key: string }>(items: T[], i: number, moreLists: boolean): T {
+    const at = (arr: T[], k: number) => arr[((k % arr.length) + arr.length) % arr.length];
+    const list = items.find((s) => s.key === 'list');
+    const others = items.filter((s) => s.key !== 'list');
+    if (!moreLists || !list || !others.length) return at(items, i);
+    return i % MORE_LISTS_EVERY === 0 ? list : at(others, i);
+}
+
 export function socialShapeFor(
     targetPublishDate: string | Date | null | undefined,
     allowed?: unknown,
+    opts: SocialShapeOptions = {},
 ): { shape: PostShape; length: string } {
     const shapes = allowedSocialShapes(allowed);
+    const moreLists = wantsMoreLists(opts.listFrequency);
+    // A shape picked for this one post wins, even one outside the Content mix — they asked for it.
+    const forced = socialShapeByKey(opts.forced);
     const t = targetPublishDate ? new Date(targetPublishDate).getTime() : NaN;
     if (!Number.isFinite(t)) {
-        const shape = shapes[Math.floor(Math.random() * shapes.length)];
-        return { shape, length: SOCIAL_LENGTHS[Math.floor(Math.random() * SOCIAL_LENGTHS.length)] };
+        const shape = forced ?? pickWithListWeight(shapes, Math.floor(Math.random() * shapes.length * MORE_LISTS_EVERY), moreLists);
+        const length = shape.key === 'one_thought' || shape.key === 'question'
+            ? SOCIAL_LENGTHS[0]
+            : SOCIAL_LENGTHS[Math.floor(Math.random() * SOCIAL_LENGTHS.length)];
+        return { shape, length };
     }
     const day = Math.floor(t / 86_400_000);
     const hour = Math.floor(t / 3_600_000);
     // Hour within the day is added so two slots on the same day get different shapes.
-    const shape = shapes[(day + (hour % 24)) % shapes.length];
+    const shape = forced ?? pickWithListWeight(shapes, day + (hour % 24), moreLists);
     // A length that follows the shape where the shape fixes it; otherwise rotated on a different cycle.
     const length = shape.key === 'one_thought' || shape.key === 'question'
         ? SOCIAL_LENGTHS[0]
@@ -88,13 +136,23 @@ export function socialShapeFor(
 }
 
 /** The prompt line for a social slot's shape. */
-export function socialShapeLine(targetPublishDate: string | Date | null | undefined, allowed?: unknown): string {
-    const { shape, length } = socialShapeFor(targetPublishDate, allowed);
-    return [
+export function socialShapeLine(targetPublishDate: string | Date | null | undefined, allowed?: unknown, opts: SocialShapeOptions = {}): string {
+    return socialShapeBlock(targetPublishDate, allowed, opts).line;
+}
+
+/** The shape chosen for a social slot AND its prompt line — the drafter needs the key to fix a list's count. */
+export function socialShapeBlock(
+    targetPublishDate: string | Date | null | undefined,
+    allowed?: unknown,
+    opts: SocialShapeOptions = {},
+): { shape: PostShape; line: string } {
+    const { shape, length } = socialShapeFor(targetPublishDate, allowed, opts);
+    const line = [
         `POST SHAPE for THIS post — ${shape.brief}`,
         length,
         'The shape decides the structure. Do NOT fall back on the default "hook → problem → three points → call to action" template, and do not use a list unless the shape above is a list. If the opening-hook style below fits awkwardly with this shape, keep the shape and adapt the hook.',
     ].join('\n');
+    return { shape, line };
 }
 
 // ── Blog ──────────────────────────────────────────────────────────────────────────────────────────
@@ -128,9 +186,9 @@ export const BLOG_ARTICLE_TYPES: ArticleType[] = [
     },
     {
         key: 'list',
-        label: 'List article',
-        summary: 'Numbered items with real substance',
-        brief: 'A LIST ARTICLE — a short intro, then 6–10 numbered items as level-2 headings, each with a paragraph or two of genuine substance (not one-liners), and a brief close. 900–1,200 words.',
+        label: 'Top list',
+        summary: 'A "7 ways to…" article, every item with real substance',
+        brief: `A TOP LIST ARTICLE — the title carries the real count ("7 ways to…", "Top 5…"). A short intro, then 5–10 numbered items as level-2 headings written "## 1. <heading>", each heading leading with the answer itself rather than a teaser, each item a paragraph or two of genuine substance (not one-liners), and a brief close. If it compares options, add a short "How we chose" line after the intro. 900–1,200 words. ${TOP_LIST_RULES}`,
     },
     {
         key: 'myth',
@@ -163,8 +221,19 @@ export const BLOG_ARTICLE_TYPES: ArticleType[] = [
  * this one, so consecutive posts always differ; rotating with a step coprime to the list length (3
  * over 8) means a reader sees guide → story → … rather than the list in order.
  */
-export function blogArticleTypeFor(sequence: number, allowed?: unknown): ArticleType {
+export function blogArticleTypeFor(sequence: number, allowed?: unknown, listFrequency?: unknown): ArticleType {
     const types = allowedArticleTypes(allowed);
+    // "More lists": every 4th post is the list; the rest rotate through the other types as below.
+    const list = types.find((t) => t.key === 'list');
+    const others = types.filter((t) => t.key !== 'list');
+    if (wantsMoreLists(listFrequency) && list && others.length) {
+        if (Math.floor(Math.max(0, sequence)) % MORE_LISTS_EVERY === 0) return list;
+        return rotateArticleTypes(others, sequence);
+    }
+    return rotateArticleTypes(types, sequence);
+}
+
+function rotateArticleTypes(types: ArticleType[], sequence: number): ArticleType {
     const n = types.length;
     // Step 3 is coprime with 8 (all types) but not with every subset — for a subset whose size is a
     // multiple of 3, step 1 keeps consecutive posts apart and still uses every allowed type.

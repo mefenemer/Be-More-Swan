@@ -151,7 +151,7 @@ async function main() {
     await check('every rule layer the page shows is really in the prompt of the path it names', () => {
         // export used by the layer → the identifier that must appear in its source path's file.
         const USES: Record<string, string> = {
-            standards: 'CONTENT_QUALITY_STANDARDS', platform_craft: 'platformCraftBlock(', shapes: 'socialShapeLine(', hooks: 'socialHookFor(',
+            standards: 'CONTENT_QUALITY_STANDARDS', platform_craft: 'platformCraftBlock(', shapes: 'socialShapeBlock(', hooks: 'socialHookFor(',
             email_craft: 'emailCraftBlock(', email_openings: 'emailOpeningBlock(', cta_email: 'CTA_BINDING_RULE',
             article_types: 'blogArticleTypeBlock(', blog_openings: 'blogOpeningBlock(', cta_blog: 'CTA_BINDING_RULE', blog_craft: 'BLOG_CRAFT',
             special_social: 'SPECIAL_CATEGORY_RULE', special_email: 'SPECIAL_CATEGORY_RULE', special_blog: 'SPECIAL_CATEGORY_RULE', special: 'SPECIAL_CATEGORY_RULE',
