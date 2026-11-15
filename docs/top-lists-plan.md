@@ -114,7 +114,7 @@ item has real substance. They fail as filler or as a "we're #1" ad.
   shapes, 8 article types). `MORE_LISTS_EVERY = 4`. A forced shape is supported (`socialShapeBlock`, `socialShapeByKey`).
 - Drafters: `process-content-jobs.ts` honours "More lists" and a picked shape, then fixes the caption and card headline
   count. `blog-generate.ts` honours "More lists" and fixes the post title plus the body's H1.
-- **New post ▸ Shape** (`workspace.html` `#gen-post-shape`) → `generate-post.ts` `shape` → `content_generation_jobs.post_shape`.
+- **Post editor ▸ Shape** above "Draft it for me" (`workspace.html` `#pce-ai-shape`; New post opens the editor, so this is the on-screen route) → `generate-post.ts` `shape` → `content_generation_jobs.post_shape`.
 - **Content mix ▸ More lists** (`assistant-detail.html` / `assistants.js`) → `onboardingContext.list_frequency = 'more'`,
   carried across whole-context saves.
 - Chat: a social draft may carry `"shape": "list"`, and its count is fixed before saving. A blog batch topic may carry

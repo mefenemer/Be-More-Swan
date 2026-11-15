@@ -203,11 +203,15 @@ check('generate-post validates the shape and stores it best-effort, outside Driz
     assert.match(read('db/z-post-shape.sql'), /ADD COLUMN IF NOT EXISTS post_shape TEXT/);
 });
 
-check('New post dialog offers Shape and sends it', () => {
+check('The editor\'s "Draft it for me" offers Shape and sends it', () => {
+    // New post → destinations → the editor is the ONLY on-screen route to an AI draft; the old
+    // generate-post sheet is never opened, which is where Shape first went (found 2026-11-15).
     const ws = read('workspace.html');
-    assert.match(ws, /<select id="gen-post-shape"/);
-    assert.match(ws, /function gpRenderShapeOptions\(\)/);
-    assert.match(ws, /shape: document\.getElementById\('gen-post-shape'\)\?\.value \|\| undefined/);
+    assert.match(ws, /<select id="pce-ai-shape"/);
+    assert.ok(!ws.includes('id="gen-post-shape"'), 'Shape must not sit in the unreachable sheet');
+    assert.match(ws, /function gpRenderShapeOptions\(\)[\s\S]{0,300}getElementById\('pce-ai-shape'\)/);
+    assert.match(ws, /shape: _pceEl\('pce-ai-shape'\)\?\.value \|\| undefined/);
+    assert.match(ws, /function _pceSyncForPost[\s\S]{0,2500}gpRenderShapeOptions\(\)/);
 });
 
 check('Content mix has "More lists", saved as list_frequency and carried across saves', () => {
