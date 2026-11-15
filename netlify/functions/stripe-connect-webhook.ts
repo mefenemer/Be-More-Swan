@@ -19,7 +19,7 @@ import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { STRIPE_API_VERSION } from '../../src/utils/stripe';
-import { recordPaidCheckout, syncConnectAccount } from '../../src/utils/site-shop';
+import { recordPaidCheckout, recordRefund, syncConnectAccount } from '../../src/utils/site-shop';
 import { depositPaid, releaseHold } from '../../src/utils/booking-deposits';
 import { balanceCharge, stayBalancePaid, stayModeFor, stayPaymentSettled } from '../../src/utils/stay-charges';
 import { formatMoney } from '../../src/utils/product-price';
@@ -114,6 +114,10 @@ export default withLambda(async (event) => {
             if (session.metadata?.bms_kind === 'booking_deposit' && Number.isInteger(id)) await releaseHold(db, id);
         } else if (evt.type === 'account.updated') {
             await syncConnectAccount(db, evt.data.object as Stripe.Account);
+        } else if (evt.type === 'charge.refunded') {
+            // A refund made in the business's own Stripe dashboard → the shop order shows it (site-shop.ts).
+            // ⚠️ The Connect endpoint must list charge.refunded in Stripe (Developers → Webhooks).
+            await recordRefund(db, evt.account, evt.data.object as Stripe.Charge);
         }
     } catch (err) {
         // A 500 makes Stripe retry, which is what we want for a database blip.

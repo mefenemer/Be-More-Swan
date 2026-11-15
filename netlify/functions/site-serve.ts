@@ -21,7 +21,7 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay, renderSiteShell } from '../../src/utils/site-render';
 import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
 import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
@@ -35,6 +35,7 @@ import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
+import { loadShopSettings, shopReady, shopTermsHtml, SHOP_TERMS_PATH } from '../../src/utils/shop-settings';
 import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
 import audiencePublic from './audience-public';
@@ -236,6 +237,14 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         const step = await bookStep({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));
         if ('location' in step) return { statusCode: 303, headers: { Location: step.location } as Record<string, string>, body: '' };
         return { statusCode: step.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: step.html };
+    }
+    // Delivery & returns (online shop Phase 0, shop-settings.ts): who sells, delivery, the right to
+    // cancel and the model cancellation form. Served whenever the details are filled in — a page of
+    // the site's own (a real page at that address wins), linked under every Buy button.
+    if (path === SHOP_TERMS_PATH && !definition.pages.some((p) => `/${p.slug}` === SHOP_TERMS_PATH)) {
+        const shop = await loadShopSettings(db, site.organisationId);
+        if (!shopReady(shop)) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSiteShell(definition, ctx, 'Delivery & returns', shopTermsHtml(shop!)) };
     }
     if (path === REVIEW_PATH) {
         const r = await reviewPage({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));

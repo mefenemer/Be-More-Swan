@@ -41,6 +41,7 @@ import { loadProductsBlock } from './org-products';
 import {
     applySiteOperation, applySiteOperationBatch, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
+import { loadShopSettings, missingFields } from './shop-settings';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { buildFillPrompt, siteFromFillReply } from './site-template-fill';
 import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHost } from './site-hosting';
@@ -527,6 +528,11 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         }
     }
     const acct = await connectAccountFor(db, orgId).catch(() => null);
+    const shopSet = await loadShopSettings(db, orgId);
+    const shopGaps = missingFields(shopSet);
+    lines.push(shopGaps.length
+        ? `Delivery & returns details (Orders tab, or the shop_settings card): NOT complete — missing ${shopGaps.join(', ')}. Buy buttons stay hidden until they are filled in, even with Stripe connected. Never invent an address or delivery promise: ask the owner.`
+        : `Delivery & returns details: complete — ${shopSet!.traderName}; ${shopSet!.returnsDays}-day returns, ${shopSet!.returnPostage === 'seller' ? 'business pays' : 'buyer pays'} return postage${shopSet!.exceptions.length ? `; exceptions: ${shopSet!.exceptions.join(', ')}` : ''}; delivery: "${clip(shopSet!.deliveryText || '', 100)}". The site has a /delivery-returns page.`);
     lines.push(acct?.chargesEnabled
         ? 'Payments: their Stripe account is connected — Buy buttons on a products section work on the live site.'
         : acct ? 'Payments: they started connecting Stripe but it is not finished — Buy buttons do not show yet. Point them to the Orders tab.'

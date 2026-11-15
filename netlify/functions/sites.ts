@@ -81,6 +81,7 @@ import { readWordsFile } from '../../src/utils/site-words';
 import { recheckAfterPublish } from '../../src/utils/site-audit-recheck';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
@@ -225,7 +226,12 @@ export default withLambda(async (event) => {
             blog: await siteBlogSummary(db, orgId).catch(() => ({ published: 0 })),
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
-                return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };
+                // Delivery & returns details (shop-settings.ts): Buy buttons show only once `missing` is empty.
+                const shop = await loadShopSettings(db, orgId);
+                return {
+                    connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin',
+                    shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
+                };
             })(),
             booking: await (async () => {
                 const b = await loadBookingSetup(db, orgId);
@@ -459,6 +465,15 @@ export default withLambda(async (event) => {
         }
     }
 
+    // Delivery & returns details — the same action for the Orders tab's form and the chat card.
+    if (action === 'shop_settings') {
+        if (role !== 'owner' && role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can change the shop\'s Delivery & returns details.' });
+        const input = (body.settings && typeof body.settings === 'object' ? body.settings : {}) as SettingsInput;
+        const r = await saveShopSettings(db, orgId, userId, input);
+        if (!r.ok) return json(400, { error: r.error });
+        return json(200, await view(site, [missingFields(r.value).length ? `Saved. Still needed before Buy buttons show: ${missingFields(r.value).join(', ')}.` : 'Saved. Your Delivery & returns page is ready.']));
+    }
+
     if (action === 'payments_refresh') {
         try { await refreshConnectAccount(db, orgId); } catch (err) { console.error('[sites] Stripe refresh failed', err instanceof Error ? err.message : err); }
         return json(200, await view(site));
@@ -658,7 +673,7 @@ export default withLambda(async (event) => {
         const rows = await db.select({
             id: siteOrders.id, itemName: siteOrders.itemName, quantity: siteOrders.quantity, amountTotal: siteOrders.amountTotal, currency: siteOrders.currency,
             customerName: siteOrders.customerName, customerEmail: siteOrders.customerEmail, shippingAddress: siteOrders.shippingAddress,
-            status: siteOrders.status, createdAt: siteOrders.createdAt,
+            status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt,
         }).from(siteOrders).where(and(eq(siteOrders.siteId, site.id), eq(siteOrders.organisationId, orgId))).orderBy(desc(siteOrders.createdAt));
         return json(200, { orders: rows });
     }

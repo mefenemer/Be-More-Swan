@@ -245,6 +245,7 @@ export const CARD_LABELS: Record<string, string> = {
     site_draft_request: 'Draft a new website',
     site_import_decision: 'Keep or drop imported pages',
     site_import_products: 'Import products from their old site',
+    shop_settings: 'Fill in the shop\'s Delivery & returns details',
     site_import_request: 'Import their existing website',
     site_picture: 'Put a picture on the website',
     site_publish_open: 'Open the Publish card (the owner publishes)',
