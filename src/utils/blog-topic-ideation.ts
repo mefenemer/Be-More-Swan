@@ -26,6 +26,7 @@ import { loadProductsBlock } from './org-products';
 import { pickBalancedTopic, topicLine } from './topic-balance';
 import { PILLAR_PROFILES } from './pillar-profiles';
 import { adaptForModel, replyText } from '../config/model-options';
+import { loadSearchQueries, searchQueriesPromptBlock } from './gsc-queries';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -167,6 +168,15 @@ export async function ideateBlogTopic(
         assistantId, organisationId, compiledBy: String(userId),
     });
 
+    // "Searches that found you" (docs/google-trends-plan.md Phase 1b): real searches that showed this
+    // business's own site, as SUGGESTED angles only. The topic choice above still leads; a directed slot
+    // (guidance, Inspo) ignores them. Fenced as data — they are strangers' text. Never throws.
+    const searchBlock = guidance || inspoTopic ? null : await loadSearchQueries(db, organisationId, 15)
+        .then((snap) => searchQueriesPromptBlock(snap,
+            'Optional angles: if one of these searches fits the topic for THIS post, you may write the post that answers it '
+            + '(a question someone typed is a strong title). Never force one in, and never write about a search outside what the business does.'))
+        .catch((err) => { console.error(`ideateBlogTopic: search queries for org ${organisationId} (non-fatal)`, err); return null; });
+
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const response = await anthropic.messages.create(adaptForModel({
@@ -185,7 +195,8 @@ export async function ideateBlogTopic(
                 '"title" is a compelling H1 under 70 characters. "topic" is one sentence on the angle ' +
                 'to take. "keywords" is 2-4 comma-separated search terms.' +
                 (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
-                (inspoBlock ? `\n\n${inspoBlock}` : ''),
+                (inspoBlock ? `\n\n${inspoBlock}` : '') +
+                (searchBlock ? `\n\n${searchBlock}` : ''),
             messages: [{ role: 'user', content: brief }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 

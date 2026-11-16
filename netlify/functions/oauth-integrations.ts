@@ -58,6 +58,7 @@ import {
 } from '../../src/utils/workspace-integrations';
 import { forgetMicrosoft, syncMicrosoft } from '../../src/utils/calendar-microsoft';
 import { forgetGoogle, GOOGLE_CALENDAR_SCOPE, syncGoogle } from '../../src/utils/calendar-google';
+import { forgetSearchQueries } from '../../src/utils/gsc-queries';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { YT_EXTENDED_SCOPES_FLAG, youtubeScopes } from '../../src/lib/youtube-extras';
@@ -269,6 +270,8 @@ export default withLambda(async (event) => {
         // The booking calendar: its busy times stop counting (events already written stay theirs).
         if (provider === 'outlook_calendar') await forgetMicrosoft(db, ctx.organisationId);
         if (provider === 'google_calendar') await forgetGoogle(db, ctx.organisationId);
+        // "Searches that found you" came from this connection: disconnecting forgets them too.
+        if (provider === 'searchconsole') await forgetSearchQueries(db, ctx.organisationId);
         return json(200, { success: true });
     }
 

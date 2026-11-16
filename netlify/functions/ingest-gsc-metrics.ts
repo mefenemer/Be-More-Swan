@@ -6,6 +6,9 @@
 // blog_posts.traffic_baseline, and — when impressions fall below a threshold of that peak —
 // raises a persistent "Update Ticket" notification for the author.
 //
+// Also stores "Searches that found you" — the top queries for the workspace's own property — in
+// search_console_queries (src/utils/gsc-queries.ts, db/z-search-console-queries.sql).
+//
 // Surfacing choice: a notification (persistent, user-facing, no auto-expiry) rather than
 // pending_actions, which auto-cancels after 24h and is coupled to the agent-action approval flow.
 
@@ -16,6 +19,7 @@ import { blogPosts, notifications, workspaceIntegrations } from '../../db/schema
 import { createNotification } from '../../src/utils/notify';
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
 import { evaluateDecay, gscDateRange, matchProperty } from '../../src/utils/gsc-decay';
+import { fetchTopQueries, loadCandidateUrls, pickOrgProperties, pruneOtherProperties, saveQuerySnapshot } from '../../src/utils/gsc-queries';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const DECAY_RATIO = Number(process.env.GSC_DECAY_RATIO || 0.6);   // flag at a 40% drop from peak
@@ -72,6 +76,7 @@ export default withLambda(async () => {
 
     let checked = 0;
     let flagged = 0;
+    let queriesSaved = 0;
 
     for (const { organisationId } of integrations) {
         if (organisationId == null) continue;
@@ -79,6 +84,22 @@ export default withLambda(async () => {
             const fresh = await getFreshAccessToken(db, organisationId, 'searchconsole');
             const properties = await listProperties(fresh.accessToken);
             if (!properties.length) continue;
+
+            // "Searches that found you" (docs/google-trends-plan.md Phase 1b): one extra call per
+            // property that belongs to this workspace. Its own try, so a failure here never stops the
+            // decay loop below, and a failed call keeps yesterday's list (fetchTopQueries → null).
+            try {
+                const own = pickOrgProperties(await loadCandidateUrls(db, organisationId), properties);
+                await pruneOtherProperties(db, organisationId, own);
+                for (const property of own) {
+                    const rows = await fetchTopQueries(fresh.accessToken, property, range);
+                    if (rows == null) continue;
+                    await saveQuerySnapshot(db, organisationId, property, rows, range);
+                    queriesSaved += rows.length;
+                }
+            } catch (err) {
+                console.error('[ingest-gsc-metrics] search queries, org', organisationId, err);
+            }
 
             const posts = await db
                 .select({
@@ -142,5 +163,5 @@ export default withLambda(async () => {
         }
     }
 
-    return { statusCode: 200, body: JSON.stringify({ orgs: integrations.length, checked, flagged }) };
+    return { statusCode: 200, body: JSON.stringify({ orgs: integrations.length, checked, flagged, queriesSaved }) };
 });
