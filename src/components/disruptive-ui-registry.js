@@ -2814,7 +2814,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('site_import_products', renderSiteImportProductsCard);
 
   // { type: 'shop_settings', settings: {…} } — the shop's Delivery & returns details (online shop
-  // Phase 0, shop-settings.ts): sites.ts shop_settings, the Orders tab form's same save. Shows only the
+  // Phase 0, shop-settings.ts): shop.ts shop_settings, the Shop tab / Orders tab forms' same save. Shows only the
   // fields the chat proposes; nothing is saved until they click.
   const SHOP_LABELS = { traderName: 'Business or trading name', traderAddress: 'Business address', contactEmail: 'Email for customers', contactPhone: 'Phone', deliveryText: 'How and when you deliver', vatNumber: 'VAT number', returnsDays: 'Days buyers have to cancel', returnPostage: 'Who pays return postage', exceptions: 'Can\'t be returned for a change of mind', extraTerms: 'Anything else buyers should know' };
   const SHOP_EX = { personalised: 'Personalised or made-to-order items', perishable: 'Items that go off quickly', sealed_hygiene: 'Sealed hygiene items once opened', sealed_media: 'Sealed recordings or software once opened', mixed: 'Items mixed with other things after delivery' };

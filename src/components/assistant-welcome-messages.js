@@ -57,6 +57,9 @@
     email_assistant: {
       working: 'I’m ready to sort your inbox so you can see what needs you first',
     },
+    shopkeeper: {
+      working: 'I’m ready to get your shop taking orders and keep them in one place',
+    },
     tier1_support_agent: {
       working: 'I’m ready to help you answer customer questions calmly and consistently',
     },

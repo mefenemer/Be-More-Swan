@@ -377,6 +377,15 @@ export async function recordRefund(db: Db, accountId: string, charge: Stripe.Cha
     return true;
 }
 
+/** The Shopkeeper's Shop tab (shop.ts): the same rule as markOrderDone across the whole workspace's
+ *  orders, since a Shopkeeper is not tied to one website. */
+export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<boolean> {
+    if (!Number.isInteger(orderId) || orderId <= 0) return false;
+    const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
+        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.organisationId, orgId), ne(siteOrders.status, 'refunded'))).returning({ id: siteOrders.id });
+    return !!row;
+}
+
 export async function markOrderDone(db: Db, orgId: number, siteId: number, orderId: number, done: boolean): Promise<boolean> {
     // A refunded order stays refunded: "Mark as done" never hides a refund.
     const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
