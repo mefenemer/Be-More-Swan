@@ -82,6 +82,8 @@ export async function listWatch(db: Db, orgId: number, assistantId: number): Pro
     const signals = await db.execute(sql`
         SELECT s.id, s.watch_id AS "watchId", w.company_name AS "companyName", s.kind, s.text, s.direction,
                s.occurred_on::text AS "occurredOn", s.url, w.assistant_record_id AS "recordId",
+               -- Only the first-website look (Phase 4) sets a source the tab labels; Companies House news keeps its link text.
+               CASE WHEN s.source = 'crtsh' THEN 'crtsh' END AS source,
                to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "seenAt"
           FROM lead_watch_signals s JOIN lead_watch w ON w.id = s.watch_id
          WHERE s.organisation_id = ${orgId} AND s.ai_assistant_id = ${assistantId}

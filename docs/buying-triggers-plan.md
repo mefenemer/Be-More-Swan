@@ -190,8 +190,24 @@ for ad tags (Meta Pixel, Google Ads/gtag conversion, TikTok Pixel) and booking/e
 watched leads with no website (the first certificate for their name = "launched a website", which also starts #30's
 enrichment early instead of waiting for day 14/45).
 
+> **Built 2026-11-16** (branch `feat/buying-triggers-phase4`), on top of the website watch that Why now Phase 2
+> added (`lead_site_watch`, src/utils/lead-site-watch.ts) rather than a second one. `db/z-site-markers.sql` (adds 3
+> columns, both DBs; until it runs both checks skip quietly).
+> - **Tools added to the home page** (src/lib/triggers/site-watch.ts `SITE_MARKERS`, narrow literal markers): Meta
+>   Pixel / Google Ads conversion / TikTok Pixel ("may be starting to advertise"), booking tools (Calendly, Acuity,
+>   Fresha, Treatwell, SimplyBook, OpenTable, ResDiary), shops (Shopify, WooCommerce, Square Online, Ecwid, Stripe),
+>   and a change of website builder (one neutral signal). Read in the same weekly site look; first read silent; a
+>   removed tool is never reported; a home page under 1,500 characters is never a baseline.
+> - **A first website** (src/utils/lead-launch-watch.ts): watched companies with no website on record get one crt.sh
+>   search a month, paced 2 s apart, up to 60 a run. Only a domain that is exactly the company's name with .co.uk,
+>   .uk or .com counts, and only when its first certificate came after watching began. Worded "may be theirs".
+> - Not done: #30's enrichment kick-off (needs #30 Phase 1), and adding the ad tags to lead-intel.ts PLATFORM_MARKERS
+>   (the watch keeps its own list).
+
 **Phase 5: Hiring source.** Reed API (UK), once its terms are confirmed in writing: "Find local businesses hiring
 {role}". Filter out recruitment agencies (Reed flags them). ATS boards keep doing the watching.
+
+> The email to Reed is drafted for the owner to send: docs/reed-api-terms-email.md (2026-11-16).
 
 **Phase 6 (if decision 5 = yes): Maps signals.** Serper place lookup per watched local lead every 14 days; store our own
 counts only (rating, review count, first seen). Signals: review spike (≥ 2× the 90-day rate), rating drop of 0.3 or
