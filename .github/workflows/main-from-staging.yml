@@ -1,0 +1,69 @@
+# Main only from staging — every PR into main must come from `staging`, or be a hotfix PR.
+#
+# ── Why ─────────────────────────────────────────────────────────────────────────────────────────
+# Staging is where things are checked before production, so main must never hold work staging
+# lacks. Between 2026-11-12 and 2026-11-15, seven PRs went straight into main (#575, #584, #585,
+# #587, #618, #624, #631). The cost showed up on 2026-11-15: run-site-domain-checks existed on main
+# but not on the staging deploy, so staging-crons.yml got a 404 on every run, never saved its
+# timestamps, and staging's queues stopped draining. Shop code was on prod and missing from staging
+# until #638 synced it back.
+#
+# ── What passes ─────────────────────────────────────────────────────────────────────────────────
+#  1. head = `staging`  → the normal promote.
+#  2. head = `hotfix/issue-<n>` from this repo → opened by hotfix-pr.yml, which copies ONE fix that
+#     is already merged into staging. Nothing on it is missing from staging.
+#  3. anything else with the `direct-to-main` label → a deliberate exception. It still passes with a
+#     warning: merge main back into staging straight after, or staging drifts again.
+# Anything else fails.
+#
+# ── Enforcement ─────────────────────────────────────────────────────────────────────────────────
+# This only blocks a merge once "Main only from staging" is a required status check in the
+# "Protect main" ruleset (Settings ▸ Rules). Until then it is a red cross a person can merge past.
+#
+# Every value from the event goes through env vars, never ${{ }} inside the script, so a branch name
+# cannot become shell.
+
+name: Main only from staging
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Main only from staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check where this PR comes from
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          same_repo=false
+          [ "$HEAD_REPO" = "$THIS_REPO" ] && same_repo=true
+
+          if $same_repo && [ "$HEAD_REF" = "staging" ]; then
+            echo "✅ Promote from staging."
+            exit 0
+          fi
+          if $same_repo && [[ "$HEAD_REF" =~ ^hotfix/issue-[0-9]+$ ]]; then
+            echo "✅ Hotfix PR from hotfix-pr.yml (one fix already merged into staging)."
+            exit 0
+          fi
+          if echo "$LABELS" | grep -q '"direct-to-main"'; then
+            echo "::warning::'$HEAD_REF' goes straight to main under the direct-to-main label. Merge main back into staging straight after, or staging will lack this work."
+            exit 0
+          fi
+
+          echo "::error::PRs into main must come from 'staging' (or a hotfix/issue-<n> branch). This one is from '$HEAD_REF'."
+          echo "Retarget this PR at 'staging', merge it there, and promote staging → main."
+          echo "For a deliberate exception, add the 'direct-to-main' label, then merge main back into staging afterwards."
+          exit 1
