@@ -25,7 +25,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, aiBlueprints } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { resolveBaseUrl } from '../../src/utils/base-url';
+import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { enqueueYoutubeShortJob } from '../../src/utils/schedule-gap-fill';
 import { resolveLiveSocialConnections } from '../../src/utils/live-social-connections';
 import { isPlatformOptedInForAssistant } from '../../src/utils/assistant-platform-selection';
@@ -36,35 +36,6 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
-}
-
-/**
- * Poke the queue so the caller sees a draft in a minute rather than at the next cron tick.
- *
- * Fire-and-observe: the drain can legitimately run longer than we are willing to wait, so we abort
- * the CLIENT after 5s and report success anyway. Aborting our end does not stop the server — the
- * request has already left — so the drain finishes regardless. What we must not do is skip the
- * await entirely: Lambda freezes the environment when the handler returns, and a request that never
- * left the box would leave the job sitting there with the caller told it was running.
- */
-async function pokeQueue(baseUrl: string | null): Promise<boolean> {
-    const secret = process.env.CRON_TRIGGER_SECRET;
-    if (!baseUrl || !secret) return false;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    try {
-        await fetch(`${baseUrl}/.netlify/functions/run-content-jobs`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
-            signal: controller.signal,
-        });
-        return true;
-    } catch (err) {
-        // An abort here means the drain is still running, which is the expected case.
-        return (err as Error)?.name === 'AbortError';
-    } finally {
-        clearTimeout(timer);
-    }
 }
 
 export default withLambda(async (event) => {
@@ -159,7 +130,9 @@ export default withLambda(async (event) => {
         triggerType: 'on_demand',
     });
 
-    const drained = await pokeQueue(resolveBaseUrl(event.headers as Record<string, string | undefined>));
+    // Start drafting now rather than at the next cron tick. The shared poke carries the jobId, so the
+    // background drain claims this Short before any older queued work (trigger-drain.ts).
+    const drained = await triggerContentDrain(event.headers as Record<string, string | undefined>, jobId, 'trigger-youtube-short');
 
     return json(202, {
         jobId,

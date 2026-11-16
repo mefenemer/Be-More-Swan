@@ -136,3 +136,23 @@ export function triggerDiscoveryDrain(
 ): Promise<boolean> {
     return poke('run-discovery-jobs-background', headers, jobId, caller, extra);
 }
+
+/**
+ * Start the right drain after a gap-fill queued a BATCH of drafts from a settings save
+ * (set-draft-horizon, update-assistant-context). Without it the batch sat at `queued` until something
+ * else poked the queue — minutes on production's ten-minute cron, and on staging until the next
+ * staging-crons.yml tick landed, which GitHub delivers every few hours. Measured on staging
+ * 2026-11-15: five scheduled jobs queued at 11:40:50Z were not touched until an unrelated on-demand
+ * draft poked the queue at 11:42:36Z.
+ *
+ * A no-op when nothing was queued. Blog gap-fills queue blog jobs, which only the blog drain claims.
+ */
+export function triggerGapFillDrain(
+    headers: Record<string, string | undefined> | undefined,
+    args: { enqueued: number; blog: boolean; assistantId: number | string },
+    caller: string,
+): Promise<boolean> {
+    if (!(args.enqueued > 0)) return Promise.resolve(false);
+    const label = `gap-fill:${args.assistantId}`;
+    return args.blog ? triggerBlogDrain(headers, label, caller) : triggerContentDrain(headers, label, caller);
+}

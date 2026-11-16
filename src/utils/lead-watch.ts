@@ -77,6 +77,21 @@ export function watchingOn(enabled: boolean | null | undefined): boolean {
     return enabled !== false;
 }
 
+const columnCache = new Map<string, boolean>();
+/**
+ * Does this column exist yet? For columns a later SQL file adds (db/z-site-markers.sql): the code ships
+ * before the owner runs it, and must keep working without it. Cached per instance once found.
+ */
+export async function hasColumn(db: Db, table: string, column: string): Promise<boolean> {
+    const key = `${table}.${column}`;
+    if (columnCache.get(key)) return true;
+    const rows = await db.execute(sql`
+        SELECT 1 FROM information_schema.columns WHERE table_name = ${table} AND column_name = ${column} LIMIT 1`) as unknown[];
+    const found = rows.length > 0;
+    if (found) columnCache.set(key, true);
+    return found;
+}
+
 export function isMissingTable(err: unknown): boolean {
     const e = err as { code?: string; cause?: { code?: string } } | null;
     return e?.code === '42P01' || e?.cause?.code === '42P01';
@@ -229,7 +244,7 @@ export async function syncWatchList(db: Db): Promise<SyncResult> {
 
 // ── Recording a signal ───────────────────────────────────────────────────────────────────────────
 
-interface WatchRow {
+export interface WatchRow {
     id: number;
     organisation_id: number;
     ai_assistant_id: number;
@@ -247,7 +262,7 @@ export type SignalHooks = {
 };
 
 /** Saves one signal. Returns false when it was already recorded (the unique key). */
-export async function recordSignal(db: Db, row: WatchRow, sig: WatchSignal, source: 'ch_check' | 'ch_stream', hooks: SignalHooks = defaultHooks): Promise<boolean> {
+export async function recordSignal(db: Db, row: WatchRow, sig: WatchSignal, source: 'ch_check' | 'ch_stream' | 'crtsh', hooks: SignalHooks = defaultHooks): Promise<boolean> {
     const inserted = await db.execute(sql`
         INSERT INTO lead_watch_signals (watch_id, organisation_id, ai_assistant_id, kind, text, direction, occurred_on, ref, url, source)
         VALUES (${row.id}, ${row.organisation_id}, ${row.ai_assistant_id}, ${sig.kind}, ${sig.text}, ${sig.direction},

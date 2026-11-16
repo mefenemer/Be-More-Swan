@@ -150,7 +150,7 @@
 
   // Website and SEC news (Why now Phase 2, src/utils/lead-site-watch.ts) carry a `source`; Companies House
   // news does not, and keeps its original link text.
-  const SOURCE_LINK = { team_page: 'Open their team page', careers: 'See the job', sec: 'Check on SEC EDGAR' };
+  const SOURCE_LINK = { team_page: 'Open their team page', careers: 'See the job', sec: 'Check on SEC EDGAR', site: 'Open their website', crtsh: 'Open the website' };
 
   function newsHtml() {
     const signals = state.view.signals || [];

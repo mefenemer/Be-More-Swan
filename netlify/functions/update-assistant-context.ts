@@ -18,6 +18,7 @@ import { normaliseAssistantColor } from '../../src/config/assistant-colors';
 import { INSPO_TOPIC_CONFIG_KEY } from '../../src/utils/inspo-topics';
 import { TREND_ANGLE_CONFIG_KEY } from '../../src/utils/trend-angles';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { triggerGapFillDrain } from '../../src/utils/trigger-drain';
 import { applySetupPatch } from '../../src/utils/chat-setup-field';
 
 /** Everything the post-save gap-fill needs, captured from inside the write transaction. */
@@ -344,6 +345,11 @@ export default withLambda(async (event) => {
                         ? await enqueueScheduleGapFill(db, { ...common, configuration: target.configuration })
                         : { enqueued: 0 };
                 draftsQueued = result.enqueued;
+                // draftsQueued tells the user their assistant has started — so start it now, not at
+                // the next cron tick. Best-effort: a failed poke leaves the batch for the cron.
+                await triggerGapFillDrain(event.headers as Record<string, string | undefined>,
+                    { enqueued: draftsQueued, blog: BLOG_WRITER_ROLE_KEYS.includes(target.roleKey), assistantId: target.id },
+                    'update-assistant-context');
             } catch (e) {
                 console.warn('[update-assistant-context] gap-fill failed (context still saved):',
                     e instanceof Error ? e.message : e);

@@ -19,7 +19,13 @@ export type WatchSignalKind =
     | 'charge_registered'
     | 'owner_added'
     | 'owner_left'
-    | 'company_closing';
+    | 'company_closing'
+    // Phase 4 (src/lib/triggers/site-watch.ts): the company's website.
+    | 'ad_tracking_added'
+    | 'booking_added'
+    | 'shop_added'
+    | 'website_rebuilt'
+    | 'website_launched';
 
 export interface WatchSignal {
     kind: WatchSignalKind;

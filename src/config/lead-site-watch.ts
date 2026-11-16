@@ -14,8 +14,10 @@
 //
 // Pure. No I/O.
 
-export type SiteSignalSource = 'team_page' | 'careers' | 'sec';
-export type SiteSignalKind = 'new_team_member' | 'new_job' | 'careers_page' | 'raised_money' | 'fundraising_update' | 'sec_event';
+export type SiteSignalSource = 'team_page' | 'careers' | 'sec' | 'site';
+export type SiteSignalKind = 'new_team_member' | 'new_job' | 'careers_page' | 'raised_money' | 'fundraising_update' | 'sec_event'
+    // Buying triggers Phase 4 (src/lib/triggers/site-watch.ts): a tool added to the home page.
+    | 'ad_tracking_added' | 'booking_added' | 'shop_added' | 'website_rebuilt';
 export type SiteDirection = 'positive' | 'neutral' | 'negative';
 
 /** One change, in the Watch list's signal shape plus where it came from. */

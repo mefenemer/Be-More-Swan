@@ -16,6 +16,7 @@
 //                           requires a contact in the User-Agent. ⚠️ An ops mailbox, NEVER a customer's.
 //   LEAD_WATCH_TIMEOUT_MS — per request (default 8000)
 
+import { detectSiteMarkers, MIN_HOMEPAGE_CHARS } from './triggers/site-watch';
 import * as cheerio from 'cheerio';
 import { safeFetchText, USER_AGENTS } from '../utils/safe-fetch';
 import { discoverSitePaths } from './discovery-enrich';
@@ -242,6 +243,9 @@ export interface SiteLook {
     /** US states printed on the home page, for the EDGAR match. */
     usStates: string[];
     homeText: string;
+    /** Buying triggers Phase 4: tools on the home page (site-watch.ts SITE_MARKERS). Null when the page was
+     *  too short to trust (a parked page or a JS shell), so the old snapshot is kept. */
+    markers: string[] | null;
 }
 
 /**
@@ -249,10 +253,11 @@ export interface SiteLook {
  * one, the job board. At most ~5 fetches. Never throws.
  */
 export async function lookAtSite(domain: string, noCareers: string, usStatesInText: (t: string) => string[]): Promise<SiteLook> {
-    const look: SiteLook = { reached: false, teamUrl: null, team: null, careersHash: null, careersSource: null, careersUrl: null, jobs: [], usStates: [], homeText: '' };
+    const look: SiteLook = { reached: false, teamUrl: null, team: null, careersHash: null, careersSource: null, careersUrl: null, jobs: [], usStates: [], homeText: '', markers: null };
     const home = await readPage(domain, '/');
     if (!home) return look;
     look.reached = true;
+    look.markers = home.html.length >= MIN_HOMEPAGE_CHARS ? detectSiteMarkers(home.html) : null;
     const $ = cheerio.load(home.html);
     $('script, style, noscript').remove();
     look.homeText = $('body').text().replace(/\s+/g, ' ').trim().slice(0, 20000);
