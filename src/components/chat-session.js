@@ -36,10 +36,30 @@
   const MAX_MESSAGE_CHARS = 4000; // mirrors the orchestrator's server-side cap
   // Roles whose chat takes files (route flag `acceptsAttachments` in chat-orchestrator.ts). Pictures
   // go into the media library first (media-picker.js upload); documents are read on the server.
-  const ATTACH_ROLES = new Set(['website_assistant']);
+  // The Meeting Note Taker takes transcripts only (`transcriptAttachments`, meeting-transcript.ts):
+  // no pictures, and Zoom/Teams/Meet caption files (.vtt/.srt) as well as documents.
+  const ATTACH_ROLES = {
+    website_assistant: {
+      pictures: true,
+      docTypes: /\.(docx|pdf|txt|md)$/i,
+      accept: 'image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain',
+      title: 'Add pictures — upload, your library, find stock or create one — or attach a document',
+      srLabel: 'Attach pictures or documents',
+      placeholder: 'Type your message, or attach pictures and documents…',
+      refused: 'use pictures, Word documents, PDFs or text files',
+    },
+    meeting_note_taker: {
+      pictures: false,
+      docTypes: /\.(docx|pdf|txt|md|vtt|srt)$/i,
+      accept: '.txt,.docx,.pdf,.vtt,.srt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/vtt',
+      title: 'Attach a meeting transcript (.txt, .docx, .pdf, or a .vtt/.srt file from Zoom, Teams or Google Meet)',
+      srLabel: 'Attach a meeting transcript',
+      placeholder: 'Paste your meeting notes, or attach the transcript…',
+      refused: 'attach the transcript as a .txt, .docx, .pdf, .vtt or .srt file',
+    },
+  };
   const ATTACH_MAX = 5;
   const DOC_MAX_BYTES = 4 * 1024 * 1024;
-  const DOC_TYPES = /\.(docx|pdf|txt|md)$/i;
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -100,7 +120,8 @@
     let chatSessionId = props.chatSessionId ?? null;
     const assistantId = props.assistantId ?? null;
     let sending = false;
-    const canAttach = props.readOnly !== true && ATTACH_ROLES.has(props.roleKey);
+    const attachCfg = Object.prototype.hasOwnProperty.call(ATTACH_ROLES, props.roleKey) ? ATTACH_ROLES[props.roleKey] : null;
+    const canAttach = props.readOnly !== true && !!attachCfg;
     /** Files waiting to go with the next message: { file, kind: 'image' | 'document' }. */
     let pending = [];
 
@@ -163,11 +184,11 @@
           ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
           <div class="mb-2" data-chat-ref style="display:none"></div>
           <form class="flex items-end gap-3" data-chat-form>
-            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Add pictures — upload, your library, find stock or create one — or attach a document">
-              <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
-              <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="${escapeHtml(attachCfg.title)}">
+              <span aria-hidden="true">📎</span><span class="sr-only">${escapeHtml(attachCfg.srLabel)}</span>
+              <input type="file" multiple hidden data-chat-attach accept="${escapeHtml(attachCfg.accept)}">
             </label>` : ''}
-            <textarea rows="${Number(props.composerRows) > 1 ? Number(props.composerRows) : 1}" placeholder="${escapeHtml(props.placeholder || (canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
+            <textarea rows="${Number(props.composerRows) > 1 ? Number(props.composerRows) : 1}" placeholder="${escapeHtml(props.placeholder || (canAttach ? attachCfg.placeholder : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
@@ -249,8 +270,10 @@
     function addFiles(files) {
       for (const file of files) {
         if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
-        const kind = /^image\//.test(file.type) ? 'image' : DOC_TYPES.test(file.name) || file.type === 'application/pdf' || /^text\//.test(file.type) ? 'document' : null;
-        if (!kind) { showError(`"${file.name}" can't be attached — use pictures, Word documents, PDFs or text files.`); continue; }
+        const isImage = /^image\//.test(file.type);
+        const kind = isImage ? (attachCfg.pictures ? 'image' : null)
+          : attachCfg.docTypes.test(file.name) || file.type === 'application/pdf' || /^text\//.test(file.type) ? 'document' : null;
+        if (!kind) { showError(`"${file.name}" can't be attached — ${attachCfg.refused}.`); continue; }
         if (kind === 'document' && file.size > DOC_MAX_BYTES) { showError(`"${file.name}" is too large (the limit is 4 MB).`); continue; }
         pending.push({ file, kind });
       }
@@ -285,6 +308,8 @@
     // library, "Ask … to find stock", "Ask … to create one" (description optional) — and documents.
     // Without that window on the page it falls back to the computer's own file chooser.
     function onAttachClick(e) {
+      // No pictures here (meeting transcripts): the computer's own file chooser, filtered by `accept`.
+      if (!attachCfg.pictures) return;
       if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') return;
       e.preventDefault();
       window.MediaPicker.open({

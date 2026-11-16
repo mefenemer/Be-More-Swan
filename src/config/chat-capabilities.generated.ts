@@ -136,10 +136,13 @@ export const GENERATED_CHAT_MANIFEST = {
             "craftInChat": []
         },
         "meeting_note_taker": {
-            "flags": [],
+            "flags": [
+                "acceptsAttachments",
+                "transcriptAttachments"
+            ],
             "contentSnapshot": null,
             "offersOwnCards": true,
-            "maxTokens": 2048,
+            "maxTokens": 4096,
             "cards": [
                 "action_item_assignment"
             ],
@@ -286,6 +289,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesMentorSnapshot",
         "usesSiteSnapshot",
         "acceptsAttachments",
+        "transcriptAttachments",
         "contentSnapshot",
         "usesAudienceSnapshot"
     ],

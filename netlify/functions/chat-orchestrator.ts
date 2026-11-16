@@ -328,6 +328,9 @@ interface AssistantRoute {
     usesSiteSnapshot?: boolean;
     /** The chat takes pictures and documents (paperclip / drag / paste — chat-session.js). Read per turn. */
     acceptsAttachments?: boolean;
+    /** Attachments are meeting transcripts (meeting-transcript.ts): documents only, .vtt/.srt accepted,
+     *  up to ~2 hours of talk, and the newest one reaches the model in full. Needs acceptsAttachments. */
+    transcriptAttachments?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** When true the handler reads the organisation's Audience for this turn (rc.audienceSnapshot). */
@@ -1439,6 +1442,29 @@ async function persistSocialPostDraft(
 }
 
 /** Best-effort upsert of a reply's hub records — a persistence failure never fails the turn. */
+/** The role a chat turn is for, from its session or (a new conversation) its assistant. Org-scoped. */
+async function attachmentRoleKey(
+    db: ReturnType<typeof getDb>,
+    orgId: number,
+    body: { chatSessionId?: unknown; aiAssistantId?: unknown },
+): Promise<string | null> {
+    try {
+        let assistantId = Number(body.aiAssistantId);
+        if (body.chatSessionId !== undefined) {
+            const [row] = await db.select({ aiAssistantId: chatSessions.aiAssistantId }).from(chatSessions)
+                .where(and(eq(chatSessions.id, Number(body.chatSessionId)), eq(chatSessions.organisationId, orgId))).limit(1);
+            assistantId = row?.aiAssistantId ?? NaN;
+        }
+        if (!Number.isInteger(assistantId)) return null;
+        const [row] = await db.select({ roleKey: masterAssistants.roleKey }).from(aiAssistants)
+            .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+            .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+        return row?.roleKey ?? null;
+    } catch {
+        return null;
+    }
+}
+
 async function persistHubRecords(
     db: ReturnType<typeof getDb>,
     orgId: number,
@@ -2603,7 +2629,10 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // matching the ActionItemAssignmentCard renderer in disruptive-ui-registry.js.
     meeting_note_taker: {
         model: DEFAULT_MODEL,
-        maxTokens: 2048,
+        // A 60-minute transcript's minutes, attendees and follow-up outgrew 2048 (finish plan step 4).
+        maxTokens: 4096,
+        acceptsAttachments: true,
+        transcriptAttachments: true,
         buildRolePrompt: (rc) => {
             const meetingPlatform = onboardingValue(rc, 'meetingPlatform');
             const taskDestination = onboardingValue(rc, 'taskDestination');
@@ -2628,7 +2657,9 @@ Attribution rules: assignee is the person the meeting content implies owns the t
 
 Decisions are firm conclusions the group agreed on ("we're going with vendor A", "launch slips to Q4") — not open discussion or individual opinions; return an empty array when the meeting reached none. Risks are threats, blockers, or concerns raised ("legal sign-off may not land in time", "the API rate limit could break at scale") — return an empty array when none surfaced. Never invent decisions or risks that are not in the source material.
 
-When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their transcript or notes. Long transcripts may arrive across several consecutive messages — wait until the user says the transcript is complete (or clearly stops pasting) before summarising, and say you are ready for the next chunk in the meantime.
+When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their notes or attach the transcript file (.txt, .docx, .pdf, or a .vtt/.srt caption file from Zoom, Teams or Google Meet) with the paperclip. Pasted transcripts may arrive across several consecutive messages — wait until the user says the transcript is complete (or clearly stops pasting) before summarising, and say you are ready for the next chunk in the meantime. An ATTACHED transcript is always complete: write it up at once.
+
+${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}
 
 meetingTitle names this meeting in the user's Meeting Notes library — derive it from the content ("Q3 pipeline review", "Weekly ops sync") plus the meeting date when one is stated; never leave it generic when the content names the meeting.
 
@@ -3188,7 +3219,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // theirs, is refused with nothing charged.
     let attached: AcceptedAttachment[] = [];
     if (Array.isArray(body.attachments) && body.attachments.length) {
-        try { attached = await readAttachments(db, orgId, body.attachments); }
+        // Which assistant the files are for decides how they are read (a transcript may be far longer
+        // than a website page). Looked up here, org-scoped, because the session is resolved further down.
+        const transcripts = !!ROUTES[await attachmentRoleKey(db, orgId, body) ?? '']?.transcriptAttachments;
+        try { attached = await readAttachments(db, orgId, body.attachments, { transcripts }); }
         catch (err) { return json(400, { error: err instanceof Error ? err.message : 'Those files couldn\'t be attached.' }); }
         const words = attached.filter((a) => a.text).map((a) => a.text).join('\n\n');
         if (words) {
@@ -3396,7 +3430,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             .catch((err) => console.error('[chat-orchestrator] could not save attachments', err));
     }
     const attachmentsBlock = route.acceptsAttachments
-        ? await buildAttachmentsBlock(db, orgId, session.id).catch((err) => {
+        ? await buildAttachmentsBlock(db, orgId, session.id, { transcripts: !!route.transcriptAttachments }).catch((err) => {
             console.error('[chat-orchestrator] attachments block failed:', err);
             return null;
         })
