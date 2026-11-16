@@ -159,6 +159,7 @@ import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-invent
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { buildMeetingsSnapshot, meetingActionFromUiElement, meetingActionsPromptBlock, resolveMeetingActionProposal } from '../../src/utils/chat-meeting-action';
 import { MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt, meetingHubRecord, normaliseMinutesCard } from '../../src/utils/meeting-minutes';
 import { persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
@@ -294,6 +295,9 @@ interface RouteContext {
     /** The shared Audience — counts, segments, tags, forms, custom fields — read per turn for routes
      *  with usesAudienceSnapshot. See src/utils/chat-audience.ts. */
     audienceSnapshot?: string | null;
+    /** This Meeting Note Taker's meetings by id — read per turn for routes with usesMeetingsSnapshot.
+     *  src/utils/chat-meeting-action.ts. */
+    meetingsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -336,6 +340,8 @@ interface AssistantRoute {
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** When true the handler reads the organisation's Audience for this turn (rc.audienceSnapshot). */
     usesAudienceSnapshot?: boolean;
+    /** When true the handler reads this assistant's meetings for this turn (rc.meetingsSnapshot). */
+    usesMeetingsSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -2576,6 +2582,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         maxTokens: MEETING_MINUTES_MAX_TOKENS,
         acceptsAttachments: true,
         transcriptAttachments: true,
+        usesMeetingsSnapshot: true,
         // The rules and JSON shape are shared with the "New meeting" form (src/utils/meeting-minutes.ts).
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
@@ -2588,6 +2595,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
 ${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}`,
                 trailingBlock: spreadsheetFallback(onboardingValue(rc, 'meetingPlatform'), 'Meeting Notes', 'a meeting transcript or rough notes'),
             }),
+            // Chat only: its meetings, and the confirm card that acts on one (finish plan step 6).
+            meetingActionsPromptBlock(rc.meetingsSnapshot ?? null),
         ].join('\n\n'),
         parseResponse: parseStructuredReply,
     },
@@ -3401,6 +3410,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
     // Per turn, like the others: a contact added on the Audience page a moment ago must be counted.
     const audienceSnapshot = route.usesAudienceSnapshot ? await buildAudienceSnapshot(db, orgId) : null;
+    // Per turn: a meeting approved or edited in the Inbox a moment ago must not be offered again.
+    const meetingsSnapshot = route.usesMeetingsSnapshot ? await buildMeetingsSnapshot(db, orgId, session.aiAssistantId) : null;
 
     // Per turn: an edit made on the Website tab a moment ago must be visible to the next message.
     const siteSnapshot = route.usesSiteSnapshot
@@ -3473,6 +3484,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         videosSnapshot,
         mailboxSnapshot,
         audienceSnapshot,
+        meetingsSnapshot,
         mentorSnapshot,
         attachmentsBlock,
     });
@@ -3840,6 +3852,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (t === 'action_item_assignment' || t === 'ActionItemAssignmentCard') uiElement = normaliseMinutesCard(uiElement);
         }
         let content = parsed.content;
+        // An existing meeting (src/utils/chat-meeting-action.ts): rebuilt from its row, so a made-up id or a
+        // meeting of another assistant's draws nothing. The click is the Inbox's own PATCH.
+        const meetingActionReq = route === ROUTES.meeting_note_taker ? meetingActionFromUiElement(uiElement) : null;
+        if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === 'meeting_action_proposal') {
+            uiElement = meetingActionReq ? await resolveMeetingActionProposal(db, orgId, session.aiAssistantId, meetingActionReq) : null;
+            if (!uiElement) content = 'I couldn’t find that meeting among this assistant’s meetings, so I haven’t set anything up. Which one do you mean? You can also open it on the Inbox tab.';
+        }
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
         // A ticket or issue report the user asked for (owner, 2026-11-07): the Business Mentor's own card, on every
