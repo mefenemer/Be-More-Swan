@@ -135,7 +135,8 @@ async function main() {
 
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.ok(!orch.includes('Live meeting/task-tool connections are not wired up yet'), 'out-of-date prompt line gone');
-    assert.ok(orch.includes('Nothing leaves the workspace until the user approves the meeting'));
+    // The minutes rules moved to src/utils/meeting-minutes.ts (step 5), shared with the New meeting form.
+    assert.ok(read('src/utils/meeting-minutes.ts').includes('Nothing leaves the workspace until the user approves the meeting'));
     // The card learns its record id before the reply is saved, so Approve survives a reload.
     const persistAt = orch.indexOf('const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);');
     const replyAt = orch.indexOf('const [assistantMessage] = await db.transaction(');

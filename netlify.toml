@@ -1296,6 +1296,11 @@ node_bundler = "esbuild"
 [functions.chat-orchestrator]
   timeout = 26
 
+# The Meeting Note Taker's "New meeting" form (meeting-minutes.ts): one model call over a transcript of
+# up to ~2 hours, the same work as a chat turn with an attached transcript, so the same budget.
+[functions.meeting-minutes]
+  timeout = 26
+
 # The Business Mentor's page (mentor.ts): "Get feedback" is one model call on the Mentor's model
 # (Opus 5.5 by default), which can outrun the 10s default like a chat turn does.
 [functions.mentor]

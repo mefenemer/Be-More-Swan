@@ -110,7 +110,9 @@ async function main() {
     // ── Wiring ───────────────────────────────────────────────────────────────────
     const orch = read('netlify/functions/chat-orchestrator.ts');
     const route = orch.slice(orch.indexOf('    meeting_note_taker: {'), orch.indexOf('buildRolePrompt', orch.indexOf('    meeting_note_taker: {')));
-    assert.match(route, /maxTokens: 4096,/);
+    // The size lives in meeting-minutes.ts since step 5, shared with the New meeting form.
+    assert.match(route, /maxTokens: MEETING_MINUTES_MAX_TOKENS,/);
+    assert.ok(read('src/utils/meeting-minutes.ts').includes('export const MEETING_MINUTES_MAX_TOKENS = 4096;'));
     assert.match(route, /acceptsAttachments: true,/);
     assert.match(route, /transcriptAttachments: true,/);
     assert.ok(orch.includes("${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}"), 'the meeting prompt carries the transcript');

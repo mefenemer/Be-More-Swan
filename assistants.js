@@ -1881,6 +1881,24 @@ function _detailRqCountLabel(shown, total) {
     return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
 }
 
+// A role's own "New …" form, from the Overview button or a records queue's tab header (registry
+// primaryAction / reviewQueue.newAction). Today: the Meeting Note Taker's "New meeting"
+// (meeting-minutes-form.js). On save the Inbox opens on Review, so the new meeting is in view.
+function _openRoleForm(kind, data) {
+    if (kind !== 'meetingForm') return;
+    if (!window.MeetingMinutesForm) { window.showToast?.('That form didn\u2019t load. Refresh the page and try again.'); return; }
+    window.MeetingMinutesForm.open({
+        assistantId: data.id,
+        assistantName: data.name,
+        onSaved: () => {
+            window._activateMainTab?.('review-queue');
+            window.detailRqOpenStatus?.('review');
+            window._refreshAssistantMetrics?.();
+            window._detailRqRefreshColumnCounts?.();
+        },
+    });
+}
+
 // An empty Review column is the first thing a new hire sees, and "No posts awaiting review" alone
 // left them nowhere to go. Say when the next draft is due (the Autopilot card has already worked it
 // out, or why nothing is coming) and offer the page's own Create button, so this is the same
@@ -7325,8 +7343,15 @@ function _applyDashboardRegistry(data) {
         }
         if (sub) { sub.classList.toggle('hidden', into); sub.style.display = into ? 'none' : ''; }
     }
-    // Records queues have no post-generation button; blog re-points it at Blog Studio.
-    toggleBtn('detail-rq-primary-btn', !rqIsRecords);
+    // Records queues have no post-generation button; blog re-points it at Blog Studio. A records
+    // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
+    const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
+    toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    if (rqNew) {
+        setText('detail-rq-primary-label', rqNew.label);
+        const rqBtn = document.getElementById('detail-rq-primary-btn');
+        if (rqBtn) rqBtn.onclick = () => _openRoleForm(rqNew.kind, data);
+    }
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
     // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent
@@ -7483,7 +7508,9 @@ function _applyDashboardRegistry(data) {
     } else if (pa) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
-            if (pa.kind === 'chat') {
+            if (pa.kind === 'meetingForm') {
+                paBtn.onclick = () => _openRoleForm(pa.kind, data);
+            } else if (pa.kind === 'chat') {
                 // The same pop-up as the header Chat button — this was a full page load, so the two
                 // doors into one conversation behaved differently (review, 2026-10-22).
                 paBtn.onclick = () => {
