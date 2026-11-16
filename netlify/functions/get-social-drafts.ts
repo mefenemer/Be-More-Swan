@@ -514,7 +514,11 @@ export default withLambda(async (event) => {
                 // Why the video render failed, when it did — null in every other state. In the
                 // customer's words: the stored message is Remotion's, AWS console links and all.
                 renderError: d.renderStatus === 'failed' ? customerRenderError(renderErrors.get(d.id)) : null,
-                brandCard: brandCards.get(d.id) ?? null,
+                // ⚠️ Only a SINGLE-picture post is "a brand card". A carousel made of brand cards
+                // (make-carousel: a cover + one per list item) has a brand_card row per slide, and
+                // the map above keeps whichever came last — so the editor drew slide 5 as the whole
+                // post and hid the slide strip (_pceRenderSlides skips posts with a brandCard).
+                brandCard: slideIds.length > 1 ? null : (brandCards.get(d.id) ?? null),
                 // Name of the assistant whose post triggered this hand-off — orchestration drafts only.
                 handoffFrom: handoffFrom.get(d.id) ?? null,
                 // Who asked for it, when another assistant did — null for the assistant's own work.

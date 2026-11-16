@@ -141,4 +141,12 @@ check('editor: "Make it a carousel" calls the same endpoint, saves first and rel
     assert.match(ws, /'time_text', 'carousel'\]\.includes\(d\.action\)/, 'the editor reloads after a carousel');
 });
 
+check('the editor shows a carousel of brand cards as slides, not as one card (browser check 2026-11-16)', () => {
+    // Every slide is a brand_card asset; flagging the post as "a brand card" made the editor draw the
+    // last slide alone and hide the slide strip. Only a single-picture post may carry brandCard.
+    const src = read('netlify/functions/get-social-drafts.ts');
+    assert.match(src, /brandCard: slideIds\.length > 1 \? null : \(brandCards\.get\(d\.id\) \?\? null\)/);
+    assert.match(read('workspace.html'), /const capable = !!post && !post\.brandCard && /, 'the strip hides for a brandCard post');
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
