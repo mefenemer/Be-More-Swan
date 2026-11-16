@@ -120,7 +120,7 @@ function fullRouteContext(): Parameters<(typeof ROUTES)[string]['buildRolePrompt
         leadsSnapshot: s, outreachOfferBlock: s, followUpPlanBlock: s, discussionsBlock: s,
         campaignsSnapshot: s, briefsSnapshot: s, taskCosts: resolveTaskCosts([]), videosSnapshot: s,
         mailboxSnapshot: s, siteAuditSnapshot: s, mentorSnapshot: s, siteSnapshot: s,
-        attachmentsBlock: s, contentSnapshot: s, audienceSnapshot: s,
+        attachmentsBlock: s, contentSnapshot: s, audienceSnapshot: s, meetingsSnapshot: s,
     } as Parameters<(typeof ROUTES)[string]['buildRolePrompt']>[0];
 }
 
