@@ -806,6 +806,13 @@
         <span id="discussions-tab-label">Discussions</span>
         <span id="discussions-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Watch list — lead roles only (watchListTab: lead_qualifier). Companies House news on customers,
+           leads and companies added by hand (buying triggers Phase 2). Badge = news in the last 7 days.
+           assistant-watch-list.js → lead-watch.ts. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-watchlist" id="maintab-btn-watchlist" data-maintab="watchlist" class="main-tab-btn hidden">
+        <span id="watchlist-tab-label">Watch list</span>
+        <span id="watchlist-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
            (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
       <button type="button" role="tab" aria-selected="true" tabindex="0" aria-controls="maintab-datahub" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
@@ -1201,6 +1208,9 @@
   <div id="maintab-discussions" role="tabpanel" aria-labelledby="maintab-btn-discussions" class="main-tab-content hidden">
     <div id="discussions-host"></div>
   </div><!-- /maintab-discussions -->
+  <div id="maintab-watchlist" role="tabpanel" aria-labelledby="maintab-btn-watchlist" class="main-tab-content hidden">
+    <div id="watchlist-host"></div>
+  </div><!-- /maintab-watchlist -->
 
   <!-- Strategy — lead roles only, and only when `strategy_agent` is enabled for the workspace.
        assistant-strategy.js resolves that gate on init (there is no client-side feature map to
@@ -2235,6 +2245,37 @@
         </label>
       </div>
       <p id="review-cadence-status" class="hidden text-xs font-semibold mt-3"></p>
+    </div>
+
+    <!-- Timely angles from search trends (docs/google-trends-plan.md Phase 3, src/utils/trend-angles.ts).
+         Social Media and Email Marketing only — shown by assistants.js _initTrendAngles. The chat's
+         settings card changes the same value through set-trend-angles.ts. -->
+    <div id="module-trend-angles" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-4">
+        <h3 class="text-lg font-bold text-gray-900">Timely angles from search trends</h3>
+        <p class="text-sm text-gray-500 mt-1">When one of your search terms is in its busy season or rising (Business Information ▸ What People Search), this assistant can give a scheduled post or email a timely angle on it. It stays on its usual subject.</p>
+      </div>
+      <div id="trend-angle-options" class="space-y-3">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="trend-angle" value="never" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
+          <span><span class="block text-sm font-semibold text-gray-900">Never</span></span>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="trend-angle" value="occasionally" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
+          <span>
+            <span class="block text-sm font-semibold text-gray-900">Occasionally</span>
+            <span class="block text-xs text-gray-500 leading-snug">About 1 in 5 scheduled posts or emails, when something is in season.</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="trend-angle" value="often" class="mt-1 h-4 w-4 text-emerald-800 border-gray-300 focus:ring-emerald-700">
+          <span>
+            <span class="block text-sm font-semibold text-gray-900">Often</span>
+            <span class="block text-xs text-gray-500 leading-snug">About 1 in 3.</span>
+          </span>
+        </label>
+      </div>
+      <p id="trend-angle-status" class="hidden text-xs font-semibold mt-3"></p>
     </div>
   </div>
 

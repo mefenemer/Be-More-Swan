@@ -243,3 +243,57 @@ trial is left.
 - **Not yet:** `trackTrendTerm` / `untrackTrendTerm` exist but nothing calls them. The terms tab, the Haiku first
   fill, chat cards, the `<search_trends>` blocks and the Admin terms list are Phase 2.
 - Tests in `tests/search-trends.test.ts`, run against a real Phase 0 reply (`tests/fixtures/trends-boiler-service-uk.json`).
+
+**Phase 2 built (2026-11-16, branch `feat/trends-mentor-blog`).** The Business Mentor and the Blog Writer. No new tables.
+- **One loader and one prompt block:** `src/utils/search-trends-read.ts`. For each term it gives:
+  - which way interest is moving (the last 4 weeks against the 8 before; ±20% counts as rising or falling);
+  - the next busy month;
+  - one plain sentence describing it.
+  - `<search_trends>` is fenced as data, says "relative interest, never counts" and calls seasons last year's
+    pattern rather than a forecast.
+- **Choosing terms:** `src/utils/search-trend-terms.ts`.
+  - Haiku suggests 8 broad terms from the industry, description, Products & Services and blog keywords. They are
+    saved as suggestions and only fetched once approved.
+  - The country comes from the owner's time zone.
+  - `applyTrendTermAction` is the one server action for the GUI and chat. The endpoint is
+    `netlify/functions/search-trends.ts`; viewers can read but not change the list.
+- **GUI:** a new **Business Information ▸ What People Search** tab and Blog setup ▸ Search performance ▸ "What people
+  search for" share one renderer, `src/components/search-trends-view.js`.
+  - Blog setup shows a sparkline, the busy months, a rising/falling pill and related searches.
+  - In Blog setup, a related search opens the Blog Writer's chat with a request typed in.
+- **Chat:** `chat-search-trends.ts` adds the block to `blog_writer` and `business_mentor`.
+  - The `search_terms` card (`chat-search-terms-card.ts`) can add, approve, approve all, remove or suggest. It is
+    rebuilt against the stored list and put back after the routes rebuild their cards.
+- **Blog ideation:** approved terms with data are offered as angles on undirected slots.
+- **Mentor weekly review:** the code-only checks (`mentor-content-checks.ts`) flag a busy season starting in 1–2
+  months, and suggested terms still waiting for approval.
+- **Help:** `db/z-search-trends-help-2026-11-16.sql`.
+- **Tests:** `tests/search-trends-phase2.test.ts`. The two views were driven in headless Chromium (desktop and
+  phone) against a stubbed API.
+- **Phase 3 (not built):** Social and Email timely angles, calendar markers, and the on-demand chat look-up with a
+  fair-use cap (§10 Q5).
+
+**Phase 3 built (2026-11-16, branch `feat/trends-social-email`).** Social Media and Email Marketing. No new tables.
+- **Timely angles:** `src/utils/trend-angles.ts`.
+  - On a share of scheduled slots, an approved term is offered as an *optional angle*. Shares: never 0,
+    occasionally 1/5 (the default), often 1/3. The slot is hash-picked with no stored state, salted apart from
+    Inspo.
+  - A term qualifies when its busy months are now or next month, or it is rising.
+  - The post keeps its subject and pillar, and related searches are fenced as data.
+  - Social: `process-content-jobs.ts`, after Inspo. An Inspo slot or a user's own brief takes priority.
+  - Email: the automatic issue notes in `draft-newsletter-issues.ts`, keyed by UTC day.
+- **The setting, on the page and in chat:**
+  - Page: Profile ▸ Notifications ▸ "Timely angles from search trends" (`assistant-detail.html`, `assistants.js`).
+    It saves through `set-trend-angles.ts` (jsonb merge; viewers can't change it).
+  - Chat: the settings card's new `trend_angles` setting (`chat-assistant-settings.ts`, `chat-session.js`).
+  - `update-assistant-context.ts` keeps the key when other settings are saved.
+- **Calendar:** month and week views show a faint "Busy season for…" line (`calendar.js` `_seasonLine`), from
+  approved terms that have data.
+- **Look-up:** the `search_terms` card's `lookup` action (`search-trends.ts`).
+  - It reuses a shared row fetched this week; otherwise it makes one DataForSEO Live call (`dataforseo-trends-live`,
+    logged to the workspace), filters the result and caches it.
+  - It runs under the new fair-use kind `trends`: `fair_use_trends_lookups_per_day`, default 10.
+  - Over the cap, or with no provider, the term is saved as a suggestion instead.
+- **Chat:** Social and Email now get the `<search_trends>` block and card as well.
+- **Help:** `db/z-search-trends-help-phase3-2026-11-16.sql` replaces the article body.
+- **Tests:** `tests/search-trends-phase3.test.ts`.

@@ -349,6 +349,8 @@ export const USER_AGENTS = {
     siteImport: 'BeMoreSwan-SiteImport/1.0 (+https://bemoreswan.com)',
     /** The site page directory: a weekly map of the owner's own site for every assistant (site-directory.ts). Honours robots.txt. */
     siteDirectory: 'BeMoreSwan-SiteDirectory/1.0 (+https://bemoreswan.com)',
+    /** Lead watching: a look every few days at a saved lead's own team and careers pages for changes (lead-site-watch.ts). */
+    leadWatch: 'BeMoreSwan-LeadWatch/1.0 (+https://bemoreswan.com)',
 } as const;
 
 /**

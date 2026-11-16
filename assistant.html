@@ -48,7 +48,7 @@
     }
     .sc-shot { display: block; width: 100%; border-radius: 0.875rem; border: 1px solid #e5e7eb; box-shadow: 0 20px 40px -20px rgba(31,30,27,.35); cursor: zoom-in; background: #fff; }
     .sc-samples { display: grid; gap: 1.5rem; }
-    @media (min-width: 768px) { .sc-samples { grid-template-columns: repeat(auto-fit, minmax(0, 320px)); justify-content: center; } }
+    @media (min-width: 768px) { .sc-samples { grid-template-columns: repeat(auto-fit, minmax(0, 320px)); justify-content: center; } .sc-samples > .sc-sample-wide { grid-column: span 2; } }
     /* Five short clips: two to a row on a phone, all five across on a wide screen. */
     /* A centred wrap, not a grid: a leftover clip on the last row sits in the middle, not alone on the left. */
     .sc-samples-ai { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
@@ -187,6 +187,23 @@
         ],
       },
     },
+    // Made 2026-11-16 in the staging test workspace (org 58, test Shopkeeper #65) dressed as
+    // Willowbrook Coffee, then restored. The message is ours; the reply and the card are the
+    // Shopkeeper's, unedited, and Save details was pressed on that card. The postcode area WB does not
+    // exist, the phone number is Ofcom drama range, and willowbrookcoffee.co.uk was unregistered.
+    shopkeeper: {
+      title: 'See what it does',
+      intro: 'One message from a made-up coffee roaster, in the words a shop owner might use. The Shopkeeper picked out the details UK law asks buyers to see and put them on a card; nothing was saved until we pressed Save details. Nothing was edited.',
+      footnote: 'Sample business. The phone number is from Ofcom\'s range for TV and radio drama, and the address is made up.',
+      items: [
+        { business: 'Willowbrook Coffee', kind: 'Delivery & returns details from one message', wide: true, brief: 'Hi! I want to start selling our coffee online. We\'re Willowbrook Coffee, 14 Mill Lane, Willowbrook WB1 4MC…',
+          meta: 'The reply and the card it made, then the same card after Save details · No tasks used',
+          round: [
+            { src: '/images/samples/shopkeeper/willowbrook-chat.jpg', alt: 'The chat: a coffee roaster sends its details and the Shopkeeper replies with a list of what it picked up and a Delivery & returns card' },
+            { src: '/images/samples/shopkeeper/willowbrook-saved.jpg', alt: 'The Delivery & returns card after Save details: Saved. Your Delivery & returns page is ready.' },
+          ] },
+      ],
+    },
   };
 
   // A role's swan character, shown in the hero. Kept here, not in the showcase
@@ -259,7 +276,7 @@
     const art = ILLUSTRATIONS[roleKey];
     const samples = SAMPLE_WORK[roleKey] || null;
     const sampleCard = (v, label) => `
-        <figure class="sc-sample bg-white rounded-2xl border border-gray-200 shadow-sm p-3">
+        <figure class="sc-sample ${v.wide ? 'sc-sample-wide' : ''} bg-white rounded-2xl border border-gray-200 shadow-sm p-3">
           ${v.round ? `
           <div class="sc-round ${v.round.length === 3 ? 'sc-round-3' : ''}">${v.round.map((o, i) => `
             <div class="${i === v.chosen ? 'sc-chosen' : ''}"><img src="${esc(o.src)}" alt="${esc(o.alt)}${i === v.chosen ? ' (the one we picked)' : ''}" data-zoom loading="lazy">${i === v.chosen ? '<span>Picked</span>' : ''}</div>`).join('')}

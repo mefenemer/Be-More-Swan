@@ -125,6 +125,8 @@ jobs:
           # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
           # `run-trigger-poll-dispatch` (24h) starts the buying triggers' daily FSA read (trigger-engine.ts),
           # Admin only. A second run in a day only finds the few premises added since; daily matches production.
+          # `run-lead-watch-dispatch` (24h) starts the Lead Generator Watch list's daily Companies House check
+          # (lead-watch.ts). Idempotent: a company is due only 3–30 days after its last check; one note a day.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
           # a workspace is due only a week after its last read.
           # `run-search-trends-refresh` (1h) is the Google Trends engine's tick (search-trends.ts): collects
@@ -138,6 +140,9 @@ jobs:
           # itself: that one is scheduled, and Netlify answers a URL call to a scheduled function with 403.
           # `run-site-domain-checks` (10m) moves customer domains on their way (site-domains.ts checkDueDomains).
           # Idempotent: Netlify is only touched when something changed.
+          # `run-scenario-jobs` (5m) drains the Integration Scenario Library's outbound hand-offs (process-scenario-jobs.ts):
+          # what approving a meeting or lead sends — follow-up email, Slack, Notion, Jira/Asana, CRM. Idempotent:
+          # each job is claimed atomically. NOT `process-scenario-jobs` itself: scheduled, so a URL call is a 403.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
@@ -151,6 +156,7 @@ jobs:
           # roughly a 14h margin. If OPTIMISER_STALE_HOURS ever changes, this number moves with it.
           JOBS="
           run-content-jobs          300     120
+          run-scenario-jobs         300     120
           run-discovery-jobs        300     120
           run-blog-jobs             1800    300
           run-sequence-sends        3600    120
@@ -171,6 +177,7 @@ jobs:
           run-mentor-morning-dispatch 3600  120
           run-discussion-scan-dispatch 21600 120
           run-trigger-poll-dispatch 86400  120
+          run-lead-watch-dispatch   86400  120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-partner-sweep         86400   120

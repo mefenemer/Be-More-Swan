@@ -139,6 +139,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // Leads that will leave the Outreach queue on the retention clock. LAPSING, by definition —
     // the whole point of the notification is the deadline.
     leads_expiring_soon: 'suggested_action',
+    // News on a watched company (Watch list, lead-watch-effects.ts): a reason to get in touch now.
+    watch_list_news: 'suggested_action',
     // A company was excluded from every search because someone erased a prospect we held no address
     // for. state_change, NOT suggested_action: it is done, it was correct, and there is nothing the
     // reader is being asked to decide. It is here so that a company disappearing from the pipeline

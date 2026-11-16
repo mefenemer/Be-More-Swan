@@ -209,6 +209,8 @@ export const ASSISTANT_PAGE_SLUGS = {
     brand_designer: 'ai-brand-designer',
     mystery_shopper: 'ai-mystery-shopper',
     website_assistant: 'ai-website-assistant',
+    // Pinned before launch (2026-11-16): the build only makes a page once the role is live.
+    shopkeeper: 'ai-shopkeeper-assistant',
 };
 
 export function slugForRole(roleKey, name) {

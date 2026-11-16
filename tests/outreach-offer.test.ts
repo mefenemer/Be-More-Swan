@@ -93,7 +93,7 @@ check('a sign-up through the link credits the lead and stops its follow-ups', ()
     assert.ok((EVENT_TYPES as readonly string[]).includes('offer_signed_up'));
     assert.ok(read('src/config/lead-activity-events.ts').includes('offer_signed_up:'));
     assert.ok((SEQUENCE_HALT_REASONS as readonly string[]).includes('signed_up') && SEQUENCE_HALT_REASON_LABELS.signed_up);
-    const sql = read('db/sequence-halt-signed-up.sql');
+    const sql = read('db/sequence-halt-company-closed.sql'); // the newest halt-reason migration lists every reason
     for (const r of SEQUENCE_HALT_REASONS) assert.ok(sql.includes(`'${r}'`), `SQL lists ${r}`);
 });
 

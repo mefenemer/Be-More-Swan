@@ -37,7 +37,7 @@ function _assistantRenamed(assistantId, name) {
     window.bmsCachedFetch?.invalidate?.();
     window.ChatPane?.renameAll?.(assistantId, name);
     [window.AssistantDataHub, window.AssistantCampaigns, window.AssistantMentorOverview, window.AssistantMentorPlan, window.MentorCommitments,
-        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantInspo]
+        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantWatchList, window.AssistantInspo]
         .forEach((m) => { try { m?.rename?.(name); } catch (e) { console.warn('[assistant-detail] a tab could not take the new name', e); } });
     document.dispatchEvent(new CustomEvent('assistant:renamed', { detail: { assistantId, name } }));
 }
@@ -1153,6 +1153,7 @@ window._activateMainTab = function(name) {
     if (name === 'signals') window.AssistantSignalInbox?.activate();
     // Discussions likewise — init() already fetched for the new-threads badge.
     if (name === 'discussions') window.AssistantDiscussions?.activate();
+    if (name === 'watchlist') window.AssistantWatchList?.activate();
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
@@ -5445,6 +5446,50 @@ async function _initAssistantNotifPrefs() {
     }
 
     _initReviewCadence();
+    _initTrendAngles();
+}
+
+// Timely angles from search trends (docs/google-trends-plan.md Phase 3): never / occasionally / often,
+// stored in ai_assistants.configuration.trendAngleFrequency, saved via PATCH set-trend-angles — the same
+// endpoint as the chat's settings card. Social Media and Email Marketing only.
+function _initTrendAngles() {
+    const card = document.getElementById('module-trend-angles');
+    const wrap = document.getElementById('trend-angle-options');
+    if (!card || !wrap) return;
+    const roles = ['social_media_manager', 'newsletter_editor'];
+    card.classList.toggle('hidden', !roles.includes(window._assistantRoleType || ''));
+    const current = window._trendAngleFrequency || 'occasionally';
+    wrap.querySelectorAll('input[name="trend-angle"]').forEach(radio => {
+        radio.checked = radio.value === current;
+        if (radio.dataset.wired) return;
+        radio.dataset.wired = '1';
+        radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            const previous = window._trendAngleFrequency || 'occasionally';
+            const statusEl = document.getElementById('trend-angle-status');
+            const show = (text, ok) => {
+                if (!statusEl) return;
+                statusEl.textContent = text;
+                statusEl.classList.remove('hidden', ok ? 'text-red-600' : 'text-emerald-600');
+                statusEl.classList.add(ok ? 'text-emerald-600' : 'text-red-600');
+                if (ok) setTimeout(() => statusEl.classList.add('hidden'), 2500);
+            };
+            try {
+                const r = await fetch('/.netlify/functions/set-trend-angles', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assistantId: Number(window._currentAssistantId), frequency: radio.value }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || 'save failed');
+                window._trendAngleFrequency = radio.value;
+                show('✓ Saved', true);
+            } catch (err) {
+                wrap.querySelectorAll('input[name="trend-angle"]').forEach(rb => { rb.checked = rb.value === previous; });
+                show(err && err.message && err.message !== 'save failed' ? err.message : 'Could not save — please try again.', false);
+            }
+        });
+    });
 }
 
 // Review-alert cadence for this assistant (aiAssistants.reviewNotifPreference):
@@ -7686,6 +7731,15 @@ function _applyDashboardRegistry(data) {
         window.AssistantDiscussions?.init({ assistantId: data.id, assistantName: data.name });
     }
 
+    // Watch list tab — lead roles only (watchListTab: lead_qualifier): Companies House news on customers,
+    // leads and companies added by hand. init() loads eagerly: the week's news count is the tab badge.
+    const watchListTab = cfg.watchListTab;
+    toggle('maintab-btn-watchlist', !!watchListTab);
+    if (watchListTab) {
+        setText('watchlist-tab-label', watchListTab.label || 'Watch list');
+        window.AssistantWatchList?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
     // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is
     // laid out as the steps a lead goes through (assistant-lead-outreach.js), and its Following up /
     // Replied / Finished stages are the conversations list (assistant-lead-threads.js), which loads
@@ -8812,6 +8866,20 @@ function _detailCollect(currentData) {
             || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
+    // Only the fields of cards this role shows (registry profileKeysOff). A hidden card's field keeps
+    // its stored value, or stays absent: never the page's social default ("3 times a week", Mon–Fri…).
+    // Runs before the role's own set-up answers below, so a schema field of the same name still wins.
+    const _stored = currentData.context || {};
+    const _keep = (key) => {
+        if (Object.prototype.hasOwnProperty.call(_stored, key)) newContext[key] = _stored[key];
+        else delete newContext[key];
+    };
+    (window.AssistantDashboardRegistry?.profileKeysOff?.(currentData.roleKey) || []).forEach(_keep);
+    // Trigger / Content Source are the generic Operational Setup block (#operation-generic), shown only to
+    // roles without set-up questions of their own; platforms are carried, never edited here.
+    const _genericOn = !document.getElementById('operation-generic')?.classList.contains('hidden');
+    if (!_genericOn) { _keep('trigger_type'); _keep('content_source'); }
+    if (!Object.prototype.hasOwnProperty.call(_stored, 'primary_platforms')) delete newContext.primary_platforms;
     if (!window._pillarsTextDirty) delete newContext.content_pillars;
     // ⚠️ Same rule for Blog / Email topics (records since docs/pillar-records-plan.md §7): the page's copy
     // is never sent, or a save built before a topic change could reconcile the rows back to an old list.
@@ -8871,6 +8939,14 @@ function _detailCollect(currentData) {
             strictRules: strictLines,
         }
     };
+    // Same rule for the copies in configuration.inputs: a role without the generic block keeps what it had.
+    if (!_genericOn) {
+        const storedInputs = currentData.configuration?.inputs || {};
+        for (const k of ['trigger_type', 'content_source', 'triggerText', 'sourceText', 'platforms']) {
+            if (Object.prototype.hasOwnProperty.call(storedInputs, k)) newConfiguration.inputs[k] = storedInputs[k];
+            else delete newConfiguration.inputs[k];
+        }
+    }
 
     return { newContext, newConfiguration };
 }
@@ -9019,7 +9095,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const newName = nameInput ? nameInput.value.trim() : null;
         // Per-assistant AI disclosure (EU AI Act Art. 52) — saved alongside the context.
         const disclosureEl = document.getElementById('edit_ai_disclosure');
-        const disclosureText = disclosureEl ? disclosureEl.value.trim() : undefined;
+        // Sent only when it changed: an assistant saved without one (rows made outside hire-assistant.ts)
+        // got '' on EVERY autosave, and the server refuses '' on an active assistant (422
+        // DISCLOSURE_MISSING), so even renaming it failed. Clearing a stored one is still refused there.
+        const _disclosureNow = disclosureEl ? disclosureEl.value.trim() : undefined;
+        const disclosureText = _disclosureNow !== undefined && _disclosureNow !== String(currentData.disclosureText || '').trim()
+            ? _disclosureNow : undefined;
         try {
             const body = { assistantId: parseInt(assistantId), newContext, newConfiguration };
             if (newName) body.newName = newName;
@@ -9202,6 +9283,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // Review-alert cadence for the Profile › Notifications panel (saved via
         // set-review-notif-prefs; stashed here so the panel doesn't refetch context).
         window._reviewNotifPreference = currentData.reviewNotifPreference || 'immediate';
+        // Timely angles from search trends (Phase 3, src/utils/trend-angles.ts): the role and current value.
+        window._assistantRoleType = (currentData.configuration && currentData.configuration.type) || '';
+        window._trendAngleFrequency = (currentData.configuration && currentData.configuration.trendAngleFrequency) || 'occasionally';
 
         // Hero header
         const nameInput = document.getElementById('detail-name-input');
@@ -13900,6 +13984,10 @@ document.addEventListener('assistant:settingsChanged', (e) => {
     if (d.reviewNotifPreference) {
         window._reviewNotifPreference = d.reviewNotifPreference;
         document.querySelectorAll('input[name="review-cadence"]').forEach((rb) => { rb.checked = rb.value === d.reviewNotifPreference; });
+    }
+    if (d.trendAngleFrequency) {
+        window._trendAngleFrequency = d.trendAngleFrequency;
+        document.querySelectorAll('input[name="trend-angle"]').forEach((rb) => { rb.checked = rb.value === d.trendAngleFrequency; });
     }
     if (typeof d.autonomousMediaEnabled === 'boolean' && Number(_goalsAssistantId) === id) {
         _autonomousMediaEnabled = d.autonomousMediaEnabled;

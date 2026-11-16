@@ -99,6 +99,7 @@ import {
 import { LEAD_BULK_MAX, leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
 import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '../../src/utils/chat-discussion-action';
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
+import { buildWatchActionsChatBlock, resolveWatchActionProposal, watchActionFromUiElement } from '../../src/utils/chat-watch-action';
 import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
@@ -121,6 +122,8 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildSearchQueriesBlock } from '../../src/utils/chat-search-queries';
+import { buildSearchTrendsBlock, SEARCH_TREND_ROLES } from '../../src/utils/chat-search-trends';
+import { resolveSearchTermsCard, SEARCH_TERMS_CARD_TYPE } from '../../src/utils/chat-search-terms-card';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
 import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
@@ -134,6 +137,7 @@ import { BRAND_STYLE_TYPE, brandStyleFromUiElement, type BrandStyleCard } from '
 import { DESIGN_EDIT_TYPE, designEditFromUiElement, type DesignEditCard } from '../../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startDesignFromChat, userChoseAiPicture } from '../../src/utils/brief-from-chat';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
+import { whyNowState, whyNowAgeLabel, WHY_NOW_FRESH_DAYS, WHY_NOW_GONE_DAYS } from '../../src/config/lead-why-now';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -268,6 +272,9 @@ interface RouteContext {
     /** This Lead Generator's Discussions tab — what it watches, its new threads, and the card that acts
      *  on them. Same routes as leadsSnapshot. src/utils/discussions.ts buildDiscussionsChatBlock. */
     discussionsBlock?: string | null;
+    /** This Lead Generator's Watch list (buying triggers Phase 2): what it watches, the news, and the card
+     *  that changes it. Same routes as leadsSnapshot. src/utils/chat-watch-action.ts. */
+    watchListBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -568,7 +575,7 @@ function leadGeneratorSurfaces(): string {
 - "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "New search" and "Review lead ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the All leads tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
 - "Review lead ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
 - "New search" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max searches per run, a token budget per run, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
-- "All leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Found leads", before that "Enrichment", and before that "Leads" — if the user uses any of those old names, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. For every company it keeps, a search reads the company's whole website, checks Companies House for UK companies, and only then — as the last resort — uses a paid lookup service; so each lead arrives with a named contact and their job title where one is published (shown as "contact:" in YOUR LEADS RIGHT NOW, with where the name came from on the lead itself), and the companies worth it arrive already researched. A lead with no named contact means none was published on their site or the register — say that, never guess a name. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's "To approve" stage, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
+- "All leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Found leads", before that "Enrichment", and before that "Leads" — if the user uses any of those old names, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. For every company it keeps, a search reads the company's whole website, checks Companies House for UK companies, and only then — as the last resort — uses a paid lookup service; so each lead arrives with a named contact and their job title where one is published (shown as "contact:" in YOUR LEADS RIGHT NOW, with where the name came from on the lead itself), and the companies worth it arrive already researched. A lead with no named contact means none was published on their site or the register — say that, never guess a name. Its "Why now" column shows the dated reason to contact each lead now (funding, hiring, a new site, found when the lead is researched) with how long ago it happened, linked to its source; it fades after a month and goes after three, sorts freshest first, and is separate from Rating, which is how well the lead fits. "Not checked" means the lead has not been researched for one yet. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's "To approve" stage, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
 - "Outreach" tab — every lead you email, laid out left to right as the steps it goes through: "1 To approve", "2 Following up", "3 Replied", "4 Finished", and "Archived". It used to be split across an "Outreach" tab and a "Conversations" tab, and its stages used to be columns called "Review", "Approved" and "Awaiting reply" — if the user uses any of those old names, they mean the matching stage here.
   • "To approve" — drafted first emails waiting to be signed off, each showing the email with an "Approve & send email" button ("Waiting for your approval"), plus approved leads with no inbox connected that the user has to send themselves ("Approved — send it yourself"). To approve several at once, the user ticks them (or "Select all") and presses "Approve & send" — leads whose address is a named person's own inbox, or that are flagged do-not-contact, are skipped and stay there to be approved one by one.
   • "Following up" — the email has ALREADY GONE and no reply has come back. Here the follow-up plan sends its chasers from the user's own mailbox, and each lead shows which chaser is next and when; leads the user marked as sent by hand sit here too ("Contacted outside the app"), with no automatic chasers. Never call this a queue of pending sends: the first email is out, and the only thing scheduled is the next follow-up. A lead whose follow-ups stopped because the mailbox disconnected or sending kept failing is flagged "Needs attention".
@@ -578,6 +585,7 @@ function leadGeneratorSurfaces(): string {
   Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
 - "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
 - "Discussions" tab — public Reddit threads and LinkedIn posts from the last week where someone is asking for what this business sells, found by a daily scan of the topics the user chose, each with a reply or comment you drafted after reading the thread. Only Reddit and LinkedIn are watched — no other forums. If the user asks for another site, say plainly it only watches Reddit and LinkedIn for now, and that they can request more sites right here in chat (you send the request with the mentor_support_request card when they say yes). You never post: the user presses "Copy reply & open thread", posts it from their own account, then "Mark replied" (or "Dismiss" to drop a thread). The tab's "What to watch" panel sets the topics and which of the two sites, and "Scan now" runs a scan straight away. If the user wants you to post or comment on those sites for them, say plainly that you are built not to — automated or undisclosed self-promotion breaks those sites' rules and UK consumer law — and offer the drafted replies instead.
+- "Watch list" tab — Companies House news on the companies this assistant watches: customers (leads marked won), leads matched to Companies House, and companies the user adds there by name or number. It reports a new director, a director leaving, a new owner or controller, a move of registered office, new borrowing (a charge), and a company going into liquidation, administration or being dissolved (which also stops that lead's follow-ups). It also watches each lead's own website — a new senior person on their team page, new jobs on their careers page or job board, or a careers page appearing — and, for US companies, SEC fundraising filings (Form D, "Raised $…"). A new reason to get in touch also becomes that lead's Why now on the All leads tab. Checked for free every few days; one note a day when there is news; nothing is sent to anyone. "Stop watching" / "Watch again" per company, and a switch at the top turns it off.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
@@ -629,6 +637,8 @@ const LEAD_SNAPSHOT_NAMES = 20;
 /** The Outreach list: at most this many shown, picked from this many recent candidates. */
 const LEAD_SNAPSHOT_OUTREACH = 15;
 const LEAD_SNAPSHOT_OUTREACH_SCAN = 60;
+/** Leads with a fresh or cooling Why now, listed for "who should I contact today?". */
+const LEAD_SNAPSHOT_WHY_NOW = 10;
 
 type LeadCounts = {
     total: number; hot: number; warm: number; cold: number; unrated: number;
@@ -788,6 +798,37 @@ async function buildLeadsSnapshot(
             ? `\nFIRST EMAILS ALREADY SENT (newest ${sentLines.length}, exactly as sent):\n${quoteLeadEmails(sentLines, wordingBudget).text}`
             : '\nFIRST EMAILS ALREADY SENT: none with their wording on record.';
 
+        // WHY NOW (docs/lead-why-now-and-watching-plan.md §1.3): the leads with a dated reason to
+        // contact them now, freshest first, judged by the SAME rule the All leads tab's "Why now"
+        // column runs (src/config/lead-why-now.ts), so "who should I contact today?" gets the
+        // table's answer. Leads whose deal is closed, that were turned down, erased or deleted are
+        // left out: a reason to call is no use on a lead nobody may call.
+        const whyRows = await db
+            .select({
+                id: assistantRecords.id, title: assistantRecords.title, status: assistantRecords.status,
+                intel: sql<Record<string, unknown> | null>`jsonb_build_object('whyNow', ${assistantRecords.data} #> '{intel,whyNow}', 'timing', ${assistantRecords.data} #> '{intel,timing}')`,
+            })
+            .from(assistantRecords)
+            .where(and(
+                eq(assistantRecords.organisationId, organisationId),
+                eq(assistantRecords.aiAssistantId, aiAssistantId),
+                eq(assistantRecords.recordType, 'lead'),
+                sql`${assistantRecords.data} #>> '{intel,whyNow,date}' >= ${new Date(Date.now() - WHY_NOW_GONE_DAYS * 86400000).toISOString().slice(0, 10)}`,
+                sql`coalesce(${assistantRecords.approvalStatus}, '') <> 'rejected'`,
+                sql`${assistantRecords.data} -> 'dealOutcome' IS NULL`,
+                sql`${assistantRecords.data} -> 'erasedAt' IS NULL`,
+                sql`${assistantRecords.data} #> '{retention,deletedAt}' IS NULL`,
+            ))
+            .orderBy(sql`${assistantRecords.data} #>> '{intel,whyNow,date}' DESC`)
+            .limit(LEAD_SNAPSHOT_WHY_NOW);
+        const whyLines = whyRows
+            .map((r) => ({ r, v: whyNowState(r.intel) }))
+            .filter(({ v }) => v.state === 'fresh' || v.state === 'cooling')
+            .map(({ r, v }) => `- #${r.id} ${r.title} (${(r.status || 'unrated').toLowerCase()}): ${v.summary} — ${whyNowAgeLabel(v.ageDays)}${v.state === 'cooling' ? ', cooling off' : ''}`);
+        const whyNowList = whyLines.length
+            ? `\nWHY NOW — leads with a dated reason to contact them now, freshest first (the All leads tab's "Why now" column; a reason is fresh for ${WHY_NOW_FRESH_DAYS} days and cooling off until ${WHY_NOW_GONE_DAYS}):\n${whyLines.join('\n')}\nWhen the user asks who to contact today or this week, or which leads to work first, answer from this list, freshest first, and say each reason in its own words with its age — never add a reason or a date that is not here. Rating is how well a lead FITS; Why now is WHEN — a cold lead with a fresh reason can still be worth a call. Offer to move the one they pick to Outreach with the lead_action_proposal card. If the list is short, say so; leads without a reason may simply not have been researched yet.`
+            : `\nWHY NOW: no lead has a dated reason to contact them now on file. If asked who to contact today, say that plainly, suggest the hot leads above, and explain that researching a lead looks for one (funding, hiring, a new site).`;
+
         const truncated = c.total > names.length
             ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the All leads tab — it does all three.`
             : '';
@@ -798,6 +839,7 @@ By stage: ${c.pending} awaiting your approval, ${c.approved} approved but not ye
 Contactable: ${c.withEmail} of ${c.total} have an email address on file — the rest cannot be emailed until one is added, whatever they scored.
 Closed: ${c.won} won, ${c.lost} lost.
 ${list}${truncated}
+${whyNowList}
 ${outreachList}
 ${sentList}
 
@@ -941,7 +983,7 @@ function socialSurfaces(costs: TaskCosts): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in these ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), bring back one in "Archived" that was removed or rejected (action "restore" — it goes back to "Review" to be approved again; nothing is posted until they approve it), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue), or hand one to the Video Producer for a video version (action "video_version" — only if a Video Producer is ACTIVE on their team; it plans a free storyboard from the post on the Video Producer's "Videos" tab, where the user checks it and presses "Make the video", which is when credits are used; the post itself is unchanged — any post that was not rejected or removed, a published one too). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, brought back, shortened, lengthened or made into a video — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.
+EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in these ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), bring back one in "Archived" that was removed or rejected (action "restore" — it goes back to "Review" to be approved again; nothing is posted until they approve it), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue), or turn a Top list post into a carousel (action "carousel" — only for a post on Instagram or Threads whose caption has a numbered list of at least 2 items; it makes a cover slide plus one branded slide per item from the words already in the caption, switches it to the Carousel format there, leaves the caption as it is, and uses ${taskCostLabel('carousel', costs)}; other platforms of the post are untouched; offer it when they ask for slides or a carousel, never on your own), or hand one to the Video Producer for a video version (action "video_version" — only if a Video Producer is ACTIVE on their team; it plans a free storyboard from the post on the Video Producer's "Videos" tab, where the user checks it and presses "Make the video", which is when credits are used; the post itself is unchanged — any post that was not rejected or removed, a published one too). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, brought back, shortened, lengthened, made into a carousel or made into a video — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.
 
 VOICEOVERS AND CAPTIONS ON A POST — three more actions on an existing post, the twins of the post editor's "Add a voiceover", its "Show captions" settings and "Time the text to the voice":
 - "voiceover": an AI voice reads a script over the post (a photo post becomes a short video). Write the script yourself from the post unless they gave the words — short enough to say in the video's length (about 2.5 words a second) — in the language of the voice they want; pick the voice they asked for from VOICES (if they named none, ask whether they want a woman's or a man's voice, and which accent or language, or offer one). Captions are on unless they say otherwise. It uses ${cost(costs, 'ai_voiceover')}, shown on the card. Set "timeText" when the post already has text boxes and they want the text to follow the voice.
@@ -2271,7 +2313,7 @@ ${where === 'none' ? 'They said at set-up they have no website yet. Buy buttons 
 
 ${rc.shopSnapshot ?? 'Their shop could not be read this turn. Do not guess whether Stripe is connected or what orders there are: say so, and suggest they look at the "Shop" tab.'}
 
-IS IT READY? Answer from the snapshot's "So:" line first (yes or not yet), then name only the steps still NOT done, counted correctly ("one thing left: connect Stripe"). A step that is done gets a short "already done" after, never a place in the to-do count.
+IS IT READY? Answer from the snapshot's "So:" line first (yes or not yet), then name only the "Steps left" it lists, with its count ("one thing left: connect Stripe"). Never add a step of your own: the optional details it names (the days to cancel, what can't be returned, phone, VAT, extra terms) are never a step left to do, though you may mention them once as something they can change. A step that is done gets a short "already done" after, never a place in the to-do count.
 
 GETTING READY TO SELL. Two steps, in this order: (1) connect Stripe — a button on the Shop tab, owner or admin only; you can't do it for them; (2) the Delivery & returns details. The law needs a buyer to see who they buy from, a real business address (not a PO box), an email, how and when they deliver, and their right to cancel (at least 14 days), before they pay. When something is missing, ask for it in plain words, then emit {"type":"shop_settings","settings":{…only the fields they told you…}} — keys: traderName, traderAddress, contactEmail, contactPhone, deliveryText, vatNumber, returnsDays (a whole number, at least 14), returnPostage ("buyer" or "seller"), exceptions (any of "personalised", "perishable", "sealed_hygiene", "sealed_media", "mixed"), extraTerms. Only values they gave you: never invent an address, email, delivery time or VAT number, and never choose exceptions for them. The card shows the details and saves when they press its "Save details" button (owner or admin only) — call it exactly that; the same form is on the Shop tab. Buyers then see a Delivery & returns page, a note beside the Pay button, and a confirmation email from the business. Delivery is UK only for now.
 
@@ -2369,7 +2411,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}${rc.discussionsBlock ? `\n${rc.discussionsBlock}\n` : ''}
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}${rc.discussionsBlock ? `\n${rc.discussionsBlock}\n` : ''}${rc.watchListBlock ? `\n${rc.watchListBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -3057,7 +3099,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
 OR, to act on a post that already exists (see EXISTING POSTS), uiElement is instead:
 {
   "type": "post_action_proposal",
-  "action": "approve" | "reject" | "retry" | "reschedule" | "remove" | "restore" | "shorter" | "longer" | "video_version" | "voiceover" | "captions" | "time_text",
+  "action": "approve" | "reject" | "retry" | "reschedule" | "remove" | "restore" | "shorter" | "longer" | "video_version" | "voiceover" | "captions" | "time_text" | "carousel",
   "postId": <the number after # in YOUR POSTS RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
   "when": "<reschedule: the new time exactly as the user said it, e.g. 'next Friday at 3pm'; retry: the time to try again, only if they named one>" | null,
@@ -3436,6 +3478,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const discussionsBlock = route.usesLeadSnapshot
         ? await buildDiscussionsChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Watch list (src/utils/chat-watch-action.ts) — per turn, null before db/z-lead-watch.sql is applied.
+    const watchListBlock = route.usesLeadSnapshot
+        ? await buildWatchActionsChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -3547,6 +3593,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         outreachOfferBlock,
         followUpPlanBlock,
         discussionsBlock,
+        watchListBlock,
         campaignsSnapshot,
         taskCosts: await getTaskCosts(),
         briefsSnapshot,
@@ -3651,6 +3698,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // "Searches that found you" from their own Search Console (src/utils/chat-search-queries.ts) — the
     // Blog Writer and the Business Mentor; the same list as Blog setup ▸ Search performance. Never throws.
     const searchQueriesBlock = await buildSearchQueriesBlock(db, orgId, assistantRow.roleKey);
+    // Google Trends for the terms the workspace tracks (src/utils/chat-search-trends.ts) — the Blog Writer
+    // and the Business Mentor; the same loader as Business Information ▸ What people search. Never throws.
+    const searchTrendsBlock = await buildSearchTrendsBlock(db, orgId, assistantRow.roleKey);
     // What the directory last read, what is left out, and the site_directory card that re-reads the
     // site or leaves a page out — the same action as Business Information ▸ Website Pages
     // (src/utils/chat-site-directory.ts). Structured routes only; never throws.
@@ -3677,7 +3727,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, searchTrendsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3945,6 +3995,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const card = mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (card && 'error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
             else if (card) { supportCard = { ...card, from: assistantRow.jobRole || assistantRow.name || 'Assistant' }; uiElement = supportCard; }
+        }
+        // Tracked search terms (src/utils/chat-search-terms-card.ts): the Mentor's and the Blog Writer's card, the
+        // same action as Business Information ▸ What People Search. Taken now and put back with the support card,
+        // because both routes rebuild uiElement from their own lists below.
+        let searchTermsCard: Record<string, unknown> | null = null;
+        if (route !== defaultRoute && (uiElement as { type?: unknown } | null)?.type === SEARCH_TERMS_CARD_TYPE) {
+            searchTermsCard = SEARCH_TREND_ROLES.includes(assistantRow.roleKey ?? '')
+                ? await resolveSearchTermsCard(db, orgId, uiElement) as unknown as Record<string, unknown> | null : null;
+            if (!searchTermsCard) content = `${content}\n\n(I couldn’t check your search terms just now, so there’s no card. Try again in a moment, or use Business Information ▸ What People Search.)`;
+            uiElement = searchTermsCard;
         }
         // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts): the Social Media route's own card. The
         // server names the assistant (this one); the click previews, and a second click redrafts.
@@ -4377,6 +4437,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 ? 'Watching forums for threads to reply to is switched off for now, so I haven’t set anything up.'
                 : 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
         }
+        // And its Watch list (src/utils/chat-watch-action.ts); the click calls lead-watch.ts, the tab's endpoint.
+        const watchReq = route === ROUTES.lead_qualifier ? watchActionFromUiElement(uiElement) : null;
+        if (watchReq) {
+            uiElement = await resolveWatchActionProposal(db, orgId, session.aiAssistantId, watchReq);
+            if (!uiElement) content = 'I couldn’t find that company on this assistant’s Watch list, so I haven’t changed anything. Which one do you mean? You can also see them on the "Watch list" tab.';
+        }
         const leadActionReq = route === ROUTES.lead_qualifier ? leadActionFromUiElement(uiElement) : null;
         if (leadActionReq) {
             leadAction = await resolveLeadActionProposal(db, orgId, session.aiAssistantId, leadActionReq);
@@ -4556,6 +4622,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
 
         if (supportCard) uiElement = supportCard;
+        if (searchTermsCard) uiElement = searchTermsCard;
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
         // independent paths, and nothing used to compare them — so "all three posts are drafted

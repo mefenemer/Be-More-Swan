@@ -1076,6 +1076,11 @@
           message = d.action === 'voiceover' ? `Voiceover added.${timedLine}${editor.open ? '' : ' Open the post to hear it.'}`
             : d.action === 'captions' ? `Captions saved.${timedLine}`
             : `Done.${timedLine}`;
+        } else if (d.action === 'carousel') {
+          // The post editor's "Make it a carousel" — make-carousel.ts, one task, every Instagram /
+          // Threads row of the post at once.
+          const r = await postActionCall('make-carousel', { postId: d.postId });
+          message = `Done — ${r.slideCount} slides: a cover and one per item.${editor.open ? '' : ' Open the post to see them.'}`;
         } else if (d.action === 'video_version') {
           // The Review Queue's "Make a video version" — video-projects.ts `from_post`. Free: it plans
           // a storyboard on the Video Producer's Videos tab; making the video is a click there.
@@ -1359,6 +1364,10 @@
           changed.autonomousMediaEnabled = r.autonomousMediaEnabled;
           changed.autonomousMediaMonthlyCap = r.autonomousMediaMonthlyCap;
           message = r.autonomousMediaEnabled ? `Saved — on, up to ${r.autonomousMediaMonthlyCap} a month.` : 'Saved — switched off.';
+        } else if (d.setting === 'trend_angles') {
+          await call('set-trend-angles', 'PATCH', { assistantId: id, frequency: d.frequency });
+          changed.trendAngleFrequency = d.frequency;
+          message = d.frequency === 'never' ? 'Saved — no timely angles from search trends.' : `Saved — timely angles ${d.frequency === 'often' ? 'often' : 'now and then'}.`;
         } else {
           throw new Error('Unknown setting.');
         }
@@ -1698,6 +1707,32 @@
           throw new Error('Unknown action.');
         }
         document.dispatchEvent(new CustomEvent('discussions:changed', { detail: { assistantId: aid } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
+    // Watch list cards → lead-watch.ts, the same actions as the Watch list tab's buttons. Dispatches
+    // `watchlist:changed` so the tab behind the chat reloads. Nothing is sent to anyone.
+    async function onWatchAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const aid = d.assistantId || assistantId;
+      const body = d.action === 'add' ? { action: 'add', number: d.number }
+        : d.action === 'remove' ? { action: 'remove', id: d.watchId }
+        : d.action === 'resume' ? { action: 'resume', id: d.watchId }
+        : d.action === 'set_enabled' ? { action: 'set_enabled', enabled: d.enabled === true }
+        : null;
+      if (!body) { respond({ ok: false, error: 'Unknown action.' }); return; }
+      try {
+        const res = await fetch('/.netlify/functions/lead-watch', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ assistantId: aid, ...body }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        respond({ ok: true, message: data.message });
+        document.dispatchEvent(new CustomEvent('watchlist:changed', { detail: { assistantId: aid } }));
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
@@ -2668,6 +2703,7 @@
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('discussion:action', onDiscussionAction);
+    container.addEventListener('watch:action', onWatchAction);
     container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('rule:change', onRuleChange);
     container.addEventListener('goal:change', onGoalChange);
@@ -2797,6 +2833,7 @@
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('discussion:action', onDiscussionAction);
+        container.removeEventListener('watch:action', onWatchAction);
         container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('rule:change', onRuleChange);
         container.removeEventListener('goal:change', onGoalChange);

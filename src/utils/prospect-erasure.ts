@@ -58,7 +58,7 @@ import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     accountMemory, accountNodes, assistantRecords, discoveredLeads, discoveryGuardrails,
-    leadMessages, leadOptOuts, leadThreads, sequenceEnrolments,
+    leadMessages, leadOptOuts, leadThreads, leadWatch, leadSiteWatch, leadSiteWatchSignals, sequenceEnrolments,
 } from '../../db/schema';
 import { mintReplyToken } from './reply-address';
 
@@ -432,6 +432,31 @@ export async function eraseProspect(db: Db, input: EraseProspectInput): Promise<
                 or(emailMatch, recordMatch),
             ))
             .returning({ id: assistantRecords.id });
+        if (rows.length) {
+            // Buying triggers Phase 2: the Watch list row and its Companies House news (which can name
+            // directors and owners) go with the record's personal data. Signals cascade from the row.
+            // Its own catch: until db/z-lead-watch.sql is applied the table does not exist.
+            try {
+                await db.delete(leadWatch).where(and(
+                    eq(leadWatch.organisationId, orgId),
+                    inArray(leadWatch.assistantRecordId, rows.map((r) => r.id)),
+                ));
+            } catch (err) {
+                const e = err as { code?: string; cause?: { code?: string } } | null;
+                if (e?.code !== '42P01' && e?.cause?.code !== '42P01') throw err;
+            }
+            // Why now Phase 2: the website / SEC watch (team-page names, job titles) and its news. The
+            // signals are deleted explicitly too: the record row is kept (erasure redacts, never deletes
+            // it), so the FK cascade would never fire. Same missing-table rule (db/z-lead-site-watch.sql).
+            try {
+                const ids = rows.map((r) => r.id);
+                await db.delete(leadSiteWatchSignals).where(and(eq(leadSiteWatchSignals.organisationId, orgId), inArray(leadSiteWatchSignals.assistantRecordId, ids)));
+                await db.delete(leadSiteWatch).where(and(eq(leadSiteWatch.organisationId, orgId), inArray(leadSiteWatch.assistantRecordId, ids)));
+            } catch (err) {
+                const e = err as { code?: string; cause?: { code?: string } } | null;
+                if (e?.code !== '42P01' && e?.cause?.code !== '42P01') throw err;
+            }
+        }
         return rows.length;
     });
 

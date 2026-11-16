@@ -20,6 +20,7 @@ import { loadIntroOffer, summariseIntroOffer } from './intro-offer';
 import { loadBusinessKnowledge } from './business-knowledge';
 import { connectedServices } from './goal-connections';
 import type { MentorSnapshotData } from './mentor-snapshot';
+import { loadOrgTrends, monthList, type OrgTrend } from './search-trends-read';
 
 type Db = any;
 
@@ -43,12 +44,23 @@ export interface ContentCheckInputs {
     knowledge: Array<{ name: string; excerpt: string }>;
     /** Whether a plan is approved (the model compares Brand Knowledge against it too). */
     hasApprovedPlan: boolean;
+    /**
+     * Google Trends seasons for the approved tracked terms (docs/google-trends-plan.md Phase 2): each
+     * term's peak months last year and how many months until the next one. Optional: older callers and
+     * fixtures leave it out.
+     */
+    seasons?: Array<{ term: string; peakMonths: number[]; monthsAway: number }>;
+    /** Suggested search terms still waiting for the owner's OK. */
+    pendingTerms?: number;
 }
+
+/** A season is worth flagging when it starts in 1–2 months: early enough to write for it, close enough to act. */
+export const SEASON_LEAD_MONTHS = [1, 2];
 
 export interface ContentFinding { text: string; where: string }
 
 /** Pure: the checks code can decide on its own. */
-export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | 'goals' | 'services'>): ContentFinding[] {
+export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | 'goals' | 'services' | 'seasons' | 'pendingTerms'>): ContentFinding[] {
     const out: ContentFinding[] = [];
     for (const c of i.ctas) {
         if (c.chosen !== 'own' && c.resolved.kind === 'own' && c.resolved.unusable) {
@@ -77,6 +89,20 @@ export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | '
         out.push({
             text: `${g.assistant}'s goal "${g.label}" can't be measured: ${platform} isn't connected.`,
             where: `Connections (connect ${platform}), or change the goal on ${g.assistant}'s Results tab`,
+        });
+    }
+    // Google Trends: a busy season about to start. Last year's pattern, never a forecast or a count.
+    for (const s of i.seasons ?? []) {
+        if (!SEASON_LEAD_MONTHS.includes(s.monthsAway) || !s.peakMonths.length) continue;
+        out.push({
+            text: `Searches for "${s.term.replace(/["<>]/g, '')}" usually peak in ${monthList(s.peakMonths)} (Google Trends, last year) — that starts in about ${s.monthsAway} month${s.monthsAway === 1 ? '' : 's'}. Articles and posts published a few weeks before a busy spell tend to be found.`,
+            where: 'your Blog Writer\'s chat (ask for an article on it), or Business Information ▸ What People Search',
+        });
+    }
+    if (i.pendingTerms && i.pendingTerms > 0) {
+        out.push({
+            text: `${i.pendingTerms} suggested search term${i.pendingTerms === 1 ? ' is' : 's are'} waiting for your OK, so ${i.pendingTerms === 1 ? 'it isn\'t' : 'they aren\'t'} being tracked yet.`,
+            where: 'Business Information ▸ What People Search',
         });
     }
     return out;
@@ -112,7 +138,7 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
         const active = data.team.filter((t) => t.state === 'active');
         const ctaTeam = active.filter((t) => (CTA_ROLES as readonly string[]).includes(t.roleKey ?? ''));
         const activeIds = active.map((t) => t.id);
-        const [ctas, intro, goalRows, services, knowledge] = await Promise.all([
+        const [ctas, intro, goalRows, services, knowledge, trends] = await Promise.all([
             Promise.all(ctaTeam.map(async (t) => ({
                 name: t.name, chosen: ctaChoiceFromContext(t.setup).kind, resolved: await resolveCta(db, orgId, t.setup),
                 incentive: typeof t.setup?.incentive === 'string' ? t.setup.incentive : null,
@@ -124,6 +150,7 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
                 : Promise.resolve([]),
             connectedServices(db, orgId),
             loadBusinessKnowledge(db, orgId).catch(() => null),
+            loadOrgTrends(db, orgId).catch(() => [] as OrgTrend[]),
         ]);
         const names = new Map(active.map((t) => [t.id, t.name]));
         return {
@@ -137,6 +164,9 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
                 name: d.name, excerpt: d.text.replace(/\s+/g, ' ').trim().slice(0, KNOWLEDGE_EXCERPT_CHARS),
             })),
             hasApprovedPlan: !!knowledge?.strategy,
+            seasons: trends.filter((t) => t.approved && t.status === 'ok' && t.nextPeak)
+                .map((t) => ({ term: t.term, peakMonths: t.peakMonths, monthsAway: t.nextPeak!.monthsAway })),
+            pendingTerms: trends.filter((t) => !t.approved).length,
         };
     } catch (err) {
         console.error('[mentor-content-checks] could not read (non-fatal)', err instanceof Error ? err.message : err);

@@ -45,6 +45,9 @@ export const DEFAULT_TASK_WEIGHTS = {
     // suggesting again from the same analysis is free (src/utils/footage-review.ts).
     footage_review: 2,
     caption_translation: 1,
+    // "Make it a carousel" on a Top list post (docs/top-lists-plan.md, owner decision 4, 2026-11-15):
+    // one task per carousel, never per slide. The slides are brand cards: no AI call, no provider cost.
+    carousel: 1,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -131,6 +134,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     background_removal: 'Background removals',
     footage_review: 'Footage reviews',
     caption_translation: 'Caption translations',
+    carousel: 'Carousels',
     // No "every 10 messages" here: how often chat is charged is now a setting (chat_messages_per_task).
     chat_messages: 'Chat',
     editing_helper: 'Editing helpers',

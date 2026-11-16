@@ -22,7 +22,7 @@
 import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { orgTrendTerms, searchTrendTerms } from '../../db/schema';
 import type { getDb } from '../../db/client';
-import { DATAFORSEO_TRENDS_USAGE_MODEL, type RawTrendsTask, type TrendsProvider } from '../lib/trends-provider';
+import { DATAFORSEO_TRENDS_LIVE_USAGE_MODEL, DATAFORSEO_TRENDS_USAGE_MODEL, type RawTrendsTask, type TrendsProvider } from '../lib/trends-provider';
 import { logAiUsage } from './ai-usage';
 import { parseModelJson } from './model-json';
 
@@ -357,6 +357,49 @@ export async function refreshSearchTrends(db: Db, deps: RefreshDeps): Promise<Re
         }
     }
     return r;
+}
+
+// ── On-demand look-up (chat; plan §10 Q5) ───────────────────────────────────────────────────────
+
+export type LookupResult = { ok: true; termId: number; fromCache: boolean } | { ok: false; error: string };
+
+/**
+ * Answer one term now. A shared row fetched in the last REFRESH_EVERY_DAYS is reused for free (a second
+ * workspace asking the same week costs nothing); otherwise one Live call, screened by the same relevance
+ * filter, saved into the shared cache. The caller has already checked the fair-use cap. Does NOT track
+ * the term for the workspace — tracking stays the owner's choice.
+ */
+export async function lookupTrendTerm(
+    db: Db,
+    input: { term: string; locationCode: number; locationName: string; organisationId: number },
+    deps: { provider: TrendsProvider; callFilterModel: CallFilterModel; now?: () => Date },
+): Promise<LookupResult> {
+    const now = deps.now ?? (() => new Date());
+    const term = normaliseTerm(input.term);
+    if (!term) return { ok: false, error: `A search term needs 1–${TERM_MAX_CHARS} characters.` };
+    await db.insert(searchTrendTerms).values({ term, locationCode: input.locationCode, locationName: input.locationName }).onConflictDoNothing();
+    const [row] = await db.select({ id: searchTrendTerms.id, status: searchTrendTerms.status, fetchedAt: searchTrendTerms.fetchedAt })
+        .from(searchTrendTerms).where(and(eq(searchTrendTerms.term, term), eq(searchTrendTerms.locationCode, input.locationCode))).limit(1);
+    if (!row) return { ok: false, error: 'Could not look that up just now.' };
+    const fresh = row.fetchedAt && row.fetchedAt.getTime() > now().getTime() - REFRESH_EVERY_DAYS * 86_400_000;
+    if (fresh && (row.status === 'ok' || row.status === 'not_enough_data')) return { ok: true, termId: row.id, fromCache: true };
+
+    const got = await deps.provider.live(term, input.locationCode);
+    if (!got.ok) return { ok: false, error: 'Google Trends couldn’t be reached just now. Try again later.' };
+    if (got.costUsd > 0) {
+        await logAiUsage({ model: DATAFORSEO_TRENDS_LIVE_USAGE_MODEL, inputTokens: 0, outputTokens: 0, workspaceId: input.organisationId, sessionId: 'search-trends-lookup', costUsdOverride: got.costUsd.toFixed(6) });
+    }
+    const parsed = parseTrendsTask(got.task);
+    if (parsed.status === 'error') return { ok: false, error: 'Google Trends couldn’t answer for that term just now.' };
+    const kept = (await filterRelatedQueries([{ id: row.id, term, location: input.locationName, queries: [...parsed.top, ...parsed.rising.map((q) => q.query)] }], deps.callFilterModel)).get(row.id) ?? new Set<string>();
+    await db.update(searchTrendTerms).set({
+        status: parsed.status, series: parsed.series, nonZeroShare: parsed.nonZeroShare, peakMonths: parsed.peakMonths,
+        topQueries: parsed.top.filter((q) => kept.has(q)).slice(0, RELATED_KEPT),
+        risingQueries: parsed.rising.filter((q) => kept.has(q.query)).slice(0, RELATED_KEPT),
+        fetchedAt: now(), attempts: 0, lastError: null,
+        costUsdTotal: sql`${searchTrendTerms.costUsdTotal} + ${got.costUsd.toFixed(4)}::numeric`,
+    }).where(eq(searchTrendTerms.id, row.id));
+    return { ok: true, termId: row.id, fromCache: false };
 }
 
 // ── Waking the worker ───────────────────────────────────────────────────────────────────────────

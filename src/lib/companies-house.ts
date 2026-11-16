@@ -243,3 +243,90 @@ export async function lookupCompaniesHouse(
         },
     };
 }
+
+// ── Watch list (docs/buying-triggers-plan.md Phase 2) ───────────────────────────────────────────
+
+/** One filing as the register returns it (filing-history items and the filings stream's `data`). */
+export interface CompaniesHouseFiling {
+    transactionId: string;
+    type: string;
+    date: string | null;
+    category: string | null;
+    description: string | null;
+    values: Record<string, string>;
+}
+
+export function parseFiling(raw: unknown): CompaniesHouseFiling | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    const transactionId = typeof r.transaction_id === 'string' ? r.transaction_id : '';
+    const type = typeof r.type === 'string' ? r.type.toUpperCase() : '';
+    if (!transactionId || !type) return null;
+    const dv = (r.description_values && typeof r.description_values === 'object') ? r.description_values as Record<string, unknown> : {};
+    const values: Record<string, string> = {};
+    for (const [k, v] of Object.entries(dv)) if (typeof v === 'string' || typeof v === 'number') values[k] = String(v);
+    return {
+        transactionId,
+        type,
+        date: typeof r.date === 'string' ? r.date.slice(0, 10) : null,
+        category: typeof r.category === 'string' ? r.category : null,
+        description: typeof r.description === 'string' ? r.description : null,
+        values,
+    };
+}
+
+/** The newest filings for one company, newest first. NEVER THROWS. */
+export async function getFilingHistory(number: string, count = 10, opts: { timeoutMs?: number } = {}): Promise<
+    { ok: true; filings: CompaniesHouseFiling[] } | { ok: false; reason: string }
+> {
+    if (!isCompaniesHouseConfigured()) return { ok: false, reason: 'not_configured' };
+    const res = await get(`/company/${encodeURIComponent(number)}/filing-history?items_per_page=${count}`, opts.timeoutMs ?? TIMEOUT_MS);
+    if (!res.ok) return res;
+    const items = (res.body as { items?: unknown } | null)?.items;
+    return { ok: true, filings: (Array.isArray(items) ? items : []).map(parseFiling).filter((f): f is CompaniesHouseFiling => !!f) };
+}
+
+export interface CompaniesHouseProfile {
+    number: string;
+    name: string;
+    status: string;
+    type: string | null;
+    postcode: string | null;
+}
+
+/** One company's register entry, or null when the number does not exist. NEVER THROWS. */
+export async function getCompanyProfile(number: string, opts: { timeoutMs?: number } = {}): Promise<
+    { ok: true; profile: CompaniesHouseProfile | null } | { ok: false; reason: string }
+> {
+    if (!isCompaniesHouseConfigured()) return { ok: false, reason: 'not_configured' };
+    const res = await get(`/company/${encodeURIComponent(number)}`, opts.timeoutMs ?? TIMEOUT_MS);
+    if (!res.ok) return res;
+    const b = res.body as Record<string, unknown> | null;
+    if (!b || typeof b.company_number !== 'string') return { ok: true, profile: null };
+    return {
+        ok: true,
+        profile: {
+            number: b.company_number,
+            name: String(b.company_name ?? ''),
+            status: String(b.company_status ?? ''),
+            type: typeof b.type === 'string' ? b.type : null,
+            postcode: normalisePostcode((b.registered_office_address as Record<string, unknown> | undefined)?.postal_code),
+        },
+    };
+}
+
+/** Name search for the "add a company" picker: up to 10 register entries, active first. NEVER THROWS. */
+export async function searchCompaniesForPicker(name: string): Promise<
+    { ok: true; items: Array<{ number: string; name: string; status: string; postcode: string | null; type: string | null }> } | { ok: false; reason: string }
+> {
+    if (!isCompaniesHouseConfigured()) return { ok: false, reason: 'not_configured' };
+    const q = String(name || '').trim().slice(0, 120);
+    if (q.length < 2) return { ok: true, items: [] };
+    const found = await searchCompanies(q, TIMEOUT_MS);
+    if (!found.ok) return found;
+    const items = found.items
+        .map((i) => ({ number: i.number, name: i.name, status: i.status, postcode: i.postcode, type: i.type ?? null }))
+        .sort((a, b) => Number(b.status === 'active') - Number(a.status === 'active'))
+        .slice(0, 10);
+    return { ok: true, items };
+}

@@ -5489,7 +5489,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
   // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'
-  //   |'voiceover'|'captions'|'time_text', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,
+  //   |'voiceover'|'captions'|'time_text'|'carousel', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,
   //   script?, voice?, voiceName?, captions?, captionStyle?, timeText? }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
@@ -5518,6 +5518,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     time_text: { head: 'Time the text to the voice', button: 'Time the text', busy: 'Listening for the words…' },
     // The post editor's "Bring back" on a removed or rejected post (restore-post.ts).
     restore: { head: 'Bring this post back', button: 'Bring it back', busy: 'Bringing it back…' },
+    // The post editor's "Make it a carousel" on a Top list post (make-carousel.ts, Top lists Phase 2).
+    carousel: { head: 'Make it a carousel', button: 'Make the slides', busy: 'Making the slides…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -5565,6 +5567,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
         <p class="text-xs text-gray-600 mt-2">Free. Captions are added when the video is made.</p>` : ''}
       ${!blocked && ui.action === 'time_text' ? '<p class="text-xs text-gray-600 mt-3">Each text box on the post shows while its words are being said. A box whose words are never said keeps its timing. Free.</p>' : ''}
+      ${!blocked && ui.action === 'carousel' ? `<p class="text-xs text-gray-600 mt-3">A cover slide plus one branded slide per numbered item, made from the words already in the post. Its caption stays as it is${labels.length ? ` and it becomes a ${esc(labels.join(' and '))} carousel` : ''}; any picture on it is replaced by the slides. Uses ${window.taskCost('carousel')}.</p>` : ''}
       ${!blocked && ui.action === 'video_version' ? '<p class="text-xs text-gray-600 mt-3">Your Video Producer plans a short video saying what this post says — free. You check the storyboard on its Videos tab before anything is made; the cost of making it is shown there first. This post stays as it is.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
@@ -6489,6 +6492,85 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('discussion_action_proposal', renderDiscussionActionProposalCard);
 
+  // ── Built-in: Watch list Action Proposal Card (Lead Generator chat) ─────────
+  // { type: 'watch_action_proposal', action: 'add'|'remove'|'resume'|'set_enabled', assistantId,
+  //   watchId?, companyName?, number?, kind?, candidates?, enabled?, blocked, settled? }
+  // Rebuilt by src/utils/chat-watch-action.ts from the rows (or Companies House). The click dispatches
+  // `watch:action`; chat-session.js onWatchAction posts to lead-watch.ts, the Watch list tab's endpoint.
+  const WATCH_ACTION_COPY = {
+    add: { head: 'Watch a company', button: 'Watch it', busy: 'Adding…' },
+    remove: { head: 'Stop watching', button: 'Stop watching', busy: 'Stopping…' },
+    resume: { head: 'Watch again', button: 'Watch again', busy: 'Starting…' },
+    set_enabled: { head: 'Watch list', button: 'Confirm', busy: 'Saving…' },
+  };
+
+  function renderWatchActionProposalCard(ui, esc) {
+    const copy = WATCH_ACTION_COPY[ui.action];
+    if (!copy) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const candidates = Array.isArray(ui.candidates) ? ui.candidates : null;
+    const who = ui.companyName ? `${esc(ui.companyName)}${ui.number ? ` <span class="text-xs text-gray-500">${esc(ui.number)}</span>` : ''}` : esc(ui.number || '');
+    let bodyHtml = '';
+    if (ui.action === 'set_enabled') {
+      bodyHtml = `<p class="text-sm text-gray-800 mt-3">${ui.enabled
+        ? 'Switch the Watch list on: your customers, your leads matched to Companies House and companies you add are checked every few days, with one note a day when there is news.'
+        : 'Switch the Watch list off: nothing is checked and no notes are sent until you switch it on again.'}</p>`;
+    } else if (ui.action === 'add' && candidates) {
+      bodyHtml = `<p class="text-sm text-gray-800 mt-3">Companies House companies matching “${esc(ui.companyName || '')}”. Pick the right one:</p>
+        <ul class="mt-2 divide-y divide-gray-100 border border-gray-100 rounded-lg">${candidates.map((c) => `
+          <li class="flex items-center justify-between gap-3 px-3 py-2">
+            <span class="text-sm text-gray-900">${esc(c.name)} <span class="text-xs text-gray-500">${esc(c.number)}${c.postcode ? ` · ${esc(c.postcode)}` : ''}${c.status && c.status !== 'active' ? ` · ${esc(c.status)}` : ''}</span></span>
+            <button type="button" data-wap-pick="${esc(c.number)}" class="btn-secondary border px-3 py-1 text-xs font-bold rounded-lg disabled:opacity-50">Watch</button>
+          </li>`).join('')}</ul>`;
+    } else if (ui.action === 'add') {
+      bodyHtml = `<p class="text-sm font-bold text-gray-900 mt-3">${who}</p>
+        <p class="text-xs text-gray-600 mt-2">Checked on Companies House every few days. The first check records where it stands; news is reported from then on. Nothing is sent to anyone.</p>`;
+    } else {
+      bodyHtml = `<p class="text-sm font-bold text-gray-900 mt-3">${who}</p>
+        ${ui.action === 'remove' ? `<p class="text-xs text-gray-600 mt-2">${ui.kind === 'manual' ? 'Removes it from your Watch list.' : 'Stops the Companies House checks. It stays on your leads; you can watch it again from the Watch list tab.'}</p>` : ''}`;
+    }
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    const showGo = !blocked && !(ui.action === 'add' && candidates);
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${bodyHtml}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${showGo ? `<button type="button" data-wap-go class="${ui.action === 'remove' ? 'btn-secondary border' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(ui.action === 'set_enabled' ? (ui.enabled ? 'Switch on' : 'Switch off') : copy.button)}</button>` : ''}
+        ${blocked ? '' : '<button type="button" data-wap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>'}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-wap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-wap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    function go(number) {
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('watch:action', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId: Number(ui.assistantId) || null, watchId: Number(ui.watchId) || null,
+          number: number || ui.number || null, enabled: ui.enabled === true,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    }
+    el.addEventListener('click', (e) => {
+      const pick = e.target.closest('[data-wap-pick]');
+      if (pick) { go(pick.getAttribute('data-wap-pick')); return; }
+      if (e.target.closest('[data-wap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-wap-go]')) go(null);
+    });
+    return el;
+  }
+
+  register('watch_action_proposal', renderWatchActionProposalCard);
+
   // ── Built-in: Assistant Settings Proposal Card (every structured chat) ─────
   // { type: 'assistant_settings_proposal', setting: 'pause'|'resume'|'draft_horizon'|'review_alerts'|
   //   'content_suggestions', assistantId, assistantName, current, proposed, days, value, enabled,
@@ -6502,6 +6584,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     draft_horizon: { head: 'Generate posts ahead', button: 'Save', busy: 'Saving…' },
     review_alerts: { head: 'Review alerts', button: 'Save', busy: 'Saving…' },
     content_suggestions: { head: 'Autonomous Content Suggestions', button: 'Save', busy: 'Saving…' },
+    trend_angles: { head: 'Timely angles from search trends', button: 'Save', busy: 'Saving…' },
   };
 
   function renderAssistantSettingsProposalCard(ui, esc) {
@@ -6537,7 +6620,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         bubbles: true,
         detail: {
           setting: ui.setting, assistantId,
-          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null,
+          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null, frequency: ui.frequency ?? null,
           respond({ ok, message, error }) {
             if (ok) { say(message || 'Done.'); return; }
             setBusy(false);
@@ -6836,6 +6919,67 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
 
   register('site_directory', renderSiteDirectoryCard);
+
+  // ── Built-in: Search Terms Card (Business Mentor + Blog Writer) ────────────────────────────
+  // { type: 'search_terms', action: 'add'|'approve'|'approve_all'|'remove'|'suggest', term, termId, region,
+  //   regionName, count, blocked, settled? }
+  // Built by src/utils/chat-search-terms-card.ts. The click POSTs to search-trends.ts — the same action as
+  // Business Information ▸ What People Search (docs/google-trends-plan.md Phase 2).
+  function renderSearchTermsCard(ui, esc) {
+    const actions = ['add', 'approve', 'approve_all', 'remove', 'suggest', 'lookup'];
+    const action = actions.indexOf(ui.action) >= 0 ? ui.action : 'add';
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const term = `“${esc(String(ui.term || ''))}”`;
+    const where = ui.regionName ? ` in ${esc(String(ui.regionName))}` : '';
+    const what = action === 'add' ? `Track ${term}${where} on Google Trends, so your assistants can plan for its busy months.`
+      : action === 'approve' ? `Approve ${term}${where} — tracking starts and its first data arrives within a day.`
+      : action === 'approve_all' ? `Approve all ${Number(ui.count) || 0} suggested search terms.`
+      : action === 'remove' ? `Stop tracking ${term}${where}.`
+      : action === 'lookup' ? `Check ${term}${where} on Google Trends now, without adding it to your list.`
+      : 'Suggest search terms from your business details. They’re saved as suggestions for you to approve.';
+    const label = { add: 'Track it', approve: 'Approve', approve_all: 'Approve all', remove: 'Stop tracking', suggest: 'Suggest terms', lookup: 'Look it up' }[action];
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Search terms · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${what}</p>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked || ui.settled ? '' : `<button type="button" data-st-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${label}</button>
+        <button type="button" data-st-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-st-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-st-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-st-go], [data-st-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-st-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-st-go]')) return;
+      setBusy(true);
+      say(action === 'suggest' ? 'Thinking…' : 'Saving…');
+      const body = action === 'add' || action === 'lookup' ? { action, term: ui.term, region: ui.region || undefined }
+        : action === 'approve' || action === 'remove' ? { action, termId: ui.termId }
+        : { action };
+      try {
+        const res = await fetch('/.netlify/functions/search-trends', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn’t work — please try again.');
+        say(action === 'suggest'
+          ? (data.added && data.added.length ? `Suggested: ${data.added.join(', ')}. Approve them in Business Information ▸ What People Search.` : 'Nothing new to suggest.')
+          : action === 'lookup'
+            ? (data.deferred ? (data.message || 'Added as a suggestion.') : (data.summary ? `${data.summary} (Relative interest from Google Trends — never a number of searches.)` : 'No data came back for that term.'))
+            : (data.message || 'Done.'));
+      } catch (err) {
+        setBusy(false);
+        say(err && err.message ? err.message : 'That didn’t work — please try again.', 'error');
+      }
+    });
+    return el;
+  }
+
+  register('search_terms', renderSearchTermsCard);
 
   // ── Built-in: Library Proposal Cards (Support Agent's Knowledge Base; Social / Blog Inspo) ────
   // { type: 'kb_article_proposal', assistantId, title, content, blocked, settled? }

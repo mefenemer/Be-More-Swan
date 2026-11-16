@@ -34,7 +34,12 @@ export interface TrendsProvider {
     ready(): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }>;
     /** Fetch one answer. `pending` = not ready yet (try again later). Free once posted. */
     get(taskId: string): Promise<{ ok: true; task: RawTrendsTask } | { ok: false; pending: boolean; error: string }>;
+    /** One term answered now (≈ $0.011). For the on-demand chat look-up, under a daily fair-use cap. */
+    live(term: string, locationCode: number): Promise<{ ok: true; task: RawTrendsTask; costUsd: number } | { ok: false; error: string }>;
 }
+
+/** The usage-log model key for a Live look-up. */
+export const DATAFORSEO_TRENDS_LIVE_USAGE_MODEL = 'dataforseo-trends-live';
 
 /** The usage-log model key for a DataForSEO Trends charge (src/utils/system-map.ts maps `dataforseo-`). */
 export const DATAFORSEO_TRENDS_USAGE_MODEL = 'dataforseo-trends-standard';
@@ -116,6 +121,16 @@ export function dataForSeoProvider(env: NodeJS.ProcessEnv = process.env, fetchIm
             const code = Number(t?.status_code ?? 0);
             if (IN_QUEUE.has(code)) return { ok: false, pending: true, error: `${code} ${t?.status_message}` };
             return { ok: true, task: { statusCode: code, statusMessage: String(t?.status_message ?? ''), items: t?.result?.[0]?.items ?? [] } };
+        },
+        async live(term, locationCode) {
+            const r = await call('POST', '/explore/live', [dataForSeoTaskBody(term, locationCode, 'live')]);
+            if (!r.ok) return r;
+            const t = r.json.tasks?.[0];
+            return {
+                ok: true,
+                costUsd: Number(t?.cost ?? r.json.cost ?? 0) || 0,
+                task: { statusCode: Number(t?.status_code ?? 0), statusMessage: String(t?.status_message ?? ''), items: t?.result?.[0]?.items ?? [] },
+            };
         },
     };
 }

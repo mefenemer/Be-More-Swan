@@ -39,6 +39,8 @@ export const SEQUENCE_HALT_REASONS = [
     'manual',         // a human stopped it
     'signed_up',      // they signed up through the outreach offer's link (src/utils/outreach-offer.ts) —
                       // a success like 'replied': they said yes, so the chasers stop
+    'company_closed', // Companies House shows the company in liquidation, administration or dissolved
+                      // (the Watch list, src/utils/lead-watch.ts). Not do-not-contact: the user decides.
 ] as const;
 export type SequenceHaltReason = typeof SEQUENCE_HALT_REASONS[number];
 
@@ -64,6 +66,7 @@ export const SEQUENCE_HALT_REASON_LABELS: Record<SequenceHaltReason, string> = {
     do_not_contact: 'This lead must never be emailed',
     manual: 'You stopped it',
     signed_up: 'They signed up through your offer — follow-ups stopped automatically',
+    company_closed: 'Companies House shows the company closing — follow-ups stopped automatically',
 };
 
 /**

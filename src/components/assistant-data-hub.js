@@ -241,6 +241,48 @@
     };
   }
 
+  /**
+   * Why now: the dated reason to contact this lead NOW (docs/lead-why-now-and-watching-plan.md).
+   *
+   * ⚠️ Every rule comes from window.LeadWhyNow, generated from src/config/lead-why-now.ts — the
+   * same code the chat's lead snapshot runs, so the table and the chat never disagree about
+   * whether a reason is still fresh. The date is the EVIDENCE's date, worked out against today on
+   * every render; nothing here stores "fresh".
+   *
+   * The cell shows the sentence and its age; the filter, group-by and search see the state label
+   * ("Reason now", "Cooling off", "No recent reason", "Not checked") — a menu of one sentence per
+   * lead would be no filter at all.
+   */
+  function whyNowView(record) {
+    const W = window.LeadWhyNow;
+    if (!W) return null;
+    return W.state((record.data || {}).intel, Date.now());
+  }
+
+  function whyNowCell(record) {
+    const W = window.LeadWhyNow;
+    const v = whyNowView(record);
+    if (!W || !v) return { text: '—', html: '<span class="text-gray-500">—</span>' };
+    const label = W.LABELS[v.state] || '—';
+    if (v.state === 'fresh' || v.state === 'cooling') {
+      const age = W.ageLabel(v.ageDays);
+      const tone = v.state === 'fresh' ? 'text-gray-800' : 'text-gray-500';
+      const ageCls = v.state === 'fresh' ? 'text-emerald-700 font-semibold' : 'text-gray-500';
+      return {
+        text: label,
+        html: `<span class="text-sm ${tone}">${esc(v.summary)}</span>
+          <a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer nofollow" data-row-stop
+             class="text-xs ${ageCls} hover:underline whitespace-nowrap" title="Open the source">${esc(age)} &#8599;</a>`,
+      };
+    }
+    const tip = v.state === 'not_checked'
+      ? 'Not researched for a reason to contact them now yet. Open the lead and choose Research this lead (or Research again).'
+      : v.state === 'gone'
+        ? `The last reason we found is over ${W.GONE_DAYS} days old. It is still listed in the lead's research.`
+        : 'Researched: nothing dated and recent that makes now a good time.';
+    return { text: label, html: `<span class="text-xs text-gray-500" title="${esc(tip)}">${esc(label)}</span>` };
+  }
+
   function cellValue(record, key) {
     if (key === 'title') return record.title;
     if (key === 'status') return record.status ?? '—';
@@ -248,6 +290,7 @@
     if (key === 'approvalStatus') return approvalChip(record)?.short ?? '—';
     if (key === 'contact') return CONTACT_CHIP[contactState(record)].short;
     if (key === 'retention') return retentionCell(record).text;
+    if (key === 'whyNow') return whyNowCell(record).text;
     if (key === 'updatedAt') return fmtDate(record.updatedAt);
     let v = record.data;
     for (const part of String(key).split('.')) {
@@ -637,6 +680,36 @@
     return wrap;
   }
 
+  /**
+   * The Why now line at the top of the research panel: the one dated reason to contact them now,
+   * its age, its source, and the timing score beside the fit rating. Same rules as the table
+   * column (window.LeadWhyNow). Empty for leads researched before Why now existed — the table
+   * says "Not checked" for those, and "Research again" fills it in.
+   */
+  function whyNowLine(intel) {
+    const W = window.LeadWhyNow;
+    if (!W) return '';
+    const v = W.state(intel, Date.now());
+    const timing = typeof intel.timing === 'number' ? `<span class="text-xs text-gray-500 whitespace-nowrap">Timing ${esc(String(intel.timing))}/100</span>` : '';
+    if (v.state === 'fresh' || v.state === 'cooling') {
+      const fresh = v.state === 'fresh';
+      return `<div class="mb-3 rounded-lg border ${fresh ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'} px-3 py-2" data-why-now>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold uppercase tracking-wide ${fresh ? 'text-emerald-800' : 'text-gray-500'}">Why now</span>
+          <span class="text-xs ${fresh ? 'text-emerald-800 font-semibold' : 'text-gray-500'}">${esc(W.ageLabel(v.ageDays))}${fresh ? '' : ' · cooling off'}</span>
+          ${timing}
+        </div>
+        <p class="text-sm ${fresh ? 'text-gray-900' : 'text-gray-600'} mt-0.5">${esc(v.summary)}
+          <a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer nofollow" class="text-emerald-700 hover:underline font-semibold whitespace-nowrap">source &#8599;</a>
+        </p>
+      </div>`;
+    }
+    if (v.state === 'none' || v.state === 'gone') {
+      return `<p class="text-xs text-gray-500 mb-3" data-why-now>Why now: nothing dated and recent that makes now a good time.${timing ? ` ${timing}` : ''}</p>`;
+    }
+    return '';
+  }
+
   function intelBanner(record) {
     const d = record.data || {};
     const intel = d.intel && typeof d.intel === 'object' ? d.intel : null;
@@ -669,6 +742,8 @@
           ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200">${esc(intel.changeSummary)}</span>`
           : ''}
       </div>
+
+      ${whyNowLine(intel)}
 
       ${signals.length ? `
         <ul class="space-y-1.5 mb-3">
@@ -2410,6 +2485,8 @@
   const ORDERED_VALUES = {
     // Rating: the whole point of the column is that hot beats warm beats cold.
     status: ['hot', 'warm', 'cold'],
+    // Why now: the labels window.LeadWhyNow.LABELS renders, freshest first.
+    whyNow: ['Reason now', 'Cooling off', 'No recent reason', 'Not checked'],
     // Approval: the order of the gate itself, so "sort by Approval" puts what needs you on top.
     // ⚠️ These are the RENDERED labels, and for a lead `approvalChip()` can substitute the outreach
     // state for the approval state — so "Email Drafted" and "Email Sent" have to be ranked here or
@@ -2432,6 +2509,13 @@
     // would have buried the leads about to be deleted in the middle of the column. Ascending is
     // the useful direction here (most urgent first), and leads that are not on a clock at all sort
     // last rather than first: they are not "safe for ∞ days", they are simply not in this race.
+    // Why now sorts by freshness, never by its sentence: fresh reasons first, newest first within
+    // a band (window.LeadWhyNow.rank). Ascending is the useful direction — who to call today.
+    if (key === 'whyNow') {
+      const W = window.LeadWhyNow;
+      const v = whyNowView(record);
+      return W && v ? W.rank(v) : Infinity;
+    }
     if (key === 'retention') {
       const R = window.LeadRetention;
       const swept = record.approvalStatus === 'pending_approval' || record.approvalStatus === 'rejected';
@@ -2671,6 +2755,9 @@
         const who = contactPersonLine(record);
         const shown = who ? `${who} — ${tip}` : tip;
         cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${shown ? ` title="${esc(shown)}"` : ''}>${esc(s.short)}</span>`;
+      } else if (c.key === 'whyNow') {
+        // The sentence links to its source; whyNowCell() already escaped its own text.
+        cell = whyNowCell(record).html;
       } else if (c.key === 'retention') {
         // The 30-day countdown. Coloured by urgency rather than by state — this is the one column
         // whose job is to be noticed BEFORE it matters, because what it counts down to cannot be
@@ -2982,6 +3069,8 @@
             paintSelectionBar();
             return;
           }
+          // A link inside a cell (the Why now source) opens its page, not the row.
+          if (e.target.closest('[data-row-stop]')) return;
           const open = !detailTr.classList.contains('hidden');
           if (!open && !td.hasChildNodes()) td.appendChild(detailPanel(record));
           detailTr.classList.toggle('hidden', open);

@@ -15,18 +15,22 @@ import { checkRateLimit } from './rate-limit';
 
 type Db = ReturnType<typeof getDb>;
 
-export type FairUseKind = 'chat' | 'helpers';
+// 'trends': on-demand Google Trends look-ups from chat (docs/google-trends-plan.md §10 Q5) — free, but
+// each one costs us a DataForSEO Live call, so a workspace gets 10 a day by default.
+export type FairUseKind = 'chat' | 'helpers' | 'trends';
 
-const DEFAULTS: Record<FairUseKind, number> = { chat: 300, helpers: 200 };
+const DEFAULTS: Record<FairUseKind, number> = { chat: 300, helpers: 200, trends: 10 };
 const CONFIG_KEYS: Record<FairUseKind, string> = {
     chat: 'fair_use_chat_per_day',
     helpers: 'fair_use_helpers_per_day',
+    trends: 'fair_use_trends_lookups_per_day',
 };
 const DAY_SECS = 24 * 60 * 60;
 
 export const FAIR_USE_MESSAGE: Record<FairUseKind, string> = {
     chat: "You've sent a lot of messages today, so chat is paused until tomorrow. Your assistants keep working in the meantime.",
     helpers: "You've used the editing helpers a lot today, so they're paused until tomorrow. Your assistants keep working in the meantime.",
+    trends: "You've looked up a lot of search terms today, so live look-ups are paused until tomorrow. Terms you track are still refreshed every week.",
 };
 
 async function dailyLimit(db: Db, kind: FairUseKind): Promise<number> {

@@ -493,6 +493,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // Buying triggers Phase 2: the Watch list's once-a-day note (src/utils/lead-watch-effects.ts).
+        templateKey: 'watch_list_news',
+        name: 'News on companies you watch',
+        category: 'Assistants',
+        type: 'watch_list_news',
+        title: '{{watch.title}}',
+        message: '{{assistant.name}}: {{watch.body}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('watch.title', 'Headline', 'News on 3 companies you watch'),
+            v('watch.body', 'What changed', '2 new reasons to get in touch from Companies House: Acme Ltd, Bolt Ltd. See the Watch list tab.'),
+        ],
+    },
+    {
         templateKey: 'assistant_archived',
         name: 'Assistant archived',
         category: 'Assistants',

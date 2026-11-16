@@ -336,6 +336,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "myContentBlock",
         "reviewsBlock",
         "searchQueriesBlock",
+        "searchTrendsBlock",
         "myAccountBlock",
         "mentorPointerBlock",
         "mentorNoPlanBlock",
@@ -439,6 +440,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "reviews_add",
         "rule_proposal",
         "schedule_proposal",
+        "search_terms",
         "setup_field_proposal",
         "share_for_review_proposal",
         "shop_settings",
@@ -481,6 +483,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "video_tidy_proposal",
         "visual_brief_edit",
         "visual_brief_proposal",
-        "visual_option_review"
+        "visual_option_review",
+        "watch_action_proposal"
     ]
 };

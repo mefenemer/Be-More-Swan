@@ -114,6 +114,13 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     swanIndexProfiles: s.swanIndexProfiles,
     swanIndexPosts: s.swanIndexPosts,
     assistantRecords: s.assistantRecords,
+    // Buying triggers Phase 2: the Watch list and the Companies House news found on it.
+    leadWatch: s.leadWatch,
+    leadWatchSignals: s.leadWatchSignals,
+    leadWatchSettings: s.leadWatchSettings,
+    // Why now Phase 2: what the website / SEC watch last saw for each lead, and its news.
+    leadSiteWatch: s.leadSiteWatch,
+    leadSiteWatchSignals: s.leadSiteWatchSignals,
     actionItems: s.actionItems,
     featureRequests: s.featureRequests,
     connections: s.systemConnections,
@@ -133,8 +140,16 @@ async function inBatches<T>(jobs: Array<() => Promise<T>>, size = 6): Promise<T[
 }
 
 async function rowsWhere(db: Db, table: any, where: any): Promise<Record<string, unknown>[]> {
-    const rows = await db.select().from(table).where(where);
-    return (rows as Record<string, unknown>[]).map(stripSecrets);
+    try {
+        const rows = await db.select().from(table).where(where);
+        return (rows as Record<string, unknown>[]).map(stripSecrets);
+    } catch (err) {
+        // A table whose migration has not been applied yet (42P01, e.g. db/z-lead-watch.sql before the
+        // owner runs it) holds nothing to export: it must not fail the whole export.
+        const e = err as { code?: string; cause?: { code?: string } } | null;
+        if (e?.code === '42P01' || e?.cause?.code === '42P01') return [];
+        throw err;
+    }
 }
 
 export interface ExportScope {
