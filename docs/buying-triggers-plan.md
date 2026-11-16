@@ -1,7 +1,8 @@
 # Buying triggers — PLAN (feature request #36)
 
-2026-11-15. **Phase 1 built and LIVE on prod (engine + FSA feed, Admin only); nothing else built.** All nine owner
-decisions taken 2026-11-16 (§10). UK first, then the US.
+2026-11-15. **Phase 1 (engine + FSA feed, Admin only) and Phase 2 (Lead Generator Watch list) built and LIVE on
+prod** (Phase 2 released 2026-11-16, #645 / #649); Phases 3–6 not built. All nine owner decisions taken 2026-11-16
+(§10). UK first, then the US.
 **Is it disruptive, is it worth building, will it bring leads?** See §9 (added 2026-11-15).
 
 The ask: *"What are your thoughts on this? I want the biggest value items to consider building into Be More Swan
@@ -334,5 +335,7 @@ little is wasted.
    a DPIA note. Counts per trigger type and trade only, never a workspace's leads or messages.
 
 **What this means next:** Phase 1 collects data on Admin ▸ Assistants ▸ Buying triggers (prod live from 2026-11-16,
-first new premises 2026-11-17). The gate is read after 2–4 weeks. Phase 2 (Watch list, including customers, + the
-Companies House stream) is not blocked by the gate and can be built next.
+first new premises 2026-11-17). The gate is read after 2–4 weeks; Phase 3 waits for it. Phase 2 (Watch list,
+including customers, + the Companies House stream) is built and live (2026-11-16; the stream waits for
+`COMPANIES_HOUSE_STREAM_KEY`). Phase 4 (website changed) is not gated and can be built next; Phase 5 waits for
+Reed's written answer, Phase 6 for advice on the Maps terms.
