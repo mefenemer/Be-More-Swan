@@ -747,7 +747,7 @@ function _renderConnectionsGrid() {
 
     if (!platforms.length && !sources.length && !comingSoon.length && !_blogDestinations.length && !_mailboxProviders.length && !_searchConsole) {
         // Nothing to connect and nothing "coming soon" here — but the assistant may still
-        // have enable-able recipes rendered by the Synced actions list above, so only show
+        // have enable-able recipes rendered by the Synced actions list below, so only show
         // the empty state when there are no recipes either.
         grid.innerHTML = covered.size ? '' : '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">This assistant doesn&#39;t connect to any outside tools — everything it does happens inside Be More Swan. If that changes, the connections it can use will appear here.</div>';
         return;
