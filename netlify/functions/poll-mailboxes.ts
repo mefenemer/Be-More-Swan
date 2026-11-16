@@ -2,8 +2,8 @@
 // (docs/email-assistant-plan.md §4.3, the Phase 1 mechanism; push notifications come in Phase 3 and
 // this stays as the safety net).
 //
-// ⚠️ Netlify runs scheduled functions on PRODUCTION only. Staging is poked by
-// .github/workflows/staging-crons.yml with CRON_TRIGGER_SECRET, which this accepts as well.
+// ⚠️ Netlify runs scheduled functions on PRODUCTION only, and answers a direct URL call to one with a
+// bare 403 before this handler runs. Staging is poked through run-poll-mailboxes.ts instead.
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -25,8 +25,8 @@ export function mayPoll(event: { body?: string | null; headers?: Record<string, 
     try { return typeof JSON.parse(String(raw))?.next_run === 'string'; } catch { return false; }
 }
 
-export default withLambda(async (event) => {
-    if (!mayPoll(event)) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
+/** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
+export async function pollDueMailboxes(): Promise<{ due: number; dispatched: number }> {
     const due = await mailboxesDueForSync(getDb()).catch((err) => {
         // The table may not exist yet (z-mailboxes.sql not applied): nothing to do, not an outage.
         console.error('[poll-mailboxes] could not list mailboxes', err instanceof Error ? err.message : err);
@@ -35,5 +35,11 @@ export default withLambda(async (event) => {
     let dispatched = 0;
     for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
     console.log('[poll-mailboxes]', { due: due.length, dispatched });
-    return { statusCode: 200, body: JSON.stringify({ ok: true, due: due.length, dispatched }) };
+    return { due: due.length, dispatched };
+}
+
+export default withLambda(async (event) => {
+    if (!mayPoll(event)) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
+    const result = await pollDueMailboxes();
+    return { statusCode: 200, body: JSON.stringify({ ok: true, ...result }) };
 });

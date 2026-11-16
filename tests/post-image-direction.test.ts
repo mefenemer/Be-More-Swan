@@ -169,7 +169,7 @@ const briefing = (over: Partial<PostImageBriefing> = {}): PostImageBriefing => (
     });
 
     await test('only the 15-minute background lane turns the writer on', () => {
-        assert.match(read('netlify/functions/run-content-jobs-background.ts'), /drainContentJobs\(\{ imageWriter: true \}\)/);
+        assert.match(read('netlify/functions/run-content-jobs-background.ts'), /drainContentJobs\(\{ imageWriter: true[,}]/);
         const staging = read('netlify/functions/run-content-jobs.ts');
         assert.match(staging, /await triggerContentDrain\(/);
         assert.ok(!staging.includes('imageWriter'));
