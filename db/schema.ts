@@ -690,6 +690,46 @@ export const searchConsoleQueries = pgTable("search_console_queries", {
   index("search_console_queries_org_idx").on(t.organisationId, t.impressions),
 ]);
 
+// The Google Trends engine (db/z-search-trends.sql, docs/google-trends-plan.md Phase 1). SHARED across
+// workspaces — one row per term + Google Trends location, refreshed weekly by search-trends-background.ts.
+// Relative interest only (100 = the period's peak), never search counts.
+export const searchTrendTerms = pgTable("search_trend_terms", {
+  id: serial().primaryKey(),
+  term: text("term").notNull(),
+  locationCode: integer("location_code").notNull(),
+  locationName: text("location_name").notNull(),
+  status: text("status").notNull().default('pending'),
+  series: jsonb("series").$type<Array<{ d: string; v: number | null }>>().notNull().default([]),
+  peakMonths: jsonb("peak_months").$type<number[]>().notNull().default([]),
+  topQueries: jsonb("top_queries").$type<string[]>().notNull().default([]),
+  risingQueries: jsonb("rising_queries").$type<Array<{ query: string; value: string }>>().notNull().default([]),
+  nonZeroShare: real("non_zero_share"),
+  taskId: text("task_id"),
+  taskPostedAt: timestamp("task_posted_at"),
+  fetchedAt: timestamp("fetched_at"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  costUsdTotal: numeric("cost_usd_total", { precision: 10, scale: 4 }).notNull().default('0'),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("search_trend_terms_term_location_code_key").on(t.term, t.locationCode),
+  index("search_trend_terms_task_idx").on(t.taskId),
+]);
+
+// Which workspace tracks which shared trend term. approvedAt null = suggested, awaiting the owner's
+// approval (plan §10 Q4); only approved rows are fetched.
+export const orgTrendTerms = pgTable("org_trend_terms", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  termId: integer("term_id").notNull().references(() => searchTrendTerms.id, { onDelete: "cascade" }),
+  source: text("source").notNull().default('user'),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("org_trend_terms_organisation_id_term_id_key").on(t.organisationId, t.termId),
+  index("org_trend_terms_term_idx").on(t.termId),
+]);
+
 // The Email Assistant's mailboxes (db/z-mailboxes.sql, docs/email-assistant-plan.md §3.3). One row per
 // PERSON's mailbox, not per workspace: only `userId` ever sees it. Its token lives in the vault under
 // its own `vaultRefKey`. Disconnecting deletes the row and, by cascade, every mailboxMessages row.
@@ -743,6 +783,28 @@ export const mailboxMessages = pgTable("mailbox_messages", {
 }, (t) => [
   unique("mailbox_messages_mailbox_id_provider_message_id_key").on(t.mailboxId, t.providerMessageId),
   index("mailbox_messages_mailbox_received_idx").on(t.mailboxId, t.receivedAt),
+]);
+
+// What the Email Assistant proposes and the user approves (db/z-mailbox-actions.sql): drafted replies and
+// clean-up batches, with what Undo needs. Owner-only (userId) — never assistant_records, which every member
+// with access to the assistant can read.
+export const mailboxActions = pgTable("mailbox_actions", {
+  id: serial().primaryKey(),
+  mailboxId: integer("mailbox_id").notNull().references(() => mailboxes.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),                       // 'reply' | 'cleanup'
+  status: text("status").notNull().default("waiting"), // waiting | sent | drafted | applied | undone | dismissed | failed
+  messageId: integer("message_id").references(() => mailboxMessages.id, { onDelete: "set null" }),
+  payload: jsonb("payload").notNull().default({}),
+  result: jsonb("result"),
+  actedAt: timestamp("acted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("mailbox_actions_mailbox_status_idx").on(t.mailboxId, t.status),
+  index("mailbox_actions_user_idx").on(t.organisationId, t.userId),
+  uniqueIndex("mailbox_actions_one_waiting_reply").on(t.messageId).where(sql`kind = 'reply' AND status = 'waiting'`),
 ]);
 
 // Manually-entered, date-stamped follower counts. LinkedIn's member API does not expose a
@@ -6511,12 +6573,41 @@ export const siteOrders = pgTable("site_orders", {
   shippingAddress: jsonb("shipping_address"),
   pagePath: text("page_path"),
   status: text().notNull().default("paid"),
+  // db/z-shop-settings.sql: a Stripe refund (charge.refunded) is matched back by payment intent.
+  paymentIntentId: text("payment_intent_id"),
+  refundedAmount: integer("refunded_amount").notNull().default(0),
+  buyerEmailedAt: timestamp("buyer_emailed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("site_orders_session_uq").on(t.checkoutSessionId),
   index("site_orders_site_idx").on(t.siteId, t.createdAt),
   index("site_orders_org_idx").on(t.organisationId),
-  check("site_orders_status_check", sql`${t.status} IN ('paid','done')`),
+  index("site_orders_pi_idx").on(t.paymentIntentId),
+  check("site_orders_status_check", sql`${t.status} IN ('paid','done','refunded')`),
+]);
+
+// What UK consumer law needs a buyer to see (db/z-shop-settings.sql, src/utils/shop-settings.ts):
+// one row per workspace; the Delivery & returns page and the buyer's email are drawn from it.
+export const shopSettings = pgTable("shop_settings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  traderName: text("trader_name"),
+  traderAddress: text("trader_address"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  vatNumber: text("vat_number"),
+  deliveryText: text("delivery_text"),
+  returnsDays: integer("returns_days").notNull().default(14),
+  returnPostage: text("return_postage").notNull().default("buyer"),
+  exceptions: jsonb().notNull().default([]),
+  extraTerms: text("extra_terms"),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("shop_settings_org_uq").on(t.organisationId),
+  check("shop_settings_returns_days_check", sql`${t.returnsDays} BETWEEN 14 AND 365`),
+  check("shop_settings_return_postage_check", sql`${t.returnPostage} IN ('buyer','seller')`),
 ]);
 
 // "Report this site" — public, from every hosted site's footer (db/z-website-hosting.sql).

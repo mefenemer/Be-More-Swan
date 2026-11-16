@@ -19,6 +19,7 @@ const RULES: Array<{ system: string; test: (model: string) => boolean }> = [
     { system: 'gemini', test: (m) => m.startsWith('gemini-') },
     { system: 'serper', test: (m) => m.startsWith('serper-') },
     { system: 'hunter', test: (m) => m.startsWith('hunter-') },
+    { system: 'dataforseo', test: (m) => m.startsWith('dataforseo-') },
     { system: 'remotion', test: (m) => m === 'remotion-lambda' },
 ];
 

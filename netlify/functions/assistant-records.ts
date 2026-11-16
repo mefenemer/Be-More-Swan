@@ -37,7 +37,7 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads } from '../../db/schema';
+import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads, users } from '../../db/schema';
 import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
@@ -55,6 +55,7 @@ import {
 } from '../../src/config/lead-retention';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { actionItemRowsFromMeeting, summariseActionItemSync } from '../../src/utils/meeting-action-items';
 import { DATED_RECORD_TYPES, recordCalendarDate } from '../../src/utils/record-calendar-dates';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
@@ -120,21 +121,7 @@ async function materialiseActionItems(
 ): Promise<void> {
     if (record.recordType !== 'meeting') return;
     try {
-        const data = (record.data && typeof record.data === 'object') ? record.data as Record<string, unknown> : {};
-        const rawTasks = Array.isArray(data.tasks) ? data.tasks
-            : Array.isArray(data.actionItems) ? data.actionItems : [];
-        const rows = (rawTasks as unknown[])
-            .filter((t): t is Record<string, unknown> =>
-                !!t && typeof t === 'object' && typeof (t as Record<string, unknown>).description === 'string'
-                && String((t as Record<string, unknown>).description).trim() !== '')
-            .map((t) => ({
-                organisationId: orgId,
-                aiAssistantId: record.aiAssistantId,
-                meetingRecordId: record.id,
-                description: String(t.description).trim().slice(0, 2000),
-                assignee: typeof t.assignee === 'string' ? t.assignee.slice(0, 200) : null,
-                dueDate: typeof t.dueDate === 'string' ? t.dueDate.slice(0, 200) : null,
-            }));
+        const rows = actionItemRowsFromMeeting(orgId, record);
         for (const row of rows) {
             await db.insert(actionItems).values(row).onConflictDoUpdate({
                 target: [actionItems.meetingRecordId, actionItems.description],
@@ -188,18 +175,7 @@ async function attachActionItemSync<T extends { id: number; recordType: string }
         return records.map((r) => {
             const its = byMeeting.get(r.id);
             if (!its || its.length === 0) return r;
-            const count = (s: string) => its.filter((i) => i.syncStatus === s).length;
-            return {
-                ...r,
-                actionItemSync: {
-                    total: its.length,
-                    synced: count('synced'),
-                    failed: count('failed'),
-                    pending: count('pending'),
-                    skipped: count('skipped'),
-                    items: its,
-                },
-            };
+            return { ...r, actionItemSync: summariseActionItemSync(its) };
         });
     } catch {
         // Ledger table not applied yet — degrade to no sync state rather than 500 the whole hub.
@@ -215,6 +191,7 @@ async function enqueueHandoffOnApproval(
     db: Db,
     orgId: number,
     record: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown },
+    approverUserId: number | null = null,
 ): Promise<void> {
     const triggerStatus = record.recordType === 'lead' ? 'QUALIFIED'
         : record.recordType === 'meeting' ? 'MEETING_BOOKED'
@@ -238,6 +215,14 @@ async function enqueueHandoffOnApproval(
                 .limit(1);
             assistantName = a?.name;
         } catch { /* name is best-effort — the email footer degrades to a generic label */ }
+        // Who approved it: Reply-To on a follow-up sent from Be More Swan's address (finish plan step 7).
+        let approverEmail: string | undefined;
+        if (approverUserId) {
+            try {
+                const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, approverUserId)).limit(1);
+                approverEmail = u?.email ?? undefined;
+            } catch { /* best-effort — the follow-up then goes with no Reply-To */ }
+        }
         fields = {
             company: data.company ?? record.title ?? undefined,
             contactName: data.contactName ?? data.attendee ?? data.with,
@@ -253,6 +238,7 @@ async function enqueueHandoffOnApproval(
             attendees: data.attendees, // [{name,email}] — emails filled in on the inbox card
             followupEmail: data.followupEmail, // { subject, body } — the reviewed draft
             assistantName,
+            approverEmail,
             attribution: 'Be More Swan',
         };
     } else {
@@ -1046,7 +1032,7 @@ export default withLambda(async (event) => {
                 // Phase 3: normalise the meeting's action items BEFORE the handoff enqueues, so the
                 // create_tasks recipes have the per-task ledger rows to sync.
                 await materialiseActionItems(db, orgId, liveRecord);
-                await enqueueHandoffOnApproval(db, orgId, liveRecord);
+                await enqueueHandoffOnApproval(db, orgId, liveRecord, userId);
             }
 
             // After the reject has committed: a rule for a rejection that did not happen would teach

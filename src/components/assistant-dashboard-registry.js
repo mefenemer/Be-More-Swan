@@ -44,10 +44,13 @@
  *                //   are separate switches on purpose; see the note on lead_qualifier.
  *   cfg.primaryAction // → OPTIONAL. The workspace tab's primary button { label, kind }. kind:
  *                //   'generate_post' opens the post sheet (social); 'chat' opens the assistant's
- *                //   chat intake (Data Hub roles). Omit it for a role with no single "do the
+ *                //   chat intake (Data Hub roles); with `send` it also asks that, as the user, in the
+ *                //   chat docked beside the tab when there is one (the Shopkeeper). 'meetingForm' opens the
+ *                //   Meeting Note Taker's "New meeting" form (meeting-minutes-form.js). Omit it for a role with no single "do the
  *                //   thing" action and the button is hidden outright — see lead_qualifier.
  *   cfg.reviewQueue // → the Review Queue tab's data model (ALWAYS present — every assistant has a
  *                //   review/approve gate). Shape: { kind: 'posts' | 'records', recordType? }.
+ *                //   A records queue may add newAction { label, kind } for its tab header's "+ New" button.
  *                //   'posts'   → scheduled_posts lifecycle (social/blog), rendered by _detailRq*.
  *                //   'records' → assistant_records awaiting approval (approval_status), recordType
  *                //               matches hubTab.recordType.
@@ -1305,13 +1308,17 @@
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
       },
-      primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
+      // "New meeting" writes a meeting up without the chat (meeting-minutes-form.js → meeting-minutes.ts),
+      // with the same prompt and parsing as the chat (finish plan step 5, GUI-and-chat rule).
+      primaryAction: { label: 'New meeting', kind: 'meetingForm' },
       // Per-role tab label ("Inbox") — the brief forbids heavy "Review Queue" terminology for
       // the note-taker; other roles keep the default. Applied in _applyDashboardRegistry.
       reviewQueue: {
         kind: 'records',
         recordType: 'meeting',
         label: 'Inbox',
+        // The tab header's "+ New" button on a records queue (assistants.js); same form as primaryAction.
+        newAction: { label: 'New meeting', kind: 'meetingForm' },
         subtitle: 'Meetings awaiting your approval — read the drafted follow-up email on each one. Approving runs your handoff recipes, which can email the attendees and file action items.',
       },
       hubTab: {
@@ -1328,7 +1335,7 @@
           { key: 'status', label: 'Status' },
           { key: 'updatedAt', label: 'Updated' },
         ],
-        importHint: 'Paste transcripts into chat for processing — or upload a CSV of past meetings (one row per meeting) to build your library.',
+        importHint: 'Use "New meeting" on the Inbox tab (or the chat) to write up a meeting from notes or a transcript file — or upload a CSV of past meetings (one row per meeting) to build your library.',
         importColumns: ['meeting title', 'date', 'summary', 'action items'],
       },
     },
@@ -1375,7 +1382,7 @@
       reviewQueue: {
         kind: 'records',
         recordType: 'email_action',
-        subtitle: 'Drafted replies and clean-ups waiting for your approval. Coming next: for now your Email Assistant sorts and sums up your email, and changes nothing in your mailbox.',
+        subtitle: 'Your drafted replies and clean-ups are on the Emails tab, under Drafts and Clean-up — open an email and press "Draft a reply". Nothing is sent or moved until you press the button for it.',
       },
       hubTab: {
         id: 'datahub',
@@ -1383,6 +1390,38 @@
         label: 'Emails',
         // No recordType: this tab reads netlify/functions/mailboxes.ts, never assistant-records.
         description: 'Your email, sorted: what needs you first, everything else put away. Only you can see it.',
+        columns: [],
+      },
+    },
+
+    // Shopkeeper Assistant (docs/online-shop-review-plan.md §10). The shell: Stripe, the Delivery &
+    // returns details UK law asks for, and the workspace's orders, on its Shop tab (hubTab kind 'shop',
+    // src/components/assistant-shop.js → netlify/functions/shop.ts). Workspace-level, so it works
+    // without a Be More Swan website. Basket, stock and delivery rates arrive in Phase 1.
+    shopkeeper: {
+      // Results cards from shop.ts `get` stats (assistants.js _loadShopMetrics).
+      metricsSource: 'shop',
+      kpis: [
+        { label: 'New Orders', title: 'Orders Waiting for You', desc: 'Paid orders you have not marked as dealt with yet.' },
+        { label: 'Orders', title: 'Orders in the Last 30 Days', desc: 'Every paid order from your Buy buttons in the last 30 days.' },
+        { label: 'Taken', title: 'Money Taken in the Last 30 Days', desc: 'Paid orders in pounds, less refunds. The money is in your own Stripe account.' },
+        { label: 'Refunds', title: 'Refunded Orders', desc: 'Orders refunded in full or in part in the last 30 days (refunds are made in Stripe).' },
+      ],
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // `send`: the label is a question, so the button asks it (in the chat docked beside the Shop tab).
+      primaryAction: { label: 'Is my shop ready to sell?', kind: 'chat', send: 'Is my shop ready to sell?' },
+      tabChat: { tabs: ['datahub'], placeholder: 'Ask about your shop — "is my shop ready?", "any new orders?"' },
+      hubTab: {
+        id: 'datahub',
+        kind: 'shop',
+        label: 'Shop',
+        // No recordType: this tab reads netlify/functions/shop.ts, never assistant-records.
+        description: 'Take payments, show buyers what the law asks for, and see every order.',
         columns: [],
       },
     },

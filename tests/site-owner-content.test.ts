@@ -289,7 +289,10 @@ Our roastery is open on Saturdays from 9 until 1.`;
 
     await check('the chat box: paperclip, drag and drop, paste — only for roles that take files; pictures go to the library', () => {
         const chat = read('src/components/chat-session.js');
-        assert.ok(chat.includes("const ATTACH_ROLES = new Set(['website_assistant'])"));
+        // The Website Assistant takes pictures; the Meeting Note Taker takes transcripts only (tests/meeting-transcript.test.ts).
+        const roles = chat.slice(chat.indexOf('const ATTACH_ROLES = {'), chat.indexOf('const ATTACH_MAX'));
+        assert.match(roles, /website_assistant: \{\s*pictures: true,/);
+        assert.match(roles, /meeting_note_taker: \{\s*pictures: false,/);
         assert.ok(chat.includes('data-chat-attach') && chat.includes("container.addEventListener('drop', onDrop)") && chat.includes("inputEl.addEventListener('paste', onPaste)"));
         assert.ok(chat.includes('window.MediaPicker.upload(p.file)'));
         assert.ok(chat.includes("container.removeEventListener('drop', onDrop)"), 'listeners removed on destroy');

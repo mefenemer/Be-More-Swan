@@ -6298,6 +6298,8 @@ function formatCurrency(amount, currency) {
      assistant-detail.html: Disruptive UI renderers reused for record detail,
      CSV import (Spreadsheet Fallback), and the hub table itself. -->
 <script src="/src/components/disruptive-ui-registry.js"></script>
+<!-- The Email Assistant's chat cards (draft/send, clean-up, undo, rule, unsubscribe) — same actions as its Emails tab. -->
+<script src="/src/components/email-assistant-cards.js"></script>
 <!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Suggestions tab, Inbox "Needs you"). -->
 <script src="/src/components/mentor-apply.js"></script>
 <script src="/src/components/redraft-upcoming.js"></script>
@@ -6336,9 +6338,13 @@ function formatCurrency(amount, currency) {
      of its callers — the All leads tab's expanded row (assistant-data-hub.js) and the Outreach
      card (assistants.js) — and shared so both append through one implementation. -->
 <script src="/src/components/lead-notes-modal.js"></script>
+<!-- Meeting Note Taker "New meeting" (assistants.js _openRoleForm → meeting-minutes.ts). -->
+<script src="/src/components/meeting-minutes-form.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
 <!-- The Email Assistant's Emails tab (hubTab kind 'mailbox') — the signed-in person's own mailboxes. -->
 <script src="/src/components/assistant-mailbox.js"></script>
+<!-- The Shopkeeper's Shop tab (hubTab kind 'shop') — Stripe, Delivery & returns, the workspace's orders. -->
+<script src="/src/components/assistant-shop.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
      scoped to the assistant + filtered to its role (integration-scenarios.ts). -->
 <script src="/src/components/assistant-integrations.js"></script>

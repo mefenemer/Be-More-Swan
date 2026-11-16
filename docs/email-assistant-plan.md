@@ -618,11 +618,49 @@ page only — no real mailbox has been connected yet). As built:
   version bump at launch, so a not-yet-agreed version is never served.
 - Measuring the real AI cost per email: needs a connected mailbox (owner's own, on staging).
 
-**Phase 2: actions with approval (Outlook)**
-- Drafted replies in Review, Send in thread, Save to Drafts, Shorter/Longer/Redraft.
-- Clean-up batches, archive/trash, Undo, unsubscribe, rules (label/archive only).
-- Categories written to the mailbox; Activity log; notifications; chat cards for every action.
-- Task costs set from Phase 1 measurements.
+**Phase 2: actions with approval (Outlook and Gmail)** — split in two (2026-11-16):
+- **2a ✅ BUILT 2026-11-16** (branch `claude/email-assistant-phase1`; `db/z-mailbox-actions.sql` ✅ applied to
+  BOTH DBs 2026-11-16, read back: 12 columns, 4 indexes on each):
+  - `mailbox_actions` table (owner-only; not assistant_records, which every member with access can read).
+    Stores a drafted reply's text until sent/dismissed, then 30 days; clean-up rows keep the ids Undo needs.
+    poll-mailboxes.ts deletes acted-on rows after 30 days.
+  - `src/utils/mail-writer/` (Gmail + Graph): reply in the thread, save to Drafts, archive, trash, restore.
+    Never permanent delete, forward or settings. Outlook gives a moved message a new id; Undo uses it.
+  - `src/utils/mailbox-actions.ts`: AI draft (Shorter/Longer/Redraft, an optional "what should it say"),
+    `[check: …]` gaps block Send, recipient = Reply-To else From **from the headers** (never the model),
+    clean-up suggestions (old newsletters/notifications → archive, cold pitches → trash; never private,
+    needs-you or unsorted), apply ≤25 per request, Undo for 30 days. 60 drafts/mailbox/day ceiling.
+  - Emails tab: Drafts pill (every draft open and editable), "Draft a reply" on any email, Send / Save to
+    drafts each after a confirm naming the recipient, Clean-up pill (untick any, confirm), Done list with
+    Undo. Review tab points to the Emails tab (approvals live there in 2a).
+  - Checked on the fixture page (desktop + phone): gaps disable Send, confirm, exact text sent, clean-up
+    untick, Done + Undo. **Not checked against a real mailbox yet.**
+  - Also fixed: the tab's toasts always showed 🔒 and errors weren't announced (wrong showToast option).
+- **2b ✅ BUILT 2026-11-16** (branch `claude/email-assistant-phase1`; no new SQL — rules and the labels switch
+  live in `mailboxes.settings`):
+  - **Chat cards** (`src/components/email-assistant-cards.js`, loaded on workspace.html + assistant-chat.html):
+    `email_reply_proposal` (drafts, or reopens an open draft; edit; Send after a confirm / Save to drafts),
+    `email_cleanup_proposal`, `email_undo_proposal`, `email_rule_proposal`, `email_unsubscribe_proposal`. Each
+    button calls the same `mailboxes.ts` action as the Emails tab; the route offers one card per reply with
+    ids from the per-turn snapshot only, and never says an action is done. The snapshot now names emails
+    (#id), mailboxes, open drafts, clean-up batches, undoable clean-ups and rules.
+  - **Drafting** reads `loadProductsBlock` (products, prices, intro offer, booking link) like every assistant.
+  - **Archive rules** (D5: archive only): "Always archive from this sender…" on any email, a Rules list,
+    `add_rule` / `remove_rule`; mailbox-sync runs them after sorting (≤50/run; never what needs the user),
+    each run recorded as a clean-up with Undo.
+  - **Categories in the mailbox** (D4: on for business unless turned off): Gmail nested label
+    `Swan/<Category>` (created on first use), Outlook category `Swan: <Category>` merged with the user's own;
+    private never labelled; moving an email relabels it; "Labels in …: on/off" switch (`set_labels`).
+  - **One-click unsubscribe** (`src/utils/one-click-unsubscribe.ts`): RFC 8058 only (both headers, https);
+    public hosts only — every resolved address checked, no redirects, 8 s; otherwise the sender's own link
+    is shown for the owner to use. Button on newsletters + chat card; confirm first.
+  - Tests: 63 checks in tests/mailbox-email-assistant.test.ts (async checks now really awaited).
+  - Checked on the fixture page: all five cards render via the registry; reply card drafts and blocks Send
+    on a gap; clean-up card reads the live batch; rule card saves; tab shows Labels/Rules/Unsubscribe.
+    **Not checked against a real mailbox.**
+- **Still open after 2b:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per
+  email, which needs real email from people in a connected mailbox; a Review-tab listing (approvals live on
+  the Emails tab); notifications ("3 emails need you") in the bell/Inbox and the morning summary section.
 
 **Phase 3: Gmail** — split in two (2026-11-13):
 - **3a ✅ BUILT 2026-11-13** (branch `claude/email-assistant-phase1`): Gmail connect on the separate mail
@@ -704,6 +742,7 @@ The owner chose the name, then said "go with your recommendations on D2–D12".
 - [ ] `db/z-mailboxes.sql` (and the task-cost rows) applied to **both** DBs before deploy; help
       article SQL on both DBs at release.
 - [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.
+- [x] `db/z-mailbox-actions.sql` applied to BOTH DBs (2026-11-16, read back on staging ep-blue-truth and prod ep-rapid-smoke).
 - [ ] Google "Be More Swan Mail" OAuth client: redirect URIs
       `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/gmail/callback` and the prod one;
       `GMAIL_MAIL_CLIENT_ID` / `_SECRET` on staging only until Google approves.

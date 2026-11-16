@@ -129,6 +129,8 @@ jobs:
           # (lead-watch.ts). Idempotent: a company is due only 3–30 days after its last check; one note a day.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
           # a workspace is due only a week after its last read.
+          # `run-search-trends-refresh` (1h) is the Google Trends engine's tick (search-trends.ts): collects
+          # DataForSEO answers and posts tasks for tracked terms a week old. Idempotent: nothing due = no call.
           # `run-video-autopilot` (6h) writes the Video Producer's weekly storyboards (video-autopilot.ts).
           # Idempotent: a storyboard is due only after its spacing (7/3/2 days); never makes a video.
           # `run-fix-live-check` (30 min) tells Issues reporters their fix is live on staging and closes issues
@@ -165,6 +167,7 @@ jobs:
           run-lead-sweeps           21600   300
           run-site-audit-dispatch   21600   120
           run-site-directory-dispatch 86400 120
+          run-search-trends-refresh 3600   120
           run-video-autopilot       21600   120
           run-mentor-review-dispatch 21600  120
           run-mentor-morning-dispatch 3600  120

@@ -220,3 +220,26 @@ trial is left.
 - **Chat:** the Blog Writer and Business Mentor chats read it (`src/utils/chat-search-queries.ts`), fenced as
   third-party data. There is no card.
 - Logic in `src/utils/gsc-queries.ts`; tests in `tests/gsc-queries.test.ts`.
+
+**Phase 1 built (2026-11-16, branch `feat/trends-engine`).** The engine, with no customer UI yet:
+- **Storage:** `db/z-search-trends.sql`, to apply to both DBs before deploy.
+  - `search_trend_terms` is shared by term + location and holds the weekly series, peak months, filtered
+    related searches, status and cost.
+  - `org_trend_terms` records which workspace tracks which term. An empty `approved_at` means an auto-suggestion
+    the owner hasn't approved yet, and it is not fetched.
+- **Provider:** `src/lib/trends-provider.ts`. DataForSEO is behind one interface so the Google alpha can replace
+  it. Country is the default location (`countryLocation`, UK when unknown).
+- **Refresh:** `src/utils/search-trends.ts`. An hourly tick (`refresh-search-trends`, `23 * * * *`; staging uses
+  `run-search-trends-refresh`) wakes `search-trends-background` only when something is due. The worker:
+  - collects the answers that are ready and parses them;
+  - screens related searches with Haiku (fenced as data; if the filter fails, it keeps none);
+  - posts Standard tasks for tracked terms that are a week old, 100 per call;
+  - gives up on a task that hasn't been answered in 24 hours, and backs a term off after 3 errors in a row.
+- **Phase 0 conditions built in:** country by default; peak *months* taken from monthly averages (a flat series
+  has none); the relevance filter.
+- **Spend:** one `ai_usage_log` row per run (`dataforseo-trends-standard`), filed under a new DataForSEO row on
+  Admin ▸ System Map. `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` must be set in Netlify (owner). Without them
+  the worker does nothing and says so.
+- **Not yet:** `trackTrendTerm` / `untrackTrendTerm` exist but nothing calls them. The terms tab, the Haiku first
+  fill, chat cards, the `<search_trends>` blocks and the Admin terms list are Phase 2.
+- Tests in `tests/search-trends.test.ts`, run against a real Phase 0 reply (`tests/fixtures/trends-boiler-service-uk.json`).

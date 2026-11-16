@@ -53,6 +53,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'The Lead Generator\'s Watch list: companies watched on Companies House and the public register news found on them (buying triggers Phase 2)', [
         'lead_watch', 'lead_watch_signals', 'lead_watch_settings',
     ]),
+    // Phase 1 of docs/google-trends-plan.md: the engine only, nothing reads it in chat yet. Phase 2 adds the
+    // <search_trends> block and moves this to `always` (with a reader in tests/mentor-data-inventory.test.ts).
+    ...group('on_request', 'The Google search terms the workspace tracks for trends (their data is shared, relative interest only, in search_trend_terms)', ['org_trend_terms'], 'The search terms you track on Google Trends'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars
@@ -89,7 +92,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     // the Video Producer reads them; nothing the Mentor needs.
     ...group('never', 'Video Producer footage reviews: shot lists and transcripts of the owner\'s own videos', ['footage_analyses']),
     // docs/email-assistant-plan.md §7.3: a mailbox is ONE person's — not even the workspace owner sees it.
-    ...group('never', 'Email Assistant mailboxes: one person\'s own email (senders, subjects, summaries), private even from the workspace owner', ['mailboxes', 'mailbox_messages']),
+    ...group('never', 'Email Assistant mailboxes: one person\'s own email (senders, subjects, summaries), private even from the workspace owner', ['mailboxes', 'mailbox_messages', 'mailbox_actions']),
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),
@@ -122,7 +125,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'user_organisations', 'login_events', 'team_reads',
     ], 'Your team members\' email addresses and logins'),
     ...group('never', 'Billing and payment internals', [
-        'invoices', 'payments', 'stripe_disputes', 'site_orders', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
+        'invoices', 'payments', 'stripe_disputes', 'site_orders', 'shop_settings', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
     ], 'Card details and payments'),
     ...group('never', 'What Be More Swan records about the customer, and compliance records', [
         'dpa_acceptances', 'legal_holds', 'beta_endings', 'platform_reviews', 'risk_assessments', 'security_audits', 'agent_anomalies',

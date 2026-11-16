@@ -205,8 +205,8 @@ interface AttendeeIn { name?: unknown; email?: unknown }
 
 /**
  * Build the outbound-email payload the email_meeting_followup handler consumes: the attendee
- * recipient list, the reviewed subject/body draft, and the assistant's display name (for the
- * mandatory AI disclosure footer). Recipients come from the meeting's `attendees[{name,email}]`
+ * recipient list, the reviewed subject/body draft, the assistant's display name (for the
+ * mandatory AI disclosure footer), and the approver's address for Reply-To. Recipients come from the meeting's `attendees[{name,email}]`
  * (emails the user filled in on the inbox card); a single `contactEmail` is the fallback.
  */
 export function buildEmailPayload(
@@ -235,6 +235,10 @@ export function buildEmailPayload(
         subject: emailSubject,
         body,
         assistantName: typeof f.assistantName === 'string' ? f.assistantName : '',
+        // The person who approved the meeting: Reply-To when it goes from Be More Swan's address
+        // (no inbox connected), so replies reach them. The meeting id lets the handler stamp the route.
+        replyTo: typeof f.approverEmail === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.approverEmail.trim()) ? f.approverEmail.trim() : null,
+        meetingRecordId: subject.recordId ?? null,
     };
 }
 

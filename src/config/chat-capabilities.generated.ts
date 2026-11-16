@@ -136,12 +136,17 @@ export const GENERATED_CHAT_MANIFEST = {
             "craftInChat": []
         },
         "meeting_note_taker": {
-            "flags": [],
+            "flags": [
+                "acceptsAttachments",
+                "transcriptAttachments",
+                "usesMeetingsSnapshot"
+            ],
             "contentSnapshot": null,
             "offersOwnCards": true,
-            "maxTokens": 2048,
+            "maxTokens": 4096,
             "cards": [
-                "action_item_assignment"
+                "action_item_assignment",
+                "meeting_action_proposal"
             ],
             "craftInChat": []
         },
@@ -182,6 +187,18 @@ export const GENERATED_CHAT_MANIFEST = {
             "craftInChat": [
                 "email_craft"
             ]
+        },
+        "shopkeeper": {
+            "flags": [
+                "usesShopSnapshot"
+            ],
+            "contentSnapshot": null,
+            "offersOwnCards": true,
+            "maxTokens": 1200,
+            "cards": [
+                "shop_settings"
+            ],
+            "craftInChat": []
         },
         "social_media_manager": {
             "flags": [
@@ -257,6 +274,7 @@ export const GENERATED_CHAT_MANIFEST = {
                 "qr_code",
                 "review_decisions",
                 "reviews_add",
+                "shop_settings",
                 "site_changes",
                 "site_draft_request",
                 "site_import_decision",
@@ -282,12 +300,15 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesBriefsSnapshot",
         "usesVideosSnapshot",
         "usesMailboxSnapshot",
+        "usesShopSnapshot",
         "usesSiteAuditSnapshot",
         "usesMentorSnapshot",
         "usesSiteSnapshot",
         "acceptsAttachments",
+        "transcriptAttachments",
         "contentSnapshot",
-        "usesAudienceSnapshot"
+        "usesAudienceSnapshot",
+        "usesMeetingsSnapshot"
     ],
     "promptBlocks": [
         "rolePrompt",
@@ -388,6 +409,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "lead_scoring_card",
         "listing_decisions",
         "listings_add",
+        "meeting_action_proposal",
         "mentor_break_even",
         "mentor_business_profile",
         "mentor_business_stage",
@@ -419,6 +441,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "schedule_proposal",
         "setup_field_proposal",
         "share_for_review_proposal",
+        "shop_settings",
         "site_audit_check",
         "site_audit_check_update",
         "site_audit_fix_update",

@@ -20,7 +20,7 @@ import { FIRST_SORT_DAYS } from './graph';
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 /** The headers sorting reads (email-sort.ts headerSort) plus sender, subject and date. */
-const META_HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Id', 'Precedence', 'Auto-Submitted'];
+const META_HEADERS = ['From', 'Subject', 'Date', 'List-Unsubscribe', 'List-Unsubscribe-Post', 'List-Id', 'Precedence', 'Auto-Submitted', 'Message-ID', 'References', 'Reply-To'];
 /** Gmail's own tabs that mean "not a person writing to you". A hint, never a rule. */
 const OTHER_LABELS = new Set(['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS']);
 /** Messages read per run on a first sort (the rest wait for the next run, via the saved page token). */

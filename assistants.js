@@ -1217,8 +1217,12 @@ window._activateMainTab = function(name) {
             window._assistantDetailFocusPostId = null;
             window.AssistantDataHub?.focusRecord(focusPostId);
         }
-        window.AssistantDataHub?.refresh();
-        window.AssistantMailbox?.refresh?.();
+        // Each tab kind refreshes only its own module: a Data Hub left over from an assistant opened
+        // earlier in this single-page session must not paint over the Emails or Shop tab.
+        const hubKind = window._detailHubKind;
+        if (hubKind === 'mailbox') window.AssistantMailbox?.refresh?.();
+        else if (hubKind === 'shop') window.AssistantShop?.refresh?.();
+        else window.AssistantDataHub?.refresh();
     }
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
@@ -1878,6 +1882,24 @@ function _detailRqCountLabel(shown, total) {
     return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
 }
 
+// A role's own "New …" form, from the Overview button or a records queue's tab header (registry
+// primaryAction / reviewQueue.newAction). Today: the Meeting Note Taker's "New meeting"
+// (meeting-minutes-form.js). On save the Inbox opens on Review, so the new meeting is in view.
+function _openRoleForm(kind, data) {
+    if (kind !== 'meetingForm') return;
+    if (!window.MeetingMinutesForm) { window.showToast?.('That form didn\u2019t load. Refresh the page and try again.'); return; }
+    window.MeetingMinutesForm.open({
+        assistantId: data.id,
+        assistantName: data.name,
+        onSaved: () => {
+            window._activateMainTab?.('review-queue');
+            window.detailRqOpenStatus?.('review');
+            window._refreshAssistantMetrics?.();
+            window._detailRqRefreshColumnCounts?.();
+        },
+    });
+}
+
 // An empty Review column is the first thing a new hire sees, and "No posts awaiting review" alone
 // left them nowhere to go. Say when the next draft is due (the Autopilot card has already worked it
 // out, or why nothing is coming) and offer the page's own Create button, so this is the same
@@ -2329,7 +2351,8 @@ const _RQ_DRAFT = {
         read: (d) => d.followupEmail,
         write: (d, subject, body) => ({ ...d, followupEmail: { ...(d.followupEmail || {}), subject, body } }),
         heading: 'Drafted follow-up email — read before approving',
-        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on.',
+        // Which inbox: Gmail, then Outlook, then Be More Swan's address (sync-action.ts, finish plan step 7).
+        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on — from your Gmail or Outlook if one is connected, otherwise from Be More Swan’s address with replies coming to you.',
     },
     ticket: {
         // A plain string on the record, not a { subject, body } object — normalise both ways.
@@ -2397,11 +2420,15 @@ function _rqOutreachPreview(r, statusKey) {
     // send, so this panel called our unsent draft "the message that went to the contact above" —
     // asserting the recipient has text they may never have been shown. See the Approved column note.
     const sentManually = outreach === 'sent' && (r.data || {}).outreachSentVia === 'manual';
-    const heading = sentManually ? 'The drafted email'
+    // A meeting's follow-up, once sent: which inbox it went from (stamped by sync-action.ts).
+    const meetingSentLine = r.recordType === 'meeting' ? _rqMeetingFollowupSent(r.data || {}) : '';
+    const heading = meetingSentLine ? 'The follow-up email that was sent'
+        : sentManually ? 'The drafted email'
         : outreach === 'sent' ? 'The email that was sent'
         : outreach === 'drafted' ? 'Your drafted email — ready for you to send'
         : cfg.heading;
-    const sends = sentManually
+    const sends = meetingSentLine ? meetingSentLine
+        : sentManually
         ? 'You marked this lead as contacted yourself, so this draft was never emailed from here.'
         : outreach === 'sent'
             ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
@@ -2439,6 +2466,15 @@ function _rqOutreachPreview(r, statusKey) {
         </div>
       </div>
     </details>`;
+}
+
+/** Where a meeting's follow-up went from, or '' when it has not been sent. */
+function _rqMeetingFollowupSent(d) {
+    const via = d && d.followupSentVia;
+    if (via === 'gmail') return 'This went to the attendees from your Gmail.';
+    if (via === 'outlook') return 'This went to the attendees from your Outlook.';
+    if (via === 'resend') return 'This went to the attendees from Be More Swan’s address because no inbox is connected — replies come to you. Connect Gmail or Outlook to send from your own.';
+    return '';
 }
 
 /**
@@ -7322,8 +7358,15 @@ function _applyDashboardRegistry(data) {
         }
         if (sub) { sub.classList.toggle('hidden', into); sub.style.display = into ? 'none' : ''; }
     }
-    // Records queues have no post-generation button; blog re-points it at Blog Studio.
-    toggleBtn('detail-rq-primary-btn', !rqIsRecords);
+    // Records queues have no post-generation button; blog re-points it at Blog Studio. A records
+    // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
+    const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
+    toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    if (rqNew) {
+        setText('detail-rq-primary-label', rqNew.label);
+        const rqBtn = document.getElementById('detail-rq-primary-btn');
+        if (rqBtn) rqBtn.onclick = () => _openRoleForm(rqNew.kind, data);
+    }
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
     // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent
@@ -7480,11 +7523,17 @@ function _applyDashboardRegistry(data) {
     } else if (pa) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
-            if (pa.kind === 'chat') {
+            if (pa.kind === 'meetingForm') {
+                paBtn.onclick = () => _openRoleForm(pa.kind, data);
+            } else if (pa.kind === 'chat') {
                 // The same pop-up as the header Chat button — this was a full page load, so the two
                 // doors into one conversation behaved differently (review, 2026-10-22).
                 paBtn.onclick = () => {
-                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id });
+                    // A button worded as a question asks it (the Shopkeeper). Where the chat is docked beside
+                    // this tab, ask it there: a pop-up over the same conversation would be a second door.
+                    const dock = pa.send && _tabChat?.dock?.connected?.() && _tabChat.tabs.includes('datahub') ? _tabChat.dock : null;
+                    if (dock) { dock.ask(pa.send); return; }
+                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id, ...(pa.send ? { send: pa.send } : {}) });
                     else window.location.href = `assistant-chat.html?assistantId=${data.id}`;
                 };
             } else {
@@ -7507,7 +7556,10 @@ function _applyDashboardRegistry(data) {
     if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
         // The Email Assistant's tab is the owner's sorted email, not assistant_records (assistant-mailbox.js).
+        // The Shopkeeper's tab is the workspace's shop (assistant-shop.js → shop.ts), not assistant_records either.
+        window._detailHubKind = hub.kind || 'records';
         if (hub.kind === 'mailbox') window.AssistantMailbox?.init({ hub, assistantId: data.id, assistantName: data.name });
+        else if (hub.kind === 'shop') window.AssistantShop?.init({ hub, assistantId: data.id, assistantName: data.name });
         else window.AssistantDataHub?.init({ hub, assistantId: data.id, assistantName: data.name });
     }
 
@@ -11347,6 +11399,11 @@ function _setMetricsEmptyState(mode, info) {
         if (title) title.textContent = 'No blog activity to measure yet';
         if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Write the first one or review what is waiting on the Blogs tab.';
         if (note) note.textContent = '';
+    } else if (mode === 'shop-no-data') {
+        // The Shopkeeper's cards fill from orders, so what is missing is a first order.
+        if (title) title.textContent = 'No orders yet';
+        if (body)  body.textContent  = 'These fill in once someone buys through your Buy buttons. Get your shop ready to sell on the Shop tab: connect Stripe and fill in your Delivery & returns details.';
+        if (note) note.textContent = '';
     } else if (mode === 'records-no-data') {
         // Not "nothing published" — this assistant publishes nothing. What is missing is its work.
         if (title) title.textContent = 'Nothing to count yet';
@@ -11906,6 +11963,37 @@ async function _loadVideoMetrics(assistantId) {
 // ── Email Assistant KPI cards ────────────────────────────────────────────────
 // Routed here by `metricsSource: 'mailbox'`. Counts from mailboxes.ts `stats`, across the signed-in
 // person's OWN mailboxes (a mailbox is one person's — docs/email-assistant-plan.md §7.3). All time.
+// ── Shopkeeper KPI cards ─────────────────────────────────────────────────────
+// Routed here by `metricsSource: 'shop'`. From shop.ts `get` stats: new orders, orders and money taken in
+// the last 30 days (pounds, less refunds), refunded orders. Workspace-wide (the shop is the workspace's).
+async function _loadShopMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/shop', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get', assistantId: Number(assistantId) }) });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        const s = data.stats;
+        if (!s || !(data.orders || []).length) { _setMetricsEmptyState('shop-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'Last 30 days · your whole shop';
+        const pounds = (p) => `£${(Number(p || 0) / 100).toFixed(2).replace(/\.00$/, '')}`;
+        [['engagement', s.newOrders, String(s.newOrders ?? 0)], ['reach', s.orders30, String(s.orders30 ?? 0)], ['ctr', s.takenPence30, pounds(s.takenPence30)], ['value', s.refunds30, String(s.refunds30 ?? 0)]].forEach(([card, raw, shown], i) => {
+            if (!valEl(card)) return;
+            const n = Number(raw ?? 0);
+            valEl(card).textContent = shown;
+            _setKpiCard(card, { empty: !n });
+            if (trendEl(card)) trendEl(card).textContent = '—';
+            if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
+        });
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 async function _loadMailboxMetrics() {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
@@ -12204,6 +12292,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'mailbox') {
         _setMetricsEmptyState('pending');
         return _loadMailboxMetrics();
+    }
+    if (source === 'shop') {
+        _setMetricsEmptyState('pending');
+        return _loadShopMetrics(assistantId);
     }
     if (source === 'site') {
         _setMetricsEmptyState('pending');

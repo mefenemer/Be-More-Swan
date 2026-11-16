@@ -2813,6 +2813,56 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('site_import_products', renderSiteImportProductsCard);
 
+  // { type: 'shop_settings', settings: {…} } — the shop's Delivery & returns details (online shop
+  // Phase 0, shop-settings.ts): shop.ts shop_settings, the Shop tab / Orders tab forms' same save. Shows only the
+  // fields the chat proposes; nothing is saved until they click.
+  const SHOP_LABELS = { traderName: 'Business or trading name', traderAddress: 'Business address', contactEmail: 'Email for customers', contactPhone: 'Phone', deliveryText: 'How and when you deliver', vatNumber: 'VAT number', returnsDays: 'Days buyers have to cancel', returnPostage: 'Who pays return postage', exceptions: 'Can\'t be returned for a change of mind', extraTerms: 'Anything else buyers should know' };
+  const SHOP_EX = { personalised: 'Personalised or made-to-order items', perishable: 'Items that go off quickly', sealed_hygiene: 'Sealed hygiene items once opened', sealed_media: 'Sealed recordings or software once opened', mixed: 'Items mixed with other things after delivery' };
+  function renderShopSettingsCard(data) {
+    const settings = (data && data.settings && typeof data.settings === 'object') ? data.settings : {};
+    const keys = Object.keys(SHOP_LABELS).filter((k) => Object.prototype.hasOwnProperty.call(settings, k));
+    const show = (k, v) => {
+      if (k === 'returnPostage') return v === 'seller' ? 'We do' : 'The buyer';
+      if (k === 'returnsDays') return `${Number(v) || 14} days`;
+      if (k === 'exceptions') return (Array.isArray(v) && v.length) ? v.map((x) => SHOP_EX[x] || x).join('; ') : 'None';
+      return v == null || v === '' ? '(left empty)' : String(v);
+    };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Delivery &amp; returns details</p>
+      <p class="text-xs text-gray-700 mt-2">Buyers see these on your Delivery &amp; returns page, beside the Pay button and in their order email. Check them before saving.</p>
+      <dl class="mt-3 space-y-2">${keys.map((k) => `<div><dt class="text-xs font-bold text-gray-700">${escapeHtml(SHOP_LABELS[k])}</dt><dd class="text-xs text-gray-900 whitespace-pre-line">${escapeHtml(show(k, settings[k]))}</dd></div>`).join('') || '<p class="text-xs text-gray-500">No details to save.</p>'}</dl>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-shs-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${keys.length ? '' : 'disabled'}>Save details</button>
+        <button type="button" data-shs-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-shs-status role="status"></p>`;
+    const status = el.querySelector('[data-shs-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-shs-cancel]')) { setBusy(true); say('Nothing saved.'); return; }
+      if (!e.target.closest('[data-shs-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      const clean = {};
+      keys.forEach((k) => { clean[k] = settings[k]; });
+      el.dispatchEvent(new CustomEvent('site:shopSettings', {
+        bubbles: true,
+        detail: {
+          settings: clean,
+          respond({ ok, error, message }) {
+            if (!ok) { setBusy(false); say(error || 'That didn\'t work — nothing was saved.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('shop_settings', renderShopSettingsCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
@@ -4703,12 +4753,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   //   identifiedRisks?: string[], targetDestination, channel?,
   //   attendees?: [{ name, email: string|null }, ...],
   //   followupEmail?: { subject, body } | null,
-  //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
-  // targetDestination echoes the onboarding taskDestination label and picks the sync
-  // route: 'Notion' creates a page (summary paragraph + to_do blocks) via
-  // /api/actions/sync (notion_create_page); anything else posts the summary + tasks
-  // to Slack as Block Kit (slack_post_summary), where an optional ui.channel ('#name'
-  // or channel id) picks the channel, defaulting to #general.
+  //   tasks: [{ description, assignee, dueDate: string|null }, ...],
+  //   recordId?: number }   // the saved meeting record (chat-orchestrator stamps it)
+  // Nothing is sent from this card (finish plan step 3, owner 2026-11-15): Approve is the Inbox's own
+  // PATCH on assistant-records, so the approval fires the same hand-offs (follow-up email, Slack,
+  // Notion, Jira/Asana tickets) as approving in the Inbox, and only then. It used to post the
+  // UNAPPROVED summary straight to Slack or Notion. No recordId (an older transcript) = no button;
+  // the Inbox link under the card is the way in.
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
@@ -4724,14 +4775,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const followup = (ui.followupEmail && typeof ui.followupEmail === 'object') ? ui.followupEmail : null;
     if (!ui.meetingSummary && !decisions.length && !risks.length && tasks.length === 0) return null; // nothing extracted — fall back to text-only
 
-    const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
-      ? ui.targetDestination.trim() : 'your task tracker';
-    const isNotion = destination.toLowerCase() === 'notion';
-    const syncActionType = isNotion ? 'notion_create_page' : 'slack_post_summary';
-    // Only Notion has a native create action today; every other destination (Jira,
-    // Asana, Monday, "your task tracker") is fulfilled by posting to Slack — the
-    // button must say what actually happens.
-    const syncLabel = isNotion ? 'Notion' : 'Slack';
+    const recordId = Number.isInteger(Number(ui.recordId)) && Number(ui.recordId) > 0 ? Number(ui.recordId) : null;
+    const missingEmails = attendees.filter((a) => !a.email).length;
 
     // Summary / Decisions / Risks stack above the action-item table. Each section
     // carries a bottom divider unless it is the last thing before the footer (the
@@ -4819,47 +4864,38 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>` : ''}
 
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-sync-status>${isNotion
-          ? `Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Notion.`
-          : `Posts the summary and ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Slack${destination.toLowerCase() !== 'slack' ? ` (direct ${esc(destination)} sync is coming — Slack is the delivery channel today)` : ''}.`}</p>
-        <button type="button" data-sync-action
-          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          ${isNotion ? 'Sync to Notion' : 'Post to Slack'}
-        </button>
+        <p class="text-xs text-gray-500" data-approve-status>Nothing is sent until you approve. Approving sends it to the connections switched on for this assistant.${missingEmails
+          ? ` ${missingEmails} attendee${missingEmails === 1 ? ' has' : 's have'} no email address and won't get the follow-up — add ${missingEmails === 1 ? 'it' : 'them'} in the Inbox first.`
+          : ''}</p>
+        ${recordId ? `<button type="button" data-approve-meeting
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">Approve</button>` : ''}
       </div>
     `;
 
-    // Live behaviour: create a Notion page or post to Slack, per the destination.
-    const statusLine = el.querySelector('[data-sync-status]');
+    // Approve = the Inbox's PATCH (assistants.js _detailRqRecordAct), never a send of its own.
+    const statusLine = el.querySelector('[data-approve-status]');
     el.addEventListener('click', async (e) => {
-      const button = e.target.closest('[data-sync-action]');
-      if (!button || button.disabled) return;
+      const button = e.target.closest('[data-approve-meeting]');
+      if (!button || button.disabled || !recordId) return;
 
       button.disabled = true;
-      button.textContent = 'Syncing…';
-      statusLine.className = 'text-xs text-gray-400';
+      button.textContent = 'Approving…';
       try {
-        const data = await postSyncAction(syncActionType, {
-          meetingSummary: ui.meetingSummary ?? null,
-          decisionsMade: decisions,
-          identifiedRisks: risks,
-          targetDestination: ui.targetDestination ?? null,
-          channel: ui.channel ?? null,
-          tasks: tasks.map((t) => ({
-            description: t.description,
-            assignee: t.assignee ?? null,
-            dueDate: t.dueDate ?? null,
-          })),
+        const res = await fetch('/.netlify/functions/assistant-records', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: recordId, approvalStatus: 'approved' }),
         });
-        button.textContent = 'Synced ✓';
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn\u2019t work. Nothing was sent.');
+        button.textContent = 'Approved ✓';
         button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-        statusLine.textContent = data.message || `Synced to ${syncLabel}.`;
+        statusLine.textContent = 'Approved. It goes to your switched-on connections now; the Inbox shows what synced.';
         statusLine.className = 'text-xs font-semibold text-emerald-700';
       } catch (err) {
         button.disabled = false;
-        button.textContent = 'Retry sync';
-        button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-        statusLine.textContent = err.message || `Could not sync to ${syncLabel}.`;
+        button.textContent = 'Try again';
+        statusLine.textContent = err.message || 'That didn\u2019t work. Nothing was sent.';
         statusLine.className = 'text-xs font-semibold text-red-600';
       }
     });
@@ -4870,6 +4906,101 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('action_item_assignment', renderActionItemAssignmentCard);
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('ActionItemAssignmentCard', renderActionItemAssignmentCard);
+
+  // ── Built-in: Meeting Action Proposal Card (Meeting Note Taker chat) ─────────
+  // { type: 'meeting_action_proposal', action: 'approve'|'add_email'|'edit_followup'|'reject', recordId,
+  //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, missing?, tasks?,
+  //   attendeeName?, email?, attendees?, before?, followupEmail?, note? }
+  //
+  // The Inbox's buttons on a meeting, from chat (finish plan step 6). Every fact comes from the meeting's
+  // row (src/utils/chat-meeting-action.ts), and the click is the Inbox's own PATCH on assistant-records:
+  // approve fires the same hand-offs as approving in the Inbox; add_email and edit_followup merge the
+  // same keys the Inbox editor writes (attendees[i].email, followupEmail); reject saves the note as a rule.
+  const MEETING_ACTION_COPY = {
+    approve: { head: 'Approve this meeting', button: 'Approve', busy: 'Approving…', done: 'Approved. It goes to your switched-on connections now; the Inbox shows what synced.' },
+    add_email: { head: 'Add an attendee’s email', button: 'Save the address', busy: 'Saving…', done: 'Saved. They’ll get the follow-up when the meeting is approved.' },
+    edit_followup: { head: 'Change the follow-up email', button: 'Save the new email', busy: 'Saving…', done: 'Saved. This is the email attendees get when the meeting is approved.' },
+    reject: { head: 'Reject this meeting', button: 'Reject', busy: 'Rejecting…', done: 'Rejected. Nothing was sent.' },
+  };
+
+  function meetingActionPatch(ui) {
+    const id = Number(ui.recordId);
+    if (ui.action === 'approve') return { id, approvalStatus: 'approved' };
+    if (ui.action === 'add_email') return { id, dataMerge: { attendees: Array.isArray(ui.attendees) ? ui.attendees : [] } };
+    if (ui.action === 'edit_followup') return { id, dataMerge: { followupEmail: ui.followupEmail } };
+    if (ui.action === 'reject') return { id, approvalStatus: 'rejected', ...(ui.note ? { feedback: ui.note } : {}) };
+    return null;
+  }
+
+  function renderMeetingActionProposalCard(ui, esc) {
+    const copy = MEETING_ACTION_COPY[ui.action];
+    if (!copy || !Number(ui.recordId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const emailBox = (fe, label) => fe && (fe.subject || fe.body) ? `
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mt-3 mb-1">${label}</p>
+      <div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+        ${fe.subject ? `<p class="px-3 py-2 text-sm font-semibold text-gray-800 border-b border-gray-200 break-words">${esc(fe.subject)}</p>` : ''}
+        ${fe.body ? `<p class="px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap break-words">${esc(fe.body)}</p>` : ''}
+      </div>` : '';
+    let detail = '';
+    if (ui.action === 'approve' && !blocked) {
+      const to = Array.isArray(ui.to) ? ui.to : [];
+      const missing = Array.isArray(ui.missing) ? ui.missing : [];
+      detail = `
+        <p class="text-sm text-gray-700 mt-2">Approving sends it to the connections switched on for this assistant${Number(ui.tasks) ? `, including ${esc(String(ui.tasks))} action item${Number(ui.tasks) === 1 ? '' : 's'} for your task tracker` : ''}.</p>
+        ${to.length ? `<p class="text-xs text-gray-600 mt-2 break-words">Follow-up email to: ${to.map((x) => esc(x)).join(', ')}</p>` : ''}
+        ${missing.length ? `<p class="text-xs text-amber-800 mt-2">No email address for ${missing.map((x) => esc(x)).join(', ')} — they won’t get the follow-up. Ask me to add ${missing.length === 1 ? 'it' : 'them'} first, or add ${missing.length === 1 ? 'it' : 'them'} in the Inbox.</p>` : ''}`;
+    } else if (ui.action === 'add_email') {
+      detail = `<p class="text-sm text-gray-700 mt-2"><span class="font-bold">${esc(ui.attendeeName || 'Attendee')}</span> · <span class="break-all">${esc(ui.email || '')}</span></p>`;
+    } else if (ui.action === 'edit_followup') {
+      detail = `${emailBox(ui.before, 'Now')}${emailBox(ui.followupEmail, 'Will be')}`;
+    } else if (ui.action === 'reject') {
+      detail = `<p class="text-sm text-gray-700 mt-2">Nothing from this meeting is sent.${ui.note ? ' What was wrong is kept as a rule for future minutes:' : ''}</p>
+        ${ui.note ? `<p class="text-sm text-gray-900 mt-1 italic break-words">“${esc(ui.note)}”</p>` : ''}`;
+    }
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.setAttribute('data-meeting-action', ui.action);
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="font-bold text-gray-900 mt-1 break-words">${esc(ui.title || `Meeting #${ui.recordId}`)}</p>
+      ${detail}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : `
+      <div class="flex flex-wrap items-center gap-2 mt-4">
+        <button type="button" data-mac-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-mac-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>`}
+      <p class="hidden mt-2 text-xs font-semibold" data-mac-status role="status" aria-live="polite"></p>`;
+    if (blocked) return el;
+    const status = el.querySelector('[data-mac-status]');
+    const go = el.querySelector('[data-mac-go]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-mac-go], [data-mac-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-mac-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-mac-go]') || go.disabled) return;
+      const body = meetingActionPatch(ui);
+      if (!body) return;
+      setBusy(true);
+      go.textContent = copy.busy;
+      try {
+        const res = await fetch('/.netlify/functions/assistant-records', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn’t work. Nothing was changed.');
+        go.textContent = 'Done ✓';
+        say(ui.action === 'reject' && ui.note && data.feedbackSaved === false ? 'Rejected, but the note couldn’t be kept as a rule.' : copy.done);
+      } catch (err) {
+        setBusy(false);
+        go.textContent = 'Try again';
+        say(err.message || 'That didn’t work. Nothing was changed.', 'error');
+      }
+    });
+    return el;
+  }
+
+  register('meeting_action_proposal', renderMeetingActionProposalCard);
 
   // ── Built-in: Social Publish Card ───────────────────────────────────────────
   // Renderer for the social-media-manager publish wire shape:
