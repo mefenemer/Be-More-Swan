@@ -84,6 +84,7 @@
       '.bms-m{font-size:.875rem;margin:.75rem 0 0}.bms-m:empty{display:none}' +
       '.bms-ok{color:#065f46}.bms-err{color:#b91c1c}' +
       '.bms-r{margin:0 0 .25rem}.bms-rt{font-size:1.2rem;font-weight:700;margin:0 0 .5rem}' +
+      '.bms-rv{font-size:1.75rem;font-weight:800;margin:0 0 .75rem;color:' + accent + '}' +
       '.bms-rb{font-size:.95rem;white-space:pre-line;margin:0 0 1rem}' +
       '.bms-rc{display:inline-block;text-decoration:none;font-weight:700;font-size:.9375rem;color:#fff;background:' + accent + ';border-radius:' + radius + ';padding:.7rem 1.15rem}' +
       '.bms-foot{text-align:center;font-size:.7rem;opacity:.5;margin:1.25rem 0 0}' +
@@ -115,6 +116,11 @@
       h += '<select class="bms-i" id="' + id + '" name="' + esc(f.id) + '"' + desc + (f.required ? ' required' : '') + '><option value="">' + esc(f.placeholder || 'Choose…') + '</option>';
       for (i = 0; i < opts.length; i++) h += '<option value="' + esc(opts[i].value) + '">' + esc(opts[i].label) + '</option>';
       h += '</select>';
+    } else if (f.type === 'number') {
+      // A calculator's number question (FR#43 Phase 2). Limits are a hint; the server enforces them.
+      var r = f.range || {};
+      var lim = (typeof r.min === 'number' && isFinite(r.min) ? ' min="' + r.min + '"' : '') + (typeof r.max === 'number' && isFinite(r.max) ? ' max="' + r.max + '"' : '');
+      h += '<input class="bms-i" id="' + id + '" name="' + esc(f.id) + '" type="number" step="any" inputmode="decimal" placeholder="' + esc(f.placeholder) + '"' + lim + desc + (f.required ? ' required' : '') + '>';
     } else if (f.type === 'textarea') {
       h += '<textarea class="bms-i" id="' + id + '" name="' + esc(f.id) + '" placeholder="' + esc(f.placeholder) + '"' + desc + (f.required ? ' required' : '') + '></textarea>';
     } else {
@@ -237,6 +243,7 @@
       if (!r || !r.title) return false;
       var link = typeof r.ctaUrl === 'string' && /^https?:\/\//i.test(r.ctaUrl) ? r.ctaUrl : '';
       resultBox.innerHTML = '<p class="bms-rt">' + esc(r.title) + '</p>' +
+        (r.value ? '<p class="bms-rv">' + esc(r.value) + '</p>' : '') +
         (r.body ? '<p class="bms-rb">' + esc(r.body) + '</p>' : '') +
         (link ? '<a class="bms-rc" href="' + esc(link) + '" target="_top" rel="noopener">' + esc(r.ctaLabel || 'Find out more') + '</a>' : '');
       return true;

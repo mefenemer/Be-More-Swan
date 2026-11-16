@@ -21,17 +21,18 @@
 // A row saved before definitions existed has definition NULL; legacyToDefinition() reads it.
 
 import { createHash, randomBytes } from 'crypto';
+import { CALC_CURRENCIES, CALC_FORMATS, MAX_CALC_SPREAD, MAX_FORMULA_LENGTH, evaluateFormula, formatCalc, parseFormula, roundCalc, type CalcDisplay } from './form-calculator';
 import { DEFAULT_CONSENT_TEXT, DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE, validateRedirectUrl } from './audience-forms';
 
 export const FORM_DEFINITION_VERSION = 1;
 
-export const FIELD_TYPES = ['email', 'text', 'textarea', 'phone', 'select', 'radio', 'checkbox'] as const;
+export const FIELD_TYPES = ['email', 'text', 'textarea', 'phone', 'number', 'select', 'radio', 'checkbox'] as const;
 export type FieldType = typeof FIELD_TYPES[number];
 
 export const CONTACT_COLUMNS = ['email', 'first_name', 'last_name', 'company', 'phone'] as const;
 export type ContactColumn = typeof CONTACT_COLUMNS[number];
 
-export const FORM_PURPOSES = ['newsletter', 'lead_magnet', 'waitlist', 'event', 'enquiry', 'onboarding', 'quiz', 'custom'] as const;
+export const FORM_PURPOSES = ['newsletter', 'lead_magnet', 'waitlist', 'event', 'enquiry', 'onboarding', 'quiz', 'calculator', 'custom'] as const;
 export const FONTS = ['inherit', 'system', 'serif', 'rounded', 'mono'] as const;
 export const RADII = ['none', 'small', 'large'] as const;
 export const LAYOUTS = ['stacked', 'inline'] as const;
@@ -44,6 +45,8 @@ export const MIN_QUIZ_RESULTS = 2;
 export const MAX_QUIZ_RESULTS = 5;
 export const MAX_QUIZ_POINTS = 10;
 export const QUIZ_RESULT_ID_RE = /^r_[a-z0-9_]{1,24}$/i;
+/** A calculator (FR#43 Phase 2): a choice's amount, and a number answer, stay within ± this. */
+export const MAX_CALC_INPUT = 1_000_000_000;
 
 export type FieldTarget =
     | { kind: 'contact'; column: ContactColumn }
@@ -57,9 +60,28 @@ export interface FormField {
     placeholder: string;
     help: string;
     required: boolean;
-    /** `scores` only on a quiz's choice questions: points this choice adds to each result, by result id. */
-    options: { value: string; label: string; scores?: Record<string, number> }[];
+    /**
+     * `scores` only on a quiz's choice questions: points this choice adds to each result, by result id.
+     * `amount` only on a calculator's choice questions: the number this choice stands for in the formula.
+     */
+    options: { value: string; label: string; scores?: Record<string, number>; amount?: number }[];
     target: FieldTarget;
+    /** A number question's limits (either may be null). Only on type 'number'. */
+    range?: { min: number | null; max: number | null };
+}
+
+/**
+ * A calculator (FR#43 Phase 2): the visitor's answers go into the business's formula and the number
+ * is shown after they sign up — "Your estimate: £1,140 – £1,260". The formula runs on the SERVER from
+ * this stored definition (form-calculator.ts, never eval); the browser never sees it or the amounts.
+ */
+export interface CalculatorConfig extends CalcDisplay {
+    formula: string;
+    /** Above the number: "Your estimate". */
+    label: string;
+    body: string;
+    ctaLabel: string;
+    ctaUrl: string | null;
 }
 
 /**
@@ -117,6 +139,8 @@ export interface FormDefinition {
      * points, and never decides the result.
      */
     quiz?: { results: QuizResult[] } | null;
+    /** A calculator (FR#43 Phase 2). Never together with a quiz — a quiz wins. */
+    calculator?: CalculatorConfig | null;
 }
 
 export const DEFAULT_STYLE: FormStyle = {
@@ -153,7 +177,7 @@ function slugifyKey(label: string): string {
 function normaliseTarget(raw: unknown, type: FieldType, label: string): FieldTarget | null {
     if (type === 'email') return { kind: 'contact', column: 'email' };
     const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    if (t.kind === 'contact' && (CONTACT_COLUMNS as readonly string[]).includes(String(t.column)) && t.column !== 'email') {
+    if (t.kind === 'contact' && type !== 'number' && (CONTACT_COLUMNS as readonly string[]).includes(String(t.column)) && t.column !== 'email') {
         return { kind: 'contact', column: t.column as ContactColumn };
     }
     if (t.kind === 'tag' && (type === 'select' || type === 'radio' || type === 'checkbox')) return { kind: 'tag' };
@@ -230,6 +254,76 @@ export function publicQuizResult(x: QuizResult) {
     return { id: x.id, title: x.title, body: x.body, ctaLabel: x.ctaLabel, ctaUrl: x.ctaUrl };
 }
 
+/** The id a calculator's result goes by in the subscribe reply and on /_sent. */
+export const CALC_RESULT_ID = 'calc';
+
+const num = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && Math.abs(n) <= MAX_CALC_INPUT ? n : null;
+};
+
+/** The names a formula may use: each number or choice question saved to a field of the contact. */
+export function calculatorNames(fields: FormField[]): Map<string, FormField> {
+    const out = new Map<string, FormField>();
+    for (const f of fields) {
+        if (f.target.kind !== 'custom') continue;
+        if (f.type === 'number' || f.type === 'select' || f.type === 'radio' || f.type === 'checkbox') out.set(f.target.key, f);
+    }
+    return out;
+}
+
+/** Products a calculator's formula prices — loaded at submit time, so a price change applies at once. */
+export function calculatorProductIds(def: FormDefinition): number[] {
+    if (!def.calculator) return [];
+    const p = parseFormula(def.calculator.formula, new Set(calculatorNames(def.fields).keys()));
+    return p.ok ? p.products : [];
+}
+
+function normaliseCalculator(raw: unknown, fields: FormField[], warnings: string[]): CalculatorConfig | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const c = raw as Record<string, unknown>;
+    const formula = str(c.formula, MAX_FORMULA_LENGTH);
+    const parsed = parseFormula(formula, new Set(calculatorNames(fields).keys()));
+    // The formula is KEPT even when it doesn't work yet — a half-written formula is the owner's work.
+    // A broken one shows the plain thank-you until it's fixed, and the warning says why.
+    if (!parsed.ok) warnings.push(`The calculator's formula doesn't work yet: ${parsed.error} Until it's fixed, people see the ordinary thank-you.`);
+    const ctaRaw = str(c.ctaUrl, 500);
+    const ctaUrl = validateRedirectUrl(ctaRaw);
+    if (ctaRaw && !ctaUrl) warnings.push('The calculator\'s button link was not a full http(s) address, so it was removed.');
+    return {
+        formula,
+        label: str(c.label, 80) || 'Your estimate',
+        format: pick(c.format, CALC_FORMATS, 'money'),
+        currency: pick(c.currency, CALC_CURRENCIES, 'GBP'),
+        decimals: Math.max(0, Math.min(2, Math.round(Number(c.decimals) || 0))),
+        spread: Math.max(0, Math.min(MAX_CALC_SPREAD, Math.round(Number(c.spread) || 0))),
+        unit: str(c.unit, 30),
+        body: str(c.body, 1200),
+        ctaLabel: ctaUrl ? (str(c.ctaLabel, 40) || 'Find out more') : '',
+        ctaUrl,
+    };
+}
+
+/**
+ * The calculator's number for these answers, or null (no calculator, a broken formula, a missing
+ * price, dividing by zero). `numbers` is each formula name's value, already checked; `prices` are the
+ * org's products in pounds/dollars, by id — loaded by the caller (calculatorProductIds).
+ */
+export function calculatorAmountFor(def: FormDefinition, numbers: Record<string, number>, prices: Record<number, number> = {}): number | null {
+    const calc = def.calculator;
+    if (!calc) return null;
+    const p = parseFormula(calc.formula, new Set(calculatorNames(def.fields).keys()));
+    if (!p.ok) return null;
+    const v = evaluateFormula(p.tree, numbers, (id) => (Number.isFinite(prices[id]) ? prices[id] : null));
+    return v === null ? null : roundCalc(v, calc.decimals);
+}
+
+/** What the visitor is shown: the label, the formatted number, and the business's words. */
+export function publicCalcResult(calc: CalculatorConfig, amount: number) {
+    return { id: CALC_RESULT_ID, title: calc.label, value: formatCalc(amount, calc), amount, body: calc.body, ctaLabel: calc.ctaLabel, ctaUrl: calc.ctaUrl };
+}
+
 export interface NormaliseContext {
     /** The org's brand kit colours, used when style.useBrandKit or when a colour is invalid. */
     brand?: { accent?: string; text?: string } | null;
@@ -251,6 +345,10 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
     // ── Quiz results (read first: a choice's points may only name a result that exists) ──────────
     const quiz = normaliseQuiz(r.quiz, warnings);
     const resultIds = new Set((quiz?.results ?? []).map((x) => x.id));
+    // A calculator is read AFTER the fields (its formula names them); a quiz wins over a calculator.
+    const wantsCalc = !!(r.calculator && typeof r.calculator === 'object');
+    if (wantsCalc && quiz) warnings.push('A form can be a quiz or a calculator, not both — it was kept as a quiz.');
+    const calcOn = wantsCalc && !quiz;
 
     // ── Fields ────────────────────────────────────────────────────────────────────────────────
     const seenIds = new Set<string>();
@@ -278,7 +376,8 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
                 if (!lab || seen.has(val)) continue;
                 seen.add(val);
                 const scores = quiz && o && typeof o === 'object' ? normaliseScores((o as Record<string, unknown>).scores, resultIds) : null;
-                options.push(scores ? { value: val, label: lab, scores } : { value: val, label: lab });
+                const amount = calcOn && o && typeof o === 'object' ? num((o as Record<string, unknown>).amount) : null;
+                options.push(scores ? { value: val, label: lab, scores } : amount !== null ? { value: val, label: lab, amount } : { value: val, label: lab });
             }
             // A single checkbox ("Yes, I'd like the guide") is legitimate; a choice needs two.
             if (type !== 'checkbox' && options.length < 2) {
@@ -292,14 +391,20 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
         seenIds.add(id);
         seenTargets.add(targetKey);
         if (type === 'email') hasEmail = true;
-        fields.push({
+        const field: FormField = {
             id, type, label,
             placeholder: str(f.placeholder, 120),
             help: str(f.help, 200),
             required: type === 'email' ? true : f.required === true,
             options,
             target,
-        });
+        };
+        if (type === 'number') {
+            let min = num(f.range?.min), max = num(f.range?.max);
+            if (min !== null && max !== null && min > max) [min, max] = [max, min];
+            field.range = { min, max };
+        }
+        fields.push(field);
         if (fields.length >= MAX_FIELDS) break;
     }
     if (!hasEmail) {
@@ -388,6 +493,7 @@ export function normaliseFormDefinition(raw: unknown, ctx: NormaliseContext = {}
             return { assetId, label: str(rw.label, 80) || 'your free download' };
         })(),
         quiz,
+        calculator: calcOn ? normaliseCalculator(r.calculator, fields, warnings) : null,
     };
     if (quiz && !fields.some((f) => f.options.some((o) => o.scores && Object.keys(o.scores).length))) {
         warnings.push('No answer adds points to a result yet, so everyone will see the first result. Choose which result each answer points to.');
@@ -448,8 +554,10 @@ export function publicDefinition(def: FormDefinition, extra: { logoUrl: string |
         version: def.version,
         content: def.content,
         // A quiz's points stay on the server: the visitor gets the choices, never what each one scores.
-        fields: def.fields.map(({ id, type, label, placeholder, help, required, options }) => ({ id, type, label, placeholder, help, required, options: options.map(({ value, label: l }) => ({ value, label: l })) })),
+        // So do a calculator's formula and amounts; a number question's limits are shown.
+        fields: def.fields.map(({ id, type, label, placeholder, help, required, options, range }) => ({ id, type, label, placeholder, help, required, options: options.map(({ value, label: l }) => ({ value, label: l })), ...(range ? { range } : {}) })),
         quiz: !!def.quiz,
+        calculator: !!def.calculator,
         consent: def.consent,
         style: { ...def.style, logo: undefined, logoUrl: extra.logoUrl },
         senderName: extra.senderName,
@@ -457,7 +565,7 @@ export function publicDefinition(def: FormDefinition, extra: { logoUrl: string |
 }
 
 export function definitionHash(def: FormDefinition): string {
-    return createHash('sha256').update(JSON.stringify({ c: def.content, f: def.fields, k: def.consent, ...(def.quiz ? { q: def.quiz } : {}) })).digest('hex');
+    return createHash('sha256').update(JSON.stringify({ c: def.content, f: def.fields, k: def.consent, ...(def.quiz ? { q: def.quiz } : {}), ...(def.calculator ? { x: def.calculator } : {}) })).digest('hex');
 }
 
 export interface ValidatedAnswers {
@@ -469,17 +577,20 @@ export interface ValidatedAnswers {
     stored: Record<string, string | string[]>;
     /** A quiz's result for these answers (its tag is already in `tags`); null on an ordinary form. */
     quizResult: QuizResult | null;
+    /** A calculator's number for these answers (rounded); null on an ordinary form or when it can't be worked out. */
+    calcAmount: number | null;
 }
 
 /**
  * Check a submission against the definition. The browser's idea of the form is never trusted:
  * unknown field ids are dropped, required is enforced here, and a choice must be one of the options.
  */
-export function validateAnswers(def: FormDefinition, raw: unknown):
+export function validateAnswers(def: FormDefinition, raw: unknown, opts: { prices?: Record<number, number> } = {}):
     { ok: true; answers: ValidatedAnswers } | { ok: false; error: string } {
     const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const out: ValidatedAnswers = { email: '', contact: {}, custom: {}, tags: [], stored: {}, quizResult: null };
+    const out: ValidatedAnswers = { email: '', contact: {}, custom: {}, tags: [], stored: {}, quizResult: null, calcAmount: null };
     const chosen: Record<string, string[]> = {};
+    const numbers: Record<string, number> = {};
     for (const f of def.fields) {
         const v = input[f.id];
         let values: string[] = [];
@@ -496,6 +607,18 @@ export function validateAnswers(def: FormDefinition, raw: unknown):
         if (f.options.length) chosen[f.id] = values;
 
         if (f.type === 'phone' && !/^[+()\d\s.-]{5,30}$/.test(values[0])) return { ok: false, error: `"${f.label}" does not look like a phone number.` };
+        if (f.type === 'number') {
+            const plain = values[0].replace(/[,\s]/g, '');
+            const n = /^-?\d+(\.\d+)?$/.test(plain) ? num(plain) : null;
+            if (n === null) return { ok: false, error: `"${f.label}" needs a number.` };
+            if (f.range?.min != null && n < f.range.min) return { ok: false, error: `"${f.label}" must be at least ${f.range.min}.` };
+            if (f.range?.max != null && n > f.range.max) return { ok: false, error: `"${f.label}" must be at most ${f.range.max}.` };
+            values = [String(n)];
+            if (f.target.kind === 'custom') numbers[f.target.key] = n;
+        } else if (def.calculator && f.options.length && f.target.kind === 'custom') {
+            // A choice stands for its amount; ticked boxes add up; a choice with no amount is 0.
+            numbers[f.target.key] = values.reduce((sum, x) => sum + (f.options.find((o) => o.value === x)?.amount ?? 0), 0);
+        }
 
         const t = f.target;
         if (t.kind === 'contact') {
@@ -516,6 +639,9 @@ export function validateAnswers(def: FormDefinition, raw: unknown):
         // Kept with the submission, so the owner can see which result each person got.
         out.stored.quiz_result = out.quizResult.id;
     }
+    out.calcAmount = calculatorAmountFor(def, numbers, opts.prices);
+    // Kept with the submission, so the owner can see what each person was told.
+    if (out.calcAmount !== null) out.stored.calc_value = String(out.calcAmount);
     out.tags = [...new Set([...def.audience.tags, ...out.tags].map((t) => t.slice(0, 40)))].slice(0, MAX_TAGS * 2);
     return { ok: true, answers: out };
 }
