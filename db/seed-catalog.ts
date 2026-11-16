@@ -358,7 +358,7 @@ const CATALOG = [
         // db/z-shopkeeper.sql: HIDDEN until launch (a Coming-soon card is public).
         roleKey: 'shopkeeper',
         name: 'Shopkeeper Assistant',
-        description: 'Runs your online shop with you: connects Stripe so buyers pay you directly (Be More Swan takes no fee), fills in the Delivery & returns details UK law asks for, and keeps your orders in one place. Works with your Be More Swan website or on its own.',
+        description: 'Runs your online shop with you: connects your own Stripe account so buyers pay you directly (Be More Swan takes no fee on your sales), asks for the Delivery & returns details UK law says buyers must see, and keeps your orders in one place. Buyers buy through Buy buttons on a website made with the Website Assistant.',
         category: 'Marketing & Sales',
         iconKey: 'chart',
         iconColor: 'green',

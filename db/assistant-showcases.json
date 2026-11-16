@@ -624,5 +624,96 @@
         "a": "No. There is no code and no drag-and-drop. You describe what you want, or edit the words directly, and the layout is handled for you."
       }
     ]
+  },
+  "shopkeeper": {
+    "headline": "Sell online. We take nothing from your sales.",
+    "overview": [
+      "The Shopkeeper Assistant gets your shop ready to take money and keeps your orders in one place. Connect your own Stripe account and buyers pay you directly: Be More Swan takes no fee on your sales, ever. Stripe charges its usual card fees.",
+      "Before anyone can pay, UK law says they must see who they are buying from, a real address, how and when you deliver and their right to cancel. Tell the Shopkeeper in your own words and it puts those details on a card for you to check and save. Buy buttons stay hidden until they are in place, so you can't take money without them.",
+      "Buyers buy through the Buy buttons on a website made with the Website Assistant. Every paid order lands on the Shop tab and in your email, and you can ask the Shopkeeper in chat whether you're ready to sell or what has come in."
+    ],
+    "highlights": [
+      "0% fee on your sales",
+      "Paid straight to your own Stripe",
+      "Delivery & returns details UK law asks for",
+      "Every order in one place",
+      "Ask it in plain words"
+    ],
+    "steps": [
+      {
+        "title": "Connect Stripe",
+        "body": "One button on the Shop tab. The money goes to your own Stripe account."
+      },
+      {
+        "title": "Tell it your details",
+        "body": "Your trading name, address, email and how you deliver. It puts them on a card for you to check."
+      },
+      {
+        "title": "Save them",
+        "body": "Buyers then see a Delivery & returns page, a note beside the Pay button and a confirmation email from you."
+      },
+      {
+        "title": "Sell",
+        "body": "Buy buttons show on your products, and each order arrives on the Shop tab and in your email."
+      }
+    ],
+    "features": [
+      {
+        "title": "Two steps to ready",
+        "body": "The Shop tab shows where you stand: connect Stripe, then fill in your Delivery & returns details. Buy buttons show on your products once both are done.",
+        "image": "/images/assistants/shopkeeper/shop.jpg",
+        "alt": "The Shop tab: a two-step checklist, Connect Stripe, Delivery & returns and Orders"
+      },
+      {
+        "title": "Tell it, check it, save it",
+        "body": "Write your details the way you'd say them. The Shopkeeper puts exactly what you told it on a card and saves nothing until you press Save details. It never makes up an address, an email or a delivery time.",
+        "image": "/images/assistants/shopkeeper/chat.jpg",
+        "alt": "A chat where a coffee roaster gives its details and the Shopkeeper replies with a Delivery & returns card to save"
+      },
+      {
+        "title": "What UK law asks buyers to see",
+        "body": "Trading name, a real address (not a PO box), an email, how and when you deliver, at least 14 days to cancel, who pays return postage and anything that can't be returned for a change of mind. You can change them on the Shop tab at any time.",
+        "image": "/images/assistants/shopkeeper/delivery-returns.jpg",
+        "alt": "The Delivery & returns form on the Shop tab, filled in for a coffee roaster"
+      },
+      {
+        "title": "Your money, your Stripe",
+        "body": "You are the seller: buyers pay your own Stripe account and Be More Swan takes no fee. Refunds, payouts and receipts stay in your Stripe dashboard, and a refund you make there shows on the order here."
+      },
+      {
+        "title": "Orders in one place",
+        "body": "Every paid order in your workspace, newest first, with what was bought, how much and who bought it. Mark each one as dealt with once it's sent, or ask in chat for any new orders."
+      }
+    ],
+    "faqs": [
+      {
+        "q": "Does Be More Swan take a cut of my sales?",
+        "a": "No. Buyers pay your own Stripe account directly and Be More Swan takes no fee on your sales. Stripe charges its usual card fees."
+      },
+      {
+        "q": "Do I need a website?",
+        "a": "Buyers buy through Buy buttons on your products on a website made with the Website Assistant, so you'll want one of those to sell. You can connect Stripe and fill in your Delivery & returns details before your website is ready."
+      },
+      {
+        "q": "Can it refund an order?",
+        "a": "No. Refunds are made in your Stripe dashboard, where your money is. Once Stripe tells us, the order shows as refunded on the Shop tab."
+      },
+      {
+        "q": "Where can I deliver to?",
+        "a": "The UK for now."
+      },
+      {
+        "q": "Can buyers put several things in a basket?",
+        "a": "Not yet. Each Buy button sells one product, and stock levels and delivery rates aren't there yet either. The Shopkeeper will tell you plainly what it can't do."
+      },
+      {
+        "q": "Is this legal advice?",
+        "a": "No. It asks for what UK consumer law says a buyer must see and puts it in front of them. If anything about what you sell is unusual, check with an adviser."
+      },
+      {
+        "q": "Does it use tasks?",
+        "a": "No. Connecting Stripe, saving your details, looking at orders and chatting with it cost nothing from your monthly allowance."
+      }
+    ]
   }
 }
