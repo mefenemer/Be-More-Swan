@@ -999,6 +999,11 @@
           // on a phone needs.
           { key: 'score', label: 'Score', phone: false },
           { key: 'status', label: 'Rating' },
+          // `whyNow` is SYNTHETIC, like `contact`: assistant-data-hub.js `whyNowCell()` derives it
+          // from data.intel.whyNow through window.LeadWhyNow (src/config/lead-why-now.ts) — the dated
+          // reason to contact this lead NOW, kept apart from Rating, which is fit. Shown on phones:
+          // it is the column that says who to call today. docs/lead-why-now-and-watching-plan.md.
+          { key: 'whyNow', label: 'Why now' },
           { key: 'suggestedNextStep', label: 'Next step' },
           // The 30-day retention countdown (src/config/lead-retention.ts). SYNTHETIC, like
           // `contact` above — there is no such field on the record; assistant-data-hub.js

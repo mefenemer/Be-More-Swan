@@ -504,6 +504,30 @@
     DELETED_NOTICE: "Leads you deleted, plus leads that sat in Outreach for 30 days without a decision or that were rejected and never picked back up. They are kept so a later search does not surface the same company as though it were new. Sending one back for enrichment returns it to the pipeline.",
   };
 
+  // ── Lead "why now" (the dated reason to contact a lead now) ───────────────
+  // From src/config/lead-why-now.ts, stringified — the same fade rule the chat's lead snapshot
+  // imports, so the Leads table and the chat can never disagree about whether a reason is still
+  // fresh. Free variables (WHY_NOW_FRESH_DAYS, WHY_NOW_GONE_DAYS) resolve to the declarations
+  // directly above, so the names must match.
+  var WHY_NOW_FRESH_DAYS = 30;
+  var WHY_NOW_GONE_DAYS = 90;
+  var whyNowState = function whyNowState(intel,now){var FRESH=WHY_NOW_FRESH_DAYS;var GONE=WHY_NOW_GONE_DAYS;var NOT_CHECKED={state:"not_checked",summary:null,url:null,date:null,ageDays:null};var NONE={state:"none",summary:null,url:null,date:null,ageDays:null};if(!intel||typeof intel!=="object"||Array.isArray(intel))return NOT_CHECKED;var rec=intel;if(!Object.prototype.hasOwnProperty.call(rec,"whyNow"))return NOT_CHECKED;var w=rec.whyNow;if(!w||typeof w!=="object")return NONE;var summary=typeof w.summary==="string"?w.summary:"";var url=typeof w.url==="string"?w.url:"";var date=typeof w.date==="string"?w.date:"";var t=Date.parse(date+"T00:00:00Z");if(!summary||!url||!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(t))return NONE;var nowMs=typeof now==="number"?now:Date.now();var age=Math.max(0,Math.floor((nowMs-t)/864e5));var state=age<=FRESH?"fresh":age<=GONE?"cooling":"gone";return{state,summary,url,date,ageDays:age}};
+  var whyNowAgeLabel = function whyNowAgeLabel(days){if(days===null||days===void 0||!isFinite(days)||days<0)return"";if(days===0)return"today";if(days===1)return"yesterday";if(days<14)return days+" days ago";if(days<60)return Math.floor(days/7)+" weeks ago";var months=Math.round(days/30);return months<=1?"1 month ago":months+" months ago"};
+  var whyNowRank = function whyNowRank(view){var base=view.state==="fresh"?0:view.state==="cooling"?1:view.state==="gone"||view.state==="none"?2:3;return base*1e5+(view.ageDays===null?99999:view.ageDays)};
+
+  window.LeadWhyNow = {
+    FRESH_DAYS: WHY_NOW_FRESH_DAYS,
+    GONE_DAYS: WHY_NOW_GONE_DAYS,
+    /** { state: 'fresh'|'cooling'|'gone'|'none'|'not_checked', summary, url, date, ageDays } from data.intel. */
+    state: whyNowState,
+    /** "3 weeks ago" — never a numeric date, which reads differently in the UK and the US. */
+    ageLabel: whyNowAgeLabel,
+    /** Sort rank: fresh first, newest first within a band. */
+    rank: whyNowRank,
+    /** What the filter and group-by show for each state. */
+    LABELS: {"fresh":"Reason now","cooling":"Cooling off","gone":"No recent reason","none":"No recent reason","not_checked":"Not checked"},
+  };
+
   // ── Lead email kind ───────────────────────────────────────────────────────
   // From src/config/lead-email-kind.ts, stringified — the REAL classifier, and it has to be, for a
   // sharper reason than the two above. The browser writes emailKind now: a user typing an address

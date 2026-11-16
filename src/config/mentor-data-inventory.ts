@@ -42,6 +42,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ], 'Your plan and the tasks used this month'),
 
     // ── on request ────────────────────────────────────────────────────────────────────────────
+    ...group('always', 'The Google search terms the workspace tracks and what Google Trends says about them — busy months, rising interest, related searches (chat-search-trends.ts); relative interest only, never counts', ['org_trend_terms'], 'The search terms you track on Google Trends, and their busy months'),
     ...group('always', 'The Google searches that showed the workspace\'s own site, from its Search Console (chat-search-queries.ts) — search text and counts, never who searched', ['search_console_queries'], 'The searches that found your website, from your Google Search Console'),
     ...group('always', 'Its own strategy documents: the idea check, business plan and marketing plan (§4.4)', ['strategy_documents'], 'Your plans: the idea check, business plan and marketing plan'),
     ...group('always', 'Its own research answers and drafting jobs, with their links (§4.5)', ['mentor_jobs'], 'What it has looked up for you, with the links'),
@@ -53,9 +54,6 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'The Lead Generator\'s Watch list: companies watched on Companies House and the public register news found on them (buying triggers Phase 2)', [
         'lead_watch', 'lead_watch_signals', 'lead_watch_settings',
     ]),
-    // Phase 1 of docs/google-trends-plan.md: the engine only, nothing reads it in chat yet. Phase 2 adds the
-    // <search_trends> block and moves this to `always` (with a reader in tests/mentor-data-inventory.test.ts).
-    ...group('on_request', 'The Google search terms the workspace tracks for trends (their data is shared, relative interest only, in search_trend_terms)', ['org_trend_terms'], 'The search terms you track on Google Trends'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars

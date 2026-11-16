@@ -27,6 +27,7 @@ import { pickBalancedTopic, topicLine } from './topic-balance';
 import { PILLAR_PROFILES } from './pillar-profiles';
 import { adaptForModel, replyText } from '../config/model-options';
 import { loadSearchQueries, searchQueriesPromptBlock } from './gsc-queries';
+import { loadOrgTrends, searchTrendsPromptBlock } from './search-trends-read';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -176,6 +177,14 @@ export async function ideateBlogTopic(
             'Optional angles: if one of these searches fits the topic for THIS post, you may write the post that answers it '
             + '(a question someone typed is a strong title). Never force one in, and never write about a search outside what the business does.'))
         .catch((err) => { console.error(`ideateBlogTopic: search queries for org ${organisationId} (non-fatal)`, err); return null; });
+    // Google Trends for the terms the workspace tracks (docs/google-trends-plan.md Phase 2): upcoming
+    // peaks and rising related searches, as SUGGESTED angles on an undirected slot only. Approved terms
+    // only; fenced as data. Never throws.
+    const trendsBlock = guidance || inspoTopic ? null : await loadOrgTrends(db, organisationId)
+        .then((trends) => searchTrendsPromptBlock(trends.filter((t) => t.approved && t.status === 'ok'),
+            'Optional angles: a post published a few weeks BEFORE a term\'s busy months, or one answering a rising search, tends to be found. '
+            + 'Use one only if it fits what the business does and is not already written; never force it in.'))
+        .catch((err) => { console.error(`ideateBlogTopic: search trends for org ${organisationId} (non-fatal)`, err); return null; });
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -196,7 +205,8 @@ export async function ideateBlogTopic(
                 'to take. "keywords" is 2-4 comma-separated search terms.' +
                 (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
                 (inspoBlock ? `\n\n${inspoBlock}` : '') +
-                (searchBlock ? `\n\n${searchBlock}` : ''),
+                (searchBlock ? `\n\n${searchBlock}` : '') +
+                (trendsBlock ? `\n\n${trendsBlock}` : ''),
             messages: [{ role: 'user', content: brief }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 

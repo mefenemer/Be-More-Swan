@@ -128,7 +128,12 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
     return 'completed';
 }
 
-export default withLambda(async () => {
+/**
+ * Claim and run up to BATCH due jobs. The scheduled handler below (production) and the staging wrapper
+ * run-scenario-jobs.ts (staging-crons.yml — Netlify never fires scheduled functions on a branch deploy,
+ * and answers a URL call to one with 403) both call this, so staging drains exactly as production does.
+ */
+export async function drainScenarioJobs(): Promise<{ claimed: number; completed: number; retried: number; failed: number }> {
     const db = getDb();
     const now = new Date();
 
@@ -162,5 +167,10 @@ export default withLambda(async () => {
         }
     }
 
-    return { statusCode: 200, body: JSON.stringify({ claimed: pending.length, completed, retried, failed }) };
+    return { claimed: pending.length, completed, retried, failed };
+}
+
+export default withLambda(async () => {
+    const result = await drainScenarioJobs();
+    return { statusCode: 200, body: JSON.stringify(result) };
 });

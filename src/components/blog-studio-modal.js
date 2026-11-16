@@ -679,6 +679,10 @@
     + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your ' + String(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant').replace(/[&<>"']/g, '') + ' spot posts losing search traffic and flag them for a refresh, and see the searches that bring people to your site.</div>'
     // "Searches that found you" (docs/google-trends-plan.md Phase 1b) — filled by loadSearchQueries().
     + '        <div id="bs-gsc-queries" class="bs-gscq bs-hidden"></div>'
+    // "What people search for" (docs/google-trends-plan.md Phase 2) — Google Trends for the workspace's
+    // tracked terms, rendered by src/components/search-trends-view.js (mode 'blog'). Filled by loadSearchTrends().
+    + '        <div class="bs-gscq-head" style="margin-top:16px;font-weight:800;font-size:13px;color:#111827;">What people search for <span style="font-weight:400;color:#6b7280;">· Google Trends</span></div>'
+    + '        <div id="bs-trends"></div>'
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="widget">'
@@ -2470,9 +2474,17 @@
   }
 
   // ── Search Console (US 5.1 content-decay loop) — connect status ────────────────────────────────
+  /** Google Trends for the tracked terms (search-trends-view.js), whether or not Search Console is connected. */
+  function loadSearchTrends() {
+    var box = el('bs-trends');
+    if (!box || !window.SearchTrendsView) return;
+    window.SearchTrendsView.mount(box, { mode: 'blog' });
+  }
+
   function loadSearchConsole() {
     var statusEl = el('bs-gsc-status');
     if (!statusEl) return;
+    loadSearchTrends();
     statusEl.textContent = 'Checking…';
     el('bs-gsc-connect').classList.add('bs-hidden');
     el('bs-gsc-disconnect').classList.add('bs-hidden');
