@@ -54,12 +54,20 @@ async function poke(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DISPATCH_TIMEOUT_MS);
     try {
-        await fetch(`${baseUrl}/.netlify/functions/${fn}`, {
+        const res = await fetch(`${baseUrl}/.netlify/functions/${fn}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
             body: JSON.stringify({ reason: 'on_demand', jobId, ...extra }),
             signal: controller.signal,
         });
+        // fetch does not throw on an HTTP error. Before this check a 404 (function missing from the
+        // deploy) or 403 still counted as "handed off", so callers skipped their in-process fallback
+        // and said "your assistant is writing" for a drain that never started. A `-background`
+        // function answers 202 once accepted, so anything that is not 2xx means it did not start.
+        if (!res.ok) {
+            console.warn(`[${caller}] drain trigger for ${jobId} got HTTP ${res.status} from ${fn} — job waits for the cron.`);
+            return false;
+        }
         return true;
     } catch (err) {
         console.warn(`[${caller}] drain trigger failed for ${jobId} — job waits for the cron:`,

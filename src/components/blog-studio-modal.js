@@ -295,6 +295,13 @@
     + '.bs-snippet{font-family:ui-monospace,monospace;font-size:12px;background:#111827;color:#e5e7eb;'
     + 'padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;}'
     + '.bs-status{font-size:12px;color:#6b7280;}'
+    + '.bs-gscq{margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;}'
+    + '.bs-gscq-title{font-size:13px;font-weight:600;color:#111827;margin:0 0 2px;}'
+    + '.bs-gscq-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px;}'
+    + '.bs-gscq-table th{text-align:left;font-weight:500;color:#6b7280;padding:4px 6px;border-bottom:1px solid #e5e7eb;}'
+    + '.bs-gscq-table td{padding:5px 6px;border-bottom:1px solid #f3f4f6;color:#374151;vertical-align:top;}'
+    + '.bs-gscq-table td.bs-gscq-q{word-break:break-word;}'
+    + '.bs-gscq-table .bs-gscq-n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}'
     // Amber, not red: the value is not wrong, it is not finished. Same colour the SEO counters use
     // when they overrun.
     + '.bs-pending{display:block;font-size:11px;color:#b45309;margin-top:4px;}'
@@ -661,7 +668,7 @@
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="search">'
-    + '<summary class="bs-sec-head"><span class="bs-sec-num">7</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console, for spotting posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">7</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console: the searches that found you, and posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
     + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
     + '        <div class="bs-row" style="margin-top:10px;">'
@@ -669,7 +676,9 @@
     + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
     + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
     + '        </div>'
-    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your ' + String(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant').replace(/[&<>"']/g, '') + ' spot posts losing search traffic and flag them for a refresh.</div>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your ' + String(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant').replace(/[&<>"']/g, '') + ' spot posts losing search traffic and flag them for a refresh, and see the searches that bring people to your site.</div>'
+    // "Searches that found you" (docs/google-trends-plan.md Phase 1b) — filled by loadSearchQueries().
+    + '        <div id="bs-gsc-queries" class="bs-gscq bs-hidden"></div>'
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="widget">'
@@ -2472,11 +2481,62 @@
       if (p && p.connected) {
         statusEl.textContent = 'Connected' + (p.accountName ? ' · ' + p.accountName : '');
         el('bs-gsc-disconnect').classList.remove('bs-hidden');
+        loadSearchQueries();
       } else {
         statusEl.textContent = 'Not connected.';
         el('bs-gsc-connect').classList.remove('bs-hidden');
+        var q = el('bs-gsc-queries');
+        if (q) { q.classList.add('bs-hidden'); q.innerHTML = ''; }
       }
     }).catch(function () { statusEl.textContent = 'Could not check status.'; });
+  }
+
+  // ── "Searches that found you" (docs/google-trends-plan.md Phase 1b) ─────────────────────────────
+  // The daily Search Console ingest stores the top searches that showed the workspace's own site;
+  // this lists them. Ten first, the rest behind "Show more". Counts are this site's, not national volumes.
+  var SEARCH_QUERIES_FIRST = 10;
+  function loadSearchQueries() {
+    var box = el('bs-gsc-queries');
+    if (!box) return;
+    box.classList.remove('bs-hidden');
+    box.innerHTML = '<div class="bs-gscq-title">Searches that found you</div><div class="bs-status">Loading&hellip;</div>';
+    api('get-search-queries?limit=25', { method: 'GET' }).then(function (res) {
+      if (!res.ok) { box.innerHTML = '<div class="bs-gscq-title">Searches that found you</div><div class="bs-status">Could not load your searches.</div>'; return; }
+      renderSearchQueries(box, res.body || {}, false);
+    }).catch(function () { box.innerHTML = '<div class="bs-gscq-title">Searches that found you</div><div class="bs-status">Could not load your searches.</div>'; });
+  }
+
+  function renderSearchQueries(box, snap, showAll) {
+    var list = Array.isArray(snap.queries) ? snap.queries : [];
+    var head = '<div class="bs-gscq-title">Searches that found you</div>';
+    if (!list.length) {
+      box.innerHTML = head + '<div class="bs-status">Nothing yet. Your list appears within a day of connecting, once Google has searches for your site to report. '
+        + 'If it stays empty, check that your website address in Business Information matches the site in your Search Console.</div>';
+      return;
+    }
+    var when = snap.windowStart && snap.windowEnd ? fmtShortDate(snap.windowStart) + ' to ' + fmtShortDate(snap.windowEnd) : 'the last 28 days';
+    var shown = showAll ? list : list.slice(0, SEARCH_QUERIES_FIRST);
+    var rows = shown.map(function (q) {
+      return '<tr><td class="bs-gscq-q">' + esc(q.query) + '</td>'
+        + '<td class="bs-gscq-n">' + esc(Number(q.impressions || 0).toLocaleString()) + '</td>'
+        + '<td class="bs-gscq-n">' + esc(Number(q.clicks || 0).toLocaleString()) + '</td>'
+        + '<td class="bs-gscq-n">' + (q.position == null ? '&ndash;' : esc(Number(q.position).toFixed(1))) + '</td></tr>';
+    }).join('');
+    box.innerHTML = head
+      + '<div class="bs-status">What people typed into Google before your site appeared, ' + esc(when) + '. Your ' + esc(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant') + ' uses these when choosing topics.</div>'
+      + '<table class="bs-gscq-table"><thead><tr><th scope="col">Search</th><th scope="col" class="bs-gscq-n" title="Times your site appeared in results">Seen</th>'
+      + '<th scope="col" class="bs-gscq-n" title="Times someone clicked through to your site">Clicks</th><th scope="col" class="bs-gscq-n" title="Average position in Google results (1 = top)">Position</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>'
+      + (list.length > SEARCH_QUERIES_FIRST
+        ? '<button type="button" class="bs-linkbtn" id="bs-gscq-more" style="margin-top:6px;">' + (showAll ? 'Show fewer' : 'Show all ' + list.length) + '</button>'
+        : '');
+    var more = el('bs-gscq-more');
+    if (more) more.addEventListener('click', function () { renderSearchQueries(box, snap, !showAll); });
+  }
+
+  function fmtShortDate(iso) {
+    var d = new Date(String(iso) + 'T00:00:00Z');
+    return isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
   }
 
   // ── Wire all events once, after markup injection ───────────────────────────────────────────────
