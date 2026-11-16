@@ -74,6 +74,9 @@ export type AdminAction =
     // Per-cell answers are not logged — they are the admin's own notes, not a change to anything.
     | 'ai_visibility_change'
     | 'trigger_poll_run'
+    // Admin ▸ Search trends (admin-search-trends.ts): "Run now", and "Fetch again" on one term.
+    | 'search_trends_run'
+    | 'search_trends_retry'
     // Deleting a track outright (bulk, from the admin list). Records whether its file was removed
     // or kept because a workspace's post still plays it.
     | 'music_library_delete'

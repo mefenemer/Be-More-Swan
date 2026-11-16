@@ -1209,6 +1209,30 @@
         </div>
       </section>
 
+      <!-- ── Search trends — Admin → System → Health (admin-search-trends.ts) ──────────────────
+           docs/google-trends-plan.md §5 Phase 1: every shared Google Trends term, how many workspaces
+           track it, whether its weekly refresh is healthy, and DataForSEO spend. Shared data only. -->
+      <section id="view-search-trends" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+          <p class="text-sm text-gray-500 max-w-2xl">The search terms workspaces track in <strong>What People Search</strong>. Each is fetched once a week from Google Trends through DataForSEO, however many workspaces track it. Problems are listed first. Workspace names are never shown here.</p>
+          <button type="button" id="str-run-btn" onclick="strRunNow()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border" title="Collects any answers that are ready and sends what is due, now instead of at the next hourly tick.">Run now</button>
+        </div>
+        <div id="str-not-setup" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 mb-5">
+          <strong>Not set up on this database yet.</strong> Apply <span class="font-mono">db/z-search-trends.sql</span> in the Neon SQL Editor, then reload this page.
+        </div>
+        <p id="str-error" class="hidden text-sm font-semibold text-red-600 mb-4"></p>
+        <p id="str-note" class="hidden text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-4"></p>
+        <div id="str-body" class="hidden space-y-6">
+          <div id="str-tiles" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+            <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase">
+              <th class="py-1 pr-2">Term</th><th class="py-1 pr-2">Health</th><th class="py-1 pr-2 text-right">Tracking</th><th class="py-1 pr-2">Last fetched</th><th class="py-1 pr-2">Busy months</th><th class="py-1 pr-2 text-right">Related</th><th class="py-1 pr-2 text-right">Cost</th><th class="py-1"></th>
+            </tr></thead><tbody id="str-terms"></tbody></table>
+          </div>
+          <p class="text-xs text-gray-400">Tracking = workspaces that approved the term (suggested-only in brackets). Unused = nobody approves it, so it is not refreshed (a chat look-up or a removed term). Stuck = a DataForSEO task unanswered for over a day; it is sent again automatically. Cost is everything DataForSEO has charged for the term, weekly and look-ups.</p>
+        </div>
+      </section>
+
       <!-- ── AI Visibility — Admin → Growth → Reputation (admin-ai-visibility.ts) ──────────────
            When a prospect asks an AI assistant for help, does Be More Swan come up? The same
            questions, asked of each assistant, monthly. The answer form (#aiv-modal) lives OUTSIDE
@@ -3493,6 +3517,7 @@ const VIEW_LABELS = {
   'ai-visibility': 'AI visibility',
   'platform-reviews': 'Reviews',
   'buying-triggers': 'Buying triggers',
+  'search-trends': 'Search trends',
 };
 
 // Category → child items mapping.
@@ -3598,6 +3623,8 @@ const ADMIN_CATS = {
     { view: 'feature-flags',   icon: '🚩', label: 'Feature flags',         perm: 'feature_flags',          group: 'Settings' },
     { view: 'gamification',    icon: '🎮', label: 'Gamification',          perm: 'platform_config',        group: 'Settings' },
     { view: 'systems',         icon: '🛠️', label: 'Systems & connections', perm: 'view_system_status',     group: 'Health' },
+    // Google Trends: every shared term, its weekly refresh and DataForSEO spend (admin-search-trends.ts).
+    { view: 'search-trends',   icon: '📈', label: 'Search trends',         perm: 'platform_config',        group: 'Health' },
     { view: 'logs',            icon: '📋', label: 'System logs',           perm: 'view_audit_log',         group: 'Health' },
     { view: 'sandbox',         icon: '🧫', label: 'Sandbox',               perm: 'sandbox_access',         group: 'Health' },
     { view: 'kill-switches',   icon: '🚨', label: 'Emergency controls',    perm: 'kill_switch',            group: 'Emergency' },
@@ -3966,6 +3993,7 @@ function adminNav(view) {
   if (view === 'music-library')       loadMusicLibrary();
   if (view === 'ai-visibility')       loadAiVisibility();
   if (view === 'buying-triggers')     loadBuyingTriggers();
+  if (view === 'search-trends')       loadSearchTrendsAdmin();
 }
 
 // ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
@@ -11082,6 +11110,90 @@ async function btRunNow() {
     _btMsg('bt-error', e.message);
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ── Search trends (admin-search-trends.ts) ───────────────────────────────────
+// docs/google-trends-plan.md: the shared Google Trends terms, their weekly refresh, and DataForSEO spend.
+const STR_API = '/.netlify/functions/admin-search-trends';
+const STR_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const STR_HEALTH = {
+  stuck:   ['Stuck', 'bg-red-50 text-red-700'],
+  failing: ['Failing', 'bg-red-50 text-red-700'],
+  stale:   ['Stale', 'bg-amber-50 text-amber-800'],
+  waiting: ['Waiting', 'bg-gray-100 text-gray-700'],
+  ok:      ['OK', 'bg-emerald-50 text-emerald-700'],
+  unused:  ['Unused', 'bg-gray-50 text-gray-500'],
+};
+const _strEsc = (v) => escAdm(v == null ? '' : String(v));
+const _strWhen = (iso) => { if (!iso) return 'never'; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+const _strUsd = (n) => `$${Number(n || 0).toFixed(Number(n) < 1 ? 4 : 2)}`;
+
+async function loadSearchTrendsAdmin() {
+  _btMsg('str-error', '');
+  try {
+    const d = await api(STR_API);
+    const notSetUp = d.setUp === false;
+    document.getElementById('str-not-setup').classList.toggle('hidden', !notSetUp);
+    document.getElementById('str-body').classList.toggle('hidden', notSetUp);
+    document.getElementById('str-run-btn').disabled = notSetUp;
+    if (notSetUp) return;
+    strRender(d);
+  } catch (e) {
+    _btMsg('str-error', e.message);
+  }
+}
+
+function strRender(d) {
+  const t = d.totals, s = d.spend;
+  const tile = (label, value, sub, warn) => `<div class="bg-white rounded-2xl border ${warn ? 'border-red-200' : 'border-gray-200'} p-4"><p class="text-xs font-bold text-gray-500 uppercase">${label}</p><p class="text-2xl font-black ${warn ? 'text-red-700' : 'text-gray-900'}">${value}</p><p class="text-xs text-gray-500">${sub}</p></div>`;
+  document.getElementById('str-tiles').innerHTML = [
+    tile('Terms tracked', t.tracked.toLocaleString('en-GB'), `by ${t.workspaces} workspace${t.workspaces === 1 ? '' : 's'}; ${t.terms} stored`),
+    tile('With data', t.ok.toLocaleString('en-GB'), `${t.notEnoughData} too thin to chart, ${t.pending} waiting`),
+    tile('Needs a look', (t.stuck + t.stale + t.error).toLocaleString('en-GB'), `${t.stuck} stuck, ${t.stale} stale, ${t.error} errored`, (t.stuck + t.error) > 0),
+    tile('DataForSEO, 30 days', _strUsd(s.usd30), `weekly ${_strUsd(s.standard30)} · look-ups ${_strUsd(s.live30)}; ${_strUsd(s.usdAll)} all time`),
+    tile('Provider', d.providerConfigured ? 'Connected' : 'Not set', d.providerConfigured ? `${t.tasksOut} task${t.tasksOut === 1 ? '' : 's'} waiting; ${s.lookups24h} look-ups in 24h` : 'DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD missing — nothing is fetched', !d.providerConfigured),
+  ].join('');
+  document.getElementById('str-terms').innerHTML = d.terms.length ? d.terms.map((r) => {
+    const [label, cls] = STR_HEALTH[r.health] || [r.health, 'bg-gray-100 text-gray-700'];
+    const why = r.lastError ? ` title="${_strEsc(r.lastError)}"` : '';
+    const status = r.status === 'not_enough_data' ? ' <span class="text-xs text-gray-500">too thin</span>' : r.taskOut ? ' <span class="text-xs text-gray-500">task out</span>' : '';
+    return `<tr class="border-t border-gray-100 align-top">
+      <td class="py-1 pr-2"><span class="font-semibold text-gray-900">${_strEsc(r.term)}</span><div class="text-xs text-gray-500">${_strEsc(r.locationName)}</div></td>
+      <td class="py-1 pr-2 whitespace-nowrap"><span class="text-xs font-bold rounded-full px-2 py-0.5 ${cls}"${why}>${label}</span>${status}${r.attempts ? ` <span class="text-xs text-red-600">${r.attempts}×</span>` : ''}</td>
+      <td class="py-1 pr-2 text-right">${r.tracking}${r.suggested ? ` <span class="text-xs text-gray-400">(+${r.suggested})</span>` : ''}</td>
+      <td class="py-1 pr-2 whitespace-nowrap text-xs">${_strEsc(_strWhen(r.fetchedAt))}</td>
+      <td class="py-1 pr-2 text-xs">${r.peakMonths.length ? r.peakMonths.map((m) => STR_MONTHS[m - 1]).join(', ') : '<span class="text-gray-400">—</span>'}</td>
+      <td class="py-1 pr-2 text-right text-xs">${r.related}</td>
+      <td class="py-1 pr-2 text-right text-xs">${_strUsd(r.costUsd)}</td>
+      <td class="py-1 text-right">${r.tracking && (r.health === 'failing' || r.health === 'stuck' || r.health === 'stale') ? `<button type="button" onclick="strRetry(${Number(r.id)}, this)" class="text-xs font-bold text-indigo-600 hover:underline">Fetch again</button>` : ''}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="8" class="py-2 text-xs text-gray-500">No terms yet. They appear when a workspace adds or approves one in Business Information ▸ What People Search.</td></tr>';
+}
+
+async function strRunNow() {
+  const btn = document.getElementById('str-run-btn');
+  btn.disabled = true;
+  _btMsg('str-error', '');
+  try {
+    const r = await api(STR_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'run_now' }) });
+    _btMsg('str-note', r.woke ? 'Started. DataForSEO answers in 1–4 minutes; press Run now again after that to collect them, or wait for the hourly tick.' : `Nothing was started: ${r.reason}.`);
+  } catch (e) {
+    _btMsg('str-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function strRetry(termId, btn) {
+  btn.disabled = true;
+  try {
+    await api(STR_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry', termId }) });
+    _btMsg('str-note', 'Marked to fetch again. It goes out at the next run (press Run now to send it straight away).');
+    loadSearchTrendsAdmin();
+  } catch (e) {
+    btn.disabled = false;
+    _btMsg('str-error', e.message);
   }
 }
 
