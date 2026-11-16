@@ -284,19 +284,47 @@ async function inParallel<T, R>(items: readonly T[], n: number, fn: (t: T) => Pr
     return out;
 }
 
-export interface CleanupPayload { op: 'archive' | 'trash'; label: string; items: MovedItem[]; failed: number }
+export interface CleanupItem extends MovedItem { restored?: boolean }
+export interface CleanupPayload { op: 'archive' | 'trash'; label: string; items: CleanupItem[]; failed: number }
+
+/** Emails Undo puts back per call (a sync function has ~26 s; each is a provider call or two). */
+export const UNDO_CHUNK = 40;
+/** How long after the first chunk later chunks may still join its entry. */
+const JOIN_WINDOW_MS = 15 * 60 * 1000;
+
+/** The items of an entry still out of the inbox. Pure. */
+export function itemsToRestore(items: readonly CleanupItem[], max: number = UNDO_CHUNK): CleanupItem[] {
+    return items.filter((i) => !i.restored).slice(0, max);
+}
+
+/**
+ * Join a later chunk onto the entry the first chunk made, so one clean-up is ONE entry with one Undo
+ * (the page sends a big batch in chunks of CLEANUP_CHUNK). Pure: the merged payload.
+ */
+export function joinCleanupPayload(prev: CleanupPayload, moved: readonly MovedItem[], failed: number): CleanupPayload {
+    return { ...prev, items: [...(prev.items ?? []), ...moved], failed: (prev.failed ?? 0) + failed };
+}
 
 /**
  * Archive or trash the emails the owner ticked and confirmed — at most CLEANUP_CHUNK per call (the page
- * sends a big batch in chunks). Records each move so Undo can put it back.
+ * sends a big batch in chunks, passing the first chunk's `joinActionId` on the rest). Records each move
+ * so Undo can put it back.
  */
-export async function applyCleanup(db: Db, box: MailboxRow, op: 'archive' | 'trash', messageIds: number[], label: string): Promise<{ action: ActionRow; moved: number; failed: number }> {
+export async function applyCleanup(db: Db, box: MailboxRow, op: 'archive' | 'trash', messageIds: number[], label: string, joinActionId: number | null = null): Promise<{ action: ActionRow; moved: number; failed: number }> {
     if (op !== 'archive' && op !== 'trash') throw new ActionError(400, 'Unknown clean-up.');
     const ids = [...new Set(messageIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
     if (!ids.length) throw new ActionError(400, 'Nothing ticked.');
     if (ids.length > CLEANUP_CHUNK) throw new ActionError(400, `At most ${CLEANUP_CHUNK} at a time.`);
     const writer = writerFor(box.provider);
     if (!writer) throw new ActionError(400, 'This kind of mailbox can\'t be changed.');
+    // The entry to join: this mailbox's, the same operation, made in the last few minutes, not undone.
+    let joinTo: ActionRow | null = null;
+    if (joinActionId) {
+        const [j] = await db.select().from(mailboxActions)
+            .where(and(eq(mailboxActions.id, joinActionId), eq(mailboxActions.mailboxId, box.id), eq(mailboxActions.kind, 'cleanup'),
+                inArray(mailboxActions.status, ['applied', 'failed']))).limit(1);
+        if (j && (j.payload as CleanupPayload).op === op && j.actedAt && Date.now() - j.actedAt.getTime() < JOIN_WINDOW_MS) joinTo = j;
+    }
     // Only this mailbox's emails that are still in the inbox.
     const rows = await db.select().from(mailboxMessages)
         .where(and(eq(mailboxMessages.mailboxId, box.id), inArray(mailboxMessages.id, ids), isNull(mailboxMessages.removedAt)));
@@ -309,6 +337,15 @@ export async function applyCleanup(db: Db, box: MailboxRow, op: 'archive' | 'tra
             return { messageId: m.id, providerMessageId: m.providerMessageId, movedProviderId: r.movedProviderId };
         } catch { failed++; return null; }
     })).filter((x): x is MovedItem => Boolean(x));
+
+    if (joinTo) {
+        const payload = joinCleanupPayload(joinTo.payload as CleanupPayload, moved, failed);
+        const [action] = await db.update(mailboxActions).set({
+            payload, status: payload.items.length ? 'applied' : 'failed', updatedAt: new Date(),
+            result: payload.failed ? { error: `${payload.failed} could not be moved.` } : null,
+        }).where(eq(mailboxActions.id, joinTo.id)).returning();
+        return { action, moved: moved.length, failed };
+    }
     const payload: CleanupPayload = { op, label: String(label || '').slice(0, 120), items: moved, failed };
     const [action] = await db.insert(mailboxActions).values({
         mailboxId: box.id, organisationId: box.organisationId, userId: box.userId, kind: 'cleanup',
@@ -318,8 +355,11 @@ export async function applyCleanup(db: Db, box: MailboxRow, op: 'archive' | 'tra
     return { action, moved: moved.length, failed };
 }
 
-/** Put a clean-up back into the inbox, within UNDO_DAYS. */
-export async function undoCleanup(db: Db, box: MailboxRow, actionId: number): Promise<{ restored: number; failed: number }> {
+/**
+ * Put a clean-up back into the inbox, within UNDO_DAYS — UNDO_CHUNK emails per call; `remaining` says how
+ * many are still out (the page calls again until it is 0, or a call puts none back).
+ */
+export async function undoCleanup(db: Db, box: MailboxRow, actionId: number): Promise<{ restored: number; failed: number; remaining: number }> {
     const [a] = await db.select().from(mailboxActions)
         .where(and(eq(mailboxActions.id, actionId), eq(mailboxActions.mailboxId, box.id), eq(mailboxActions.kind, 'cleanup'))).limit(1);
     if (!a) throw new ActionError(404, 'Clean-up not found.', 'not_found');
@@ -328,21 +368,30 @@ export async function undoCleanup(db: Db, box: MailboxRow, actionId: number): Pr
     const writer = writerFor(box.provider);
     if (!writer) throw new ActionError(400, 'This kind of mailbox can\'t be changed.');
     const p = a.payload as CleanupPayload;
+    const items = (p.items ?? []).map((i) => ({ ...i }));
+    const todo = itemsToRestore(items);
     const token = await getMailboxAccessToken(db, box);
     let failed = 0;
-    const restored = (await inParallel(p.items ?? [], 5, async (it) => {
+    let restored = 0;
+    await inParallel(todo, 5, async (it) => {
         try {
             const r = await writer.restore(token, it.movedProviderId, p.op);
             // Back in the inbox, under the id it has there now (Outlook gives it a new one).
             await db.update(mailboxMessages).set({ providerMessageId: r.providerMessageId, removedAt: null, updatedAt: new Date() })
                 .where(and(eq(mailboxMessages.id, it.messageId), eq(mailboxMessages.mailboxId, box.id)));
-            return true;
-        } catch { failed++; return false; }
-    })).filter(Boolean).length;
+            const mine = items.find((x) => x.messageId === it.messageId && x.movedProviderId === it.movedProviderId);
+            if (mine) mine.restored = true;
+            restored++;
+        } catch { failed++; }
+    });
+    const remaining = items.filter((i) => !i.restored).length;
     await db.update(mailboxActions).set({
-        status: restored ? 'undone' : a.status, result: failed ? { error: `${failed} could not be put back.` } : a.result, updatedAt: new Date(),
+        payload: { ...p, items },
+        status: remaining === 0 ? 'undone' : a.status,
+        result: failed ? { error: `${failed} could not be put back.` } : a.result,
+        updatedAt: new Date(),
     }).where(eq(mailboxActions.id, a.id));
-    return { restored, failed };
+    return { restored, failed, remaining };
 }
 
 // ── Lists and housekeeping ───────────────────────────────────────────────────────────────────────

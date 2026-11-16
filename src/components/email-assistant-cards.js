@@ -149,11 +149,13 @@
       if (!(await confirmIt(`${batch.op === 'trash' ? 'Move' : 'Archive'} ${n} email${n === 1 ? '' : 's'}? You can undo this for ${undoDays} days.`,
         { title: batch.op === 'trash' ? 'Move to trash' : 'Archive', confirmLabel: batch.op === 'trash' ? 'Move to trash' : 'Archive', tone: batch.op === 'trash' ? 'destructive' : 'primary' }))) return;
       f.busy(true); f.say('Working…');
-      let moved = 0; let failed = 0;
+      let moved = 0; let failed = 0; let joinActionId = null;
       try {
+        // One batch = one entry in Done (later chunks join the first chunk's entry).
         for (let i = 0; i < batch.messageIds.length; i += chunk) {
-          const out = await post({ action: 'cleanup', mailboxId, op: batch.op, label: batch.label, messageIds: batch.messageIds.slice(i, i + chunk) });
+          const out = await post({ action: 'cleanup', mailboxId, op: batch.op, label: batch.label, messageIds: batch.messageIds.slice(i, i + chunk), ...(joinActionId ? { joinActionId } : {}) });
           moved += out.moved || 0; failed += out.failed || 0;
+          if (!joinActionId && out.actionId) joinActionId = out.actionId;
         }
         f.say(`${batch.op === 'trash' ? 'Moved to trash' : 'Archived'}: ${moved}.${failed ? ` ${failed} could not be moved.` : ''} Undo from the Emails tab ▸ Done.`, failed ? 'error' : undefined);
       } catch (err) { f.busy(false); f.say(`${moved ? `${moved} done, then: ` : ''}${err.message}`, 'error'); }
@@ -170,8 +172,16 @@
       if (e.target.closest('[data-ea-cancel]')) { f.busy(true); f.say('Left as it is.'); return; }
       if (!e.target.closest('[data-ea-go]')) return;
       f.busy(true); f.say('Putting them back…');
-      try { const out = await post({ action: 'undo_cleanup', mailboxId, actionId }); f.say(out.message); }
-      catch (err) { f.busy(false); f.say(err.message, 'error'); }
+      try {
+        // The server puts back a chunk per call: keep going until none remain (or a call puts none back).
+        let restored = 0; let failed = 0;
+        for (let guard = 0; guard < 50; guard++) {
+          const out = await post({ action: 'undo_cleanup', mailboxId, actionId });
+          restored += out.restored || 0; failed = out.failed || 0;
+          if (!out.remaining || !out.restored) break;
+        }
+        f.say(`Put back in your inbox: ${restored}.${failed ? ` ${failed} could not be put back — try again.` : ''}`, failed ? 'error' : undefined);
+      } catch (err) { f.busy(false); f.say(err.message, 'error'); }
     });
     return f.el;
   }

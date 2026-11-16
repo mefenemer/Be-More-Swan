@@ -1,6 +1,7 @@
 # Buying triggers — PLAN (feature request #36)
 
-2026-11-15. **Phase 1 built (engine + FSA feed, Admin only); nothing else built.** For the owner to review and decide
+2026-11-15. **Phase 1 (engine + FSA feed, Admin only) and Phase 2 (Lead Generator Watch list) built and LIVE on
+prod** (Phase 2 released 2026-11-16, #645 / #649); Phases 3–6 not built. All nine owner decisions taken 2026-11-16
 (§10). UK first, then the US.
 **Is it disruptive, is it worth building, will it bring leads?** See §9 (added 2026-11-15).
 
@@ -304,31 +305,37 @@ already knows them.
 | Website changed (Phase 4) | Yes | Cheap (our own fingerprint), contactable leads |
 | Hiring (Phase 5), Maps (Phase 6) | Later | Terms risk (Reed, Serper) and lower value |
 
-**Gate after Phase 1 (proposed, the owner to set):** in at least 3 large councils, for one realistic trade filter,
+**Gate after Phase 1 (agreed by the owner 2026-11-16):** in at least 3 large councils, for one realistic trade filter,
 (a) at least 15 new premises a month, and (b) at least 35% reachable within 21 days (address published or company /
 website found). Then a **6-week pilot**: Be More Swan's own marketing (#30 B) plus 3–5 friendly customers in
 high-ticket trades, against a cold-list baseline. Go if trigger leads get **at least 2× the reply rate** and at least
 one real meeting per pilot customer. If it fails, keep the Watch list and the Admin feed, and stop there: very
 little is wasted.
 
-## 10. Decisions for the owner
+## 10. Decisions for the owner — ALL TAKEN 2026-11-16
 
-1. **Top five as ranked?** FSA premises, Companies House stream (leads + customers), website changed, hiring, Maps.
-   Or reorder?
-2. **Watch customers too?** Adds won leads and manually added companies to watching, with account-news wording.
-   *Recommendation: yes; it is the cheapest retention feature we could add.*
-3. **Sole traders:** agree that trigger leads without a corporate Companies House match are never emailed, only
-   offered as letters/visits?
-4. **FSA first test:** one area and one trade group first (e.g. sign makers / accountants in one city) before
-   general release?
-5. **Maps signals via Serper:** acceptable risk, given that Google's own API forbids storing review data? Or skip
-   until we have advice?
-6. **Reed:** OK to ask Reed in writing whether lead generation is allowed under the free Jobseeker key, and to build
-   the hiring source only if they say yes?
-7. **Plans:** which plans get the trigger sources and the Watch list? (why-now decision 1 put free watching on for
-   every Lead Generator.)
-8. **US:** add health-inspection and permit datasets to the #30 Socrata connector for the same states (CT, NY, CO
-   first), after each dataset's terms are checked?
-9. **The §9.3 gate and pilot:** agree the thresholds (15 a month, 35% reachable, 2× reply rate, one meeting per
-   pilot customer), and that Be More Swan's own marketing is the first pilot? Also: OK to start pooled, anonymised
-   outcome learning (§9.1.3) once there is enough data, after a privacy page line and a DPIA note?
+1. **Top five as ranked?** ✅ **Keep the order:** FSA premises, Companies House stream (leads + customers), website
+   changed, hiring, Maps.
+2. **Watch customers too?** ✅ **Yes.** Won leads and manually added companies are watched, with account-news wording.
+3. **Sole traders:** ✅ **Agreed.** A trigger lead without a corporate Companies House match is never emailed, only
+   offered as a letter or visit. Enforced in code, next to the do-not-contact gate.
+4. **FSA first test:** ✅ **One area and one trade group first** (e.g. sign makers or accountants in one city) before
+   general release.
+5. **Maps signals via Serper:** ✅ **Skip until we have advice** on the terms. Phase 6 is not built until then.
+6. **Reed:** ✅ **Ask Reed in writing first.** The owner sends the email; Phase 5's Reed search is built only on a
+   written yes. ATS boards keep doing the watching.
+7. **Plans:** ✅ **Every plan with a Lead Generator** gets the trigger sources and the Watch list (as why-now decision
+   1). Finding leads is still paid per task as now.
+8. **US:** ✅ **Yes, after each dataset's terms are checked:** health-inspection and permit datasets on the #30
+   Socrata connector, CT, NY, CO first, after the UK.
+9. **The §9.3 gate and pilot:** ✅ **Agreed as written:** ≥15 new premises a month and ≥35% reachable in at least 3
+   large councils for one realistic trade; then a pilot needing ≥2× the reply rate and at least one meeting per pilot
+   customer. Be More Swan's own marketing is the first pilot. Phase 3 only after the gate passes.
+   ✅ **Pooled, anonymised outcome learning (§9.1.3): yes**, once there is enough data, after a privacy page line and
+   a DPIA note. Counts per trigger type and trade only, never a workspace's leads or messages.
+
+**What this means next:** Phase 1 collects data on Admin ▸ Assistants ▸ Buying triggers (prod live from 2026-11-16,
+first new premises 2026-11-17). The gate is read after 2–4 weeks; Phase 3 waits for it. Phase 2 (Watch list,
+including customers, + the Companies House stream) is built and live (2026-11-16; the stream waits for
+`COMPANIES_HOUSE_STREAM_KEY`). Phase 4 (website changed) is not gated and can be built next; Phase 5 waits for
+Reed's written answer, Phase 6 for advice on the Maps terms.

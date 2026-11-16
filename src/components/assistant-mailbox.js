@@ -406,6 +406,17 @@
     finally { state.busy = false; }
   }
 
+  /** Undo a whole clean-up: the server puts back a chunk per call, so call until none remain (or one call puts none back). */
+  async function undoAll(actionId) {
+    let restored = 0; let failed = 0;
+    for (let guard = 0; guard < 50; guard++) {
+      const out = await post({ action: 'undo_cleanup', mailboxId: state.mailboxId, actionId });
+      restored += out.restored || 0; failed = out.failed || 0;
+      if (!out.remaining || !out.restored) break;
+    }
+    return `Put back in your inbox: ${restored}.${failed ? ` ${failed} could not be put back — try Undo again.` : ''}`;
+  }
+
   /** Archive or trash the ticked emails of one batch, after a confirm, in chunks the server accepts. */
   async function runCleanup(key) {
     const b = state.cleanup.find((x) => x.key === key);
@@ -423,11 +434,13 @@
       : window.confirm(what);
     if (!ok) return;
     state.busy = true;
-    let moved = 0; let failed = 0;
+    let moved = 0; let failed = 0; let joinActionId = null;
     try {
+      // One batch = one entry in Done: every chunk after the first joins the first chunk's entry.
       for (let i = 0; i < ids.length; i += state.cleanupChunk) {
-        const out = await post({ action: 'cleanup', mailboxId: state.mailboxId, op: b.op, label: b.label, messageIds: ids.slice(i, i + state.cleanupChunk) });
+        const out = await post({ action: 'cleanup', mailboxId: state.mailboxId, op: b.op, label: b.label, messageIds: ids.slice(i, i + state.cleanupChunk), ...(joinActionId ? { joinActionId } : {}) });
         moved += out.moved || 0; failed += out.failed || 0;
+        if (!joinActionId && out.actionId) joinActionId = out.actionId;
       }
       toast(`${b.op === 'trash' ? 'Moved to trash' : 'Archived'}: ${moved}.${failed ? ` ${failed} could not be moved.` : ''} Undo from the Done list.`, failed ? 'error' : 'success');
     } catch (err) { toast(err.message, 'error'); }
@@ -531,7 +544,7 @@
       if (t.dataset.mbxCleanup) { await runCleanup(t.dataset.mbxCleanup); return; }
       if (t.dataset.mbxUndo) {
         state.busy = true;
-        try { const out = await post({ action: 'undo_cleanup', mailboxId: state.mailboxId, actionId: Number(t.dataset.mbxUndo) }); toast(out.message); await refresh(); }
+        try { toast(await undoAll(Number(t.dataset.mbxUndo))); await refresh(); }
         catch (err) { toast(err.message, 'error'); }
         finally { state.busy = false; }
         return;
