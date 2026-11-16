@@ -22,6 +22,7 @@ import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
 import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { resolveHorizonDays, MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { triggerGapFillDrain } from '../../src/utils/trigger-drain';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const MIN_HORIZON = MIN_HORIZON_DAYS;
@@ -141,6 +142,9 @@ export default withLambda(async (event) => {
                 ? await enqueueScheduleGapFill(db, { ...common, configuration: assistant.configuration })
                 : { enqueued: 0 };
         gapFillEnqueued = result.enqueued;
+        // Start drafting now rather than at the next cron tick; the user is looking at this assistant.
+        await triggerGapFillDrain(event.headers as Record<string, string | undefined>,
+            { enqueued: gapFillEnqueued, blog: isBlogWriter, assistantId }, 'set-draft-horizon');
 
         if (gapFillEnqueued > 0) {
             const newWindowEnd = new Date();

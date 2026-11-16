@@ -239,14 +239,14 @@ test('the trigger refuses when there is no renderer or no YouTube', () => {
     );
 });
 
-test('the queue poke is awaited, and an abort still counts as sent', () => {
-    // An un-awaited fetch never leaves a frozen Lambda — the documented way to strand a job. But we
-    // also refuse to block on a full drain, so the client aborts at 5s and reports success: the
-    // request has already left, and aborting our end does not stop the server.
+test('the queue poke is awaited and carries the jobId', () => {
+    // An un-awaited fetch never leaves a frozen Lambda — the documented way to strand a job. The
+    // shared poke (trigger-drain.ts) awaits the -background invoke, which answers 202 at once, and
+    // carries the jobId so the drain claims this Short ahead of older queued work.
     const s = src('netlify/functions/trigger-youtube-short.ts');
-    const fn = s.slice(landmark(s, 'async function pokeQueue'), landmark(s, 'export default'));
-    assert.ok(/await fetch\(/.test(fn), 'the poke must be awaited');
-    assert.ok(/AbortError/.test(fn), 'an abort means the drain is running, not that it failed');
+    assert.ok(/await triggerContentDrain\([^)]*jobId/.test(s), 'the poke must be awaited and name the job');
+    assert.ok(!/async function pokeQueue/.test(s), 'no private copy of the poke');
+    assert.ok(/await fetch\(/.test(src('src/utils/trigger-drain.ts')), 'the shared poke must await its fetch');
 });
 
 // ── 4. Retrying a Short's render ─────────────────────────────────────────────
