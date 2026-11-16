@@ -30,6 +30,10 @@
     return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function host() { return document.getElementById('assistant-integrations-host'); }
+  function connectHref(providerKey) {
+    const id = Number(state.assistantId);
+    return '/api/oauth/' + encodeURIComponent(providerKey) + '/connect' + (Number.isInteger(id) && id > 0 ? '?assistantId=' + id : '');
+  }
   function recordType() { return (window._detailReviewQueue || {}).recordType || null; }
 
   // Recipes to show: relevant-and-available, plus any already active for this assistant.
@@ -62,7 +66,10 @@
     // Tier-1 recipes need the provider connected first; tier-2 (webhook) and connection-optional
     // (e.g. email) providers enable directly.
     if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
-      return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="' + ROW_BTN + ' btn-primary border-transparent">Connect ' + esc(s.providerName) + '</a>';
+      // ?assistantId= brings the user back to THIS assistant's Connections tab after sign-in (or with the
+      // error, if it failed) — without it oauth-integrations.ts had nowhere to return them but the
+      // workspace-wide integrations.html (found connecting Slack/Notion/Jira, 2026-11-16).
+      return '<a href="' + connectHref(s.providerKey) + '" class="' + ROW_BTN + ' btn-primary border-transparent">Connect ' + esc(s.providerName) + '</a>';
     }
     return '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-primary border-transparent">Enable</button>';
   }
