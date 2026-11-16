@@ -76,13 +76,17 @@ export async function loadAdminTrends(db: Db, providerConfigured: boolean, now: 
     const [{ workspaces }] = await db.select({ workspaces: sql<number>`count(distinct ${orgTrendTerms.organisationId})::int` })
         .from(orgTrendTerms).where(isNotNull(orgTrendTerms.approvedAt));
 
+    // ⚠️ Inside a raw sql`` fragment a Date is sent as-is, and the driver can't serialise it (prod
+    // 2026-11-16: "Failed query … params: Sat Oct 17 2026 14:34:55 GMT+0000"). Pass an ISO string and
+    // cast, as review-requests.ts does. created_at is a naive UTC timestamp, so ::timestamp.
     const d30 = new Date(now.getTime() - 30 * 86_400_000);
+    const d30Iso = d30.toISOString();
     const d1 = new Date(now.getTime() - 86_400_000);
     const [spend] = await db.select({
         usdAll: sql<string>`coalesce(sum(${aiUsageLog.costUsd}), 0)::text`,
-        usd30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30}), 0)::text`,
-        standard30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30} and ${aiUsageLog.model} = 'dataforseo-trends-standard'), 0)::text`,
-        live30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30} and ${aiUsageLog.model} = 'dataforseo-trends-live'), 0)::text`,
+        usd30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30Iso}::timestamp), 0)::text`,
+        standard30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30Iso}::timestamp and ${aiUsageLog.model} = 'dataforseo-trends-standard'), 0)::text`,
+        live30: sql<string>`coalesce(sum(${aiUsageLog.costUsd}) filter (where ${aiUsageLog.createdAt} >= ${d30Iso}::timestamp and ${aiUsageLog.model} = 'dataforseo-trends-live'), 0)::text`,
     }).from(aiUsageLog).where(like(aiUsageLog.model, 'dataforseo-%'));
     const [{ lookups24h }] = await db.select({ lookups24h: sql<number>`count(*)::int` }).from(aiUsageLog)
         .where(and(eq(aiUsageLog.model, 'dataforseo-trends-live'), gte(aiUsageLog.createdAt, d1)));
