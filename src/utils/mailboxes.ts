@@ -220,6 +220,18 @@ export interface MailboxSettings {
     senderRules: Record<string, string>;
     /** Addresses or @domains whose email is never sent to an AI model, not even the subject. */
     privateSenders: string[];
+    /**
+     * Rules the owner approved: archive email from a sender once it is `afterDays` old (plan §2.5, D5 —
+     * a rule may archive, never trash). Run by mailbox-sync.ts; each run's archiving can be undone.
+     */
+    archiveRules: { match: string; afterDays: number }[];
+    /** Write the category into the mailbox (Gmail label "Swan/…", Outlook category "Swan: …"). Null = not chosen. */
+    writeLabels: boolean | null;
+}
+
+/** Whether categories are written into this mailbox: the owner's choice, else on for business (D4). Pure. */
+export function labelsOn(kind: string, settings: Pick<MailboxSettings, 'writeLabels'>): boolean {
+    return settings.writeLabels ?? kind === 'business';
 }
 
 export function parseMailboxSettings(raw: unknown): MailboxSettings {
@@ -233,5 +245,14 @@ export function parseMailboxSettings(raw: unknown): MailboxSettings {
     const privateSenders = Array.isArray(o.privateSenders)
         ? (o.privateSenders as unknown[]).filter((s): s is string => typeof s === 'string').map((s) => s.toLowerCase().trim()).filter(Boolean).slice(0, 200)
         : [];
-    return { senderRules: rules, privateSenders };
+    const archiveRules = Array.isArray(o.archiveRules)
+        ? (o.archiveRules as unknown[]).flatMap((r) => {
+            const x = r && typeof r === 'object' ? r as Record<string, unknown> : {};
+            const match = typeof x.match === 'string' ? x.match.toLowerCase().trim() : '';
+            const afterDays = Math.round(Number(x.afterDays));
+            return match && Number.isFinite(afterDays) && afterDays >= 0 && afterDays <= 365 ? [{ match, afterDays }] : [];
+        }).slice(0, 50)
+        : [];
+    const writeLabels = typeof o.writeLabels === 'boolean' ? o.writeLabels : null;
+    return { senderRules: rules, privateSenders, archiveRules, writeLabels };
 }

@@ -79,3 +79,46 @@ export async function gmailRestore(token: string, id: string, from: 'archive' | 
     await gmailPost(`/messages/${encodeURIComponent(id)}/modify`, token, { addLabelIds: ['INBOX'] });
     return { providerMessageId: id };
 }
+
+// ── Categories as labels (plan §2.1, D4) ─────────────────────────────────────────────────────────
+// Each category is a nested label under "Swan/" (e.g. "Swan/Needs a reply"), created on first use. A
+// label never moves or removes an email, so it needs no per-email approval; the owner can turn it off.
+
+export const GMAIL_LABEL_PREFIX = 'Swan/';
+
+async function gmailGet(path: string, token: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${GMAIL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new GmailWriteError(res.status, `Gmail ${res.status}`);
+    return res.json() as Promise<Record<string, unknown>>;
+}
+
+/** A labeller for one run: looks the Swan labels up once, creates any missing, then sets one per email. */
+export function gmailLabeller(token: string) {
+    let byName: Map<string, string> | null = null;
+    const load = async () => {
+        if (byName) return byName;
+        const out = await gmailGet('/labels', token);
+        byName = new Map(((out.labels as { id: string; name: string }[] | undefined) ?? []).map((l) => [l.name, l.id]));
+        return byName;
+    };
+    const idFor = async (name: string): Promise<string> => {
+        const map = await load();
+        const have = map.get(name);
+        if (have) return have;
+        const created = await gmailPost('/labels', token, { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
+        const id = String(created.id ?? '');
+        if (!id) throw new GmailWriteError(502, 'Gmail returned no label id.');
+        map.set(name, id);
+        return id;
+    };
+    return {
+        /** Put exactly one Swan label on the email (or none, for null), leaving every other label alone. */
+        async set(messageId: string, category: string | null): Promise<void> {
+            const map = await load();
+            const ours = [...map.entries()].filter(([n]) => n.startsWith(GMAIL_LABEL_PREFIX));
+            const add = category ? await idFor(`${GMAIL_LABEL_PREFIX}${category}`) : null;
+            const remove = ours.map(([, id]) => id).filter((id) => id !== add);
+            await gmailPost(`/messages/${encodeURIComponent(messageId)}/modify`, token, { ...(add ? { addLabelIds: [add] } : {}), removeLabelIds: remove });
+        },
+    };
+}

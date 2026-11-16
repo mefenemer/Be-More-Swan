@@ -52,3 +52,34 @@ export async function graphRestore(token: string, movedProviderId: string, _from
     const { movedProviderId: back } = await move(token, movedProviderId, 'inbox');
     return { providerMessageId: back };
 }
+
+// ── Categories (plan §2.1, D4) ───────────────────────────────────────────────────────────────────
+// Outlook category "Swan: <Category>" on the message, keeping the user's own categories. Adding it to
+// the user's colour list would need MailboxSettings.ReadWrite, which we don't ask for: it shows without
+// a colour until they pick one in Outlook.
+
+export const GRAPH_CATEGORY_PREFIX = 'Swan: ';
+
+/** Pure: the user's categories with ours replaced by `category` (or removed, for null). */
+export function mergeOutlookCategories(existing: readonly string[], category: string | null): string[] {
+    const theirs = existing.filter((c) => !c.startsWith(GRAPH_CATEGORY_PREFIX));
+    return category ? [...theirs, `${GRAPH_CATEGORY_PREFIX}${category}`] : theirs;
+}
+
+export function graphLabeller(token: string) {
+    return {
+        async set(messageId: string, category: string | null): Promise<void> {
+            const res = await fetch(`${GRAPH}/messages/${encodeURIComponent(messageId)}?$select=categories`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new GraphWriteError(res.status, `Graph ${res.status}`);
+            const cur = ((await res.json()) as { categories?: string[] }).categories ?? [];
+            const next = mergeOutlookCategories(cur, category);
+            if (next.length === cur.length && next.every((c, i) => c === cur[i])) return;
+            const patch = await fetch(`${GRAPH}/messages/${encodeURIComponent(messageId)}`, {
+                method: 'PATCH',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ categories: next }),
+            });
+            if (!patch.ok) throw new GraphWriteError(patch.status, `Graph ${patch.status}`);
+        },
+    };
+}

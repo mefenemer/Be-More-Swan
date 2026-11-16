@@ -22,6 +22,7 @@ import { readerFor } from './mail-reader';
 import { parseFromHeader } from './mail-reader/gmail';
 import { replySubject, writerFor, type MovedItem, type ReplyTarget } from './mail-writer';
 import { EMAIL_SPECIAL_CATEGORY_CLAUSE, trimEmailBody } from './email-sort';
+import { loadProductsBlock } from './org-products';
 
 type Db = ReturnType<typeof getDb>;
 type MessageRow = typeof mailboxMessages.$inferSelect;
@@ -69,14 +70,15 @@ export function replyRecipient(headers: Readonly<Record<string, string>>, fromAd
 }
 
 /** The system prompt for writing a reply. Pure. */
-export function buildReplySystem(business: { name: string; description: string | null }, mode: DraftMode, urgentMeans?: string | null): string {
+export function buildReplySystem(business: { name: string; description: string | null }, mode: DraftMode, urgentMeans?: string | null, productsBlock?: string | null): string {
     const length = mode === 'shorter' ? 'Make it noticeably SHORTER than the previous draft: keep only what the sender needs.'
         : mode === 'longer' ? 'Make it a little LONGER and warmer than the previous draft, adding nothing that isn\'t known.'
         : mode === 'redraft' ? 'Write it again differently from the previous draft, same facts.'
         : 'Keep it short: most replies are three to six sentences.';
     return [
         `You write email replies for ${business.name || 'a small business'}${business.description ? ` (${business.description.slice(0, 400)})` : ''}, in its own friendly, plain British English voice. The owner will read and edit your draft before anything is sent.`,
-        'Answer what the sender actually asked or needs. Use ONLY facts stated in the email or in the business details above. Anything you would need to know and don\'t — a price, availability, a date, a policy, a promise — write as a gap in square brackets: "[check: the price for two nights in March]". Never guess it, never promise it.',
+        'Answer what the sender actually asked or needs. Use ONLY facts stated in the email, the business details above, or the products and services below. Anything you would need to know and don\'t — a price not listed, availability, a date, a policy, a promise — write as a gap in square brackets: "[check: the price for two nights in March]". Never guess it, never promise it. When they want to book and a booking link is listed below, give that exact link.',
+        productsBlock ?? '',
         length,
         urgentMeans ? `What counts as urgent for this business: ${urgentMeans.slice(0, 300)}` : '',
         'No subject line, no "Dear Sir/Madam", no placeholders other than [check: …]. End with a short sign-off and the business name.',
@@ -157,8 +159,10 @@ export async function draftReply(db: Db, box: MailboxRow, messageId: number, mod
 
     const [org] = await db.select({ name: organisations.name, description: organisations.businessDescription })
         .from(organisations).where(eq(organisations.id, box.organisationId)).limit(1);
+    // Products, prices, the intro offer and the booking link — the block every assistant reads (org-products.ts).
+    const productsBlock = await loadProductsBlock(db, box.organisationId, org?.name ?? null).catch(() => null);
     const res = await gatewayGenerate({
-        system: buildReplySystem({ name: org?.name ?? '', description: org?.description ?? null }, mode, opts.urgentMeans ?? null),
+        system: buildReplySystem({ name: org?.name ?? '', description: org?.description ?? null }, mode, opts.urgentMeans ?? null, productsBlock),
         messages: [{ role: 'user', content: buildReplyUser({ fromName: msg.fromName, fromAddress: msg.fromAddress, subject: msg.subject, body }, previous, note) }],
         maxTokens: 1200,
         deadlineMs: 20_000, // inside a 26 s request

@@ -31,12 +31,22 @@ import { ASSISTANT_BUILD } from '../src/config/assistant-build-manifest';
 import { buildReplySystem, buildReplyUser, draftGaps, parseReplyDraft, replyRecipient, sendableReason, suggestCleanup, CLEANUP_CHUNK, UNDO_DAYS } from '../src/utils/mailbox-actions';
 import { replySubject } from '../src/utils/mail-writer';
 import { buildRawReply } from '../src/utils/mail-writer/gmail';
+import { mergeOutlookCategories } from '../src/utils/mail-writer/graph';
+import { isPrivateAddress, oneClickUnsubscribe, parseListUnsubscribe, safeUrlShape } from '../src/utils/one-click-unsubscribe';
+import { ruleMatches } from '../src/utils/mailbox-sync';
+import { labelsOn } from '../src/utils/mailboxes';
 
 let passed = 0;
-function check(name: string, fn: () => void): void {
-    try { fn(); passed++; console.log(`  ✓ ${name}`); }
-    catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
+function check(name: string, fn: () => void | Promise<void>): void {
+    // Async checks are queued and awaited before the summary line (they used to pass unrun).
+    const fail = (err: unknown) => { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; };
+    try {
+        const r = fn();
+        if (r && typeof (r as Promise<void>).then === 'function') { pendingChecks.push((r as Promise<void>).then(() => { passed++; console.log(`  ✓ ${name}`); }, fail)); return; }
+        passed++; console.log(`  ✓ ${name}`);
+    } catch (err) { fail(err); }
 }
+const pendingChecks: Promise<void>[] = [];
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const code = (p: string) => read(p).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -206,7 +216,7 @@ check('settings parse: lower-cased, de-junked, capped', () => {
     const s = parseMailboxSettings({ senderRules: { 'Jo@X.com': 'money', bad: 3 }, privateSenders: ['@DOC.uk', 5, ' '] });
     assert.deepStrictEqual(s.senderRules, { 'jo@x.com': 'money' });
     assert.deepStrictEqual(s.privateSenders, ['@doc.uk']);
-    assert.deepStrictEqual(parseMailboxSettings(null), { senderRules: {}, privateSenders: [] });
+    assert.deepStrictEqual(parseMailboxSettings(null), { senderRules: {}, privateSenders: [], archiveRules: [], writeLabels: null });
     assert.strictEqual(normaliseSenderEntry('@mydoctor.co.uk'), '@mydoctor.co.uk');
     assert.strictEqual(normaliseSenderEntry(' Jo@X.com '), 'jo@x.com');
     assert.strictEqual(normaliseSenderEntry('not an address'), null);
@@ -489,6 +499,122 @@ check('acted-on actions (and their reply text) are deleted after 30 days; the SQ
     assert.ok(!/original_body|email_body|quoted/.test(sqlText.replace(/^--.*$/gm, '')));
 });
 
+
+console.log('\nPhase 2b: chat cards, rules, labels, unsubscribe');
+
+check('one-click unsubscribe only with BOTH headers, only https; mailto/web links are just shown', () => {
+    const both = parseListUnsubscribe({ 'list-unsubscribe': '<mailto:u@list.com>, <https://list.com/u?x=1>', 'list-unsubscribe-post': 'List-Unsubscribe=One-Click' });
+    assert.strictEqual(both.oneClickUrl, 'https://list.com/u?x=1');
+    assert.strictEqual(both.mailto, 'mailto:u@list.com');
+    assert.strictEqual(parseListUnsubscribe({ 'list-unsubscribe': '<https://list.com/u>' }).oneClickUrl, null, 'no Post header → no one-click');
+    assert.strictEqual(parseListUnsubscribe({ 'list-unsubscribe': '<http://list.com/u>', 'list-unsubscribe-post': 'List-Unsubscribe=One-Click' }).oneClickUrl, null);
+});
+
+check('the unsubscribe URL can\'t reach anything internal (SSRF)', async () => {
+    for (const bad of ['http://x.com/u', 'https://127.0.0.1/u', 'https://[::1]/u', 'https://localhost/u', 'https://user:pw@x.com/u', 'https://x.com:8443/u', 'https://intranet/u', 'https://db.internal/u']) {
+        assert.strictEqual(safeUrlShape(bad), null, bad);
+    }
+    assert.ok(safeUrlShape('https://list.example.com/u?t=1'));
+    for (const ip of ['10.0.0.1', '172.16.5.4', '192.168.1.1', '127.0.0.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) assert.ok(isPrivateAddress(ip), ip);
+    for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700::1111']) assert.ok(!isPrivateAddress(ip), ip);
+});
+
+check('a public-looking name that resolves to a private address is refused before any request', async () => {
+    let fetched = false;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { fetched = true; return new Response('', { status: 200 }); }) as typeof fetch;
+    try {
+        const r = await oneClickUnsubscribe('https://evil.example.com/u', { resolve: async () => ['93.184.216.34', '10.0.0.5'] });
+        assert.deepStrictEqual(r, { ok: false, reason: 'unsafe_url' });
+        assert.strictEqual(fetched, false);
+        const ok = await oneClickUnsubscribe('https://list.example.com/u', { resolve: async () => ['93.184.216.34'] });
+        assert.deepStrictEqual(ok, { ok: true });
+    } finally { globalThis.fetch = realFetch; }
+    const src = code('src/utils/one-click-unsubscribe.ts');
+    assert.ok(/redirect: 'manual'/.test(src) && /body: 'List-Unsubscribe=One-Click'/.test(src));
+});
+
+check('Outlook categories: ours replaced, theirs kept; Gmail labels live under Swan/', () => {
+    assert.deepStrictEqual(mergeOutlookCategories(['Red category', 'Swan: Money'], 'Customers'), ['Red category', 'Swan: Customers']);
+    assert.deepStrictEqual(mergeOutlookCategories(['Swan: Money'], null), []);
+    assert.ok(/GMAIL_LABEL_PREFIX = 'Swan\/'/.test(code('src/utils/mail-writer/gmail.ts')));
+});
+
+check('labels: on for business unless turned off (D4), off for personal unless turned on; private never labelled', () => {
+    assert.strictEqual(labelsOn('business', { writeLabels: null }), true);
+    assert.strictEqual(labelsOn('business', { writeLabels: false }), false);
+    assert.strictEqual(labelsOn('personal', { writeLabels: null }), false);
+    assert.ok(/if \(pid && r\.category !== 'private'\) toLabel\.push/.test(code('src/utils/mailbox-sync.ts')));
+});
+
+check('archive rules: sender + age only; never what needs the user; rules only archive (D5)', () => {
+    const now = new Date('2026-11-16T12:00:00Z');
+    const d = (days: number) => new Date(now.getTime() - days * 86_400_000);
+    const msgs = [
+        { id: 1, fromAddress: 'receipts@stripe.com', receivedAt: d(10), priority: 'whenever', removedAt: null },
+        { id: 2, fromAddress: 'receipts@stripe.com', receivedAt: d(2), priority: 'whenever', removedAt: null },
+        { id: 3, fromAddress: 'receipts@stripe.com', receivedAt: d(10), priority: 'today', removedAt: null },
+        { id: 4, fromAddress: 'jo@notstripe.com', receivedAt: d(10), priority: 'whenever', removedAt: null },
+        { id: 5, fromAddress: 'x@stripe.com', receivedAt: d(10), priority: 'whenever', removedAt: d(1) },
+    ];
+    assert.deepStrictEqual(ruleMatches(msgs, { match: '@stripe.com', afterDays: 7 }, now), [1]);
+    const sync = code('src/utils/mailbox-sync.ts');
+    const fn = sync.slice(sync.indexOf('async function runArchiveRules'), sync.indexOf('/** The provider\'s name'));
+    assert.ok(/writer\.archive\(/.test(fn) && !/writer\.trash\(/.test(fn), 'a rule never trashes');
+    assert.ok(/kind: 'cleanup', status: 'applied'/.test(fn), 'each run is recorded, so it can be undone');
+});
+
+check('drafting reads the products block (prices, intro offer, booking link) every assistant reads', () => {
+    const src = code('src/utils/mailbox-actions.ts');
+    assert.ok(/loadProductsBlock\(db, box\.organisationId/.test(src));
+    assert.ok(/a booking link is listed below, give that exact link/.test(read('src/utils/mailbox-actions.ts')));
+});
+
+check('chat snapshot names emails, drafts, batches, undoable actions and rules by id', () => {
+    const s2 = formatMailboxSnapshot(box, [msg({ id: 42 })], 0, false, {
+        drafts: [{ actionId: 7, messageId: 42, to: 'jo@client.com' }],
+        cleanup: [{ key: 'old_newsletters', label: 'Newsletters and offers older than a week', op: 'archive', count: 3 }],
+        undoable: [{ actionId: 9, label: 'Cold sales pitches', count: 2 }],
+        archiveRules: [{ match: '@stripe.com', afterDays: 7 }],
+    });
+    assert.ok(/#42 \[Today\]/.test(s2) && /mailbox 1: me@biz\.com/.test(s2));
+    assert.ok(/draft 7 for email #42, to jo@client\.com/.test(s2) && /batch "old_newsletters"/.test(s2) && /action 9: Cold sales pitches/.test(s2) && /@stripe\.com is archived once 7 days old/.test(s2));
+    assert.ok(!/draft|batch|action \d/.test(formatMailboxSnapshot(box, [msg({ id: 42 })], 0, true, { drafts: [{ actionId: 7, messageId: 42, to: 'x' }] })), 'support view: no drafts or batches');
+});
+
+check('chat offers the five cards (one per reply, ids from the snapshot only); each card calls the same server action', () => {
+    const route = read('netlify/functions/chat-orchestrator.ts');
+    for (const t of ['email_reply_proposal', 'email_cleanup_proposal', 'email_undo_proposal', 'email_rule_proposal', 'email_unsubscribe_proposal']) {
+        assert.ok(route.includes(`"type":"${t}"`), t);
+        assert.ok(read('src/components/email-assistant-cards.js').includes(`R.register('${t}'`), `${t} has a renderer`);
+    }
+    assert.ok(/Offer AT MOST ONE card per reply, and only with ids that appear in the lists above/.test(route));
+    const cards = code('src/components/email-assistant-cards.js');
+    for (const action of ['draft_reply', 'send_reply', 'dismiss_reply', 'cleanup', 'undo_cleanup', 'add_rule', 'unsubscribe']) assert.ok(cards.includes(`action: '${action}'`), action);
+    assert.ok(/const API = '\/\.netlify\/functions\/mailboxes';/.test(cards));
+    for (const f of ['workspace.html', 'assistant-chat.html']) {
+        const html = read(f);
+        assert.ok(html.indexOf('email-assistant-cards.js') > html.indexOf('disruptive-ui-registry.js'), `${f} loads the cards after the registry`);
+    }
+});
+
+check('chat cards: Send, clean-up and unsubscribe confirm first; a reply card reopens an open draft instead of overwriting it', () => {
+    const cards = code('src/components/email-assistant-cards.js');
+    const reply = cards.slice(cards.indexOf('function renderReply'), cards.indexOf('function renderCleanup'));
+    assert.ok(/confirmIt\(`Send this reply to \$\{draft\.to\}\?/.test(reply));
+    assert.ok(/const open = \(a\.actions \|\| \[\]\)\.find\(\(x\) => x\.kind === 'reply' && x\.status === 'waiting' && x\.messageId === messageId\);/.test(reply));
+    assert.ok(/confirmIt\(/.test(cards.slice(cards.indexOf('function renderCleanup'), cards.indexOf('function renderUndo'))));
+    assert.ok(/confirmIt\(/.test(cards.slice(cards.indexOf('function renderUnsubscribe'))));
+});
+
+check('rules / labels / unsubscribe are owner-only like every other action; the GUI has each one too', () => {
+    const fn = code('netlify/functions/mailboxes.ts');
+    const post = fn.slice(fn.indexOf("if (event.httpMethod !== 'POST')"));
+    for (const a of ['add_rule', 'set_labels', 'unsubscribe']) assert.ok(post.indexOf("if (access !== 'owner') return json(403") < post.indexOf(`'${a}'`), a);
+    const js = read('src/components/assistant-mailbox.js');
+    for (const a of ["action: 'add_rule'", "action: 'remove_rule'", "action: 'set_labels'", "action: 'unsubscribe'"]) assert.ok(js.includes(a), a);
+});
+
 console.log('\nThe role');
 
 check('it is a built role: manifest, registry (Emails tab of kind mailbox), set-up schema, chat route', () => {
@@ -501,12 +627,12 @@ check('it is a built role: manifest, registry (Emails tab of kind mailbox), set-
     assert.ok(/^\s{4}email_assistant: \{\n\s+model: DEFAULT_MODEL,[\s\S]{0,120}usesMailboxSnapshot: true/m.test(read('netlify/functions/chat-orchestrator.ts')));
 });
 
-check('the chat changes nothing yet: no card, and it says where the buttons are', () => {
+check('the chat itself does nothing: it offers a card the user presses, and never says an action is done', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
     const route = src.slice(src.indexOf('    email_assistant: {'), src.indexOf('    business_mentor: {'));
-    assert.ok(/"uiElement": null/.test(route));
-    assert.ok(/You can't draft, send, archive, trash or move anything from here/.test(route));
-    assert.ok(/never say you did it/.test(route));
+    assert.ok(/You never do any of these yourself, and never say one is done/.test(route));
+    assert.ok(/"uiElement": <one card from the list above, or null>/.test(route));
+    assert.ok(/no forwarding, no sending to anyone else, no deleting for good/.test(route));
 });
 
 check('special-category: the Email Assistant\'s own clause, for that role only', () => {
@@ -531,4 +657,4 @@ check('it can\'t be hired or seen by accident: catalogue row HIDDEN (not a publi
     }
 });
 
-console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`);
+void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));

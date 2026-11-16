@@ -19,7 +19,7 @@
   const state = {
     assistantId: null, data: null, pill: 'needs', mailboxId: null, open: new Set(), bodies: new Map(), busy: false,
     // Phase 2a
-    actions: [], cleanup: [], undoDays: 30, cleanupChunk: 25,
+    actions: [], cleanup: [], undoDays: 30, cleanupChunk: 25, archiveRules: [], labelsOn: false,
     drafting: new Set(),      // message ids with a draft being written
     draftText: new Map(),     // action id → the text in the editor (saved on blur, sent as shown)
     cleanupSel: new Map(),    // batch key → Set of message ids still ticked
@@ -93,6 +93,7 @@
       if (r.ok) {
         state.actions = a.actions || []; state.cleanup = a.cleanup || [];
         state.undoDays = a.undoDays || 30; state.cleanupChunk = a.cleanupChunk || 25;
+        state.archiveRules = a.archiveRules || []; state.labelsOn = Boolean(a.labelsOn);
         // A batch keeps the user's unticks across a refresh; new emails in it start ticked.
         for (const b of state.cleanup) {
           const prev = state.cleanupSel.get(b.key);
@@ -110,7 +111,7 @@
   function privacyNote() {
     return `<p class="text-xs text-gray-600 leading-relaxed">Only you can see this mailbox in Be More Swan — not your workspace's owner or admins.
       We keep each email's sender, subject, date and our one-line summary. We don't keep the text of your emails or any attachments:
-      we fetch an email's text from your mailbox when you open it or when it's being sorted. Nothing in your mailbox is changed.</p>`;
+      we fetch an email's text from your mailbox when you open it or when it's being sorted. Nothing is sent, moved or deleted unless you press the button for it; we add a "Swan" label showing each email's category, which you can turn off.</p>`;
   }
 
   function renderConnect() {
@@ -196,6 +197,8 @@
         <div class="flex flex-wrap gap-3 text-xs">
           ${m.webLink ? `<a class="tab-link" href="${esc(m.webLink)}" target="_blank" rel="noopener noreferrer">Open in ${esc(prov)}</a>` : ''}
           ${m.fromAddress && m.category !== 'private' ? `<button type="button" class="tab-link" data-mbx-private="${esc(m.fromAddress)}">Keep this sender private</button>` : ''}
+          ${m.fromAddress ? `<button type="button" class="tab-link" data-mbx-rule="${esc(m.fromAddress)}">Always archive from this sender…</button>` : ''}
+          ${m.category === 'newsletters' ? `<button type="button" class="tab-link" data-mbx-unsub="${m.id}">Unsubscribe</button>` : ''}
         </div>
         ${replyHtml(m, prov)}
       </div>` : ''}
@@ -325,9 +328,13 @@
           <div class="stage-pills" role="tablist" aria-label="Email categories">
             ${pills.map((p) => `<button type="button" role="tab" aria-selected="${p.key === state.pill}" data-mbx-pill="${esc(p.key)}">${esc(p.label)}${window._tabPillCount ? window._tabPillCount(p.n, !!p.waiting) : ` (${p.n})`}</button>`).join('')}
           </div>
-          <div class="tab-pillbar-actions"><button type="button" class="tab-link" data-mbx-disconnect>Disconnect</button></div>
+          <div class="tab-pillbar-actions">
+            <button type="button" class="tab-link" data-mbx-labels aria-pressed="${state.labelsOn}">Labels in ${esc(providerName(box.provider))}: ${state.labelsOn ? 'on' : 'off'}</button>
+            <button type="button" class="tab-link" data-mbx-rules>Rules (${state.archiveRules.length})</button>
+            <button type="button" class="tab-link" data-mbx-disconnect>Disconnect</button>
+          </div>
         </div>
-        <p class="tab-help">${esc(lastRead)} Nothing in your ${esc(providerName(box.provider))} mailbox is sent, moved or deleted unless you press the button for it.</p>
+        <p class="tab-help">${esc(lastRead)} Nothing in your ${esc(providerName(box.provider))} mailbox is sent, moved or deleted unless you press the button for it (or set a rule)${state.labelsOn ? `; each email gets a "Swan" ${box.provider === 'gmail' ? 'label' : 'category'} showing where it was sorted` : ''}.</p>
         ${problem}
         ${content}
       </div>`;
@@ -427,6 +434,50 @@
     finally { state.busy = false; state.cleanupSel.delete(key); await refresh(); }
   }
 
+  /** Save an archive rule for a sender, after the owner chooses the days (rules archive, never delete). */
+  async function addRule(address) {
+    const domain = address.includes('@') ? `@${address.split('@').pop()}` : address;
+    const msg = `Archive email from ${address} (or type ${domain} for everyone at that domain) once it's this many days old. It's moved out of your inbox, never deleted, and anything that needs you stays. Each run can be undone from Done.`;
+    const answer = window.promptModal ? await window.promptModal(msg, { title: 'Archive rule', placeholder: '7', inputLabel: 'Days (0 = as it arrives)', confirmLabel: 'Save rule' }) : window.prompt(msg, '7');
+    if (answer == null || String(answer).trim() === '') return;
+    let match = address; let days = String(answer).trim();
+    const m = days.match(/^(@[^\s]+|[^\s@]+@[^\s]+)\s+(\d+)$/); // "@stripe.com 7" also accepted
+    if (m) { match = m[1]; days = m[2]; }
+    if (!/^\d+$/.test(days)) { toast('Enter a number of days, like 7.', 'error'); return; }
+    try { const out = await post({ action: 'add_rule', mailboxId: state.mailboxId, match, afterDays: Number(days) }); toast(out.message); await refresh(); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
+  async function manageRules() {
+    const list = state.archiveRules.map((r) => `${r.match} — after ${r.afterDays} day${r.afterDays === 1 ? '' : 's'}`);
+    const msg = `${list.length ? `Your archive rules:\n${list.join('\n')}\n\nTo remove one, type its sender (like @stripe.com).` : 'No rules yet. Open an email and press "Always archive from this sender…".'}`;
+    if (!list.length) { if (window.alertModal) await window.alertModal(msg, { title: 'Archive rules' }); return; }
+    const answer = window.promptModal ? await window.promptModal(msg, { title: 'Archive rules', placeholder: '@stripe.com', confirmLabel: 'Remove rule' }) : window.prompt(msg);
+    if (!answer) return;
+    try { const out = await post({ action: 'remove_rule', mailboxId: state.mailboxId, match: String(answer).trim() }); toast(out.message); await refresh(); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
+  /** One-click unsubscribe after a confirm; without one-click, the sender's own link to open. */
+  async function unsubscribe(messageId) {
+    const ok = window.confirmModal
+      ? await window.confirmModal('Unsubscribe from this sender? This tells them to stop sending — it can\'t be undone from here.', { title: 'Unsubscribe', confirmLabel: 'Unsubscribe', tone: 'primary' })
+      : window.confirm('Unsubscribe from this sender?');
+    if (!ok) return;
+    try {
+      const res = await fetch(API, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unsubscribe', mailboxId: state.mailboxId, messageId }) });
+      const out = await res.json().catch(() => ({}));
+      if (out.manual) {
+        const link = out.webUrl && /^https:\/\//i.test(out.webUrl) ? out.webUrl : out.mailto && /^mailto:/i.test(out.mailto) ? out.mailto : null;
+        if (link && window.confirmModal && await window.confirmModal(`${out.message}`, { title: 'Unsubscribe', confirmLabel: 'Open their link', tone: 'primary' })) window.open(link, '_blank', 'noopener');
+        else if (!link) toast(out.message, 'error');
+        return;
+      }
+      if (!res.ok) throw new Error(out.error || 'That didn\'t work.');
+      toast(out.message);
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
   async function managePrivate() {
     const list = (state.data.privateSenders || {})[state.mailboxId] || [];
     const msg = `Emails from private senders are never sent to AI — not even the subject. They are listed as "Private".\n\n${list.length ? `Private now:\n${list.join('\n')}\n\n` : ''}Add an address, or @ and a domain (like @mydoctor.co.uk). To remove one, type it with a minus in front (-@mydoctor.co.uk).`;
@@ -444,7 +495,7 @@
     if (!root || root.dataset.mbxBound) return;
     root.dataset.mbxBound = '1';
     const onClick = async (e) => {
-      const t = e.target.closest('[data-mbx-pill],[data-mbx-open],[data-mbx-private],[data-mbx-disconnect],[data-mbx-refresh],[data-mbx-privlist],[data-mbx-draftnew],[data-mbx-redraft],[data-mbx-send],[data-mbx-savedraft],[data-mbx-dismiss],[data-mbx-cleanup],[data-mbx-cleanupopen],[data-mbx-undo]');
+      const t = e.target.closest('[data-mbx-pill],[data-mbx-open],[data-mbx-private],[data-mbx-disconnect],[data-mbx-refresh],[data-mbx-privlist],[data-mbx-draftnew],[data-mbx-redraft],[data-mbx-send],[data-mbx-savedraft],[data-mbx-dismiss],[data-mbx-cleanup],[data-mbx-cleanupopen],[data-mbx-undo],[data-mbx-rule],[data-mbx-rules],[data-mbx-labels],[data-mbx-unsub]');
       if (!t || state.busy) return;
       if (t.dataset.mbxPill) {
         state.pill = t.dataset.mbxPill;
@@ -459,6 +510,23 @@
         catch (err) { toast(err.message, 'error'); }
         return;
       }
+      if (t.dataset.mbxRule) { await addRule(t.dataset.mbxRule); return; }
+      if (t.hasAttribute('data-mbx-rules')) { await manageRules(); return; }
+      if (t.hasAttribute('data-mbx-labels')) {
+        const box = (state.data.mailboxes || []).find((m) => m.id === state.mailboxId);
+        const turnOn = !state.labelsOn;
+        const prov = providerName(box && box.provider);
+        const ok = window.confirmModal
+          ? await window.confirmModal(turnOn
+            ? `Show each email's category in ${prov} too? New emails get a "Swan" ${box && box.provider === 'gmail' ? 'label' : 'category'} (like "Swan/Needs a reply"). Nothing is moved or deleted.`
+            : `Stop writing categories into ${prov}? Labels already there stay until you remove them.`, { title: 'Labels', confirmLabel: turnOn ? 'Turn on' : 'Turn off', tone: 'primary' })
+          : true;
+        if (!ok) return;
+        try { const out = await post({ action: 'set_labels', mailboxId: state.mailboxId, on: turnOn }); toast(out.message); await refresh(); }
+        catch (err) { toast(err.message, 'error'); }
+        return;
+      }
+      if (t.dataset.mbxUnsub) { await unsubscribe(Number(t.dataset.mbxUnsub)); return; }
       if (t.dataset.mbxCleanupopen) { const k = t.dataset.mbxCleanupopen; state.cleanupOpen.has(k) ? state.cleanupOpen.delete(k) : state.cleanupOpen.add(k); render(); return; }
       if (t.dataset.mbxCleanup) { await runCleanup(t.dataset.mbxCleanup); return; }
       if (t.dataset.mbxUndo) {

@@ -14,6 +14,10 @@
 //   POST { action: 'dismiss_reply', mailboxId, actionId }
 //   POST { action: 'cleanup', mailboxId, op, messageIds, label }      → archive | trash, ≤ CLEANUP_CHUNK per call
 //   POST { action: 'undo_cleanup', mailboxId, actionId }              → back into the inbox, within UNDO_DAYS
+//   POST { action: 'add_rule', mailboxId, match, afterDays }          → archive from this sender after N days (never trash)
+//   POST { action: 'remove_rule', mailboxId, match }
+//   POST { action: 'set_labels', mailboxId, on }                      → write categories into the mailbox, or stop (and clear ours)
+//   POST { action: 'unsubscribe', mailboxId, messageId }              → RFC 8058 one-click, else the sender's own link to open
 //
 // ⚠️ Only the mailbox's OWNER sees its email — not the workspace owner, not admins. An admin viewing
 // through impersonation sees that a mailbox exists and its counts, never a subject or sender
@@ -28,10 +32,12 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import {
     EMAIL_ASSISTANT_FLAG, MailboxError, disconnectMailbox, getMailboxAccessToken, getOwnMailbox, listOwnMailboxes,
-    mailboxAccess, parseMailboxSettings, gmailMailboxConfigured,
+    mailboxAccess, parseMailboxSettings, gmailMailboxConfigured, labelsOn,
 } from '../../src/utils/mailboxes';
 import { DEFAULT_CATEGORIES, PRIORITY_LABELS, categoryLabel } from '../../src/utils/email-sort';
 import { readerFor } from '../../src/utils/mail-reader';
+import { writerFor } from '../../src/utils/mail-writer';
+import { oneClickUnsubscribe, parseListUnsubscribe } from '../../src/utils/one-click-unsubscribe';
 import { providerName, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 import {
     ActionError, applyCleanup, cleanupSuggestions, dismissReply, draftGaps, draftReply, editReply, listActions, sendReply, undoCleanup,
@@ -79,8 +85,10 @@ export default withLambda(async (event) => {
             const box = own.find((b) => b.id === Number(qp.mailboxId));
             if (!box) return json(404, { error: 'Mailbox not found.' });
             const [actions, cleanup] = await Promise.all([listActions(db, box.id), cleanupSuggestions(db, box)]);
+            const st = parseMailboxSettings(box.settings);
             return json(200, {
                 undoDays: UNDO_DAYS, cleanupChunk: CLEANUP_CHUNK, cleanup,
+                archiveRules: st.archiveRules, labelsOn: labelsOn(box.kind, st),
                 actions: actions.map((a) => ({
                     id: a.id, kind: a.kind, status: a.status, messageId: a.messageId, actedAt: a.actedAt, updatedAt: a.updatedAt,
                     result: a.result,
@@ -183,6 +191,12 @@ export default withLambda(async (event) => {
             .where(and(eq(mailboxMessages.id, Number(body.messageId)), eq(mailboxMessages.mailboxId, box.id))).limit(1);
         if (!msg) return json(404, { error: 'Email not found.' });
         await db.update(mailboxMessages).set({ category, sortedBy: 'user', updatedAt: new Date() }).where(eq(mailboxMessages.id, msg.id));
+        // The label in the mailbox follows (best effort: our list is the truth, a failed label never undoes the move).
+        if (labelsOn(box.kind, parseMailboxSettings(box.settings))) {
+            const writer = writerFor(box.provider);
+            const [pm] = await db.select({ pid: mailboxMessages.providerMessageId }).from(mailboxMessages).where(eq(mailboxMessages.id, msg.id)).limit(1);
+            if (writer && pm) await getMailboxAccessToken(db, box).then((t) => writer.labeller(t).set(pm.pid, categoryLabel(category))).catch(() => undefined);
+        }
         // Remember the sender, so their next email sorts the same way without AI (plan §2.1).
         let remembered: string | null = null;
         if (body.remember !== false && msg.fromAddress) {
@@ -213,6 +227,49 @@ export default withLambda(async (event) => {
                 .where(and(eq(mailboxMessages.mailboxId, box.id), match));
         }
         return json(200, { ok: true, privateSenders, message: add ? `Emails from ${add} will never be sent to AI. Earlier summaries of them are deleted.` : 'Updated.' });
+    }
+
+    // ── Phase 2b: rules, labels, unsubscribe ──
+    if (body.action === 'add_rule' || body.action === 'remove_rule') {
+        const match = normaliseSenderEntry(body.match);
+        if (!match) return json(400, { error: 'Enter an email address, or @ and a domain (like @stripe.com).' });
+        const st = parseMailboxSettings(box.settings);
+        let rules = st.archiveRules.filter((r) => r.match !== match);
+        if (body.action === 'add_rule') {
+            const afterDays = Math.round(Number(body.afterDays));
+            if (!Number.isFinite(afterDays) || afterDays < 0 || afterDays > 365) return json(400, { error: 'Choose between 0 and 365 days.' });
+            rules = [...rules, { match, afterDays }].slice(-50);
+        }
+        await db.update(mailboxes).set({ settings: { ...(box.settings as object), archiveRules: rules }, updatedAt: new Date() }).where(eq(mailboxes.id, box.id));
+        return json(200, { ok: true, archiveRules: rules, message: body.action === 'add_rule'
+            ? `Rule saved: email from ${match} is archived ${Number(body.afterDays) === 0 ? 'as it arrives' : `once it is ${Math.round(Number(body.afterDays))} day${Math.round(Number(body.afterDays)) === 1 ? '' : 's'} old`}. It is never deleted, and each run can be undone from Done.`
+            : `Rule removed: email from ${match} stays in your inbox.` });
+    }
+    if (body.action === 'set_labels') {
+        const on = body.on === true;
+        await db.update(mailboxes).set({ settings: { ...(box.settings as object), writeLabels: on }, updatedAt: new Date() }).where(eq(mailboxes.id, box.id));
+        return json(200, { ok: true, labelsOn: on, message: on
+            ? `New emails will show their category in ${providerName(box.provider)} as well.`
+            : `Categories are no longer written into ${providerName(box.provider)}. Labels already there stay until you remove them.` });
+    }
+    if (body.action === 'unsubscribe') {
+        const [msg] = await db.select().from(mailboxMessages)
+            .where(and(eq(mailboxMessages.id, Number(body.messageId)), eq(mailboxMessages.mailboxId, box.id))).limit(1);
+        if (!msg) return json(404, { error: 'Email not found.' });
+        const reader = readerFor(box.provider);
+        if (!reader) return json(400, { error: 'This kind of mailbox can\'t be read.' });
+        const headers = await getMailboxAccessToken(db, box).then((t) => reader.getHeaders(t, msg.providerMessageId)).catch(() => null);
+        if (!headers) return json(502, { error: `${providerName(box.provider)} didn't return this email. Try again in a moment.` });
+        const opts = parseListUnsubscribe(headers);
+        if (!opts.oneClickUrl) {
+            // No one-click: we call nothing. The owner gets the sender's own link (or address) to use themselves.
+            return json(200, { ok: false, manual: true, webUrl: opts.webUrl, mailto: opts.mailto,
+                message: opts.webUrl || opts.mailto ? 'This sender doesn\'t offer one-click unsubscribe. Use their own unsubscribe link below.' : 'This email has no unsubscribe link. You could ask the sender, or archive their email with a rule.' });
+        }
+        const r = await oneClickUnsubscribe(opts.oneClickUrl);
+        return json(r.ok ? 200 : 502, r.ok
+            ? { ok: true, message: `Unsubscribed from ${msg.fromName || msg.fromAddress || 'this sender'}. It can take a few days for their emails to stop.` }
+            : { ok: false, error: r.reason === 'unsafe_url' ? 'That unsubscribe link doesn\'t look safe, so it wasn\'t used.' : 'The sender didn\'t accept the unsubscribe. Try their own link instead.', webUrl: opts.webUrl });
     }
 
     // ── Phase 2a: replies and clean-up — each one pressed (and confirmed) by the owner ──

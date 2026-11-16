@@ -3,12 +3,12 @@
 // src/utils/mailbox-actions.ts — never by sorting, never by chat on its own.
 //
 // What exists: reply in the same thread, save a reply to the mailbox's own Drafts, archive (out of the
-// inbox, kept), move to trash, and put either back. What does NOT exist, on purpose: permanent delete
+// inbox, kept), move to trash, put either back, and (Phase 2b) write the category as a label. What does NOT exist, on purpose: permanent delete
 // (Gmail would need https://mail.google.com/; D3 = never), forwarding, sending to anyone but the
 // person being replied to, changing mailbox settings or filters.
 
-import { GraphWriteError, graphArchive, graphRestore, graphSaveReplyDraft, graphSendReply, graphTrash } from './graph';
-import { GmailWriteError, gmailArchive, gmailRestore, gmailSaveReplyDraft, gmailSendReply, gmailTrash } from './gmail';
+import { GraphWriteError, graphArchive, graphLabeller, graphRestore, graphSaveReplyDraft, graphSendReply, graphTrash } from './graph';
+import { GmailWriteError, gmailArchive, gmailLabeller, gmailRestore, gmailSaveReplyDraft, gmailSendReply, gmailTrash } from './gmail';
 
 /** Everything a reply needs about the email it answers. */
 export interface ReplyTarget {
@@ -41,11 +41,13 @@ export interface MailWriter {
     trash(token: string, providerMessageId: string): Promise<{ movedProviderId: string }>;
     /** Back into the inbox, from archive or trash. */
     restore(token: string, movedProviderId: string, from: 'archive' | 'trash'): Promise<{ providerMessageId: string }>;
+    /** Writes the category into the mailbox (label / category); one per run, it caches what it looks up. */
+    labeller(token: string): { set(providerMessageId: string, category: string | null): Promise<void> };
 }
 
 const WRITERS: Record<string, MailWriter> = {
-    gmail: { sendReply: gmailSendReply, saveReplyDraft: gmailSaveReplyDraft, archive: gmailArchive, trash: gmailTrash, restore: gmailRestore },
-    outlook: { sendReply: graphSendReply, saveReplyDraft: graphSaveReplyDraft, archive: graphArchive, trash: graphTrash, restore: graphRestore },
+    gmail: { sendReply: gmailSendReply, saveReplyDraft: gmailSaveReplyDraft, archive: gmailArchive, trash: gmailTrash, restore: gmailRestore, labeller: gmailLabeller },
+    outlook: { sendReply: graphSendReply, saveReplyDraft: graphSaveReplyDraft, archive: graphArchive, trash: graphTrash, restore: graphRestore, labeller: graphLabeller },
 };
 
 export function writerFor(provider: string): MailWriter | null {
