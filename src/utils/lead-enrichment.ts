@@ -22,6 +22,7 @@ import { eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { assistantRecords, discoveredLeads } from '../../db/schema';
 import { recordEvent } from './revenue-ledger';
+import { clampTiming, dateSignals, resolveWhyNow } from '../config/lead-why-now';
 import { enrichLeadContact, type FoundEmail } from '../lib/discovery-enrich';
 import { isEnrichProviderConfigured, lookupProviderContact, findPersonEmail, ENRICH_COST_GBP_PER_LOOKUP } from '../lib/discovery-enrich-provider';
 import { isCompaniesHouseConfigured, lookupCompaniesHouse, type CompaniesHouseCompany } from '../lib/companies-house';
@@ -573,8 +574,9 @@ export async function deepEnrichLead(
     if (!hasIntelWorthScoring(intel)) {
         // Stamp the attempt even so. Without it the cadence sweep would revisit this lead every
         // night forever, paying for the same four searches to learn the same nothing.
+        // `whyNow: null` = "checked, no reason" (lead-why-now.ts), distinct from never checked.
         await stampIntel(db, opts.assistantRecordId, {
-            gatheredAt: intel.gatheredAt, signals: [], people: [], hooks: [],
+            gatheredAt: intel.gatheredAt, signals: [], people: [], hooks: [], whyNow: null, timing: null,
             platforms: intel.fingerprint.platforms, hasCareersPage: intel.fingerprint.hasCareersPage,
             pagesRead: intel.fingerprint.pagesRead, changeSummary: null,
         });
@@ -616,6 +618,11 @@ export async function deepEnrichLead(
     }
 
     const people = verifyPeople(rescored.people, intel.peopleSources);
+    // Why now (docs/lead-why-now-and-watching-plan.md §1.1). The model only POINTS at evidence;
+    // the date is read from that evidence here, and a reason with no readable date is dropped.
+    const whyNow = resolveWhyNow(rescored.whyNow, intel.evidence, intel.gatheredAt);
+    const timing = clampTiming(rescored.timing, whyNow);
+    const signals = dateSignals(rescored.signals, intel.evidence, intel.gatheredAt);
     const next = rescored.card;
     const changed = next.score !== current.score || next.rating !== current.rating;
 
@@ -635,7 +642,9 @@ export async function deepEnrichLead(
                 ...(next.outreachDraft ? { outreachDraft: next.outreachDraft } : {}),
                 [INTEL_FIELD]: {
                     gatheredAt: intel.gatheredAt,
-                    signals: rescored.signals,
+                    signals,
+                    whyNow,
+                    timing,
                     people,
                     hooks: rescored.hooks,
                     platforms: intel.fingerprint.platforms,

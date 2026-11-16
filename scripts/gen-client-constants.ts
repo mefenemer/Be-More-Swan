@@ -72,6 +72,10 @@ import {
     isRetentionDeleted, retentionReasonOf, retentionClockStart,
     retentionDaysRemaining, retentionCountdownLabel, retentionUrgency,
 } from '../src/config/lead-retention';
+import {
+    WHY_NOW_FRESH_DAYS, WHY_NOW_GONE_DAYS, WHY_NOW_STATE_LABELS,
+    whyNowState, whyNowAgeLabel, whyNowRank,
+} from '../src/config/lead-why-now';
 import { RATING_BANDS } from '../src/config/icp-profile';
 import { LEAD_RATING_CHIPS, LEAD_RATING_CHIP_UNKNOWN } from '../src/config/lead-rating-chips';
 import {
@@ -625,6 +629,30 @@ ${formatRows}
 
     /** The Deleted section's own header line. */
     DELETED_NOTICE: ${JSON.stringify(RETENTION_DELETED_NOTICE)},
+  };
+
+  // ── Lead "why now" (the dated reason to contact a lead now) ───────────────
+  // From src/config/lead-why-now.ts, stringified — the same fade rule the chat's lead snapshot
+  // imports, so the Leads table and the chat can never disagree about whether a reason is still
+  // fresh. Free variables (WHY_NOW_FRESH_DAYS, WHY_NOW_GONE_DAYS) resolve to the declarations
+  // directly above, so the names must match.
+  var WHY_NOW_FRESH_DAYS = ${JSON.stringify(WHY_NOW_FRESH_DAYS)};
+  var WHY_NOW_GONE_DAYS = ${JSON.stringify(WHY_NOW_GONE_DAYS)};
+  var whyNowState = ${whyNowState.toString()};
+  var whyNowAgeLabel = ${whyNowAgeLabel.toString()};
+  var whyNowRank = ${whyNowRank.toString()};
+
+  window.LeadWhyNow = {
+    FRESH_DAYS: WHY_NOW_FRESH_DAYS,
+    GONE_DAYS: WHY_NOW_GONE_DAYS,
+    /** { state: 'fresh'|'cooling'|'gone'|'none'|'not_checked', summary, url, date, ageDays } from data.intel. */
+    state: whyNowState,
+    /** "3 weeks ago" — never a numeric date, which reads differently in the UK and the US. */
+    ageLabel: whyNowAgeLabel,
+    /** Sort rank: fresh first, newest first within a band. */
+    rank: whyNowRank,
+    /** What the filter and group-by show for each state. */
+    LABELS: ${JSON.stringify(WHY_NOW_STATE_LABELS)},
   };
 
   // ── Lead email kind ───────────────────────────────────────────────────────

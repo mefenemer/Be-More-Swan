@@ -32,7 +32,9 @@ source (Companies House, free, company number already saved) is unused.
 
 ---
 
-## Phase 1 — "Why now" on every researched lead (no migration)
+## Phase 1 — "Why now" on every researched lead (no migration) — ✅ BUILT 2026-11-16
+
+Built as planned: `src/config/lead-why-now.ts` (guard, date reading, fade), `rescoreWithIntel` returns `timing` + `whyNow`, `deepEnrichLead` saves them through the guard (plus a date on each signal), the All leads "Why now" column and the lead panel line via `window.LeadWhyNow`, and a WHY NOW list in the chat's lead snapshot. Tests: `tests/lead-why-now.test.ts`. Not yet done: the help article (§1.4) and a real research run on staging.
 
 ### 1.1 Keep fit and timing apart
 `rescoreWithIntel` returns, in addition to today's fields:

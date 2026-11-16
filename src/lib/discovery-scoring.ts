@@ -729,6 +729,13 @@ export interface RescoreResult {
     people: DecisionMaker[];
     /** Concrete things the outreach could open with, each tied to something we can point at. */
     hooks: string[];
+    /**
+     * The model's timing score (0-100) and its one reason to contact them now, AS RETURNED —
+     * unverified. The caller runs them through lead-why-now.ts resolveWhyNow / clampTiming, which
+     * hold the evidence and drop anything that does not point at a dated piece of it.
+     */
+    timing: unknown;
+    whyNow: unknown;
     inputTokens: number;
     outputTokens: number;
     /** The model that answered, for usage logging. */
@@ -736,7 +743,7 @@ export interface RescoreResult {
 }
 
 const EMPTY_RESCORE: RescoreResult = {
-    card: null, signals: [], people: [], hooks: [], inputTokens: 0, outputTokens: 0, model: SCORING_MODEL,
+    card: null, signals: [], people: [], hooks: [], timing: null, whyNow: null, inputTokens: 0, outputTokens: 0, model: SCORING_MODEL,
 };
 
 /**
@@ -777,6 +784,12 @@ WHAT MOVES A SCORE:
 - DOWN: evidence they are a poor fit after all, are contracting, have closed, or were misidentified — including evidence they are the wrong KIND of organisation (a supplier, an aggregator, a directory, a news site) rather than a business we can sell to.
 - NOT AT ALL: marketing copy, boilerplate, undated pages, or anything that is merely evidence the company exists. A website is not a buying signal.
 
+FIT AND TIMING ARE TWO DIFFERENT QUESTIONS. "score" is how well they FIT the profile. "timing" is how strong the reason is to contact them NOW, separately:
+- timing 70-100: a dated, recent event that makes buying likely now — they raised money, opened a site, started hiring for the kind of role that needs what we sell, launched something, appointed a new decision-maker.
+- timing 30-69: something recent but weaker, or a strong event a few months old.
+- timing 0-29: nothing dated and recent. Most companies, most of the time.
+"whyNow" is the ONE strongest reason to contact them now, as one plain sentence a busy owner reads in a second ("Opened a second shop in Leeds", "Hiring two sales reps"), and the url of the evidence it comes from. Only a POSITIVE reason, only from evidence with a "published" date, and only when it would make a salesperson pick up the phone this week. Otherwise null. Never put a date in the sentence — it is shown with its own date.
+
 ${SCORING_BANDS}
 
 Ideal customer profile (from setup):
@@ -788,6 +801,8 @@ Return STRICT JSON only (no markdown):
 {
   "score": <0-100>,
   "rating": "hot" | "warm" | "cold",
+  "timing": <0-100>,
+  "whyNow": { "summary": "<one sentence, no date>", "url": "<the evidence url it came from>" } | null,
   "reasons": ["<why the score is what it is now — name the specific evidence, not the category>", ...],
   "changeSummary": "<one sentence: what changed and why, or that nothing did>",
   "signals": [{ "summary": "<what this means commercially, one sentence>", "url": "<the evidence url it came from>", "direction": "positive" | "negative" | "neutral" }],
@@ -795,7 +810,7 @@ Return STRICT JSON only (no markdown):
   "hooks": ["<a concrete opening line the outreach could use, tied to something in the evidence>", ...],
   "suggestedNextStep": "<one concrete next action>",
   "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
-  "outreachDraft": { "to": null, "subject": "<subject>", "body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES: personalised outreach in the sales tone, referencing the strongest hook>" } | null
+  "outreachDraft": { "to": null, "subject": "<subject>", "body": "<UNDER 75 WORDS, following the FIRST-EMAIL RULES: personalised outreach in the sales tone, opening with the whyNow reason when there is one, otherwise the strongest hook>" } | null
 }
 
 Every "url" in "signals" must be one of the evidence urls given to you. Write an outreachDraft for hot/warm leads only; use null for cold. Keep "hooks" to at most three, and only include one if the evidence genuinely supports it.
@@ -904,5 +919,5 @@ ${outreachFirstEmailBlock(sender.outreachOffer)}`;
         .map((h) => h.trim().slice(0, 300))
         .slice(0, 3);
 
-    return { card, signals, people, hooks, inputTokens, outputTokens, model: usedModel };
+    return { card, signals, people, hooks, timing: parsed.timing ?? null, whyNow: parsed.whyNow ?? null, inputTokens, outputTokens, model: usedModel };
 }
