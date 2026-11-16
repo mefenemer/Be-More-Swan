@@ -60,7 +60,15 @@
     try {
       const data = await call('list');
       state.notSetUp = data.setUp === false;
-      state.view = state.notSetUp ? null : data;
+      // Every field defaulted: a partial reply (an older server, a stubbed test) must never throw in
+      // render() — this tab loads eagerly on every Lead Generator page, so a throw breaks the page.
+      state.view = state.notSetUp ? null : {
+        ...data,
+        enabled: data.enabled !== false,
+        counts: { lead: 0, customer: 0, manual: 0, watching: 0, ...(data.counts || {}) },
+        items: Array.isArray(data.items) ? data.items : [],
+        signals: Array.isArray(data.signals) ? data.signals : [],
+      };
       state.error = null;
     } catch (err) {
       state.error = err.message;
