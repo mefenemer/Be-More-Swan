@@ -24,6 +24,8 @@
 import { drainContentJobs } from './process-content-jobs';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+export const BACKGROUND_START_BUDGET_MS = 10 * 60_000;
+
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -40,7 +42,11 @@ export default withLambda(async (event) => {
 
     try {
         // This lane has the time for the image prompt writer; the 26 s functions do not.
-        const processed = await drainContentJobs({ imageWriter: true });
+        // The poke's body names the job a human is waiting on (trigger-drain.ts); claim it first.
+        let priorityJobId: string | null = null;
+        try { priorityJobId = JSON.parse(event.body || '{}')?.jobId ?? null; } catch { /* cron poke, no body */ }
+        // 10 of the 15 minutes for STARTING work: a chunk started at 10 min still finishes well inside 15.
+        const processed = await drainContentJobs({ imageWriter: true, priorityJobId, startBudgetMs: BACKGROUND_START_BUDGET_MS });
         console.log(`[run-content-jobs-background] drained ${processed} job(s)`);
         return { statusCode: 200, body: JSON.stringify({ ok: true, processed }) };
     } catch (err) {

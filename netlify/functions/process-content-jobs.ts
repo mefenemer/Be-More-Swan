@@ -123,7 +123,25 @@ async function resolveFallbackPlatform(
 // native Netlify schedule (this file's `handler`) AND by an on-demand HTTP trigger
 // (run-content-jobs.ts) — the latter is how staging/branch deploys drain their queue, since
 // Netlify only runs scheduled functions on the production deploy.
-export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Promise<number> {
+/** A job_id is a v4 UUID (generate-post randomUUID); anything else is ignored rather than queried. */
+const JOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function drainContentJobs(opts: {
+    imageWriter?: boolean;
+    /**
+     * The job a human is waiting on (the poke from generate-post carries it). Claimed FIRST, ahead of
+     * older queued work. Without this the claim is strictly oldest-first, so a backlog of 20 older
+     * queued jobs (Autopilot, retries waiting out their backoff) put an on-demand draft behind all of
+     * them, and with the start budget below it could sit there for several drains.
+     */
+    priorityJobId?: string | null;
+    /**
+     * Stop STARTING new chunks after this long. The 26 s HTTP/cron lane keeps the default 8 s; the
+     * background lane has 15 minutes and passes a much larger value, so one poke clears the batch
+     * instead of processing one or two chunks and leaving the rest for a cron staging rarely gets.
+     */
+    startBudgetMs?: number;
+} = {}): Promise<number> {
     const db = getDb();
     const now = new Date();
 
@@ -143,6 +161,8 @@ export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Pr
            AND updated_at < now() - interval '3 minutes' AND attempt >= max_attempts`
     );
 
+    // Validated against JOB_ID_RE before it goes anywhere near the SQL string below.
+    const priority = opts.priorityJobId && JOB_ID_RE.test(opts.priorityJobId) ? opts.priorityJobId.toLowerCase() : null;
     const jobs = await db.execute<{
         id: number; job_id: string; blueprint_id: number; assistant_id: number;
         organisation_id: number; user_id: number; attempt: number; max_attempts: number;
@@ -162,7 +182,7 @@ export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Pr
          WHERE status = 'queued'
            AND content_type = 'social'
            AND (next_retry_at IS NULL OR next_retry_at <= now())
-         ORDER BY created_at
+         ORDER BY ${priority ? `(job_id = '${priority}') DESC, ` : ''}created_at
          LIMIT 20
          FOR UPDATE SKIP LOCKED`
     );
@@ -176,7 +196,8 @@ export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Pr
     // didn't start is still 'queued' for the next 10-min cron tick (or manual trigger). Light text-only
     // jobs finish fast, so several chunks fit; heavy image jobs get ~one chunk per invocation.
     const CONCURRENCY = 2;
-    const START_BUDGET_MS = 8_000;   // ~18s slowest chunk started by 8s still lands under the 26s cap
+    // ~18s slowest chunk started by 8s still lands under the 26s cap. The background lane overrides it.
+    const START_BUDGET_MS = opts.startBudgetMs ?? 8_000;
     const startedAt = Date.now();
     let processed = 0;
     for (let i = 0; i < jobs.length; i += CONCURRENCY) {

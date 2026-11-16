@@ -131,8 +131,11 @@ jobs:
           # Idempotent: a storyboard is due only after its spacing (7/3/2 days); never makes a video.
           # `run-fix-live-check` (30 min) tells Issues reporters their fix is live on staging and closes issues
           # nobody replied to 7 days later (issue-fix-live.ts). Idempotent: every change is compare-and-swap.
-          # `poll-mailboxes` (10m) wakes the Email Assistant's mailbox reads (docs/email-assistant-plan.md §4).
-          # Idempotent: a mailbox read in the last 9 minutes, or mid-read, is skipped.
+          # `run-poll-mailboxes` (10m) wakes the Email Assistant's mailbox reads (docs/email-assistant-plan.md §4).
+          # Idempotent: a mailbox read in the last 9 minutes, or mid-read, is skipped. NOT `poll-mailboxes`
+          # itself: that one is scheduled, and Netlify answers a URL call to a scheduled function with 403.
+          # `run-site-domain-checks` (10m) moves customer domains on their way (site-domains.ts checkDueDomains).
+          # Idempotent: Netlify is only touched when something changed.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
@@ -153,7 +156,8 @@ jobs:
           run-goal-telemetry        3600    120
           run-campaign-reconciler   3600    120
           run-fix-live-check        1800    120
-          poll-mailboxes            600     60
+          run-poll-mailboxes        600     60
+          run-site-domain-checks    600     120
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
           run-lead-sweeps           21600   300

@@ -7362,6 +7362,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           return `<li><span class="font-bold">${esc(r.title)}</span> · ${esc(n === 1 ? '1 answer points here' : `${n} answers point here`)}${r.body ? `<span class="block text-gray-500">${esc(r.body)}</span>` : ''}</li>`;
         }).join('')}</ul>
       </div>` : ''}
+      ${def.calculator && typeof def.calculator.formula === 'string' ? `<div class="bg-white border border-indigo-100 rounded-lg p-3 mb-3" data-afd-calc>
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider mb-1">🧮 Calculator</p>
+        <p class="text-[11px] text-gray-700"><span class="font-bold">${esc(def.calculator.label || 'Your estimate')}</span> = <span class="font-mono">${esc(def.calculator.formula)}</span></p>
+        <ul class="text-[11px] text-gray-500 mt-1 space-y-0.5">${def.fields.filter((f) => (f.options || []).some((o) => typeof o.amount === 'number')).map((f) =>
+          `<li>${esc(f.label)}: ${f.options.map((o) => `${esc(o.label)} = ${esc(String(typeof o.amount === 'number' ? o.amount : 0))}`).join(' · ')}</li>`).join('')}</ul>
+        <p class="text-[11px] text-gray-500 mt-1">Check the figures on the Calculator tab before you share it.</p>
+      </div>` : ''}
       ${warnings.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
         <p class="text-[11px] font-bold text-amber-900 mb-0.5">We tidied this before showing it</p>
         <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>

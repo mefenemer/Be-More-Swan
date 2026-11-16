@@ -208,3 +208,15 @@ UK/Scotland/US on the Standard queue. Phase 0 cost $0.81 in all, from the $1 tri
 rest include brands, news, trivia and other towns.
 Standard answers came back in 1–4 minutes. The $50 top-up is needed before Phase 1's weekly refresh; $0.19 of the
 trial is left.
+
+**Phase 1b built (2026-11-15, branch `feat/gsc-search-queries`).** "Searches that found you":
+- **Storage:** `search_console_queries` (`db/z-search-console-queries.sql`, apply to both DBs before deploy).
+- **Daily ingest:** `ingest-gsc-metrics.ts` adds one call per property and keeps the top 100 by impressions.
+  - It only uses the workspace's own properties, matched from its website, its blog widget's site URL and its posts'
+    canonical URLs. A sole property counts as its own; a login with several unmatched properties counts as none.
+  - A failed call keeps the previous list, and disconnecting Search Console deletes it.
+- **Where it shows:** Blog setup ▸ Search performance lists it (10, then "Show all").
+- **Blog ideation:** uses up to 15 as optional angles on an undirected slot.
+- **Chat:** the Blog Writer and Business Mentor chats read it (`src/utils/chat-search-queries.ts`), fenced as
+  third-party data. There is no card.
+- Logic in `src/utils/gsc-queries.ts`; tests in `tests/gsc-queries.test.ts`.
