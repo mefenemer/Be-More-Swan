@@ -7,6 +7,13 @@
 //   POST { action: 'private_senders', mailboxId, add?, remove? }      → senders never sent to AI
 //   POST { action: 'refresh', mailboxId }                             → read new mail now
 //   POST { action: 'disconnect', mailboxId }                          → forget the token, DELETE everything stored
+//   GET  ?mailboxId=&actions=1                                       → open drafts, recent actions, clean-up suggestions
+//   POST { action: 'draft_reply', mailboxId, messageId, mode?, note? } → AI drafts a reply (changes nothing in the mailbox)
+//   POST { action: 'edit_reply', mailboxId, actionId, body }          → the owner's own edit
+//   POST { action: 'send_reply', mailboxId, actionId, body, how }     → how 'send' (in the thread) | 'drafts' (to the mailbox's Drafts)
+//   POST { action: 'dismiss_reply', mailboxId, actionId }
+//   POST { action: 'cleanup', mailboxId, op, messageIds, label }      → archive | trash, ≤ CLEANUP_CHUNK per call
+//   POST { action: 'undo_cleanup', mailboxId, actionId }              → back into the inbox, within UNDO_DAYS
 //
 // ⚠️ Only the mailbox's OWNER sees its email — not the workspace owner, not admins. An admin viewing
 // through impersonation sees that a mailbox exists and its counts, never a subject or sender
@@ -26,6 +33,10 @@ import {
 import { DEFAULT_CATEGORIES, PRIORITY_LABELS, categoryLabel } from '../../src/utils/email-sort';
 import { readerFor } from '../../src/utils/mail-reader';
 import { providerName, triggerMailboxSync } from '../../src/utils/mailbox-sync';
+import {
+    ActionError, applyCleanup, cleanupSuggestions, dismissReply, draftGaps, draftReply, editReply, listActions, sendReply, undoCleanup,
+    CLEANUP_CHUNK, UNDO_DAYS, type DraftMode,
+} from '../../src/utils/mailbox-actions';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const MESSAGE_LIMIT = 300;
@@ -61,6 +72,24 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET') {
         const qp = event.queryStringParameters ?? {};
         const own = await listOwnMailboxes(db, ctx.organisationId, ctx.userId);
+
+        // ── Drafts, recent actions and clean-up suggestions for one mailbox ──
+        if (qp.mailboxId && qp.actions === '1') {
+            if (access !== 'owner') return json(403, { error: 'Only the mailbox owner can see this.' });
+            const box = own.find((b) => b.id === Number(qp.mailboxId));
+            if (!box) return json(404, { error: 'Mailbox not found.' });
+            const [actions, cleanup] = await Promise.all([listActions(db, box.id), cleanupSuggestions(db, box)]);
+            return json(200, {
+                undoDays: UNDO_DAYS, cleanupChunk: CLEANUP_CHUNK, cleanup,
+                actions: actions.map((a) => ({
+                    id: a.id, kind: a.kind, status: a.status, messageId: a.messageId, actedAt: a.actedAt, updatedAt: a.updatedAt,
+                    result: a.result,
+                    ...(a.kind === 'reply'
+                        ? (() => { const p = a.payload as { to?: string; subject?: string; body?: string }; return { to: p.to, subject: p.subject, body: p.body, gaps: draftGaps(p.body ?? '') }; })()
+                        : (() => { const p = a.payload as { op?: string; label?: string; items?: unknown[]; failed?: number }; return { op: p.op, label: p.label, count: (p.items ?? []).length, failed: p.failed ?? 0 }; })()),
+                })),
+            });
+        }
 
         // ── One email's text ──
         if (qp.mailboxId && qp.messageId) {
@@ -184,6 +213,49 @@ export default withLambda(async (event) => {
                 .where(and(eq(mailboxMessages.mailboxId, box.id), match));
         }
         return json(200, { ok: true, privateSenders, message: add ? `Emails from ${add} will never be sent to AI. Earlier summaries of them are deleted.` : 'Updated.' });
+    }
+
+    // ── Phase 2a: replies and clean-up — each one pressed (and confirmed) by the owner ──
+    try {
+        if (body.action === 'draft_reply') {
+            const mode = (['new', 'shorter', 'longer', 'redraft'] as const).includes(body.mode as DraftMode) ? body.mode as DraftMode : 'new';
+            const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 600) : null;
+            const a = await draftReply(db, box, Number(body.messageId), mode, note);
+            const p = a.payload as { to: string; subject: string; body: string };
+            return json(200, { ok: true, actionId: a.id, to: p.to, subject: p.subject, body: p.body, gaps: draftGaps(p.body) });
+        }
+        if (body.action === 'edit_reply') {
+            const a = await editReply(db, box, Number(body.actionId), String(body.body ?? ''));
+            return json(200, { ok: true, gaps: draftGaps((a.payload as { body: string }).body) });
+        }
+        if (body.action === 'send_reply') {
+            const how = body.how === 'drafts' ? 'drafts' : 'send';
+            const a = await sendReply(db, box, Number(body.actionId), String(body.body ?? ''), how);
+            const to = (a.payload as { to: string }).to;
+            return json(200, { ok: true, message: how === 'send' ? `Sent to ${to}, in the same conversation.` : `Saved to your ${providerName(box.provider)} drafts. Nothing has been sent.` });
+        }
+        if (body.action === 'dismiss_reply') {
+            await dismissReply(db, box, Number(body.actionId));
+            return json(200, { ok: true, message: 'Draft thrown away. Nothing was sent.' });
+        }
+        if (body.action === 'cleanup') {
+            const ids = Array.isArray(body.messageIds) ? (body.messageIds as unknown[]).map(Number) : [];
+            const op = body.op === 'trash' ? 'trash' : 'archive';
+            const r = await applyCleanup(db, box, op, ids, String(body.label ?? ''));
+            const verb = op === 'trash' ? 'Moved to trash' : 'Archived';
+            return json(200, { ok: true, actionId: r.action.id, moved: r.moved, failed: r.failed,
+                message: `${verb}: ${r.moved}.${r.failed ? ` ${r.failed} could not be moved.` : ''} You can undo this for ${UNDO_DAYS} days.` });
+        }
+        if (body.action === 'undo_cleanup') {
+            const r = await undoCleanup(db, box, Number(body.actionId));
+            return json(200, { ok: true, restored: r.restored, failed: r.failed,
+                message: `Put back in your inbox: ${r.restored}.${r.failed ? ` ${r.failed} could not be put back.` : ''}` });
+        }
+    } catch (err) {
+        if (err instanceof ActionError) return json(err.status, { error: err.message, code: err.code });
+        if (err instanceof MailboxError) return json(err.status, { error: err.message, code: err.code });
+        console.error('[mailboxes] action failed', { action: body.action, err: err instanceof Error ? err.message : err });
+        return json(500, { error: 'That didn\'t work. Please try again.' });
     }
 
     return json(400, { error: 'Unknown action.' });
