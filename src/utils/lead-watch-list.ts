@@ -8,7 +8,7 @@ import type { getDb } from '../../db/client';
 import { getCompanyProfile, isCompaniesHouseConfigured, searchCompaniesForPicker } from '../lib/companies-house';
 import { companyUrl, normaliseCompanyNumber } from '../lib/triggers/ch-watch';
 import { isClosingStatus } from '../lib/triggers/ch-watch';
-import { isStreamConfigured, WATCH_SOURCE } from './lead-watch';
+import { isMissingTable, isStreamConfigured, WATCH_SOURCE } from './lead-watch';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -32,7 +32,8 @@ export interface WatchListItem {
 
 export interface WatchSignalItem {
     id: number;
-    watchId: number;
+    /** Null for website / SEC news (lead-site-watch.ts): it belongs to a lead, not a watched company. */
+    watchId: number | null;
     companyName: string | null;
     kind: string;
     text: string;
@@ -41,6 +42,8 @@ export interface WatchSignalItem {
     url: string | null;
     recordId: number | null;
     seenAt: string;
+    /** 'team_page' | 'careers' | 'sec' for website / SEC news; absent for Companies House news. */
+    source?: string;
 }
 
 export interface WatchListView {
@@ -85,6 +88,24 @@ export async function listWatch(db: Db, orgId: number, assistantId: number): Pro
            AND s.created_at > now() - make_interval(days => ${SIGNAL_DAYS})
          ORDER BY s.created_at DESC, s.id DESC
          LIMIT 100`) as unknown as WatchSignalItem[];
+    // Website and SEC news (Why now Phase 2, lead-site-watch.ts) in the same News list. watchId is null:
+    // these belong to a lead, not to a watched company. Missing table = none yet.
+    try {
+        const site = await db.execute(sql`
+            SELECT s.id, NULL::bigint AS "watchId", r.title AS "companyName", s.kind, s.text, s.direction,
+                   s.occurred_on::text AS "occurredOn", s.url, s.assistant_record_id AS "recordId", s.source,
+                   to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "seenAt"
+              FROM lead_site_watch_signals s JOIN assistant_records r ON r.id = s.assistant_record_id
+             WHERE s.organisation_id = ${orgId} AND s.ai_assistant_id = ${assistantId}
+               AND s.created_at > now() - make_interval(days => ${SIGNAL_DAYS})
+             ORDER BY s.created_at DESC, s.id DESC
+             LIMIT 100`) as unknown as WatchSignalItem[];
+        (signals as WatchSignalItem[]).push(...site);
+        (signals as WatchSignalItem[]).sort((a, b) => String(b.seenAt).localeCompare(String(a.seenAt)));
+        (signals as WatchSignalItem[]).splice(100);
+    } catch (err) {
+        if (!isMissingTable(err)) throw err;
+    }
     const [run] = await db.execute(sql`
         SELECT to_char(last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM trigger_sources WHERE source = ${WATCH_SOURCE}`) as Array<{ at: string | null }>;
 
@@ -111,7 +132,7 @@ export async function listWatch(db: Db, orgId: number, assistantId: number): Pro
         streamConfigured: isStreamConfigured(),
         counts,
         items: list,
-        signals: signals.map((s) => ({ ...s, id: Number(s.id), watchId: Number(s.watchId), recordId: s.recordId == null ? null : Number(s.recordId) })),
+        signals: signals.map((s) => ({ ...s, id: Number(s.id), watchId: s.watchId == null ? null : Number(s.watchId), recordId: s.recordId == null ? null : Number(s.recordId) })),
         lastRunAt: run?.at ?? null,
         maxManual: MAX_MANUAL_PER_ASSISTANT,
     };

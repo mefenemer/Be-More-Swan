@@ -196,7 +196,10 @@ check('one note per assistant; neutral-only news sends nothing', () => {
 check('the roll-up marks every signal it read as notified, sent or not', () => {
     const src = read('src/utils/lead-watch.ts');
     const i = src.indexOf('export async function rollUpSignals');
-    assert.match(src.slice(i, i + 1500), /UPDATE lead_watch_signals SET notified_at = now\(\)/);
+    // The whole function (it also reads the website / SEC signals now), not a fixed window.
+    const body = src.slice(i, src.indexOf('\n}\n', i));
+    assert.match(body, /UPDATE lead_watch_signals SET notified_at = now\(\)/);
+    assert.match(body, /UPDATE lead_site_watch_signals SET notified_at = now\(\)/);
 });
 check('a positive signal restarts the retention clock; other news does not', () => {
     assert.match(read('src/utils/lead-watch.ts'), /updated_at = CASE WHEN \$\{positive\} THEN now\(\) ELSE updated_at END/);

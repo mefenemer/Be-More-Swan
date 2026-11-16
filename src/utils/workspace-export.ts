@@ -118,6 +118,9 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     leadWatch: s.leadWatch,
     leadWatchSignals: s.leadWatchSignals,
     leadWatchSettings: s.leadWatchSettings,
+    // Why now Phase 2: what the website / SEC watch last saw for each lead, and its news.
+    leadSiteWatch: s.leadSiteWatch,
+    leadSiteWatchSignals: s.leadSiteWatchSignals,
     actionItems: s.actionItems,
     featureRequests: s.featureRequests,
     connections: s.systemConnections,

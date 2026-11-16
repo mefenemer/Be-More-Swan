@@ -90,7 +90,28 @@ No bulk re-run (it costs money). Old intel has signals without dates, so it show
 
 ---
 
-## Phase 2 — Watching saved leads: free sources (needs SQL)
+## Phase 2 — Watching saved leads: free sources (needs SQL) — ✅ BUILT 2026-11-16, on the Watch list
+
+**Built on top of buying triggers Phase 2 (the Watch list, PR #645), not beside it.** The Watch list
+already watches Companies House for leads, customers and companies added by hand (its own `lead_watch`
+table, live stream, `company_closed` halt, deletion-countdown restart, one note a day, Watch list tab +
+chat, one switch in `lead_watch_settings`). What this added:
+- **Watch news becomes the lead's Why now.** `applySignalToLead` (src/utils/lead-watch.ts) is the one
+  write for every watch signal: research findings, Why now when positive and newer (timing lifted to
+  60), deletion countdown restart. Leads never researched are left alone, as before.
+- **Website and US watching** (src/utils/lead-site-watch.ts, rules src/config/lead-site-watch.ts, reads
+  src/lib/lead-watch-sources.ts): a new senior person on the team page, new jobs on the careers page or
+  Greenhouse / Lever / Ashby / Workable board, a careers page appearing, and SEC Form D for US leads
+  (strict name + state match). New tables `lead_site_watch` + `lead_site_watch_signals`
+  (db/z-lead-site-watch.sql). Same switch, same daily run (after the Companies House check), same note,
+  same tab News list, same chat.
+- Tests: tests/lead-site-watch.test.ts.
+
+**Before it runs:** apply `db/z-lead-site-watch.sql` on BOTH DBs (until then the website/US part skips
+quietly and the Companies House Watch list is unchanged). Set `SEC_USER_AGENT` (an ops mailbox) for the
+SEC part. Help article not written yet.
+
+The text below is the original plan, kept for the reasoning.
 
 Separate from `lead-enrichment-sweep.ts`. That one re-reads everything with a model; this one
 **looks for changes**, cheaply, and only spends when something actually changed.

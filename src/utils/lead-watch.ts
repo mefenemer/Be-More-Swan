@@ -257,27 +257,55 @@ export async function recordSignal(db: Db, row: WatchRow, sig: WatchSignal, sour
     if (!inserted.length) return false;
 
     if (row.assistant_record_id) {
-        // Into the lead's research findings, ONLY when the lead has been researched. Creating data.intel
-        // here would make lead-enrichment-sweep.ts think the lead was researched (it keys on intel) and
-        // the lead panel would show a findings box with nothing else in it.
-        // A POSITIVE signal also restarts the lead's 30-day deletion countdown (why-now decision 3): the
-        // retention clock is assistant_records.updated_at (src/config/lead-retention.ts). Neutral and
-        // negative news leave the clock alone.
-        const entry = { summary: sig.text, url: sig.url, direction: sig.direction, date: sig.occurredOn, source: 'watch', kind: sig.kind };
-        const positive = sig.direction === 'positive';
-        await db.execute(sql`
-            UPDATE assistant_records
-               SET data = CASE WHEN jsonb_typeof(data -> 'intel') = 'object'
-                               THEN jsonb_set(data, '{intel,signals}',
-                                    COALESCE(data -> 'intel' -> 'signals', '[]'::jsonb) || ${JSON.stringify([entry])}::jsonb, true)
-                               ELSE data END,
-                   updated_at = CASE WHEN ${positive} THEN now() ELSE updated_at END
-             WHERE id = ${row.assistant_record_id}`);
+        await applySignalToLead(db, row.assistant_record_id, { kind: sig.kind, text: sig.text, url: sig.url, direction: sig.direction, occurredOn: sig.occurredOn });
     }
     if (hooks.afterInsert) {
         try { await hooks.afterInsert(db, row, sig); } catch (err) { console.warn('[lead-watch] after-signal step failed', err); }
     }
     return true;
+}
+
+/**
+ * Put one watch signal onto its lead. Shared by the Companies House checks here and the website / US
+ * checks (src/utils/lead-site-watch.ts), so every watch signal does the same three things:
+ *
+ * 1. Into the lead's research findings (data.intel.signals, source 'watch'), ONLY when the lead has been
+ *    researched. Creating data.intel here would make lead-enrichment-sweep.ts think the lead was
+ *    researched (it keys on intel) and the lead panel would show a findings box with nothing else in it.
+ * 2. A POSITIVE signal newer than the lead's current Why now becomes its Why now (data.intel.whyNow —
+ *    the All leads "Why now" column, src/config/lead-why-now.ts), and its timing score is lifted to at
+ *    least WATCH_WHY_NOW_TIMING_FLOOR. The date is the source's own, never later than tomorrow.
+ * 3. A POSITIVE signal restarts the lead's 30-day deletion countdown (why-now decision 3): the retention
+ *    clock is assistant_records.updated_at (src/config/lead-retention.ts). Neutral and negative news
+ *    leave the clock and the Why now alone.
+ */
+export const WATCH_WHY_NOW_TIMING_FLOOR = 60;
+export async function applySignalToLead(
+    db: Db,
+    assistantRecordId: number,
+    sig: { kind: string; text: string; url: string; direction: string; occurredOn: string },
+): Promise<void> {
+    const entry = { summary: sig.text, url: sig.url, direction: sig.direction, date: sig.occurredOn, source: 'watch', kind: sig.kind };
+    const positive = sig.direction === 'positive';
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const becomesWhyNow = positive && /^\d{4}-\d{2}-\d{2}$/.test(sig.occurredOn) && sig.occurredOn <= tomorrow && !!sig.url;
+    const whyNow = { summary: sig.text, url: sig.url, date: sig.occurredOn };
+    await db.execute(sql`
+        UPDATE assistant_records
+           SET data = CASE
+                   WHEN jsonb_typeof(data -> 'intel') <> 'object' OR data -> 'intel' IS NULL THEN data
+                   WHEN ${becomesWhyNow} AND COALESCE(data #>> '{intel,whyNow,date}', '') < ${sig.occurredOn}
+                   THEN jsonb_set(jsonb_set(jsonb_set(data,
+                            '{intel,signals}', COALESCE(data -> 'intel' -> 'signals', '[]'::jsonb) || ${JSON.stringify([entry])}::jsonb, true),
+                            '{intel,whyNow}', ${JSON.stringify(whyNow)}::jsonb, true),
+                            '{intel,timing}', to_jsonb(GREATEST(
+                                CASE WHEN jsonb_typeof(data #> '{intel,timing}') = 'number' THEN (data #>> '{intel,timing}')::numeric ELSE 0 END,
+                                ${WATCH_WHY_NOW_TIMING_FLOOR})), true)
+                   ELSE jsonb_set(data, '{intel,signals}',
+                            COALESCE(data -> 'intel' -> 'signals', '[]'::jsonb) || ${JSON.stringify([entry])}::jsonb, true)
+               END,
+               updated_at = CASE WHEN ${positive} THEN now() ELSE updated_at END
+         WHERE id = ${assistantRecordId}`);
 }
 
 let defaultHooks: SignalHooks = {};
@@ -379,15 +407,16 @@ export async function checkDueWatches(db: Db, opts: { deadline: number }): Promi
 
 // ── The daily roll-up: one note per assistant ───────────────────────────────────────────────────
 
-export interface RollUpGroup { organisationId: number; assistantId: number; positive: number; negative: number; companies: string[] }
+export interface RollUpGroup { organisationId: number; assistantId: number; positive: number; negative: number; companies: string[]; fromSites?: boolean; fromRegister?: boolean }
 
 /** Unnotified signals → one group per assistant. Neutral-only assistants get no note. Pure. */
-export function groupForRollUp(rows: Array<{ organisation_id: number; ai_assistant_id: number; direction: string; company_name: string | null }>): RollUpGroup[] {
+export function groupForRollUp(rows: Array<{ organisation_id: number; ai_assistant_id: number; direction: string; company_name: string | null; site?: boolean }>): RollUpGroup[] {
     const map = new Map<number, RollUpGroup>();
     for (const r of rows) {
         const g = map.get(r.ai_assistant_id) ?? { organisationId: r.organisation_id, assistantId: r.ai_assistant_id, positive: 0, negative: 0, companies: [] };
         if (r.direction === 'positive') g.positive++;
         if (r.direction === 'negative') g.negative++;
+        if (r.direction === 'positive' || r.direction === 'negative') { if (r.site) g.fromSites = true; else g.fromRegister = true; }
         if ((r.direction === 'positive' || r.direction === 'negative') && r.company_name && !g.companies.includes(r.company_name)) g.companies.push(r.company_name);
         map.set(r.ai_assistant_id, g);
     }
@@ -402,23 +431,42 @@ export function rollUpText(g: RollUpGroup): { title: string; body: string } {
     const parts: string[] = [];
     if (g.positive) parts.push(`${g.positive} new reason${g.positive === 1 ? '' : 's'} to get in touch`);
     if (g.negative) parts.push(`${g.negative} warning${g.negative === 1 ? '' : 's'} (a company closing)`);
-    return { title, body: `${parts.join(' and ')} from Companies House: ${names}. See the Watch list tab.` };
+    // Where the news came from, in the user's words. Register-only notes read exactly as before.
+    const from = g.fromSites && g.fromRegister ? 'from Companies House and their websites'
+        : g.fromSites ? 'from their websites and filings'
+        : 'from Companies House';
+    return { title, body: `${parts.join(' and ')} ${from}: ${names}. See the Watch list tab.` };
 }
 
 export async function rollUpSignals(db: Db, notify: (g: RollUpGroup) => Promise<void>): Promise<number> {
     const rows = await db.execute(sql`
         SELECT s.id, s.organisation_id, s.ai_assistant_id, s.direction, w.company_name
           FROM lead_watch_signals s JOIN lead_watch w ON w.id = s.watch_id
-         WHERE s.notified_at IS NULL`) as Array<{ id: number; organisation_id: number; ai_assistant_id: number; direction: string; company_name: string | null }>;
-    if (!rows.length) return 0;
+         WHERE s.notified_at IS NULL`) as Array<{ id: number; organisation_id: number; ai_assistant_id: number; direction: string; company_name: string | null; site?: boolean }>;
+    // The website and SEC news (Why now Phase 2, src/utils/lead-site-watch.ts) goes in the same note.
+    // Missing table (db/z-lead-site-watch.sql not applied yet) = no such news.
+    let siteRows: typeof rows = [];
+    try {
+        siteRows = (await db.execute(sql`
+            SELECT s.id, s.organisation_id, s.ai_assistant_id, s.direction, r.title AS company_name
+              FROM lead_site_watch_signals s JOIN assistant_records r ON r.id = s.assistant_record_id
+             WHERE s.notified_at IS NULL`) as typeof rows).map((r) => ({ ...r, site: true }));
+    } catch (err) {
+        if (!isMissingTable(err)) throw err;
+    }
+    const all = [...rows, ...siteRows];
+    if (!all.length) return 0;
     let sent = 0;
-    for (const g of groupForRollUp(rows)) {
+    for (const g of groupForRollUp(all)) {
         try { await notify(g); sent++; } catch (err) { console.warn('[lead-watch] roll-up note failed', err); }
     }
     // Marked whether or not a note went out (neutral-only news is shown on the tab, never sent).
-    await db.execute(sql`
+    if (rows.length) await db.execute(sql`
         UPDATE lead_watch_signals SET notified_at = now()
          WHERE id IN (SELECT jsonb_array_elements_text(${JSON.stringify(rows.map((r) => r.id))}::jsonb)::bigint)`);
+    if (siteRows.length) await db.execute(sql`
+        UPDATE lead_site_watch_signals SET notified_at = now()
+         WHERE id IN (SELECT jsonb_array_elements_text(${JSON.stringify(siteRows.map((r) => r.id))}::jsonb)::bigint)`);
     return sent;
 }
 

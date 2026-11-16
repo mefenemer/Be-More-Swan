@@ -2,6 +2,8 @@
 // Buying triggers Phase 2 (docs/buying-triggers-plan.md §5): the Watch list's daily run.
 //   1. syncWatchList   — leads with a Companies House match, customers (won) and manual additions;
 //   2. checkDueWatches — filing history (+ status every 4th check) for each company due, paced;
+//   2b. syncSiteWatch + checkDueSiteWatches — the lead's team page, careers page / job board and, for US
+//       leads, SEC Form D (Why now Phase 2, src/utils/lead-site-watch.ts);
 //   3. rollUpSignals   — one note per assistant with new news.
 // Background function: 15 minutes, of which the checks use at most 12.
 //
@@ -12,8 +14,10 @@ import { sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { checkDueWatches, isLeadWatchEnabled, isMissingTable, rollUpSignals, syncWatchList, WATCH_SOURCE } from '../../src/utils/lead-watch';
 import { notifyRollUp } from '../../src/utils/lead-watch-effects';
+import { checkDueSiteWatches, syncSiteWatch } from '../../src/utils/lead-site-watch';
 
 const RUN_MS = 12 * 60_000;
+const CH_MS = 7 * 60_000;
 
 export default withLambda(async (event) => {
     const secret = process.env.CRON_TRIGGER_SECRET;
@@ -31,7 +35,11 @@ export default withLambda(async (event) => {
     const result: Record<string, unknown> = { ok: false };
     try {
         result.sync = await syncWatchList(db);
-        result.check = await checkDueWatches(db, { deadline: started + RUN_MS });
+        // Companies House first, with up to 7 of the 12 minutes; then the lead's own site and SEC Form D
+        // (Why now Phase 2, src/utils/lead-site-watch.ts) with what is left. Both feed the one daily note.
+        result.check = await checkDueWatches(db, { deadline: started + CH_MS });
+        result.siteSync = await syncSiteWatch(db);
+        result.siteCheck = await checkDueSiteWatches(db, { deadline: started + RUN_MS });
         result.notesSent = await rollUpSignals(db, (g) => notifyRollUp(db, g));
         result.ok = true;
     } catch (err) {

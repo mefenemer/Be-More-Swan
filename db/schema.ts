@@ -7305,3 +7305,45 @@ export const leadWatchSettings = pgTable("lead_watch_settings", {
   updatedByUserId: integer("updated_by_user_id"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Why now Phase 2, website + US part (db/z-lead-site-watch.sql) ────────────────────────────────
+// Beside the Companies House Watch list above: the lead's own team page and careers page / job board,
+// and SEC Form D for US leads. Same switch (lead_watch_settings), same daily run and note. See
+// src/utils/lead-site-watch.ts.
+export const leadSiteWatch = pgTable("lead_site_watch", {
+  assistantRecordId: integer("assistant_record_id").primaryKey().references(() => assistantRecords.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  domain: text("domain").notNull(),
+  country: text("country"),
+  secCik: text("sec_cik"),
+  secLinkTriedAt: timestamp("sec_link_tried_at", { withTimezone: true }),
+  secLastAccession: text("sec_last_accession"),
+  teamNames: jsonb("team_names"),
+  careersSource: text("careers_source"),
+  careersHash: text("careers_hash"),
+  careersTitles: jsonb("careers_titles"),
+  checksDone: integer("checks_done").notNull().default(0),
+  nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  pausedReason: text("paused_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const leadSiteWatchSignals = pgTable("lead_site_watch_signals", {
+  id: bigint({ mode: "number" }).primaryKey(),
+  assistantRecordId: integer("assistant_record_id").notNull().references(() => assistantRecords.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  text: text("text").notNull(),
+  direction: text("direction").notNull(),
+  occurredOn: date("occurred_on").notNull(),
+  ref: text("ref").notNull(),
+  url: text("url"),
+  source: text("source").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  notifiedAt: timestamp("notified_at", { withTimezone: true }),
+}, (t) => [unique("lead_site_watch_signals_assistant_record_id_ref_key").on(t.assistantRecordId, t.ref)]);

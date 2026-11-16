@@ -53,6 +53,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
     ...group('on_request', 'The Lead Generator\'s Watch list: companies watched on Companies House and the public register news found on them (buying triggers Phase 2)', [
         'lead_watch', 'lead_watch_signals', 'lead_watch_settings',
+        // Why now Phase 2: the same Watch list's website and SEC checks (lead-site-watch.ts).
+        'lead_site_watch', 'lead_site_watch_signals',
     ]),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),

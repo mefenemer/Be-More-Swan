@@ -58,7 +58,7 @@ import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     accountMemory, accountNodes, assistantRecords, discoveredLeads, discoveryGuardrails,
-    leadMessages, leadOptOuts, leadThreads, leadWatch, sequenceEnrolments,
+    leadMessages, leadOptOuts, leadThreads, leadWatch, leadSiteWatch, leadSiteWatchSignals, sequenceEnrolments,
 } from '../../db/schema';
 import { mintReplyToken } from './reply-address';
 
@@ -441,6 +441,17 @@ export async function eraseProspect(db: Db, input: EraseProspectInput): Promise<
                     eq(leadWatch.organisationId, orgId),
                     inArray(leadWatch.assistantRecordId, rows.map((r) => r.id)),
                 ));
+            } catch (err) {
+                const e = err as { code?: string; cause?: { code?: string } } | null;
+                if (e?.code !== '42P01' && e?.cause?.code !== '42P01') throw err;
+            }
+            // Why now Phase 2: the website / SEC watch (team-page names, job titles) and its news. The
+            // signals are deleted explicitly too: the record row is kept (erasure redacts, never deletes
+            // it), so the FK cascade would never fire. Same missing-table rule (db/z-lead-site-watch.sql).
+            try {
+                const ids = rows.map((r) => r.id);
+                await db.delete(leadSiteWatchSignals).where(and(eq(leadSiteWatchSignals.organisationId, orgId), inArray(leadSiteWatchSignals.assistantRecordId, ids)));
+                await db.delete(leadSiteWatch).where(and(eq(leadSiteWatch.organisationId, orgId), inArray(leadSiteWatch.assistantRecordId, ids)));
             } catch (err) {
                 const e = err as { code?: string; cause?: { code?: string } } | null;
                 if (e?.code !== '42P01' && e?.cause?.code !== '42P01') throw err;

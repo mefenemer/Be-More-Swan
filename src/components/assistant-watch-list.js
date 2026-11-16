@@ -102,7 +102,7 @@
 
   function headHtml() {
     const v = state.view;
-    const explain = 'Companies House news on your customers, your leads and companies you add: a new director, a new owner, a move, new borrowing, or the company closing.';
+    const explain = 'News on your customers, your leads and companies you add: from Companies House (a new director, a new owner, a move, new borrowing, or the company closing), and from their own websites (a new senior person, new jobs) and, for US companies, SEC fundraising filings.';
     if (typeof window._tabHead === 'function') {
       return window._tabHead({ title: 'Watch list', emoji: '👀', explain, chip: v ? `${v.counts.watching} watched` : '' });
     }
@@ -117,8 +117,8 @@
         <label class="flex items-start gap-3 cursor-pointer">
           <input type="checkbox" data-wl-enabled class="mt-1 h-4 w-4" ${v.enabled ? 'checked' : ''} ${busy ? 'disabled' : ''}>
           <span>
-            <span class="block text-sm font-bold text-gray-900">Watch my customers and leads on Companies House</span>
-            <span class="block text-xs text-gray-600 mt-0.5">Checked every few days for free. Leads are watched once ${esc(state.assistantName || 'your Lead Generator')} has matched them to Companies House. You get one note a day when there is news. Nothing is sent to anyone.</span>
+            <span class="block text-sm font-bold text-gray-900">Watch my customers and leads</span>
+            <span class="block text-xs text-gray-600 mt-0.5">Checked every few days for free. Leads are watched on Companies House once ${esc(state.assistantName || 'your Lead Generator')} has matched them there, and on their own website (team page, careers page) whenever they have one. A new reason to get in touch becomes the lead’s Why now on All leads. You get one note a day when there is news. Nothing is sent to anyone.</span>
           </span>
         </label>
         ${!v.companiesHouseConfigured ? '<p class="text-xs text-amber-700 mt-2">Companies House isn’t connected on this site yet, so nothing is checked.</p>' : ''}
@@ -148,6 +148,10 @@
       </div>`;
   }
 
+  // Website and SEC news (Why now Phase 2, src/utils/lead-site-watch.ts) carry a `source`; Companies House
+  // news does not, and keeps its original link text.
+  const SOURCE_LINK = { team_page: 'Open their team page', careers: 'See the job', sec: 'Check on SEC EDGAR' };
+
   function newsHtml() {
     const signals = state.view.signals || [];
     if (!signals.length) {
@@ -166,7 +170,7 @@
                 <span class="text-xs text-gray-500">${esc(when(s.occurredOn))}</span>
               </div>
               <p class="text-sm text-gray-700 mt-0.5">${esc(s.text)}</p>
-              ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="text-xs text-blue-700 underline">Check on Companies House</a>` : ''}
+              ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" class="text-xs text-blue-700 underline">${esc(SOURCE_LINK[s.source] || 'Check on Companies House')}</a>` : ''}
             </li>`;
         }).join('')}</ul>
       </div>`;

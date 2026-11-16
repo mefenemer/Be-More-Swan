@@ -139,10 +139,10 @@ const PLATFORM_MARKERS: Array<{ name: string; re: RegExp }> = [
 ];
 
 /** Paths worth reading for named people. Ordered by how likely they are to exist on an SMB site. */
-const PEOPLE_PATHS = ['/about', '/about-us', '/team', '/our-team', '/people', '/leadership', '/meet-the-team'];
+export const PEOPLE_PATHS = ['/about', '/about-us', '/team', '/our-team', '/people', '/leadership', '/meet-the-team'];
 
 /** Paths that answer "are they hiring?" without spending a search call. */
-const CAREERS_PATHS = ['/careers', '/jobs', '/vacancies', '/work-with-us'];
+export const CAREERS_PATHS = ['/careers', '/jobs', '/vacancies', '/work-with-us'];
 
 /** How much of a page's text is kept. Enough for a team page; short enough to stay a cheap prompt. */
 const MAX_PAGE_TEXT = 6000;
