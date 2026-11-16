@@ -29,7 +29,9 @@ import { normaliseEmail, looksLikeEmail } from './audience-contacts';
 import { DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE } from './audience-forms';
 import { addEnquirerToAudience } from './enquiry-audience';
 import { pseudonymiseIp } from './ip-pseudonymise';
-import { legacyToDefinition, normaliseFormDefinition, publicDefinition, type FormDefinition } from './form-definition';
+import { CALC_RESULT_ID, legacyToDefinition, normaliseFormDefinition, publicDefinition, type FormDefinition } from './form-definition';
+import { formatCalc, roundCalc } from './form-calculator';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { cleanText, type Section, type SiteDefinition } from './site-definition';
 import { esc, FORM_SENT_PATH, type SiteSignupForm } from './site-render';
 import type { SiteRow } from './site-store';
@@ -93,9 +95,29 @@ export function safeBackPath(def: SiteDefinition, raw: unknown): string {
     return known.has(p) ? p : '/';
 }
 
-/** `resultId`: a quiz result's id (FR#43) — only an id; /_sent reads its words from the stored form. */
-export function sentLocation(kind: 'contact' | 'signup', sectionId: string, back: string, resultId?: string | null): string {
-    return `${FORM_SENT_PATH}?k=${kind}&s=${encodeURIComponent(sectionId)}&b=${encodeURIComponent(back)}${resultId ? `&r=${encodeURIComponent(resultId)}` : ''}`;
+/**
+ * A calculator's number on /_sent (FR#43 Phase 2) is SIGNED: unlike a quiz result it can't be looked
+ * up by id, and a page on the business's own site must not show a number anyone typed into the
+ * address. The signature covers the form and the number; a link that doesn't verify shows the
+ * ordinary thank-you.
+ */
+function calcKey(): string | null { return process.env.JWT_SECRET || null; }
+export function signCalcValue(formId: number, value: string, key = calcKey()): string | null {
+    return key ? createHmac('sha256', key).update(`form-calc:${formId}:${value}`).digest('hex').slice(0, 24) : null;
+}
+export function verifyCalcValue(formId: number, value: string, sig: string, key = calcKey()): boolean {
+    const expected = signCalcValue(formId, value, key);
+    if (!expected) return false;
+    const given = Buffer.from(String(sig || ''));
+    return given.length === expected.length && timingSafeEqual(Buffer.from(expected), given);
+}
+
+/**
+ * `resultId`: a quiz result's id (FR#43) — only an id; /_sent reads its words from the stored form.
+ * `calc`: a calculator's number and its signature — /_sent formats it with the stored form's settings.
+ */
+export function sentLocation(kind: 'contact' | 'signup', sectionId: string, back: string, resultId?: string | null, calc?: { v: string; sig: string } | null): string {
+    return `${FORM_SENT_PATH}?k=${kind}&s=${encodeURIComponent(sectionId)}&b=${encodeURIComponent(back)}${resultId ? `&r=${encodeURIComponent(resultId)}` : ''}${calc ? `&v=${encodeURIComponent(calc.v)}&vs=${encodeURIComponent(calc.sig)}` : ''}`;
 }
 
 /** `a_<fieldId>` inputs → the answers object audience-public validates (checkboxes may repeat). */
@@ -118,7 +140,7 @@ export interface SiteFormRequest {
     userAgent: string | null;
     now?: number;
     /** audience-public's subscribe, called in-process (site-serve.ts). */
-    subscribe: (payload: Record<string, unknown>, meta: { origin: string; ip: string; userAgent: string | null }) => Promise<{ status: number; body: { error?: string; result?: { id?: unknown } } }>;
+    subscribe: (payload: Record<string, unknown>, meta: { origin: string; ip: string; userAgent: string | null }) => Promise<{ status: number; body: { error?: string; result?: { id?: unknown; amount?: unknown } } }>;
 }
 
 export async function handleSiteForm(db: Db, req: SiteFormRequest): Promise<FormOutcome> {
@@ -158,6 +180,12 @@ export async function handleSiteForm(db: Db, req: SiteFormRequest): Promise<Form
     }, { origin: req.origin, ip: req.ip, userAgent: req.userAgent });
     if (result.status === 200) {
         const rid = typeof result.body?.result?.id === 'string' ? result.body.result.id : null;
+        const amount = result.body?.result?.amount;
+        if (rid === CALC_RESULT_ID && typeof amount === 'number' && Number.isFinite(amount)) {
+            const v = String(amount);
+            const sig = signCalcValue(formId!, v);
+            return { kind: 'sent', location: sentLocation('signup', sectionId, back, sig ? rid : null, sig ? { v, sig } : null) };
+        }
         return { kind: 'sent', location: sentLocation('signup', sectionId, back, rid) };
     }
     const message = typeof result.body?.error === 'string' && result.body.error ? result.body.error : 'Something went wrong. Please try again in a minute.';
@@ -261,6 +289,18 @@ export async function sentMessage(db: Db, site: SiteRow, def: SiteDefinition, q:
         // id that isn't one of them is ignored. Anyone can type ?r= — all it can show is a result the
         // business wrote for everyone, which is what a quiz result is.
         const rid = q.get('r');
+        // A calculator's number (FR#43 Phase 2): shown only when the signature over this form and this
+        // number verifies, formatted with the stored form's own settings.
+        const calc = form?.def.calculator;
+        const v = q.get('v') || '';
+        if (rid === CALC_RESULT_ID && calc && formId && /^-?\d+(\.\d+)?$/.test(v) && verifyCalcValue(formId, v, q.get('vs') || '')) {
+            return {
+                title: `${calc.label}: ${formatCalc(roundCalc(Number(v), calc.decimals), calc)}`,
+                message: [calc.body, message].filter(Boolean).join('\n\n'),
+                back,
+                link: calc.ctaUrl ? { label: calc.ctaLabel || 'Find out more', url: calc.ctaUrl } : null,
+            };
+        }
         const res = rid ? form?.def.quiz?.results.find((x) => x.id === rid) : undefined;
         if (res) {
             return {

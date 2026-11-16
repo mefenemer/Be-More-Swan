@@ -45,9 +45,10 @@ import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isValidTimezone } from '../../src/utils/newsletter-schedule';
 import {
-    definitionHash, legacyToDefinition, normaliseFormDefinition, publicDefinition, publicQuizResult, validateAnswers, SLUG_RE,
+    calculatorProductIds, definitionHash, legacyToDefinition, normaliseFormDefinition, publicCalcResult, publicDefinition, publicQuizResult, validateAnswers, SLUG_RE,
     type FormDefinition,
 } from '../../src/utils/form-definition';
+import { loadCalculatorPrices } from '../../src/utils/calculator-prices';
 import { signAssetId } from '../../src/utils/newsletter-media-url';
 import { isOwnPublishedSite } from '../../src/utils/site-store';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -477,7 +478,7 @@ export default withLambda(async (event: HandlerEvent) => {
         message: form.successMessage
             || (form.doubleOptIn ? DEFAULT_SUCCESS_MESSAGE : SINGLE_OPT_IN_SUCCESS_MESSAGE),
         redirectUrl: form.redirectUrl || null,
-    } as { ok: true; message: string; redirectUrl: string | null; result?: ReturnType<typeof publicQuizResult> };
+    } as { ok: true; message: string; redirectUrl: string | null; result?: ReturnType<typeof publicQuizResult> | ReturnType<typeof publicCalcResult> };
 
     // Honeypot and timing. Both answer with the SAME success body — a bot that learns it was
     // caught is a bot that comes back without the tell.
@@ -513,7 +514,15 @@ export default withLambda(async (event: HandlerEvent) => {
         for (const f of def.fields) if (f.target.kind === 'contact') out[f.id] = flat[f.target.column];
         return out;
     })();
-    const checked = validateAnswers(def, rawAnswers);
+    // A calculator's price(<id>)s: this form's own workspace's products, read now (FR#43 Phase 2).
+    // A price lookup that fails only costs the visitor their number — never their sign-up.
+    let prices: Record<number, number> = {};
+    const productIds = calculatorProductIds(def);
+    if (productIds.length) {
+        try { prices = await loadCalculatorPrices(db, form.organisationId, productIds); }
+        catch (err) { console.error('[audience-public] calculator prices unavailable', err); }
+    }
+    const checked = validateAnswers(def, rawAnswers, { prices });
     if (!checked.ok) return json(400, { error: checked.error }, origin);
     const answers = checked.answers;
     // A quiz answers with the visitor's result (its words only — never its tag), and every success
@@ -522,6 +531,11 @@ export default withLambda(async (event: HandlerEvent) => {
     // A result replaces the redirect: the result IS the page they came for, and its button is the way on.
     const quizResult = answers.quizResult ? publicQuizResult(answers.quizResult) : null;
     if (quizResult) Object.assign(successBody, { result: quizResult, redirectUrl: null });
+    // A calculator answers the same way with its number. No number (a broken formula, a missing
+    // price) = the ordinary thank-you and redirect, never an error.
+    else if (def.calculator && answers.calcAmount !== null) {
+        Object.assign(successBody, { result: publicCalcResult(def.calculator, answers.calcAmount), redirectUrl: null });
+    }
 
     const email = normaliseEmail(answers.email);
     if (!looksLikeEmail(email)) return json(400, { error: 'Enter a valid email address.' }, origin);

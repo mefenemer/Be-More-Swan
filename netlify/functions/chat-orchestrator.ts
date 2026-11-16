@@ -2758,7 +2758,13 @@ QUIZZES — a form can be a QUIZ ("Which treatment suits you?", "Which package i
   • Set "purpose": "quiz" and add "quiz": { "results": [ ... ] } with 2–5 results. Each result: { "id": "r_<short>", "title": "...", "body": "<2–4 sentences: why it suits them and what to do next>", "tag": "<short tag, or omit to use the title>", "ctaLabel": "<button words or omit>", "ctaUrl": "<a URL they gave you, else null>" }.
   • The scored questions are "radio" or "select" fields, 3–6 of them, each with 2–5 options. On each option put "scores": { "<result id>": 1 } for the result that answer points to (an answer may point to none). The result with the most points wins; a tie goes to the result listed first.
   • Save quiz answers as { "kind": "custom", "key": "<snake_case>" } targets, not tags — the RESULT is the tag. Still ask for the email (last is fine), and a button such as "See my result".
-  • Never invent prices, products or claims for a result; use what you know of their business, or keep it general and say they can edit it. Never give health, legal or financial advice as a result.`,
+  • Never invent prices, products or claims for a result; use what you know of their business, or keep it general and say they can edit it. Never give health, legal or financial advice as a result.
+
+CALCULATORS — a form can be a CALCULATOR instead ("Rough cost of your new kitchen", "How much could you save?"): visitors answer, and when they press the button they see ONE number our server works out from the business's formula, with the business's words under it. Build one when they ask for a calculator, price estimator or savings calculator. A form is a quiz OR a calculator, never both.
+  • Set "purpose": "calculator" and add "calculator": { "formula": "...", "label": "Your estimate", "format": "money" | "number" | "percent", "currency": "GBP" | "USD" | "EUR" | "AUD" | "CAD", "decimals": 0, "spread": <0–50: ± this % shows a range, e.g. 10 for an estimate, 0 for an exact figure>, "unit": "<words after the number, e.g. per month, or empty>", "body": "<1–3 sentences: what the number means and what to do next>", "ctaLabel": "<button words or omit>", "ctaUrl": "<a URL they gave you, else null>" }.
+  • Inputs are "number" fields (add "range": { "min": <n or null>, "max": <n or null> }) and "radio" / "select" / "checkbox" fields whose options carry "amount": <number> — what that choice stands for (ticked checkboxes add up). Every input is saved as { "kind": "custom", "key": "<snake_case>" }, and the formula uses those keys.
+  • The formula may use ONLY: numbers, the keys, + - * /, brackets, min(a, b, …), max(a, b, …), round(x, places), ceil(x), floor(x). Example: "max(150, area * finish + extras)". Nothing else works.
+  • Use a price in an amount or the formula ONLY when it is listed in their products, exactly as listed; otherwise use a clearly round placeholder and TELL them to put their real figures in on the Calculator tab. Estimates are a guide — say so in the body. Never promise a quote, a saving or a financial outcome.`,
             // The one thing this route must never get wrong. The card is an OFFER, so a reply
             // that reports the issue as filed is false at the exact moment the user reads it.
             `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the email or flow on screen underneath your reply with buttons to keep it or discard it. Until they press one, it exists only in this conversation.
@@ -2874,7 +2880,7 @@ A sign-up form:
   "type": "audience_form_draft",
   "form": {
     "name": "<internal name>",
-    "purpose": "newsletter" | "lead_magnet" | "waitlist" | "event" | "enquiry" | "onboarding" | "quiz" | "custom",
+    "purpose": "newsletter" | "lead_magnet" | "waitlist" | "event" | "enquiry" | "onboarding" | "quiz" | "calculator" | "custom",
     "content": { "headline": "...", "intro": "...", "buttonLabel": "...", "successMessage": "...", "redirectUrl": null },
     "fields": [ { "id": "f_email", "type": "email", "label": "Email", "required": true, "target": { "kind": "contact", "column": "email" } },
                 { "id": "f_<short>", "type": "...", "label": "...", "placeholder": "", "help": "", "required": false, "options": [ { "value": "...", "label": "..." } ], "target": { ... } } ],
@@ -2883,10 +2889,11 @@ A sign-up form:
     "delivery": { "embed": { "enabled": true, "allowedOrigins": null }, "hosted": { "enabled": <true if it gets its own page>, "slug": "<short-address or null>" } },
     "audience": { "doubleOptIn": true, "segmentId": null, "tags": [ "<optional tag every sign-up gets>" ] },
     "campaign": { "sequenceId": null, "skipWelcome": false },
-    "quiz": null | { "results": [ { "id": "r_<short>", "title": "...", "body": "...", "tag": "...", "ctaLabel": "...", "ctaUrl": null } ] }
+    "quiz": null | { "results": [ { "id": "r_<short>", "title": "...", "body": "...", "tag": "...", "ctaLabel": "...", "ctaUrl": null } ] },
+    "calculator": null | { "formula": "...", "label": "...", "format": "money", "currency": "GBP", "decimals": 0, "spread": 10, "unit": "", "body": "...", "ctaLabel": "...", "ctaUrl": null }
   }
 }
-(On a quiz, each scored option also carries "scores": { "r_<short>": 1 }.)`,
+(On a quiz, each scored option also carries "scores": { "r_<short>": 1 }. On a calculator, each choice option carries "amount": <number>, and a "number" field carries "range".)`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },

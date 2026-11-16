@@ -108,7 +108,7 @@ check('the old settings panel writes THROUGH the definition, not beside it', () 
 // ── 4. The server decides ───────────────────────────────────────────────────
 
 check('answers are validated against the stored definition before anything is written', () => {
-    const sub = PUBLIC.slice(landmark(PUBLIC, 'const checked = validateAnswers(def, rawAnswers)'));
+    const sub = PUBLIC.slice(landmark(PUBLIC, 'const checked = validateAnswers(def, rawAnswers'));
     assert.ok(landmark(sub, 'if (!checked.ok)') < landmark(sub, 'upsertContact('));
     assert.match(PUBLIC, /customFields: answers\.custom/);
 });
