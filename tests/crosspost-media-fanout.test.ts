@@ -118,12 +118,17 @@ check('the writes target the resolved list, not the requested id', () => {
     for (const f of [
         'netlify/functions/attach-draft-media.ts',
         'netlify/functions/regenerate-post-media.ts',
-        'netlify/functions/set-post-slides.ts',
     ]) {
         const src = fn(f);
         assert.match(src, /\.where\(inArray\(scheduledPosts\.id, targetIds\)\)/, `${f}: the post UPDATE must cover the group`);
         assert.match(src, /inArray\(scheduledPostAssets\.scheduledPostId, targetIds\)/, `${f}: the junction rows must too`);
     }
+    // set-post-slides writes through the shared slide writer (src/utils/post-slides.ts, also used by
+    // make-carousel): it must hand it the resolved list, and the writer must use every id it is given.
+    assert.match(fn('netlify/functions/set-post-slides.ts'), /writePostSlides\(db, targetIds, assetIds\)/, 'set-post-slides: the slide write must cover the group');
+    const writer = fn('src/utils/post-slides.ts');
+    assert.match(writer, /\.where\(inArray\(scheduledPosts\.id, ids\)\)/, 'post-slides: the post UPDATE covers every id');
+    assert.match(writer, /inArray\(scheduledPostAssets\.scheduledPostId, ids\)/, 'post-slides: the junction rows too');
 });
 
 // ── A single-media picker SWAPS; it never appends ───────────────────────────────────────────────
