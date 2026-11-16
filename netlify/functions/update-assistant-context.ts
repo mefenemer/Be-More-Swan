@@ -16,6 +16,7 @@ import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles'
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { normaliseAssistantColor } from '../../src/config/assistant-colors';
 import { INSPO_TOPIC_CONFIG_KEY } from '../../src/utils/inspo-topics';
+import { TREND_ANGLE_CONFIG_KEY } from '../../src/utils/trend-angles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { applySetupPatch } from '../../src/utils/chat-setup-field';
 
@@ -214,6 +215,18 @@ export default withLambda(async (event) => {
                 updatePayload.configuration = {
                     ...updatePayload.configuration,
                     [INSPO_TOPIC_CONFIG_KEY]: existingConfig[INSPO_TOPIC_CONFIG_KEY],
+                };
+            }
+            // And the timely-angles setting (src/utils/trend-angles.ts), written only by set-trend-angles.ts:
+            // dropping it would turn a user's "Never" back to the default.
+            if (
+                Object.prototype.hasOwnProperty.call(existingConfig, TREND_ANGLE_CONFIG_KEY)
+                && updatePayload.configuration
+                && !Object.prototype.hasOwnProperty.call(updatePayload.configuration, TREND_ANGLE_CONFIG_KEY)
+            ) {
+                updatePayload.configuration = {
+                    ...updatePayload.configuration,
+                    [TREND_ANGLE_CONFIG_KEY]: existingConfig[TREND_ANGLE_CONFIG_KEY],
                 };
             }
             await tx.update(aiAssistants)

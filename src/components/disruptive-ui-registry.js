@@ -6502,6 +6502,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     draft_horizon: { head: 'Generate posts ahead', button: 'Save', busy: 'Saving…' },
     review_alerts: { head: 'Review alerts', button: 'Save', busy: 'Saving…' },
     content_suggestions: { head: 'Autonomous Content Suggestions', button: 'Save', busy: 'Saving…' },
+    trend_angles: { head: 'Timely angles from search trends', button: 'Save', busy: 'Saving…' },
   };
 
   function renderAssistantSettingsProposalCard(ui, esc) {
@@ -6537,7 +6538,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         bubbles: true,
         detail: {
           setting: ui.setting, assistantId,
-          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null,
+          days: ui.days ?? null, value: ui.value ?? null, enabled: ui.enabled ?? null, monthlyCap: ui.monthlyCap ?? null, frequency: ui.frequency ?? null,
           respond({ ok, message, error }) {
             if (ok) { say(message || 'Done.'); return; }
             setBusy(false);
@@ -6843,7 +6844,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // Built by src/utils/chat-search-terms-card.ts. The click POSTs to search-trends.ts — the same action as
   // Business Information ▸ What People Search (docs/google-trends-plan.md Phase 2).
   function renderSearchTermsCard(ui, esc) {
-    const actions = ['add', 'approve', 'approve_all', 'remove', 'suggest'];
+    const actions = ['add', 'approve', 'approve_all', 'remove', 'suggest', 'lookup'];
     const action = actions.indexOf(ui.action) >= 0 ? ui.action : 'add';
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
     const term = `“${esc(String(ui.term || ''))}”`;
@@ -6852,8 +6853,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       : action === 'approve' ? `Approve ${term}${where} — tracking starts and its first data arrives within a day.`
       : action === 'approve_all' ? `Approve all ${Number(ui.count) || 0} suggested search terms.`
       : action === 'remove' ? `Stop tracking ${term}${where}.`
+      : action === 'lookup' ? `Check ${term}${where} on Google Trends now, without adding it to your list.`
       : 'Suggest search terms from your business details. They’re saved as suggestions for you to approve.';
-    const label = { add: 'Track it', approve: 'Approve', approve_all: 'Approve all', remove: 'Stop tracking', suggest: 'Suggest terms' }[action];
+    const label = { add: 'Track it', approve: 'Approve', approve_all: 'Approve all', remove: 'Stop tracking', suggest: 'Suggest terms', lookup: 'Look it up' }[action];
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
@@ -6873,7 +6875,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (!e.target.closest('[data-st-go]')) return;
       setBusy(true);
       say(action === 'suggest' ? 'Thinking…' : 'Saving…');
-      const body = action === 'add' ? { action, term: ui.term, region: ui.region || undefined }
+      const body = action === 'add' || action === 'lookup' ? { action, term: ui.term, region: ui.region || undefined }
         : action === 'approve' || action === 'remove' ? { action, termId: ui.termId }
         : { action };
       try {
@@ -6884,7 +6886,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         if (!res.ok) throw new Error(data.error || 'That didn’t work — please try again.');
         say(action === 'suggest'
           ? (data.added && data.added.length ? `Suggested: ${data.added.join(', ')}. Approve them in Business Information ▸ What People Search.` : 'Nothing new to suggest.')
-          : (data.message || 'Done.'));
+          : action === 'lookup'
+            ? (data.deferred ? (data.message || 'Added as a suggestion.') : (data.summary ? `${data.summary} (Relative interest from Google Trends — never a number of searches.)` : 'No data came back for that term.'))
+            : (data.message || 'Done.'));
       } catch (err) {
         setBusy(false);
         say(err && err.message ? err.message : 'That didn’t work — please try again.', 'error');

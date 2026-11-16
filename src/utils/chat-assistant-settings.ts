@@ -32,11 +32,12 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { MAX_HORIZON_DAYS, MIN_HORIZON_DAYS } from '../config/posting-cadence';
+import { isTrendAngleFrequency, readTrendAngleFrequency, TREND_ANGLE_LABEL, type TrendAngleFrequency } from './trend-angles';
 
 type Db = ReturnType<typeof getDb>;
 
 export const ASSISTANT_SETTINGS_PROPOSAL_TYPE = 'assistant_settings_proposal';
-export const ASSISTANT_SETTINGS = ['pause', 'resume', 'draft_horizon', 'review_alerts', 'content_suggestions'] as const;
+export const ASSISTANT_SETTINGS = ['pause', 'resume', 'draft_horizon', 'review_alerts', 'content_suggestions', 'trend_angles'] as const;
 export type AssistantSetting = typeof ASSISTANT_SETTINGS[number];
 
 /**
@@ -47,11 +48,13 @@ export type AssistantSetting = typeof ASSISTANT_SETTINGS[number];
  *   review_alerts        — Notifications ▸ "Review alerts" (hasReviewCadence).
  *   content_suggestions  — Profile ▸ When and how I post ▸ "Autonomous Content Suggestions"
  *                          (hasContentAutomation).
+ *   trend_angles         — Notifications card's neighbour "Timely angles from search trends"
+ *                          (hasTrendAngles; src/utils/trend-angles.ts, docs/google-trends-plan.md Phase 3).
  */
 export const SETTINGS_BY_ROLE: Readonly<Record<string, readonly AssistantSetting[]>> = {
-    social_media_manager: ['draft_horizon', 'review_alerts', 'content_suggestions'],
+    social_media_manager: ['draft_horizon', 'review_alerts', 'content_suggestions', 'trend_angles'],
     blog_writer: ['draft_horizon'],
-    newsletter_editor: ['review_alerts'],
+    newsletter_editor: ['review_alerts', 'trend_angles'],
 };
 
 export function settingsForRole(roleKey: string | null | undefined): AssistantSetting[] {
@@ -89,6 +92,7 @@ interface SettingsRow {
     reviewNotifPreference: string;
     autonomousMediaEnabled: boolean;
     autonomousMediaMonthlyCap: number;
+    configuration: unknown;
 }
 
 async function readRow(db: Db, organisationId: number, aiAssistantId: number): Promise<SettingsRow | null> {
@@ -100,6 +104,7 @@ async function readRow(db: Db, organisationId: number, aiAssistantId: number): P
         reviewNotifPreference: aiAssistants.reviewNotifPreference,
         autonomousMediaEnabled: aiAssistants.autonomousMediaEnabled,
         autonomousMediaMonthlyCap: aiAssistants.autonomousMediaMonthlyCap,
+        configuration: aiAssistants.configuration,
     })
         .from(aiAssistants)
         .where(and(eq(aiAssistants.id, aiAssistantId), eq(aiAssistants.organisationId, organisationId)))
@@ -110,6 +115,7 @@ async function readRow(db: Db, organisationId: number, aiAssistantId: number): P
 const days = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
 const reviewLabel = (v: string) => REVIEW_ALERT_LABEL[v as ReviewAlert] ?? v;
 const suggestionsWords = (on: boolean, cap: number) => on ? `on, up to ${cap} AI pictures or videos a month` : 'off';
+const angleLabel = (v: TrendAngleFrequency) => TREND_ANGLE_LABEL[v];
 
 // ── Read ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -131,6 +137,9 @@ export async function buildAssistantSettingsSnapshot(
         if (available.includes('content_suggestions')) {
             lines.push(`- "Autonomous Content Suggestions" (Assistant Settings ▸ When and how I post):${suggestionsWords(row.autonomousMediaEnabled, row.autonomousMediaMonthlyCap)} — you draft posts with AI pictures on your own to fill empty slots. It stops when the plan's monthly tasks run out; nothing is ever charged extra.`);
         }
+        if (available.includes('trend_angles')) {
+            lines.push(`- "Timely angles from search trends" (Assistant Settings ▸ Notifications, beside Review alerts): ${angleLabel(readTrendAngleFrequency(row.configuration))} — how often a scheduled ${roleKey === 'newsletter_editor' ? 'email' : 'post'} is given a timely angle from the workspace's tracked search terms (Business Information ▸ What People Search) when one is in season or rising. The choices are Never, Occasionally and Often.`);
+        }
 
         return [
             `YOUR OWN SETTINGS RIGHT NOW (read this turn — the same values the user sees on your page; never guess a value that is not listed):`,
@@ -151,6 +160,7 @@ export function assistantSettingsPromptBlock(roleKey: string | null | undefined)
         available.includes('draft_horizon') ? `{ "type": "assistant_settings_proposal", "setting": "draft_horizon", "days": <${MIN_HORIZON_DAYS}–${MAX_HORIZON_DAYS}> }` : '',
         available.includes('review_alerts') ? '{ "type": "assistant_settings_proposal", "setting": "review_alerts", "value": "immediate" | "red_urgency_only" | "daily_digest" }' : '',
         available.includes('content_suggestions') ? '{ "type": "assistant_settings_proposal", "setting": "content_suggestions", "enabled": true | false, "monthlyCap": <number, or omit to keep it> }' : '',
+        available.includes('trend_angles') ? '{ "type": "assistant_settings_proposal", "setting": "trend_angles", "frequency": "never" | "occasionally" | "often" }' : '',
     ].filter(Boolean);
     return `CHANGING YOUR OWN SETTINGS — when the user asks you to change one of the settings listed under YOUR OWN SETTINGS, put this in "uiElement" instead of anything else (one change per reply):
 ${shapes.join('\n')}
@@ -165,6 +175,8 @@ export interface SettingsRequest {
     value: ReviewAlert | null;
     enabled: boolean | null;
     monthlyCap: number | null;
+    /** trend_angles only (left out of every other request). */
+    frequency?: TrendAngleFrequency | null;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -190,6 +202,9 @@ export function settingsProposalFromUiElement(uiElement: unknown): SettingsReque
             if (Number.isFinite(cap) && cap >= 0 && cap <= MAX_MEDIA_CAP) req.monthlyCap = cap;
         }
         if (req.enabled === null && req.monthlyCap === null) return null;
+    } else if (setting === 'trend_angles') {
+        if (!isTrendAngleFrequency(ui.frequency)) return null;
+        req.frequency = ui.frequency;
     }
     return req;
 }
@@ -207,6 +222,7 @@ export interface SettingsCard {
     value: ReviewAlert | null;
     enabled: boolean | null;
     monthlyCap: number | null;
+    frequency: TrendAngleFrequency | null;
     /** Set when the change does not apply; the card says it and offers no button. */
     blocked: string | null;
     settled?: boolean;
@@ -224,6 +240,7 @@ function buildCard(row: SettingsRow, roleKey: string | null | undefined, req: Se
         value: req.value,
         enabled: req.enabled,
         monthlyCap: req.monthlyCap,
+        frequency: req.frequency ?? null,
         blocked: null,
     };
     if (!settingsForRole(roleKey).includes(req.setting)) {
@@ -261,6 +278,13 @@ function buildCard(row: SettingsRow, roleKey: string | null | undefined, req: Se
             card.current = suggestionsWords(row.autonomousMediaEnabled, row.autonomousMediaMonthlyCap);
             card.proposed = suggestionsWords(on, cap);
             if (on === row.autonomousMediaEnabled && cap === row.autonomousMediaMonthlyCap) card.blocked = `Autonomous Content Suggestions are already ${card.current}.`;
+            break;
+        }
+        case 'trend_angles': {
+            const now = readTrendAngleFrequency(row.configuration);
+            card.current = angleLabel(now);
+            card.proposed = angleLabel(req.frequency!);
+            if (req.frequency === now) card.blocked = `Timely angles are already set to ${angleLabel(now)}.`;
             break;
         }
     }

@@ -1044,6 +1044,39 @@ function _gridIsEmpty() {
 }
 
 // ── Master render ─────────────────────────────────────────────────
+// ── Busy-season marker (docs/google-trends-plan.md Phase 3) ──────────────────────────────────────
+// A faint line above the month/week grid naming the workspace's tracked search terms whose busy months
+// (last year, on Google Trends) fall in the period shown — so posts and emails can be planned for them.
+// Read once per page load from search-trends.ts (approved terms with data only). Never blocks a paint.
+let _seasonTerms = null;   // null = not loaded; [] = none
+function _loadSeasons() {
+    if (_seasonTerms !== null) return;
+    _seasonTerms = [];
+    fetch('/.netlify/functions/search-trends', { credentials: 'same-origin' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+            _seasonTerms = ((d && d.trends) || [])
+                .filter((t) => t.approved && t.status === 'ok' && Array.isArray(t.peakMonths) && t.peakMonths.length)
+                .map((t) => ({ term: String(t.term), peakMonths: t.peakMonths }));
+            if (_seasonTerms.length) _render();
+        })
+        .catch(() => { /* no marker; the calendar is unaffected */ });
+}
+function _seasonLine() {
+    _loadSeasons();
+    if (_view === 'list' || !_seasonTerms || !_seasonTerms.length) return '';
+    const months = new Set();
+    if (_view === 'month') months.add(_anchor.getMonth() + 1);
+    else {
+        const ws = _weekStart(_anchor);
+        const we = new Date(ws); we.setDate(we.getDate() + 6);
+        months.add(ws.getMonth() + 1); months.add(we.getMonth() + 1);
+    }
+    const terms = _seasonTerms.filter((t) => t.peakMonths.some((m) => months.has(m))).map((t) => t.term);
+    if (!terms.length) return '';
+    return `<p class="mx-4 mt-2 text-xs text-gray-500" data-cal-season>Busy season for: ${terms.slice(0, 4).map(_escHtml).join(', ')}${terms.length > 4 ? ` and ${terms.length - 4} more` : ''} <span class="text-gray-400">· people searched most around now last year (Google Trends)</span></p>`;
+}
+
 function _render() {
     // Chips are about to be torn down and rebuilt — drop any open hover preview
     // so it doesn't linger detached from its (now-removed) anchor chip.
@@ -1100,7 +1133,7 @@ function _render() {
            </div>`;
         })()
         : '';
-    main.innerHTML = banner + (_loading ? `<div class="opacity-60">${body}</div>` : body);
+    main.innerHTML = banner + _seasonLine() + (_loading ? `<div class="opacity-60">${body}</div>` : body);
     // Fingers can't drag here (HTML drag and drop is mouse-only), so on a touch screen every chip that
     // could be dragged also gets the List view's "Move…" button.
     if (_view !== 'list' && window.matchMedia && window.matchMedia('(hover: none)').matches) {

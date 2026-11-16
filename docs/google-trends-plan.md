@@ -272,3 +272,28 @@ trial is left.
   phone) against a stubbed API.
 - **Phase 3 (not built):** Social and Email timely angles, calendar markers, and the on-demand chat look-up with a
   fair-use cap (§10 Q5).
+
+**Phase 3 built (2026-11-16, branch `feat/trends-social-email`).** Social Media and Email Marketing. No new tables.
+- **Timely angles:** `src/utils/trend-angles.ts`.
+  - On a share of scheduled slots, an approved term is offered as an *optional angle*. Shares: never 0,
+    occasionally 1/5 (the default), often 1/3. The slot is hash-picked with no stored state, salted apart from
+    Inspo.
+  - A term qualifies when its busy months are now or next month, or it is rising.
+  - The post keeps its subject and pillar, and related searches are fenced as data.
+  - Social: `process-content-jobs.ts`, after Inspo. An Inspo slot or a user's own brief takes priority.
+  - Email: the automatic issue notes in `draft-newsletter-issues.ts`, keyed by UTC day.
+- **The setting, on the page and in chat:**
+  - Page: Profile ▸ Notifications ▸ "Timely angles from search trends" (`assistant-detail.html`, `assistants.js`).
+    It saves through `set-trend-angles.ts` (jsonb merge; viewers can't change it).
+  - Chat: the settings card's new `trend_angles` setting (`chat-assistant-settings.ts`, `chat-session.js`).
+  - `update-assistant-context.ts` keeps the key when other settings are saved.
+- **Calendar:** month and week views show a faint "Busy season for…" line (`calendar.js` `_seasonLine`), from
+  approved terms that have data.
+- **Look-up:** the `search_terms` card's `lookup` action (`search-trends.ts`).
+  - It reuses a shared row fetched this week; otherwise it makes one DataForSEO Live call (`dataforseo-trends-live`,
+    logged to the workspace), filters the result and caches it.
+  - It runs under the new fair-use kind `trends`: `fair_use_trends_lookups_per_day`, default 10.
+  - Over the cap, or with no provider, the term is saved as a suggestion instead.
+- **Chat:** Social and Email now get the `<search_trends>` block and card as well.
+- **Help:** `db/z-search-trends-help-phase3-2026-11-16.sql` replaces the article body.
+- **Tests:** `tests/search-trends-phase3.test.ts`.

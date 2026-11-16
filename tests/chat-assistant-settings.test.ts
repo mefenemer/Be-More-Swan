@@ -16,6 +16,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { TREND_ANGLE_ROLES } from '../src/utils/trend-angles';
 import {
     SETTINGS_BY_ROLE, assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, refreshSettingsCards,
     resolveSettingsProposal, settingsForRole, settingsProposalFromUiElement,
@@ -94,6 +95,8 @@ async function main() {
                 ...(m.hasPostingSchedule !== false && m.hasScheduleCard !== false ? ['draft_horizon'] : []),
                 ...(m.hasReviewCadence !== false ? ['review_alerts'] : []),
                 ...(m.hasContentAutomation !== false ? ['content_suggestions'] : []),
+                // Notifications ▸ "Timely angles from search trends", shown by role (assistants.js _initTrendAngles).
+                ...(TREND_ANGLE_ROLES.includes(roleKey) ? ['trend_angles'] : []),
             ];
             assert.deepStrictEqual([...(SETTINGS_BY_ROLE[roleKey] ?? [])], expected, `${roleKey} shows ${expected.join(', ') || 'none'} on its page`);
         }

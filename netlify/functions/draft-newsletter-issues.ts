@@ -27,6 +27,7 @@ import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { capacityMemo, recordCompletedWork } from '../../src/utils/work-metering';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { pickTrendAngle } from '../../src/utils/trend-angles';
 
 /** Statuses that mean "a human still owes this issue a decision". */
 const AWAITING_HUMAN = ['draft', 'pending_approval', 'in_review'];
@@ -49,6 +50,7 @@ export default withLambda(async () => {
                 userId: aiAssistants.userId,
                 name: aiAssistants.name,
                 onboardingContext: aiAssistants.onboardingContext,
+                configuration: aiAssistants.configuration,
             })
             .from(aiAssistants)
             .where(and(
@@ -139,6 +141,12 @@ export default withLambda(async () => {
 
             // generateIssueBody frames it as "This email is about: …" (newsletter-generate.ts).
             const topic = lead ? topicLine(lead) : '';
+            // A TIMELY ANGLE from the tracked search terms (src/utils/trend-angles.ts, docs/google-trends-plan.md
+            // Phase 3), on a share of issues: an optional angle on the topic above, never a different subject.
+            // Keyed by the UTC day, so a re-run on the same day makes the same choice.
+            const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+            const trendAngle = await pickTrendAngle(db, { organisationId: a.organisationId, assistantId: a.id, slot: day, configuration: a.configuration, artifact: 'email' });
+            if (trendAngle) console.log(`[draft-newsletter-issues] issue ${issue.id} offered timely angle "${trendAngle.term}" (${trendAngle.why})`);
             await generateIssueBody(db, {
                 issueId: issue.id,
                 organisationId: a.organisationId,
@@ -147,6 +155,7 @@ export default withLambda(async () => {
                 notes: [
                     typeof actx.newsletterAudience === 'string' && actx.newsletterAudience ? `Who this is for: ${actx.newsletterAudience}` : '',
                     others.length ? `It may also briefly mention: ${others.join(', ')}.` : '',
+                    trendAngle ? trendAngle.brief : '',
                 ].filter(Boolean).join('\n'),
             });
 

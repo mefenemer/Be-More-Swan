@@ -1359,6 +1359,10 @@
           changed.autonomousMediaEnabled = r.autonomousMediaEnabled;
           changed.autonomousMediaMonthlyCap = r.autonomousMediaMonthlyCap;
           message = r.autonomousMediaEnabled ? `Saved — on, up to ${r.autonomousMediaMonthlyCap} a month.` : 'Saved — switched off.';
+        } else if (d.setting === 'trend_angles') {
+          await call('set-trend-angles', 'PATCH', { assistantId: id, frequency: d.frequency });
+          changed.trendAngleFrequency = d.frequency;
+          message = d.frequency === 'never' ? 'Saved — no timely angles from search trends.' : `Saved — timely angles ${d.frequency === 'often' ? 'often' : 'now and then'}.`;
         } else {
           throw new Error('Unknown setting.');
         }

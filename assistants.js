@@ -5445,6 +5445,50 @@ async function _initAssistantNotifPrefs() {
     }
 
     _initReviewCadence();
+    _initTrendAngles();
+}
+
+// Timely angles from search trends (docs/google-trends-plan.md Phase 3): never / occasionally / often,
+// stored in ai_assistants.configuration.trendAngleFrequency, saved via PATCH set-trend-angles — the same
+// endpoint as the chat's settings card. Social Media and Email Marketing only.
+function _initTrendAngles() {
+    const card = document.getElementById('module-trend-angles');
+    const wrap = document.getElementById('trend-angle-options');
+    if (!card || !wrap) return;
+    const roles = ['social_media_manager', 'newsletter_editor'];
+    card.classList.toggle('hidden', !roles.includes(window._assistantRoleType || ''));
+    const current = window._trendAngleFrequency || 'occasionally';
+    wrap.querySelectorAll('input[name="trend-angle"]').forEach(radio => {
+        radio.checked = radio.value === current;
+        if (radio.dataset.wired) return;
+        radio.dataset.wired = '1';
+        radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            const previous = window._trendAngleFrequency || 'occasionally';
+            const statusEl = document.getElementById('trend-angle-status');
+            const show = (text, ok) => {
+                if (!statusEl) return;
+                statusEl.textContent = text;
+                statusEl.classList.remove('hidden', ok ? 'text-red-600' : 'text-emerald-600');
+                statusEl.classList.add(ok ? 'text-emerald-600' : 'text-red-600');
+                if (ok) setTimeout(() => statusEl.classList.add('hidden'), 2500);
+            };
+            try {
+                const r = await fetch('/.netlify/functions/set-trend-angles', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assistantId: Number(window._currentAssistantId), frequency: radio.value }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || 'save failed');
+                window._trendAngleFrequency = radio.value;
+                show('✓ Saved', true);
+            } catch (err) {
+                wrap.querySelectorAll('input[name="trend-angle"]').forEach(rb => { rb.checked = rb.value === previous; });
+                show(err && err.message && err.message !== 'save failed' ? err.message : 'Could not save — please try again.', false);
+            }
+        });
+    });
 }
 
 // Review-alert cadence for this assistant (aiAssistants.reviewNotifPreference):
@@ -9202,6 +9246,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // Review-alert cadence for the Profile › Notifications panel (saved via
         // set-review-notif-prefs; stashed here so the panel doesn't refetch context).
         window._reviewNotifPreference = currentData.reviewNotifPreference || 'immediate';
+        // Timely angles from search trends (Phase 3, src/utils/trend-angles.ts): the role and current value.
+        window._assistantRoleType = (currentData.configuration && currentData.configuration.type) || '';
+        window._trendAngleFrequency = (currentData.configuration && currentData.configuration.trendAngleFrequency) || 'occasionally';
 
         // Hero header
         const nameInput = document.getElementById('detail-name-input');
@@ -13900,6 +13947,10 @@ document.addEventListener('assistant:settingsChanged', (e) => {
     if (d.reviewNotifPreference) {
         window._reviewNotifPreference = d.reviewNotifPreference;
         document.querySelectorAll('input[name="review-cadence"]').forEach((rb) => { rb.checked = rb.value === d.reviewNotifPreference; });
+    }
+    if (d.trendAngleFrequency) {
+        window._trendAngleFrequency = d.trendAngleFrequency;
+        document.querySelectorAll('input[name="trend-angle"]').forEach((rb) => { rb.checked = rb.value === d.trendAngleFrequency; });
     }
     if (typeof d.autonomousMediaEnabled === 'boolean' && Number(_goalsAssistantId) === id) {
         _autonomousMediaEnabled = d.autonomousMediaEnabled;

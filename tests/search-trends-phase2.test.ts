@@ -149,7 +149,7 @@ test('wiring: GUI tab, Blog setup panel, chat block + card on both routes, ideat
     assert.match(orch, /const searchTrendsBlock = await buildSearchTrendsBlock\(db, orgId, assistantRow\.roleKey\);/);
     assert.match(orch, /if \(searchTermsCard\) uiElement = searchTermsCard;/);
     assert.ok(orch.indexOf('if (searchTermsCard) uiElement = searchTermsCard;') > orch.indexOf('if (supportCard) uiElement = supportCard;'), 'put back after the routes rebuild their cards');
-    assert.match(read('src/utils/chat-search-trends.ts'), /SEARCH_TREND_ROLES: readonly string\[\] = \['blog_writer', 'business_mentor'\]/);
+    assert.match(read('src/utils/chat-search-trends.ts'), /SEARCH_TREND_ROLES: readonly string\[\] = \['blog_writer', 'business_mentor', 'social_media_manager', 'newsletter_editor'\]/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /register\('search_terms', renderSearchTermsCard\)/);
     assert.match(read('src/utils/blog-topic-ideation.ts'), /const trendsBlock = guidance \|\| inspoTopic \? null : await loadOrgTrends/);
     const fn = read('netlify/functions/search-trends.ts');
