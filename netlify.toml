@@ -1044,6 +1044,12 @@ node_bundler = "esbuild"
 [functions.dispatch-trigger-polls]
   schedule = "25 4 * * *"
 
+[functions.dispatch-lead-watch]
+  schedule = "10 5 * * *"
+
+[functions.dispatch-ch-stream]
+  schedule = "*/30 * * * *"
+
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
 #

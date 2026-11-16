@@ -99,6 +99,7 @@ import {
 import { LEAD_BULK_MAX, leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
 import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '../../src/utils/chat-discussion-action';
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
+import { buildWatchActionsChatBlock, resolveWatchActionProposal, watchActionFromUiElement } from '../../src/utils/chat-watch-action';
 import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
@@ -271,6 +272,9 @@ interface RouteContext {
     /** This Lead Generator's Discussions tab — what it watches, its new threads, and the card that acts
      *  on them. Same routes as leadsSnapshot. src/utils/discussions.ts buildDiscussionsChatBlock. */
     discussionsBlock?: string | null;
+    /** This Lead Generator's Watch list (buying triggers Phase 2): what it watches, the news, and the card
+     *  that changes it. Same routes as leadsSnapshot. src/utils/chat-watch-action.ts. */
+    watchListBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -581,6 +585,7 @@ function leadGeneratorSurfaces(): string {
   Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
 - "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
 - "Discussions" tab — public Reddit threads and LinkedIn posts from the last week where someone is asking for what this business sells, found by a daily scan of the topics the user chose, each with a reply or comment you drafted after reading the thread. Only Reddit and LinkedIn are watched — no other forums. If the user asks for another site, say plainly it only watches Reddit and LinkedIn for now, and that they can request more sites right here in chat (you send the request with the mentor_support_request card when they say yes). You never post: the user presses "Copy reply & open thread", posts it from their own account, then "Mark replied" (or "Dismiss" to drop a thread). The tab's "What to watch" panel sets the topics and which of the two sites, and "Scan now" runs a scan straight away. If the user wants you to post or comment on those sites for them, say plainly that you are built not to — automated or undisclosed self-promotion breaks those sites' rules and UK consumer law — and offer the drafted replies instead.
+- "Watch list" tab — Companies House news on the companies this assistant watches: customers (leads marked won), leads matched to Companies House, and companies the user adds there by name or number. It reports a new director, a director leaving, a new owner or controller, a move of registered office, new borrowing (a charge), and a company going into liquidation, administration or being dissolved (which also stops that lead's follow-ups). Checked for free every few days; one note a day when there is news; nothing is sent to anyone. "Stop watching" / "Watch again" per company, and a switch at the top turns it off.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
@@ -2406,7 +2411,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}${rc.discussionsBlock ? `\n${rc.discussionsBlock}\n` : ''}
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}${rc.discussionsBlock ? `\n${rc.discussionsBlock}\n` : ''}${rc.watchListBlock ? `\n${rc.watchListBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -3473,6 +3478,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const discussionsBlock = route.usesLeadSnapshot
         ? await buildDiscussionsChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Watch list (src/utils/chat-watch-action.ts) — per turn, null before db/z-lead-watch.sql is applied.
+    const watchListBlock = route.usesLeadSnapshot
+        ? await buildWatchActionsChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -3584,6 +3593,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         outreachOfferBlock,
         followUpPlanBlock,
         discussionsBlock,
+        watchListBlock,
         campaignsSnapshot,
         taskCosts: await getTaskCosts(),
         briefsSnapshot,
@@ -4426,6 +4436,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!uiElement) content = !DISCUSSIONS_ENABLED
                 ? 'Watching forums for threads to reply to is switched off for now, so I haven’t set anything up.'
                 : 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
+        }
+        // And its Watch list (src/utils/chat-watch-action.ts); the click calls lead-watch.ts, the tab's endpoint.
+        const watchReq = route === ROUTES.lead_qualifier ? watchActionFromUiElement(uiElement) : null;
+        if (watchReq) {
+            uiElement = await resolveWatchActionProposal(db, orgId, session.aiAssistantId, watchReq);
+            if (!uiElement) content = 'I couldn’t find that company on this assistant’s Watch list, so I haven’t changed anything. Which one do you mean? You can also see them on the "Watch list" tab.';
         }
         const leadActionReq = route === ROUTES.lead_qualifier ? leadActionFromUiElement(uiElement) : null;
         if (leadActionReq) {

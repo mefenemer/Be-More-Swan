@@ -37,7 +37,7 @@ function _assistantRenamed(assistantId, name) {
     window.bmsCachedFetch?.invalidate?.();
     window.ChatPane?.renameAll?.(assistantId, name);
     [window.AssistantDataHub, window.AssistantCampaigns, window.AssistantMentorOverview, window.AssistantMentorPlan, window.MentorCommitments,
-        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantInspo]
+        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantWatchList, window.AssistantInspo]
         .forEach((m) => { try { m?.rename?.(name); } catch (e) { console.warn('[assistant-detail] a tab could not take the new name', e); } });
     document.dispatchEvent(new CustomEvent('assistant:renamed', { detail: { assistantId, name } }));
 }
@@ -1153,6 +1153,7 @@ window._activateMainTab = function(name) {
     if (name === 'signals') window.AssistantSignalInbox?.activate();
     // Discussions likewise — init() already fetched for the new-threads badge.
     if (name === 'discussions') window.AssistantDiscussions?.activate();
+    if (name === 'watchlist') window.AssistantWatchList?.activate();
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
@@ -7728,6 +7729,15 @@ function _applyDashboardRegistry(data) {
     if (discussionsTab) {
         setText('discussions-tab-label', discussionsTab.label || 'Discussions');
         window.AssistantDiscussions?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
+    // Watch list tab — lead roles only (watchListTab: lead_qualifier): Companies House news on customers,
+    // leads and companies added by hand. init() loads eagerly: the week's news count is the tab badge.
+    const watchListTab = cfg.watchListTab;
+    toggle('maintab-btn-watchlist', !!watchListTab);
+    if (watchListTab) {
+        setText('watchlist-tab-label', watchListTab.label || 'Watch list');
+        window.AssistantWatchList?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is

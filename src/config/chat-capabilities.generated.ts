@@ -483,6 +483,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "video_tidy_proposal",
         "visual_brief_edit",
         "visual_brief_proposal",
-        "visual_option_review"
+        "visual_option_review",
+        "watch_action_proposal"
     ]
 };

@@ -122,7 +122,7 @@ export const SYSTEM_PROMPT_SOURCES: Record<string, ChatSource & { marker: string
 export const ROUTE_FLAG_SOURCES: Record<string, ChatSource> = {
     usesKnowledgeBase: { label: 'Knowledge Base search', kind: 'data', sees: 'The Knowledge Base articles that best match the message.', source: 'netlify/functions/chat-orchestrator.ts', applies: (c) => !!c.route?.flags.includes('usesKnowledgeBase') },
     usesInspo: { label: 'Inspo', kind: 'data', sees: 'Its style profile and the closest examples from its Inspo library, so a draft here sounds like an autopilot one.', source: 'src/utils/inspo-profile.ts', applies: (c) => !!c.route?.flags.includes('usesInspo') },
-    usesLeadSnapshot: { label: 'Its leads, outreach and discussions', kind: 'data', sees: 'Lead counts and titles, what its outreach offers, its follow-up plan, and its Discussions threads.', source: 'src/utils/chat-outreach-offer.ts, src/utils/chat-follow-up-plan.ts, src/utils/discussions.ts', applies: (c) => !!c.route?.flags.includes('usesLeadSnapshot'), cards: () => ['outreach_offer', 'follow_up_plan', 'follow_up_preview', 'discussion_action_proposal'] },
+    usesLeadSnapshot: { label: 'Its leads, outreach, discussions and Watch list', kind: 'data', sees: 'Lead counts and titles, what its outreach offers, its follow-up plan, its Discussions threads, and its Watch list with the Companies House news on it.', source: 'src/utils/chat-outreach-offer.ts, src/utils/chat-follow-up-plan.ts, src/utils/discussions.ts, src/utils/chat-watch-action.ts', applies: (c) => !!c.route?.flags.includes('usesLeadSnapshot'), cards: () => ['outreach_offer', 'follow_up_plan', 'follow_up_preview', 'discussion_action_proposal', 'watch_action_proposal'] },
     usesCampaignSnapshot: { label: 'Its campaigns', kind: 'data', sees: 'Its campaigns, open tasks and archived decisions by id, and the saved lead searches.', source: 'src/utils/campaign-plan.ts', applies: (c) => !!c.route?.flags.includes('usesCampaignSnapshot') },
     usesBriefsSnapshot: { label: 'Its briefs', kind: 'data', sees: 'Its visual briefs and the options waiting for a decision, by id.', source: 'src/utils/visual-briefs.ts', applies: (c) => !!c.route?.flags.includes('usesBriefsSnapshot') },
     usesVideosSnapshot: { label: 'Its videos', kind: 'data', sees: 'Its videos by id and state, and guest comments on shared videos.', source: 'src/utils/video-producer.ts', applies: (c) => !!c.route?.flags.includes('usesVideosSnapshot') },
@@ -192,6 +192,7 @@ export const CARD_LABELS: Record<string, string> = {
     design_started: 'A design has started',
     discovery_campaign_proposal: 'Start or change a lead search',
     discussion_action_proposal: 'Act on a Discussions thread',
+    watch_action_proposal: 'Change the Watch list',
     email_action_proposal: 'Approve, schedule or delete an email',
     email_block_add: 'Add a block to the email',
     email_edit: 'Change the subject, preview line or one block of the email',

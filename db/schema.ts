@@ -4180,7 +4180,7 @@ export const sequenceEnrolments = pgTable("sequence_enrolments", {
   index("sequence_enrolments_due_idx").on(t.state, t.nextSendAt),
   index("sequence_enrolments_org_idx").on(t.organisationId, t.createdAt),
   check("sequence_enrolments_state_check", sql`${t.state} IN ('active','completed','halted','cancelled')`),
-  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','do_not_contact','manual','signed_up')`),
+  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','do_not_contact','manual','signed_up','company_closed')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -7255,3 +7255,53 @@ export const contentPillars = pgTable("content_pillars", {
 }, (t) => [
   index("content_pillars_assistant_idx").on(t.assistantId, t.sortOrder),
 ]);
+
+// ── Buying triggers Phase 2: the Lead Generator's Watch list (db/z-lead-watch.sql) ──────────────────
+// Mirror only: src/utils/lead-watch.ts reads and writes these with raw SQL. Declared here so
+// workspace-export.ts includes them and the Mentor data inventory test sees them.
+export const leadWatch = pgTable("lead_watch", {
+  id: bigint({ mode: "number" }).primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "cascade" }),
+  watchKind: text("watch_kind").notNull(),
+  companyName: text("company_name"),
+  country: text("country").notNull().default('gb'),
+  chNumber: text("ch_number").notNull(),
+  fhrsId: text("fhrs_id"),
+  placeId: text("place_id"),
+  chLastFilingId: text("ch_last_filing_id"),
+  chStatus: text("ch_status"),
+  checksDone: integer("checks_done").notNull().default(0),
+  nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  pausedReason: text("paused_reason"),
+  addedByUserId: integer("added_by_user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [unique("lead_watch_ai_assistant_id_ch_number_key").on(t.aiAssistantId, t.chNumber)]);
+
+export const leadWatchSignals = pgTable("lead_watch_signals", {
+  id: bigint({ mode: "number" }).primaryKey(),
+  watchId: bigint("watch_id", { mode: "number" }).notNull().references(() => leadWatch.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  text: text("text").notNull(),
+  direction: text("direction").notNull(),
+  occurredOn: date("occurred_on").notNull(),
+  ref: text("ref").notNull(),
+  url: text("url"),
+  source: text("source").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  notifiedAt: timestamp("notified_at", { withTimezone: true }),
+}, (t) => [unique("lead_watch_signals_watch_id_ref_key").on(t.watchId, t.ref)]);
+
+export const leadWatchSettings = pgTable("lead_watch_settings", {
+  aiAssistantId: integer("ai_assistant_id").primaryKey().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedByUserId: integer("updated_by_user_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

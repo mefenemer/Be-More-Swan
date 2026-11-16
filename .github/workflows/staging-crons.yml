@@ -125,6 +125,8 @@ jobs:
           # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
           # `run-trigger-poll-dispatch` (24h) starts the buying triggers' daily FSA read (trigger-engine.ts),
           # Admin only. A second run in a day only finds the few premises added since; daily matches production.
+          # `run-lead-watch-dispatch` (24h) starts the Lead Generator Watch list's daily Companies House check
+          # (lead-watch.ts). Idempotent: a company is due only 3–30 days after its last check; one note a day.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
           # a workspace is due only a week after its last read.
           # `run-search-trends-refresh` (1h) is the Google Trends engine's tick (search-trends.ts): collects
@@ -175,6 +177,7 @@ jobs:
           run-mentor-morning-dispatch 3600  120
           run-discussion-scan-dispatch 21600 120
           run-trigger-poll-dispatch 86400  120
+          run-lead-watch-dispatch   86400  120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-partner-sweep         86400   120

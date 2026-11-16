@@ -1707,6 +1707,32 @@
       }
     }
 
+    // Watch list cards → lead-watch.ts, the same actions as the Watch list tab's buttons. Dispatches
+    // `watchlist:changed` so the tab behind the chat reloads. Nothing is sent to anyone.
+    async function onWatchAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const aid = d.assistantId || assistantId;
+      const body = d.action === 'add' ? { action: 'add', number: d.number }
+        : d.action === 'remove' ? { action: 'remove', id: d.watchId }
+        : d.action === 'resume' ? { action: 'resume', id: d.watchId }
+        : d.action === 'set_enabled' ? { action: 'set_enabled', enabled: d.enabled === true }
+        : null;
+      if (!body) { respond({ ok: false, error: 'Unknown action.' }); return; }
+      try {
+        const res = await fetch('/.netlify/functions/lead-watch', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ assistantId: aid, ...body }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        respond({ ok: true, message: data.message });
+        document.dispatchEvent(new CustomEvent('watchlist:changed', { detail: { assistantId: aid } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -2672,6 +2698,7 @@
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('discussion:action', onDiscussionAction);
+    container.addEventListener('watch:action', onWatchAction);
     container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('rule:change', onRuleChange);
     container.addEventListener('goal:change', onGoalChange);
@@ -2801,6 +2828,7 @@
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('discussion:action', onDiscussionAction);
+        container.removeEventListener('watch:action', onWatchAction);
         container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('rule:change', onRuleChange);
         container.removeEventListener('goal:change', onGoalChange);

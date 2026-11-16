@@ -11021,6 +11021,14 @@ function btRender(d) {
   if ((r.bulkSkipped || []).length) status.push(`Bulk re-imports ignored: ${_btEsc(r.bulkSkipped.map((b) => `${b.area} (${b.count})`).join(', '))}.`);
   if (!s.companiesHouseConfigured) status.push('<span class="text-amber-700">COMPANIES_HOUSE_API_KEY is not set, so no premises are matched to a company.</span>');
   else if (r.companyChecks) status.push(`Companies House: ${r.companyChecks.checked} checked last run, ${r.companyChecks.hits} matched${r.companyChecks.stoppedBy ? ` (stopped: ${_btEsc(r.companyChecks.stoppedBy)})` : ''}.`);
+  // Phase 2: the Lead Generator Watch list (Companies House news on watched companies), all workspaces.
+  const w = d.watch;
+  if (w) {
+    const wr = w.lastResult || {};
+    status.push(`<br>Watch list: <strong>${Number(w.watching || 0).toLocaleString('en-GB')}</strong> companies watched by ${w.assistants || 0} Lead Generators; ${w.signals7d || 0} news items in 7 days; last daily check ${_btEsc(_btWhen(w.lastRunAt))}${wr.check ? ` (${wr.check.checked} checked, ${wr.check.signals} news, ${wr.check.errors} errors)` : ''}${wr.ok === false ? ' <span class="font-bold text-red-600">(failed)</span>' : ''}. Companies House stream: ${w.streamConfigured ? (w.streamOkAt ? `last read ${_btEsc(_btWhen(w.streamOkAt))}` : 'not read yet') : 'off (COMPANIES_HOUSE_STREAM_KEY not set; the daily check covers it)'}.`);
+  } else {
+    status.push('<br><span class="text-amber-700">Watch list not set up: db/z-lead-watch.sql has not been applied.</span>');
+  }
   document.getElementById('bt-status').innerHTML = status.join(' ');
 
   const fill = (id, items, current, allLabel) => {

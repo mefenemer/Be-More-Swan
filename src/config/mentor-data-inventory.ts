@@ -51,6 +51,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its morning summaries (docs/morning-summary-plan.md): the newest sent in the last two days', ['mentor_mornings'], 'Its morning summaries'),
     ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
+    ...group('on_request', 'The Lead Generator\'s Watch list: companies watched on Companies House and the public register news found on them (buying triggers Phase 2)', [
+        'lead_watch', 'lead_watch_signals', 'lead_watch_settings',
+    ]),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars

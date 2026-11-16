@@ -233,6 +233,9 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // lapse, one row per assistant per run — the same shape as the search summary above, and
             // muted on push for the same reason: it is a weekly-ish nudge, not an interruption.
             'leads_expiring_soon',
+            // The Watch list's daily note (lead-watch-effects.ts). A summary, like the two above.
+            // ⚠️ scope:'assistant': the call site passes metadata.assistantId.
+            'watch_list_news',
             // A company excluded from every search by an erasure request (lead-generation.ts
             // `erase_prospect`). Here rather than in `approvals` for the same reason as the two
             // above: nothing is parked on anyone's answer — the block is already taken and it was
