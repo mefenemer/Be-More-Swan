@@ -28,6 +28,7 @@ import { countCaptionItems, fixCaptionListCount, fixListCount } from '../../src/
 import { loadDraftPillars, pillarPromptText } from '../../src/utils/content-pillars-store';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
+import { pickTrendAngle } from '../../src/utils/trend-angles';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
@@ -517,6 +518,20 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             })
             : null;
         if (inspoTopic) console.log(`[process-content-jobs] job ${job.job_id} built around inspo item ${inspoTopic.itemId}`);
+        // A TIMELY ANGLE from the workspace's tracked search terms (src/utils/trend-angles.ts,
+        // docs/google-trends-plan.md Phase 3): on a share of scheduled slots, one approved term whose busy
+        // months are now or next month (or that is rising) is offered as an optional angle. An angle, not a
+        // subject: the pillar rotation below still applies. An inspo slot or a user's own brief outranks it.
+        const trendAngle = (!job.context_prompt && !inspoTopic && job.trigger_type === 'scheduled')
+            ? await pickTrendAngle(db, {
+                organisationId: job.organisation_id,
+                assistantId: job.assistant_id,
+                slot: job.target_publish_date,
+                configuration: asstCfg?.configuration ?? null,
+                artifact: 'post',
+            })
+            : null;
+        if (trendAngle) console.log(`[process-content-jobs] job ${job.job_id} offered timely angle "${trendAngle.term}" (${trendAngle.why})`);
 
         // An inspo slot sets its own subject, so it is not also pinned to the rotated pillar (the
         // "Do NOT drift" line would fight the brief); it is still categorised under one pillar.
@@ -757,6 +772,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         } else if (inspoTopic) {
             messages.push({ role: 'assistant', content: '{"status":"understood"}' });
             messages.push({ role: 'user', content: inspoTopic.brief });
+        } else if (trendAngle) {
+            messages.push({ role: 'assistant', content: '{"status":"understood"}' });
+            messages.push({ role: 'user', content: trendAngle.brief });
         }
 
         // Rendered by the SHARED renderer (src/utils/blueprint-prompt.ts), which owns what is

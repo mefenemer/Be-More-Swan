@@ -168,6 +168,16 @@ export function toOrgTrend(r: {
     };
 }
 
+/** One shared term as a trend (the on-demand look-up's answer). Not tied to a workspace's list. */
+export async function loadSharedTrend(db: Db, termId: number, now: Date = new Date()): Promise<OrgTrend | null> {
+    const [r] = await db.select({
+        termId: searchTrendTerms.id, term: searchTrendTerms.term, locationName: searchTrendTerms.locationName,
+        status: searchTrendTerms.status, fetchedAt: searchTrendTerms.fetchedAt, series: searchTrendTerms.series,
+        peakMonths: searchTrendTerms.peakMonths, topQueries: searchTrendTerms.topQueries, risingQueries: searchTrendTerms.risingQueries,
+    }).from(searchTrendTerms).where(eq(searchTrendTerms.id, termId)).limit(1);
+    return r ? toOrgTrend({ ...r, source: 'lookup', approvedAt: null }, now) : null;
+}
+
 /** One tracked term for a workspace (approve/remove checks). */
 export async function findOrgTrend(db: Db, orgId: number, termId: number): Promise<{ approved: boolean } | null> {
     const [row] = await db.select({ approvedAt: orgTrendTerms.approvedAt }).from(orgTrendTerms)

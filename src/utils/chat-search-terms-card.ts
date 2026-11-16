@@ -15,7 +15,7 @@ import { loadOrgTrends, type OrgTrend } from './search-trends-read';
 type Db = ReturnType<typeof getDb>;
 
 export const SEARCH_TERMS_CARD_TYPE = 'search_terms';
-export type SearchTermsAction = 'add' | 'approve' | 'approve_all' | 'remove' | 'suggest';
+export type SearchTermsAction = 'add' | 'approve' | 'approve_all' | 'remove' | 'suggest' | 'lookup';
 
 export interface SearchTermsCard {
     type: typeof SEARCH_TERMS_CARD_TYPE;
@@ -32,8 +32,8 @@ export interface SearchTermsCard {
 /** The card's instructions, appended to the search trends block on the routes that offer it. Pure. */
 export function searchTermsCardInstructions(): string {
     return `CHANGING THE TRACKED SEARCH TERMS — when the user asks to track, approve or stop tracking a search term, or asks you to suggest some, put this in "uiElement" instead of anything else:
-{ "type": "search_terms", "action": "add" | "approve" | "approve_all" | "remove" | "suggest", "term": "boiler service", "region": "GB" }
-"term" for add/approve/remove (as listed above for approve/remove; 1–3 broad words customers type for add — never their business name or a town). "region" only for add, one of ${Object.keys(COUNTRY_LOCATION).join(', ')} (leave it out for their own country). Up to ${MAX_TRACKED_PER_ORG} terms. You never change the list yourself: the user confirms on the card, and only that click does it. So never say a term HAS been added or removed — say the card is there to confirm.`;
+{ "type": "search_terms", "action": "add" | "approve" | "approve_all" | "remove" | "suggest" | "lookup", "term": "boiler service", "region": "GB" }
+"lookup" = check ONE term on Google Trends right now without tracking it, when they ask about a term that is not on their list (free, up to 10 a day; the card shows the answer). "term" for add/approve/remove/lookup (as listed above for approve/remove; 1–3 broad words customers type for add/lookup — never their business name or a town). "region" only for add/lookup, one of ${Object.keys(COUNTRY_LOCATION).join(', ')} (leave it out for their own country). Up to ${MAX_TRACKED_PER_ORG} terms. You never change the list yourself: the user confirms on the card, and only that click does it. So never say a term HAS been added or removed — say the card is there to confirm.`;
 }
 
 /** Shape check and the card, against the stored list. Pure. Null when it isn't this card. */
@@ -41,7 +41,7 @@ export function searchTermsCardFrom(uiElement: unknown, trends: OrgTrend[]): Sea
     if (!uiElement || typeof uiElement !== 'object') return null;
     const ui = uiElement as Record<string, unknown>;
     if (ui.type !== SEARCH_TERMS_CARD_TYPE) return null;
-    const actions: SearchTermsAction[] = ['add', 'approve', 'approve_all', 'remove', 'suggest'];
+    const actions: SearchTermsAction[] = ['add', 'approve', 'approve_all', 'remove', 'suggest', 'lookup'];
     const action = actions.includes(ui.action as SearchTermsAction) ? ui.action as SearchTermsAction : null;
     const card: SearchTermsCard = { type: SEARCH_TERMS_CARD_TYPE, action: action ?? 'add', term: null, termId: null, region: null, regionName: null, count: null, blocked: null };
     if (!action) { card.blocked = 'I can add, approve or remove a search term, or suggest some — nothing else.'; return card; }
@@ -58,6 +58,15 @@ export function searchTermsCardFrom(uiElement: unknown, trends: OrgTrend[]): Sea
     const term = normaliseTerm(ui.term);
     card.term = term;
     if (!term) { card.blocked = 'That search term is empty or too long.'; return card; }
+    if (action === 'lookup') {
+        const iso = typeof ui.region === 'string' ? ui.region.trim().toUpperCase() : '';
+        const region = COUNTRY_LOCATION[iso === 'UK' ? 'GB' : iso];
+        card.region = region ? (iso === 'UK' ? 'GB' : iso) : null;
+        card.regionName = region?.name ?? null;
+        const tracked = trends.find((t) => t.term === term && t.approved && t.status !== 'pending');
+        if (tracked) card.blocked = `“${term}” is already tracked — its data is in the list above, no need to look it up.`;
+        return card;
+    }
     if (action === 'add') {
         const iso = typeof ui.region === 'string' ? ui.region.trim().toUpperCase() : '';
         const region = COUNTRY_LOCATION[iso === 'UK' ? 'GB' : iso];
