@@ -7487,7 +7487,11 @@ function _applyDashboardRegistry(data) {
                 // The same pop-up as the header Chat button — this was a full page load, so the two
                 // doors into one conversation behaved differently (review, 2026-10-22).
                 paBtn.onclick = () => {
-                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id });
+                    // A button worded as a question asks it (the Shopkeeper). Where the chat is docked beside
+                    // this tab, ask it there: a pop-up over the same conversation would be a second door.
+                    const dock = pa.send && _tabChat?.dock?.connected?.() && _tabChat.tabs.includes('datahub') ? _tabChat.dock : null;
+                    if (dock) { dock.ask(pa.send); return; }
+                    if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.id, ...(pa.send ? { send: pa.send } : {}) });
                     else window.location.href = `assistant-chat.html?assistantId=${data.id}`;
                 };
             } else {
@@ -11344,6 +11348,11 @@ function _setMetricsEmptyState(mode, info) {
         if (title) title.textContent = 'No blog activity to measure yet';
         if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Write the first one or review what is waiting on the Blogs tab.';
         if (note) note.textContent = '';
+    } else if (mode === 'shop-no-data') {
+        // The Shopkeeper's cards fill from orders, so what is missing is a first order.
+        if (title) title.textContent = 'No orders yet';
+        if (body)  body.textContent  = 'These fill in once someone buys through your Buy buttons. Get your shop ready to sell on the Shop tab: connect Stripe and fill in your Delivery & returns details.';
+        if (note) note.textContent = '';
     } else if (mode === 'records-no-data') {
         // Not "nothing published" — this assistant publishes nothing. What is missing is its work.
         if (title) title.textContent = 'Nothing to count yet';
@@ -11916,7 +11925,7 @@ async function _loadShopMetrics(assistantId) {
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
         const s = data.stats;
-        if (!s || !(data.orders || []).length) { _setMetricsEmptyState('records-no-data'); return; }
+        if (!s || !(data.orders || []).length) { _setMetricsEmptyState('shop-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
         if (note) note.textContent = 'Last 30 days · your whole shop';
