@@ -14,11 +14,16 @@
 // and must still be offered by that section on the PUBLISHED site; if its name or price changed since
 // the page was drawn, the visitor is sent back rather than charged a surprise.
 //
+// ── Shop settings (Phase 0, FR#35) ──────────────────────────────────────────────────────────────
+// Buy buttons show only once the Delivery & returns details are filled in (shop-settings.ts
+// shopReady): a buyer sees who they buy from and their right to cancel before paying, and gets it
+// again by email afterwards (sendBuyerConfirmation). Checkout refuses too, not just the drawing.
+//
 // ── Orders ──────────────────────────────────────────────────────────────────────────────────────
 // Recorded from the Connect webhook (stripe-connect-webhook.ts → recordPaidCheckout), not from the
 // success page: a visitor who closes the tab after paying has still paid.
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
@@ -32,6 +37,7 @@ import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
+import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -47,10 +53,12 @@ export async function connectAccountFor(db: Db, orgId: number): Promise<ConnectR
     return row ?? null;
 }
 
-/** Whether this workspace's site may show Buy buttons right now. */
+/** Whether this workspace's site may show Buy buttons right now: Stripe can take payments AND the
+ *  Delivery & returns details are filled in (shop-settings.ts). */
 export async function canSell(db: Db, orgId: number): Promise<boolean> {
     const row = await connectAccountFor(db, orgId).catch(() => null);
-    return !!row?.chargesEnabled;
+    if (!row?.chargesEnabled) return false;
+    return shopReady(await loadShopSettings(db, orgId));
 }
 
 /** Copy Stripe's flags onto our row. Used on return from onboarding and by account.updated. */
@@ -165,7 +173,7 @@ export interface BuyRequest {
 }
 
 /** The Checkout Session parameters for one product — pure, so the money rules are testable. */
-export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; product: SiteProduct; collectAddress: boolean; backPath: string; imageUrl?: string | null }): Stripe.Checkout.SessionCreateParams {
+export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; product: SiteProduct; collectAddress: boolean; backPath: string; imageUrl?: string | null; shop?: ShopSettings | null }): Stripe.Checkout.SessionCreateParams {
     const { product } = req;
     // Stripe shows the picture on its checkout page: it needs a real https address.
     const picture = req.imageUrl ?? null;
@@ -185,6 +193,8 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
             },
         }],
         ...(req.collectAddress ? { shipping_address_collection: { allowed_countries: SHIPPING_COUNTRIES } } : {}),
+        // Who sells it and the right to cancel, beside the Pay button — before the buyer pays (CCR 2013).
+        ...(req.shop ? { custom_text: { submit: { message: checkoutNote(req.shop, `${req.origin}${SHOP_TERMS_PATH}`) } } } : {}),
         success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent(req.backPath)}`,
         cancel_url: `${req.origin}${req.backPath}`,
         // What the order records — the name and unit price as they were at checkout (Stripe caps a
@@ -212,7 +222,8 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
         return { kind: 'error', status: 409, title: 'This item has changed', message: 'The details changed since you opened the page. Go back to see the current price before you buy.', backPath: back };
     }
     const account = await connectAccountFor(db, req.site.organisationId);
-    if (!account?.chargesEnabled) {
+    const shop = await loadShopSettings(db, req.site.organisationId);
+    if (!account?.chargesEnabled || !shopReady(shop)) {
         return { kind: 'error', status: 503, title: 'Online payments aren\'t available right now', message: 'Please get in touch with the business to buy this.', backPath: back };
     }
     try {
@@ -225,7 +236,7 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
         const session = await (await stripeClient()).checkout.sessions.create(
             checkoutParams({
                 origin: req.origin, site: req.site, sectionId, product, collectAddress: section.props.collectAddress, backPath: back,
-                imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null,
+                imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null, shop,
             }),
             { stripeAccount: account.stripeAccountId },
         );
@@ -272,6 +283,7 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         customerName: session.customer_details?.name ?? null, customerEmail: session.customer_details?.email ?? null,
         shippingAddress: shipping ? { name: shipping.name, address: shipping.address } : null,
         pagePath: session.metadata?.bms_page ?? null,
+        paymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id ?? null,
     }).onConflictDoNothing({ target: siteOrders.checkoutSessionId }).returning();
     if (!order) return true;   // a retry of an order already recorded
 
@@ -297,14 +309,86 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             html: `<p>${esc(order.customerName || 'Someone')} paid <strong>${esc(total)}</strong> for ${order.quantity} × ${esc(order.itemName)}.</p>
 ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}</p>` : ''}
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
-<p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Website Assistant's Orders tab.</p>`,
+<p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
+    await sendBuyerConfirmation(db, order, site, total).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
     return true;
 }
 
-export async function markOrderDone(db: Db, orgId: number, siteId: number, orderId: number, done: boolean): Promise<boolean> {
+type OrderRow = typeof siteOrders.$inferSelect;
+
+/** "Order confirmed" — from the business, to the buyer (CCR 2013: confirmation in a durable form). */
+export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: string; termsUrl: string | null }): { subject: string; html: string } {
+    const { order, shop } = o;
+    const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
+    const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
+    const business = shop.traderName || 'the shop';
+    return {
+        subject: `Order confirmed — ${business}`,
+        html: `<p>Hi ${esc(order.customerName || 'there')},</p>
+<p>Thank you for your order. We've received your payment of <strong>${esc(o.total)}</strong>${shop.vatNumber ? ' (including VAT)' : ''}.</p>
+<p><strong>Your order:</strong> ${order.quantity} × ${esc(order.itemName)}<br><strong>Order reference:</strong> ${order.id}</p>
+${addrLines.length ? `<p><strong>Delivering to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
+<p><strong>Delivery:</strong> ${esc(shop.deliveryText || '')}</p>
+<p><strong>Changed your mind?</strong> ${esc(returnsSummaryText(shop))} To cancel, reply to this email.${o.termsUrl ? ` Full details and a cancellation form: <a href="${esc(o.termsUrl)}">${esc(o.termsUrl)}</a>` : ''}</p>
+<p><strong>Sold by:</strong></p>${traderBlockHtml(shop)}
+<p style="color:#666;font-size:12px">Payment was taken by Stripe for ${esc(business)}. Keep this email as your record of the order.</p>`,
+    };
+}
+
+async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string): Promise<void> {
+    if (!order.customerEmail) return;
+    const shop = await loadShopSettings(db, site.organisationId);
+    if (!shop || !shopReady(shop)) return;   // never sell without these; an old open checkout is the only way here
+    const termsUrl = site.slug ? `${(await import('./site-hosting')).siteOrigin(site.slug)}${SHOP_TERMS_PATH}` : null;
+    const mail = buyerEmail({ order, shop, total, termsUrl });
+    await sendEmail({
+        to: order.customerEmail,
+        from: `${(shop.traderName || 'Your order').replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
+        ...(shop.contactEmail ? { replyTo: shop.contactEmail } : {}),
+        subject: mail.subject, html: mail.html,
+    });
+    await db.update(siteOrders).set({ buyerEmailedAt: new Date() }).where(eq(siteOrders.id, order.id));
+}
+
+/**
+ * A refund made in the business's Stripe dashboard (charge.refunded on the Connect webhook): note the
+ * amount on the order, and mark it refunded when all of it is. Only the account that took the order
+ * can refund it. Returns false when no order matches.
+ */
+export async function recordRefund(db: Db, accountId: string, charge: Stripe.Charge): Promise<boolean> {
+    const pi = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
+    if (!pi) return false;
+    let [order] = await db.select().from(siteOrders).where(and(eq(siteOrders.paymentIntentId, pi), eq(siteOrders.stripeAccountId, accountId))).limit(1);
+    if (!order) {
+        // An order recorded before payment_intent_id existed: find its Checkout Session by payment.
+        const list = await (await stripeClient()).checkout.sessions.list({ payment_intent: pi, limit: 1 }, { stripeAccount: accountId }).catch(() => null);
+        const sessionId = list?.data?.[0]?.id;
+        if (!sessionId) return false;
+        [order] = await db.select().from(siteOrders).where(and(eq(siteOrders.checkoutSessionId, sessionId), eq(siteOrders.stripeAccountId, accountId))).limit(1);
+        if (!order) return false;
+    }
+    const refunded = Math.min(charge.amount_refunded ?? 0, order.amountTotal);
+    await db.update(siteOrders).set({
+        paymentIntentId: pi, refundedAmount: refunded,
+        ...(refunded >= order.amountTotal && order.amountTotal > 0 ? { status: 'refunded' } : {}),
+    }).where(eq(siteOrders.id, order.id));
+    return true;
+}
+
+/** The Shopkeeper's Shop tab (shop.ts): the same rule as markOrderDone across the whole workspace's
+ *  orders, since a Shopkeeper is not tied to one website. */
+export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<boolean> {
+    if (!Number.isInteger(orderId) || orderId <= 0) return false;
     const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
-        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.siteId, siteId), eq(siteOrders.organisationId, orgId))).returning({ id: siteOrders.id });
+        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.organisationId, orgId), ne(siteOrders.status, 'refunded'))).returning({ id: siteOrders.id });
+    return !!row;
+}
+
+export async function markOrderDone(db: Db, orgId: number, siteId: number, orderId: number, done: boolean): Promise<boolean> {
+    // A refunded order stays refunded: "Mark as done" never hides a refund.
+    const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
+        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.siteId, siteId), eq(siteOrders.organisationId, orgId), ne(siteOrders.status, 'refunded'))).returning({ id: siteOrders.id });
     return !!row;
 }

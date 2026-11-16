@@ -1216,8 +1216,12 @@ window._activateMainTab = function(name) {
             window._assistantDetailFocusPostId = null;
             window.AssistantDataHub?.focusRecord(focusPostId);
         }
-        window.AssistantDataHub?.refresh();
-        window.AssistantMailbox?.refresh?.();
+        // Each tab kind refreshes only its own module: a Data Hub left over from an assistant opened
+        // earlier in this single-page session must not paint over the Emails or Shop tab.
+        const hubKind = window._detailHubKind;
+        if (hubKind === 'mailbox') window.AssistantMailbox?.refresh?.();
+        else if (hubKind === 'shop') window.AssistantShop?.refresh?.();
+        else window.AssistantDataHub?.refresh();
     }
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
@@ -7506,7 +7510,10 @@ function _applyDashboardRegistry(data) {
     if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
         // The Email Assistant's tab is the owner's sorted email, not assistant_records (assistant-mailbox.js).
+        // The Shopkeeper's tab is the workspace's shop (assistant-shop.js → shop.ts), not assistant_records either.
+        window._detailHubKind = hub.kind || 'records';
         if (hub.kind === 'mailbox') window.AssistantMailbox?.init({ hub, assistantId: data.id, assistantName: data.name });
+        else if (hub.kind === 'shop') window.AssistantShop?.init({ hub, assistantId: data.id, assistantName: data.name });
         else window.AssistantDataHub?.init({ hub, assistantId: data.id, assistantName: data.name });
     }
 
@@ -11896,6 +11903,37 @@ async function _loadVideoMetrics(assistantId) {
 // ── Email Assistant KPI cards ────────────────────────────────────────────────
 // Routed here by `metricsSource: 'mailbox'`. Counts from mailboxes.ts `stats`, across the signed-in
 // person's OWN mailboxes (a mailbox is one person's — docs/email-assistant-plan.md §7.3). All time.
+// ── Shopkeeper KPI cards ─────────────────────────────────────────────────────
+// Routed here by `metricsSource: 'shop'`. From shop.ts `get` stats: new orders, orders and money taken in
+// the last 30 days (pounds, less refunds), refunded orders. Workspace-wide (the shop is the workspace's).
+async function _loadShopMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/shop', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get', assistantId: Number(assistantId) }) });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        const s = data.stats;
+        if (!s || !(data.orders || []).length) { _setMetricsEmptyState('records-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'Last 30 days · your whole shop';
+        const pounds = (p) => `£${(Number(p || 0) / 100).toFixed(2).replace(/\.00$/, '')}`;
+        [['engagement', s.newOrders, String(s.newOrders ?? 0)], ['reach', s.orders30, String(s.orders30 ?? 0)], ['ctr', s.takenPence30, pounds(s.takenPence30)], ['value', s.refunds30, String(s.refunds30 ?? 0)]].forEach(([card, raw, shown], i) => {
+            if (!valEl(card)) return;
+            const n = Number(raw ?? 0);
+            valEl(card).textContent = shown;
+            _setKpiCard(card, { empty: !n });
+            if (trendEl(card)) trendEl(card).textContent = '—';
+            if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
+        });
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 async function _loadMailboxMetrics() {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
@@ -12194,6 +12232,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'mailbox') {
         _setMetricsEmptyState('pending');
         return _loadMailboxMetrics();
+    }
+    if (source === 'shop') {
+        _setMetricsEmptyState('pending');
+        return _loadShopMetrics(assistantId);
     }
     if (source === 'site') {
         _setMetricsEmptyState('pending');

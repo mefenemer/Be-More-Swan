@@ -1449,9 +1449,53 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${state.paymentsNotice && state.paymentsNotice.tone !== 'ok' ? `<p class="text-xs font-semibold text-amber-800 mt-2" role="status">${esc(state.paymentsNotice.text)}</p>` : ''}`);
   }
 
+  // Delivery & returns details (online shop Phase 0, shop-settings.ts): what UK law needs a buyer to
+  // see before paying. Buy buttons stay hidden until the required ones are filled in. Same server
+  // action as the chat's shop_settings card.
+  function shopSettingsCard() {
+    const p = state.data.payments || {};
+    const s = p.shop || {};
+    const missing = p.shopMissing || [];
+    const ex = p.exceptions || {};
+    const canEdit = !!p.canConnect;
+    const site = state.data.site || {};
+    const ro = canEdit ? '' : 'disabled';
+    const field = (key, label, value, opts = {}) => {
+      const common = `data-shop-field="${key}" ${ro} class="${inputCls} w-full mt-1" ${opts.max ? `maxlength="${opts.max}"` : ''} ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''}`;
+      return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(label)}${opts.required ? ' <span class="text-red-600" aria-hidden="true">*</span>' : ''}${opts.hint ? `<span class="block font-normal text-gray-500">${esc(opts.hint)}</span>` : ''}
+        ${opts.area ? `<textarea ${common} rows="${opts.rows || 3}">${esc(value || '')}</textarea>` : `<input ${common} type="${opts.type || 'text'}" value="${esc(value == null ? '' : value)}">`}</label>`;
+    };
+    const ready = !missing.length;
+    const body = `
+      ${field('traderName', 'Business or trading name', s.traderName, { required: true, max: 120 })}
+      ${field('traderAddress', 'Business address', s.traderAddress, { required: true, area: true, max: 400, hint: 'A real address buyers can write to — the law asks for it. A PO box is not enough.' })}
+      ${field('contactEmail', 'Email for customers', s.contactEmail, { required: true, type: 'email', max: 200 })}
+      ${field('contactPhone', 'Phone (optional)', s.contactPhone, { max: 40 })}
+      ${field('deliveryText', 'How and when you deliver', s.deliveryText, { required: true, area: true, max: 600, placeholder: 'e.g. Royal Mail Tracked 48, usually 2–3 working days after you order. Free collection from our shop by arrangement.' })}
+      ${field('vatNumber', 'VAT number (only if you are VAT registered)', s.vatNumber, { max: 20 })}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        ${field('returnsDays', 'Days buyers have to cancel', s.returnsDays || 14, { type: 'number', hint: 'At least 14 — the law\'s minimum.' })}
+        <label class="block text-xs font-bold text-gray-700 mt-3">Who pays return postage<span class="block font-normal text-gray-500">When a buyer changes their mind.</span>
+          <select data-shop-field="returnPostage" ${ro} class="${inputCls} w-full mt-1"><option value="buyer" ${s.returnPostage !== 'seller' ? 'selected' : ''}>The buyer</option><option value="seller" ${s.returnPostage === 'seller' ? 'selected' : ''}>We do</option></select></label>
+      </div>
+      <fieldset class="mt-3"><legend class="text-xs font-bold text-gray-700">Things that can't be returned for a change of mind <span class="font-normal text-gray-500">(tick any you sell)</span></legend>
+        ${Object.keys(ex).map((k) => `<label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="checkbox" data-shop-ex="${esc(k)}" ${ro} ${(s.exceptions || []).includes(k) ? 'checked' : ''} class="mt-0.5"> ${esc(ex[k])}</label>`).join('')}
+        <p class="text-xs text-gray-500 mt-1">Faulty items can always be returned.</p></fieldset>
+      ${field('extraTerms', 'Anything else buyers should know (optional)', s.extraTerms, { area: true, max: 2000 })}
+      ${canEdit ? `<div class="mt-4 flex flex-wrap items-center gap-2">${btn('data-shop-save', 'Save details', true)}${state.shopSaved ? `<span class="text-xs font-semibold text-green-700" role="status">${esc(state.shopSaved)}</span>` : ''}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change these.</p>'}
+      ${state.shopError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.shopError)}</p>` : ''}`;
+    const head = `<p class="text-sm font-black text-gray-900">Delivery &amp; returns</p>
+      <p class="text-xs text-gray-500 mt-1">${ready
+        ? `Buyers see these on your <strong>Delivery &amp; returns</strong> page, beside the Pay button, and in the email we send them after they buy.${site.status === 'published' && site.url ? ` <a class="underline" href="${esc(site.url.replace(/\/$/, ''))}/delivery-returns" target="_blank" rel="noopener">See your page</a>.` : ''}`
+        : `<span class="text-amber-800 font-semibold">Buy buttons stay hidden until these are filled in:</span> ${esc(missing.join(', '))}. The law says buyers must see who they're buying from and their right to cancel before they pay.`}</p>`;
+    return card(ready
+      ? `<details ${state.shopOpen ? 'open' : ''} data-shop-details><summary class="cursor-pointer">${head}<span class="text-xs font-bold text-gray-700 underline">Change details</span></summary>${body}</details>`
+      : `${head}${body}`, ready ? '' : 'border-amber-200');
+  }
+
   function ordersPanel() {
     const list = state.orders;
-    const top = paymentsCard();
+    const top = paymentsCard() + shopSettingsCard();
     if (!list) return top + card('<p class="text-sm text-gray-500 text-center">Loading orders…</p>');
     if (!list.length) return top + card('<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">When someone buys from your site, the order appears here and in your email.</p>');
     const shown = list.slice(0, state.orderShown);
@@ -1460,14 +1504,16 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <ul class="space-y-2 mt-3">${shown.map((o) => {
         const a = o.shippingAddress && o.shippingAddress.address;
         const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
+        const refundNote = o.status === 'refunded' ? '<span class="text-xs font-bold text-gray-600">· Refunded</span>'
+          : o.refundedAmount > 0 ? `<span class="text-xs font-bold text-gray-600">· ${esc(money(o.refundedAmount, o.currency))} refunded</span>` : '';
         return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''} ${refundNote}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
-          <div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>
+          ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
         </li>`;
       }).join('')}</ul>
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-orders-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
@@ -2764,6 +2810,23 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       return;
     }
     if (t('[data-site-orders-more]')) { state.orderShown += 20; render(); return; }
+    // Keep the Delivery & returns details open across re-renders (orders loading, a save).
+    if (t('[data-shop-details] > summary')) state.shopOpen = !t('[data-shop-details]').open;
+    if (t('[data-shop-save]')) {
+      const root = t('[data-shop-save]').closest('.rounded-2xl') || document;
+      const settings = {};
+      root.querySelectorAll('[data-shop-field]').forEach((el) => { settings[el.dataset.shopField] = el.dataset.shopField === 'returnsDays' ? Number(el.value) : el.value; });
+      settings.exceptions = [...root.querySelectorAll('[data-shop-ex]')].filter((el) => el.checked).map((el) => el.dataset.shopEx);
+      state.shopError = null; state.shopSaved = null;
+      try {
+        state.data = await post({ action: 'shop_settings', assistantId: state.assistantId, settings });
+        const gaps = (state.data.payments || {}).shopMissing || [];
+        state.shopSaved = gaps.length ? `Saved. Still needed: ${gaps.join(', ')}.` : 'Saved — your Delivery & returns page is ready.';
+        state.shopOpen = false;
+      } catch (err) { state.shopError = err.message; state.shopOpen = true; }
+      render();
+      return;
+    }
     if (t('[data-site-connect]')) {
       // Stripe's own onboarding, in this tab; Stripe sends them back to this Website tab.
       // The message goes beside the button: the page-level note sits above the tabs, out of sight down

@@ -1380,6 +1380,37 @@
         columns: [],
       },
     },
+
+    // Shopkeeper Assistant (docs/online-shop-review-plan.md §10). The shell: Stripe, the Delivery &
+    // returns details UK law asks for, and the workspace's orders, on its Shop tab (hubTab kind 'shop',
+    // src/components/assistant-shop.js → netlify/functions/shop.ts). Workspace-level, so it works
+    // without a Be More Swan website. Basket, stock and delivery rates arrive in Phase 1.
+    shopkeeper: {
+      // Results cards from shop.ts `get` stats (assistants.js _loadShopMetrics).
+      metricsSource: 'shop',
+      kpis: [
+        { label: 'New Orders', title: 'Orders Waiting for You', desc: 'Paid orders you have not marked as dealt with yet.' },
+        { label: 'Orders', title: 'Orders in the Last 30 Days', desc: 'Every paid order from your Buy buttons in the last 30 days.' },
+        { label: 'Taken', title: 'Money Taken in the Last 30 Days', desc: 'Paid orders in pounds, less refunds. The money is in your own Stripe account.' },
+        { label: 'Refunds', title: 'Refunded Orders', desc: 'Orders refunded in full or in part in the last 30 days (refunds are made in Stripe).' },
+      ],
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      primaryAction: { label: 'Is my shop ready to sell?', kind: 'chat' },
+      tabChat: { tabs: ['datahub'], placeholder: 'Ask about your shop — "is my shop ready?", "any new orders?"' },
+      hubTab: {
+        id: 'datahub',
+        kind: 'shop',
+        label: 'Shop',
+        // No recordType: this tab reads netlify/functions/shop.ts, never assistant-records.
+        description: 'Take payments, show buyers what the law asks for, and see every order.',
+        columns: [],
+      },
+    },
   };
 
   /**

@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals, videoProjects, mailboxes, mailboxMessages } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals, videoProjects, mailboxes, mailboxMessages, siteOrders } from '../../db/schema';
 import { normaliseSiteDefinition } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
@@ -543,6 +543,15 @@ async function fetchMetric(
                         eq(mailboxes.kind, 'business'),
                         sql`${mailboxMessages.sortedBy} <> 'pending'`,
                     ));
+                return Number(row?.v ?? 0);
+            });
+        // Shopkeeper: paid orders across the workspace (site_orders), refunded-in-full ones left out.
+        case 'shop_orders':
+            return countOrUnmeasured(async () => {
+                const [row] = await db
+                    .select({ v: sql<number>`count(*)::int` })
+                    .from(siteOrders)
+                    .where(and(eq(siteOrders.organisationId, goal.organisationId), sql`${siteOrders.status} <> 'refunded'`));
                 return Number(row?.v ?? 0);
             });
         case 'tickets_resolved':

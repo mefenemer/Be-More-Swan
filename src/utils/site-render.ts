@@ -91,6 +91,8 @@ export function timetableHtml(sessions: SessionView[], sectionId: string, opts: 
 
 /** Where a Buy button posts (step 3c) — site-serve.ts starts a Stripe Checkout and redirects. */
 export const BUY_ACTION = '/_buy';
+/** The Delivery & returns page every selling site has (shop-settings.ts draws it; site-serve.ts serves it). */
+export const SHOP_TERMS_PATH = '/delivery-returns';
 
 /** Pence → "£12.50" ("£12" when whole). Sites sell in pounds sterling. */
 export function formatPrice(pence: number): string {
@@ -557,9 +559,13 @@ ${formButton(p.buttonLabel)}
             const cards = [...fromCatalogue, ...legacy];
             if (!cards.length) return formState.preview
                 ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Products section: the products it shows are archived or removed in Business Information.</p></div></section>` : '';
-            const note = formState.preview && fromCatalogue.length && p.productIds.some((id) => formState.products[id]?.buyPence != null)
-                ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected (Orders tab).</p>' : '';
-            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div></div></section>`;
+            const buyable = p.productIds.some((id) => formState.products[id]?.buyPence != null);
+            const note = formState.preview && fromCatalogue.length && buyable
+                ? '<p class="fine">Buy buttons work on your live site once your Stripe account is connected and your Delivery &amp; returns details are filled in (Orders tab).</p>' : '';
+            // Before paying, a buyer can read who sells, delivery and the right to cancel (CCR 2013).
+            const terms = !formState.preview && formState.canSell && buyable
+                ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div>${terms}</div></section>`;
         }
         case 'reviews': {
             // The customers' words from Business Information; the summary is the honest average of all.

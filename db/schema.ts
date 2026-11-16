@@ -6511,12 +6511,41 @@ export const siteOrders = pgTable("site_orders", {
   shippingAddress: jsonb("shipping_address"),
   pagePath: text("page_path"),
   status: text().notNull().default("paid"),
+  // db/z-shop-settings.sql: a Stripe refund (charge.refunded) is matched back by payment intent.
+  paymentIntentId: text("payment_intent_id"),
+  refundedAmount: integer("refunded_amount").notNull().default(0),
+  buyerEmailedAt: timestamp("buyer_emailed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("site_orders_session_uq").on(t.checkoutSessionId),
   index("site_orders_site_idx").on(t.siteId, t.createdAt),
   index("site_orders_org_idx").on(t.organisationId),
-  check("site_orders_status_check", sql`${t.status} IN ('paid','done')`),
+  index("site_orders_pi_idx").on(t.paymentIntentId),
+  check("site_orders_status_check", sql`${t.status} IN ('paid','done','refunded')`),
+]);
+
+// What UK consumer law needs a buyer to see (db/z-shop-settings.sql, src/utils/shop-settings.ts):
+// one row per workspace; the Delivery & returns page and the buyer's email are drawn from it.
+export const shopSettings = pgTable("shop_settings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  traderName: text("trader_name"),
+  traderAddress: text("trader_address"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  vatNumber: text("vat_number"),
+  deliveryText: text("delivery_text"),
+  returnsDays: integer("returns_days").notNull().default(14),
+  returnPostage: text("return_postage").notNull().default("buyer"),
+  exceptions: jsonb().notNull().default([]),
+  extraTerms: text("extra_terms"),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("shop_settings_org_uq").on(t.organisationId),
+  check("shop_settings_returns_days_check", sql`${t.returnsDays} BETWEEN 14 AND 365`),
+  check("shop_settings_return_postage_check", sql`${t.returnPostage} IN ('buyer','seller')`),
 ]);
 
 // "Report this site" — public, from every hosted site's footer (db/z-website-hosting.sql).

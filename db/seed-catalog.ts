@@ -354,6 +354,18 @@ const CATALOG = [
         isActive: false,
     },
     {
+        // docs/online-shop-review-plan.md §10 — the Shopkeeper shell (Shop tab + chat). Same row as
+        // db/z-shopkeeper.sql: HIDDEN until launch (a Coming-soon card is public).
+        roleKey: 'shopkeeper',
+        name: 'Shopkeeper Assistant',
+        description: 'Runs your online shop with you: connects Stripe so buyers pay you directly (Be More Swan takes no fee), fills in the Delivery & returns details UK law asks for, and keeps your orders in one place. Works with your Be More Swan website or on its own.',
+        category: 'Marketing & Sales',
+        iconKey: 'chart',
+        iconColor: 'green',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         roleKey: 'status_report_generator',
         name: 'Project Reporting Assistant',
         description: 'Pulls data from Jira, Asana, or Monday.com to create weekly executive summaries on project health — leadership always in the loop.',

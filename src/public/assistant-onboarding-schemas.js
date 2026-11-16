@@ -1134,5 +1134,42 @@ function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCo
         ],
       },
     ],
+
+    // Shopkeeper Assistant (docs/online-shop-review-plan.md §10). Stripe and the Delivery & returns
+    // details are filled in on its Shop tab (a Stripe sign-up can't happen inside a set-up form).
+    shopkeeper: [
+      {
+        title: 'What do you sell?',
+        description: 'Your Shopkeeper uses this when it helps with your shop and answers questions about it.',
+        fields: [
+          {
+            key: 'whatYouSell',
+            label: 'What you sell',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. small-batch coffee beans and brewing kit, posted in the UK',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'After set-up, open the Shop tab: connect Stripe (buyers pay you directly; Be More Swan takes no fee) and fill in your Delivery & returns details. Delivery is UK only for now.',
+        operational: true,
+        fields: [
+          {
+            key: 'hasWebsite',
+            label: 'Where will people buy from you?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose…',
+            options: [
+              { value: 'bms_site', label: 'My Be More Swan website' },
+              { value: 'other_site', label: 'Another website I already have' },
+              { value: 'none', label: 'I don\'t have a website yet' },
+            ],
+          },
+        ],
+      },
+    ],
   };
 }));

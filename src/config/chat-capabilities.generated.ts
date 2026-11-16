@@ -183,6 +183,18 @@ export const GENERATED_CHAT_MANIFEST = {
                 "email_craft"
             ]
         },
+        "shopkeeper": {
+            "flags": [
+                "usesShopSnapshot"
+            ],
+            "contentSnapshot": null,
+            "offersOwnCards": true,
+            "maxTokens": 1200,
+            "cards": [
+                "shop_settings"
+            ],
+            "craftInChat": []
+        },
         "social_media_manager": {
             "flags": [
                 "usesInspo"
@@ -257,6 +269,7 @@ export const GENERATED_CHAT_MANIFEST = {
                 "qr_code",
                 "review_decisions",
                 "reviews_add",
+                "shop_settings",
                 "site_changes",
                 "site_draft_request",
                 "site_import_decision",
@@ -282,6 +295,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesBriefsSnapshot",
         "usesVideosSnapshot",
         "usesMailboxSnapshot",
+        "usesShopSnapshot",
         "usesSiteAuditSnapshot",
         "usesMentorSnapshot",
         "usesSiteSnapshot",
@@ -419,6 +433,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "schedule_proposal",
         "setup_field_proposal",
         "share_for_review_proposal",
+        "shop_settings",
         "site_audit_check",
         "site_audit_check_update",
         "site_audit_fix_update",
