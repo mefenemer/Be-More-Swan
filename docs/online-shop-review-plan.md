@@ -1,6 +1,7 @@
 # Online shop — REVIEW + PLAN (feature request #35)
 
-2026-11-15. **Nothing built.** For the owner to review and decide (§8).
+2026-11-15. **Nothing built.** Owner decisions taken 2026-11-15 (§8): micro sellers, Phase 0 first, 0% fee,
+**UK first, EU and US in later phases**, abandoned checkout email in, and a **separate Shopkeeper Assistant** on every plan (§9, §10). Nothing left open.
 
 The ask: *"Our website assistant offers an online shop. Review it and suggest how it can be improved so that it is
 better than the competition e.g. shopify, simple to maintain for the user, is a disruptive technology. Thoughts?"*
@@ -112,7 +113,7 @@ Legal (UK; we are the platform, the business is the trader and merchant of recor
   late. Show "+ delivery from £3.50" beside prices once delivery exists.
 - **VAT:** a VAT-registered business must show VAT-inclusive prices to consumers and give a VAT receipt on request.
   *Fix: "I'm VAT registered" + number in Business Information (we already store `vat_number` for billing, not for
-  customers), VAT line on our buyer email; Stripe Tax only if the owner wants EU/abroad selling later.*
+  customers), VAT line on our buyer email. Selling to the EU and US comes in Phase 3 — see §9.*
 - **Privacy:** the buyer's name, email and address are the business's data; our DPA covers us as processor. Add the
   shop to the site's privacy wording; marketing only with the unticked box.
 - **Payments ready ≠ shop ready:** refuse to publish a Buy button until the Delivery & returns page and trader
@@ -125,8 +126,9 @@ statuses (posted with tracking link, refunded via Stripe's `charge.refunded`), d
 ## 6. Phased build
 
 **Phase 0 — make what we have legal and complete (small).**
+*Status 2026-11-15: the legal pieces below are LIVE (PR #624). The Shopkeeper shell (§10) is built, HIDDEN in the catalogue: its Shop tab (`assistant-shop.js` → `netlify/functions/shop.ts`) has Stripe, the Delivery & returns form and the workspace's orders, and its chat reads the shop and offers the same `shop_settings` card. The Website Assistant's Orders tab keeps the same form until the Shopkeeper goes live; both save through the same rows. Before launch: `db/z-shopkeeper.sql` on both DBs, then Admin ▸ Assistants go-live checks.*
 - `shop_settings` per workspace: trader address, returns window and exceptions, who pays returns, VAT number, delivery
-  text. GUI in Website ▸ Shop; chat card `shop_settings` (same `sites.ts` action).
+  text. GUI in the **Shopkeeper**'s Settings (§10); chat card `shop_settings` (same server action).
 - Generated "Delivery & returns" page; link under Buy buttons; Stripe Checkout `consent_collection.terms_of_service`.
 - Buyer confirmation email from us (order, total, trader details, returns summary, cancellation form link).
 - Publish refuses Buy buttons without the settings. Webhook adds `charge.refunded` → status `refunded`.
@@ -137,17 +139,29 @@ statuses (posted with tracking link, refunded via Stripe's `charge.refunded`), d
 - Product pages at `/shop/<slug>` drawn from Business Information; products section links to them; >12 products
   through a "Shop" page with groups (reuse the `menu` grouping).
 - Server-side basket (`site_baskets`, 24-hour id in the URL, no scripts) → one Checkout Session with several lines.
-- Delivery: up to 5 rates (Stripe `shipping_options`), free-over threshold, "collect in person".
+- Delivery: **UK only.** Up to 5 rates by `weight_band` (Stripe `shipping_options`), free-over threshold, "collect
+  in person". Store rates under a `zone` (only `uk` for now) so EU/US can be added in Phase 3 without a reshape (§9).
 - Stock decremented on the webhook; "Sold out" at 0; overselling guard when the session is created.
 - Orders: statuses new → posted (tracking link, email to buyer) → done / refunded; CSV export.
-- Chat parity for all of it: Website Assistant cards `products_add`, `product_stock`, `order_update`.
+- Chat parity for all of it: **Shopkeeper** cards `products_add`, `product_stock`, `order_update`, `shop_settings` (§10).
+- **Shop without a website** (owner 2026-11-15, last item of Phase 1): a business with no Be More Swan site gets one
+  plain branded shop page — the same product pages, basket and checkout, drawn by the same renderer (no second
+  template). It carries its own Delivery & returns page, trader details and privacy wording; its address uses the
+  existing hosted-site domain path (our subdomain or own domain). Product links work in posts and an Instagram bio.
+  If the business later adds the Website Assistant, the shop page becomes the site's Shop page — nothing moves.
 
 **Phase 2 — the assistants run the shop (the disruptive part).** §4 items 1–7: photo-to-product, low-stock and
 back-in-stock drafts, buyers to Audience with consent, abandoned checkout email, Mentor shop suggestions, thank-you
 flow and review request.
 
-**Phase 3 (optional).** Digital downloads (we have private asset links from lead magnets), gift cards, selling to
-the EU/US (Stripe Tax), Google Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
+**Phase 3 — UK sellers delivering to the EU and US** (§9): delivery zones, import-charges notices, IOSS + Stripe Tax,
+GPSR responsible person, EU/US versions of the returns page and buyer email.
+
+**Phase 4 — businesses based in the EU and US** open their own shops: Stripe Connect beyond GB, per-country
+consumer-law and tax wording, non-UK legal review. Needs its own plan first.
+
+**Later (optional).** Digital downloads (we have private asset links from lead magnets), gift cards, Google
+Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
 
 ## 7. Costs and fees model
 
@@ -161,16 +175,78 @@ the EU/US (Stripe Tax), Google Merchant Center feed, Instagram/Facebook Shop cat
 - Alternative the owner may consider: a small `application_fee_amount` (say 0.5%) only on a future "Shop Pro".
   *Recommendation: don't — "no cut, ever" is worth more as a message than the revenue at our size.*
 
-## 8. Decisions for the owner
+## 8. Owner decisions (2026-11-15)
 
-1. **Scope:** aim at micro sellers (up to ~200 products, mostly UK) rather than Shopify's full range? *Recommended.*
-2. **Phase 0 now:** build the legal pieces and buyer email before any new shop marketing? *Recommended — they are
-   gaps in what we already claim.*
-3. **Public copy until Phase 1 is live:** keep "a shop with checkout on your own Stripe account", or soften to "sell
-   products with Buy buttons"? (Rule: never claim what the system doesn't do.)
-4. **Fee:** confirm 0% on sales stays, including any future bigger shop plan.
-5. **Which plans get the shop**, and whether shop AI work (photo-to-product, back-in-stock drafts) costs normal tasks.
-6. **Delivery abroad:** UK only for Phase 1, or EU too (needs VAT/IOSS thinking and Stripe Tax)?
-7. **Abandoned checkout email:** include it (consent box only), or leave it out to keep things simple?
-8. **Where the shop lives in the app:** inside the Website Assistant (today), or a separate "Shopkeeper" role in the
-   catalogue that shares the same products and orders?
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Scope | **Micro sellers**, up to ~200 products. |
+| 2 | Phase 0 first | **Yes** — legal pieces and buyer email before any new shop marketing. |
+| 3 | Public copy until Phase 1 is live | **Agreed** with the rule "never claim what the system doesn't do". Read as: **soften to "sell products with Buy buttons"** on `website-builder-for-small-business.html`, `be-more-swan-vs-website-builders.html` and `db/assistant-showcases.json` **now**, ahead of Phase 0 — confirmed by the owner 2026-11-15. |
+| 4 | Fee | **0% on sales stays**, including any future bigger shop plan. No `application_fee_amount`, ever. |
+| 5 | Plans and task costs | **The Shopkeeper is an assistant like any other** (owner 2026-11-15): on **The Workflow Saver** it can be the one assistant (shop-only sellers get the hosted shop page); **included from The Busywork Buster up**. Website Assistant–only customers **keep today's Buy buttons** (one product per checkout) — nothing is taken away; basket, stock, delivery and order handling need the Shopkeeper. **No product cap per plan** (Business Information's 200 is the ceiling). 0% on sales on every plan. Shop AI work (photo-to-product, back-in-stock drafts, abandoned checkout emails) **spends normal tasks** via `getTaskCosts()`. Trade-off accepted: website + full shop on The Workflow Saver needs two assistants, so The Busywork Buster. |
+| 6 | Delivery abroad | **UK only for Phases 0–2.** EU and US come later: UK sellers delivering to the EU/US in Phase 3, EU/US-based sellers in Phase 4. See §9. |
+| 7 | Abandoned checkout email | **Include it** — only to buyers who ticked the consent box (PECR / ePrivacy; CAN-SPAM for US). Phase 2. |
+| 8 | Where the shop lives | **A separate Shopkeeper Assistant** in the catalogue, sharing the same products and orders. See §10. **Works without a website too**: a plain hosted shop page, end of Phase 1. |
+
+## 9. Selling to the EU and US (decision 6) — Phase 3, then Phase 4
+
+**Not in Phases 0–2.** This section is the groundwork for **Phase 3**: a **UK-based seller** (Stripe Connect stays
+GB accounts) **shipping to buyers** in the EU and US. EU/US-*based* sellers are **Phase 4**, with their own plan.
+The only Phase 1 hook: delivery rates are stored under a zone so Phase 3 adds zones rather than reshaping data.
+
+**What changes for a UK seller shipping abroad** (confirm every point with an adviser before public copy):
+
+| | EU buyers | US buyers |
+| --- | --- | --- |
+| Tax at import | No VAT threshold since 2021. Parcels ≤ €150: either the seller registers for **IOSS** and charges EU VAT at checkout (buyer pays nothing on delivery), or the buyer pays VAT + a carrier handling fee on delivery. Over €150: customs duty and VAT on import, usually paid by the buyer | The $800 "de minimis" exemption was suspended for all countries from 29 Aug 2025 — **every parcel can attract duty**, collected by the carrier unless sent duty-paid |
+| Sales tax | (covered by VAT above) | State sales tax only once a seller passes a state's economic-nexus threshold (typically $100k or 200 orders a year in that state) — unlikely for micro sellers; show a note, don't calculate in Phase 3 |
+| Consumer law | Selling *to* EU consumers means their country's protections apply: 14-day withdrawal (same as UK), **2-year legal guarantee** | No federal cooling-off for online sales; keep the seller's own returns policy |
+| Product rules | **GPSR (from Dec 2024):** consumer products sold into the EU need an **EU-based "responsible person"** and manufacturer/safety details shown on the product page. Some countries also require packaging registration (e.g. Germany's LUCID) | Generally none for typical micro-seller goods; some categories (cosmetics, children's products, food) have their own rules |
+| Price shown | VAT-inclusive if IOSS; otherwise a clear "import VAT and fees may be due on delivery" notice **before payment** | "Import duties may be due on delivery" notice before payment |
+| Currency | EUR (already a product currency); Stripe Adaptive Pricing can show local currency | USD (already a product currency) |
+
+**How we build it (Phase 3):**
+- Delivery **zones**: UK, EU, US (rest of world later). Each zone has its own rates by `weight_band`, free-over
+  threshold and on/off switch. `SHIPPING_COUNTRIES` becomes the union of the zones the seller switched on.
+- Per-zone **import notice** shown beside the price and on the Checkout page (`custom_text`) — never added late
+  (same drip-pricing rule as UK).
+- Shop settings gain: **IOSS number** (optional), **EU responsible person** (name + address, required before EU
+  delivery can be switched on for physical goods), and a "my products are covered by special rules" tick that hides
+  EU/US for those products.
+- **Stripe Tax** on the seller's own Standard account, used **only** when they enter an IOSS number (EU VAT at
+  checkout). Stripe charges the seller for it, not us — say so in the switch's help text.
+- Delivery & returns page and buyer email get an EU version (2-year guarantee wording, model withdrawal form) and a
+  US version (seller's returns policy, duties note), chosen by the delivery country.
+- Product pages show the GPSR fields (manufacturer, responsible person, safety warnings) when EU delivery is on.
+- Exceptions to keep simple: no Northern Ireland special case in Phase 3 (NI addresses are treated as UK), no
+  automatic duty calculation (DDP) — we disclose, the carrier collects.
+
+## 10. Shopkeeper Assistant (decision 8)
+
+A new role in the catalogue, **sharing** `org_products`, `site_orders` and the Stripe Connect account — no copies.
+
+| Owns (Shopkeeper) | Stays with |
+| --- | --- |
+| Shop settings, Delivery & returns, delivery zones, IOSS / responsible person | — |
+| Products: stock, options, low-stock level, photo-to-product | Business Information ▸ Products stays the shared list (same server path) |
+| Orders: statuses, tracking, refunds seen, CSV export (moves from `orders.html` to the Shopkeeper's tabs; old link redirects) | Morning summary still counts orders |
+| Basket, product pages, Checkout | **Website Assistant** draws the Products section, Shop page and product pages on the site; Buy buttons link to the Shopkeeper's checkout |
+| Low-stock / back-in-stock alerts | **Social Assistant** drafts the post, **Email Marketing Assistant** the email (approval as today) |
+| Buyers who ticked consent | **Audience** (Email Marketing) |
+| Shop suggestions | **Business Mentor** shows them under Suggestions |
+
+Rules it must follow (house conventions):
+- Registered like every role: DB-driven assistant content, declared surfaces (not social-shaped by default), one
+  status via admin-assistants, an **active teammate** in Team Chat with its own expertise.
+- **Every capability in GUI and chat**, same server action; new chat cards added to the chat capabilities manifest
+  (CI fails otherwise). Chat sees and changes its own settings.
+- Public: a showcase page, sample work made in the product (not invented), and `/connections` updated only when live.
+- Background work (photo-to-product, drafts, reminders) spends tasks; chatting with it is free as today.
+
+Build order with the phases: Phase 0 can ship inside the Website Assistant's Shop tab **or** wait for the Shopkeeper
+shell. *Recommendation:* build the **Shopkeeper shell in Phase 0** (settings + orders tabs, moved from Website) so the
+legal pieces land in their final home and nothing is moved twice.
+
+## 11. Still open for the owner
+
+Nothing — all decisions taken 2026-11-15. Next step: build Phase 0 (legal pieces + Shopkeeper shell).

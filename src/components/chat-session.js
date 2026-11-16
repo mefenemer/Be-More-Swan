@@ -2279,6 +2279,23 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A shop_settings card — shop.ts shop_settings (the Website Assistant's and the Shopkeeper's chat
+    // alike), the same save as the Shop tab form and the Website Orders tab form.
+    function onShopSettings(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'shop_settings', assistantId, settings: d.settings || {} }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2675,6 +2692,7 @@
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
     container.addEventListener('site:importProducts', onSiteImportProducts);
+    container.addEventListener('site:shopSettings', onShopSettings);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -2803,6 +2821,7 @@
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
         container.removeEventListener('site:importProducts', onSiteImportProducts);
+        container.removeEventListener('site:shopSettings', onShopSettings);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

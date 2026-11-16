@@ -38,11 +38,11 @@
         <li class="bg-white border ${o.status === 'paid' ? 'border-indigo-200' : 'border-gray-200'} rounded-xl p-4 ${o.status === 'done' ? 'opacity-70' : ''}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-sm font-bold text-gray-900">${esc(o.itemName)}${o.quantity > 1 ? ` ×${esc(o.quantity)}` : ''} · ${esc(money(o.amountTotal, o.currency))}</p>
-            <span class="text-xs font-bold ${o.status === 'done' ? 'text-gray-500' : 'text-indigo-700'}">${o.status === 'done' ? 'Done' : 'New'} · ${esc(when(o.createdAt))}</span>
+            <span class="text-xs font-bold ${o.status === 'paid' ? 'text-indigo-700' : 'text-gray-500'}">${o.status === 'refunded' ? 'Refunded' : o.status === 'done' ? 'Done' : 'New'} · ${esc(when(o.createdAt))}</span>
           </div>
           <p class="text-xs text-gray-700 mt-1">${esc(o.customerName || 'Customer')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
           ${addressOf(o.shippingAddress) ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addressOf(o.shippingAddress))}</p>` : ''}
-          <div class="mt-2"><button type="button" data-order-done="${esc(o.id)}" data-assistant="${esc(s.assistant.id)}" data-done="${o.status === 'done' ? '0' : '1'}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${o.status === 'done' ? 'Mark as new' : 'Mark as done'}</button></div>
+          ${o.status === 'refunded' ? '' : `<div class="mt-2"><button type="button" data-order-done="${esc(o.id)}" data-assistant="${esc(s.assistant.id)}" data-done="${o.status === 'done' ? '0' : '1'}" class="btn-utility text-xs font-bold px-2.5 py-1 rounded">${o.status === 'done' ? 'Mark as new' : 'Mark as done'}</button></div>`}
         </li>`).join('')}</ul>`
         : '<p class="text-sm text-gray-500 bg-white border border-dashed border-gray-200 rounded-xl px-4 py-6 text-center">No orders yet. When someone buys from your website, it appears here and in your email.</p>';
       const heading = sellers.length > 1 ? `<h2 class="text-sm font-bold text-gray-900 mb-2">${esc(s.assistant.name)}${s.site && s.site.url ? ` — ${esc(s.site.url.replace('https://', ''))}` : ''}</h2>` : '';

@@ -485,6 +485,20 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 2000 },
     },
     {
+        // docs/online-shop-review-plan.md §10. Paid orders from the workspace's Buy buttons (site_orders),
+        // fully refunded ones left out. A count, never a buyer.
+        key: 'shop_orders',
+        label: 'Orders Taken',
+        unit: 'orders',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['shopkeeper'],
+        description: 'Paid orders from your Buy buttons, not counting ones refunded in full.',
+        available: true,
+        realism: { maxDailyDelta: 500 },
+    },
+    {
         key: 'invoices_chased',
         label: 'Invoices Chased',
         unit: 'invoices',

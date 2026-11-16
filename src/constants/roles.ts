@@ -43,6 +43,10 @@ export const MYSTERY_SHOPPER_ROLE_KEY = 'mystery_shopper';
 /** The Website Assistant — builds, previews and (step 3) publishes the business's website. */
 export const WEBSITE_ASSISTANT_ROLE_KEY = 'website_assistant';
 
+/** The Shopkeeper Assistant — Delivery & returns, Stripe and orders for the workspace's shop
+ *  (docs/online-shop-review-plan.md §10). Works with or without a Be More Swan website. */
+export const SHOPKEEPER_ROLE_KEY = 'shopkeeper';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *

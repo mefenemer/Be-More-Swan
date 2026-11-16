@@ -97,6 +97,9 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // Its mailbox is connected on its own Emails tab (mailbox-oauth.ts → mailboxes table), not a workspace
     // connection, so it needs none of these; 'knowledge' lets it read Brand Assets like any assistant.
     email_assistant:           ['knowledge'],
+    // Stripe is connected on its own Shop tab (shop.ts → stripe_connect_accounts, the business's own
+    // Standard account), not a workspace connection; 'knowledge' lets it read Brand Assets like any assistant.
+    shopkeeper:                ['knowledge'],
     status_report_generator:   ['project_mgmt', 'chat'],
     accounts_receivable_clerk: ['payments', 'accounting'],
     expense_categorizer:       ['accounting'],
