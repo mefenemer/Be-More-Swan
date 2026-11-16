@@ -44,8 +44,9 @@
  *                //   are separate switches on purpose; see the note on lead_qualifier.
  *   cfg.primaryAction // → OPTIONAL. The workspace tab's primary button { label, kind }. kind:
  *                //   'generate_post' opens the post sheet (social); 'chat' opens the assistant's
- *                //   chat intake (Data Hub roles); 'meetingForm' opens the Meeting Note Taker's
- *                //   "New meeting" form (meeting-minutes-form.js). Omit it for a role with no single "do the
+ *                //   chat intake (Data Hub roles); with `send` it also asks that, as the user, in the
+ *                //   chat docked beside the tab when there is one (the Shopkeeper). 'meetingForm' opens the
+ *                //   Meeting Note Taker's "New meeting" form (meeting-minutes-form.js). Omit it for a role with no single "do the
  *                //   thing" action and the button is hidden outright — see lead_qualifier.
  *   cfg.reviewQueue // → the Review Queue tab's data model (ALWAYS present — every assistant has a
  *                //   review/approve gate). Shape: { kind: 'posts' | 'records', recordType? }.
@@ -1406,7 +1407,8 @@
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
       },
-      primaryAction: { label: 'Is my shop ready to sell?', kind: 'chat' },
+      // `send`: the label is a question, so the button asks it (in the chat docked beside the Shop tab).
+      primaryAction: { label: 'Is my shop ready to sell?', kind: 'chat', send: 'Is my shop ready to sell?' },
       tabChat: { tabs: ['datahub'], placeholder: 'Ask about your shop — "is my shop ready?", "any new orders?"' },
       hubTab: {
         id: 'datahub',
