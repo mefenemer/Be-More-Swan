@@ -690,6 +690,46 @@ export const searchConsoleQueries = pgTable("search_console_queries", {
   index("search_console_queries_org_idx").on(t.organisationId, t.impressions),
 ]);
 
+// The Google Trends engine (db/z-search-trends.sql, docs/google-trends-plan.md Phase 1). SHARED across
+// workspaces — one row per term + Google Trends location, refreshed weekly by search-trends-background.ts.
+// Relative interest only (100 = the period's peak), never search counts.
+export const searchTrendTerms = pgTable("search_trend_terms", {
+  id: serial().primaryKey(),
+  term: text("term").notNull(),
+  locationCode: integer("location_code").notNull(),
+  locationName: text("location_name").notNull(),
+  status: text("status").notNull().default('pending'),
+  series: jsonb("series").$type<Array<{ d: string; v: number | null }>>().notNull().default([]),
+  peakMonths: jsonb("peak_months").$type<number[]>().notNull().default([]),
+  topQueries: jsonb("top_queries").$type<string[]>().notNull().default([]),
+  risingQueries: jsonb("rising_queries").$type<Array<{ query: string; value: string }>>().notNull().default([]),
+  nonZeroShare: real("non_zero_share"),
+  taskId: text("task_id"),
+  taskPostedAt: timestamp("task_posted_at"),
+  fetchedAt: timestamp("fetched_at"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  costUsdTotal: numeric("cost_usd_total", { precision: 10, scale: 4 }).notNull().default('0'),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("search_trend_terms_term_location_code_key").on(t.term, t.locationCode),
+  index("search_trend_terms_task_idx").on(t.taskId),
+]);
+
+// Which workspace tracks which shared trend term. approvedAt null = suggested, awaiting the owner's
+// approval (plan §10 Q4); only approved rows are fetched.
+export const orgTrendTerms = pgTable("org_trend_terms", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  termId: integer("term_id").notNull().references(() => searchTrendTerms.id, { onDelete: "cascade" }),
+  source: text("source").notNull().default('user'),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("org_trend_terms_organisation_id_term_id_key").on(t.organisationId, t.termId),
+  index("org_trend_terms_term_idx").on(t.termId),
+]);
+
 // The Email Assistant's mailboxes (db/z-mailboxes.sql, docs/email-assistant-plan.md §3.3). One row per
 // PERSON's mailbox, not per workspace: only `userId` ever sees it. Its token lives in the vault under
 // its own `vaultRefKey`. Disconnecting deletes the row and, by cascade, every mailboxMessages row.

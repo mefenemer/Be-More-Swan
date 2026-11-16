@@ -51,6 +51,7 @@ export const SYSTEM_VERSIONS: Record<string, { api?: string; sdk?: string }> = {
     pexels: { api: 'v1' },
     serper: { api: 'v1 search' },
     hunter: { api: 'v2' },
+    dataforseo: { api: 'v3 · Google Trends explore (Standard queue)' },
     'companies-house': { api: 'Public Data API' },
 };
 
@@ -310,6 +311,11 @@ export const SERVICES: ServiceDef[] = [
         key: 'hunter', name: 'Hunter', category: 'Search', tier: 'core',
         purpose: 'Finds contact email addresses for discovered leads. Charged per email found; spend is logged per lookup.',
         consoleUrl: 'https://hunter.io/dashboard', envVars: ['HUNTER_API_KEY'],
+    },
+    {
+        key: 'dataforseo', name: 'DataForSEO (Google Trends)', category: 'Search', tier: 'core',
+        purpose: 'Google Trends data for the search terms workspaces track: weekly interest, peak months and related searches (docs/google-trends-plan.md). Refreshed weekly on the Standard queue; spend is logged per run. Without it, trends simply go stale.',
+        consoleUrl: 'https://app.dataforseo.com/api-dashboard', envVars: ['DATAFORSEO_LOGIN', 'DATAFORSEO_PASSWORD'],
     },
     {
         key: 'companies-house', name: 'Companies House', category: 'Search', tier: 'core',
