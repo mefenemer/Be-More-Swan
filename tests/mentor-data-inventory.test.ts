@@ -52,6 +52,8 @@ const ALWAYS_READERS = [
     'src/utils/site-directory-store.ts',
     // "Searches that found you": the Mentor's chat reads them every turn (chat-search-queries.ts → gsc-queries.ts).
     'src/utils/gsc-queries.ts',
+    // Search trends: the Mentor's chat reads them every turn (chat-search-trends.ts → search-trends-read.ts).
+    'src/utils/search-trends-read.ts',
 ].filter((f) => { try { read(f); return true; } catch { return false; } }).map((f) => [f, read(f)] as const);
 
 const base: MentorSnapshotData = {

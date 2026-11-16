@@ -6706,6 +6706,64 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('site_directory', renderSiteDirectoryCard);
 
+  // ── Built-in: Search Terms Card (Business Mentor + Blog Writer) ────────────────────────────
+  // { type: 'search_terms', action: 'add'|'approve'|'approve_all'|'remove'|'suggest', term, termId, region,
+  //   regionName, count, blocked, settled? }
+  // Built by src/utils/chat-search-terms-card.ts. The click POSTs to search-trends.ts — the same action as
+  // Business Information ▸ What People Search (docs/google-trends-plan.md Phase 2).
+  function renderSearchTermsCard(ui, esc) {
+    const actions = ['add', 'approve', 'approve_all', 'remove', 'suggest'];
+    const action = actions.indexOf(ui.action) >= 0 ? ui.action : 'add';
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const term = `“${esc(String(ui.term || ''))}”`;
+    const where = ui.regionName ? ` in ${esc(String(ui.regionName))}` : '';
+    const what = action === 'add' ? `Track ${term}${where} on Google Trends, so your assistants can plan for its busy months.`
+      : action === 'approve' ? `Approve ${term}${where} — tracking starts and its first data arrives within a day.`
+      : action === 'approve_all' ? `Approve all ${Number(ui.count) || 0} suggested search terms.`
+      : action === 'remove' ? `Stop tracking ${term}${where}.`
+      : 'Suggest search terms from your business details. They’re saved as suggestions for you to approve.';
+    const label = { add: 'Track it', approve: 'Approve', approve_all: 'Approve all', remove: 'Stop tracking', suggest: 'Suggest terms' }[action];
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Search terms · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${what}</p>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked || ui.settled ? '' : `<button type="button" data-st-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${label}</button>
+        <button type="button" data-st-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-st-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-st-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-st-go], [data-st-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-st-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-st-go]')) return;
+      setBusy(true);
+      say(action === 'suggest' ? 'Thinking…' : 'Saving…');
+      const body = action === 'add' ? { action, term: ui.term, region: ui.region || undefined }
+        : action === 'approve' || action === 'remove' ? { action, termId: ui.termId }
+        : { action };
+      try {
+        const res = await fetch('/.netlify/functions/search-trends', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn’t work — please try again.');
+        say(action === 'suggest'
+          ? (data.added && data.added.length ? `Suggested: ${data.added.join(', ')}. Approve them in Business Information ▸ What People Search.` : 'Nothing new to suggest.')
+          : (data.message || 'Done.'));
+      } catch (err) {
+        setBusy(false);
+        say(err && err.message ? err.message : 'That didn’t work — please try again.', 'error');
+      }
+    });
+    return el;
+  }
+
+  register('search_terms', renderSearchTermsCard);
+
   // ── Built-in: Library Proposal Cards (Support Agent's Knowledge Base; Social / Blog Inspo) ────
   // { type: 'kb_article_proposal', assistantId, title, content, blocked, settled? }
   // { type: 'inspo_proposal', assistantId, kind: 'text'|'url', title, body, url, note, blocked, settled? }

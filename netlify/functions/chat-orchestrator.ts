@@ -120,6 +120,8 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildSearchQueriesBlock } from '../../src/utils/chat-search-queries';
+import { buildSearchTrendsBlock, SEARCH_TREND_ROLES } from '../../src/utils/chat-search-trends';
+import { resolveSearchTermsCard, SEARCH_TERMS_CARD_TYPE } from '../../src/utils/chat-search-terms-card';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
 import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
@@ -3626,6 +3628,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // "Searches that found you" from their own Search Console (src/utils/chat-search-queries.ts) — the
     // Blog Writer and the Business Mentor; the same list as Blog setup ▸ Search performance. Never throws.
     const searchQueriesBlock = await buildSearchQueriesBlock(db, orgId, assistantRow.roleKey);
+    // Google Trends for the terms the workspace tracks (src/utils/chat-search-trends.ts) — the Blog Writer
+    // and the Business Mentor; the same loader as Business Information ▸ What people search. Never throws.
+    const searchTrendsBlock = await buildSearchTrendsBlock(db, orgId, assistantRow.roleKey);
     // What the directory last read, what is left out, and the site_directory card that re-reads the
     // site or leaves a page out — the same action as Business Information ▸ Website Pages
     // (src/utils/chat-site-directory.ts). Structured routes only; never throws.
@@ -3652,7 +3657,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, searchTrendsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3907,6 +3912,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const card = mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (card && 'error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
             else if (card) { supportCard = { ...card, from: assistantRow.jobRole || assistantRow.name || 'Assistant' }; uiElement = supportCard; }
+        }
+        // Tracked search terms (src/utils/chat-search-terms-card.ts): the Mentor's and the Blog Writer's card, the
+        // same action as Business Information ▸ What People Search. Taken now and put back with the support card,
+        // because both routes rebuild uiElement from their own lists below.
+        let searchTermsCard: Record<string, unknown> | null = null;
+        if (route !== defaultRoute && (uiElement as { type?: unknown } | null)?.type === SEARCH_TERMS_CARD_TYPE) {
+            searchTermsCard = SEARCH_TREND_ROLES.includes(assistantRow.roleKey ?? '')
+                ? await resolveSearchTermsCard(db, orgId, uiElement) as unknown as Record<string, unknown> | null : null;
+            if (!searchTermsCard) content = `${content}\n\n(I couldn’t check your search terms just now, so there’s no card. Try again in a moment, or use Business Information ▸ What People Search.)`;
+            uiElement = searchTermsCard;
         }
         // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts): the Social Media route's own card. The
         // server names the assistant (this one); the click previews, and a second click redrafts.
@@ -4518,6 +4533,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
 
         if (supportCard) uiElement = supportCard;
+        if (searchTermsCard) uiElement = searchTermsCard;
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
         // independent paths, and nothing used to compare them — so "all three posts are drafted
