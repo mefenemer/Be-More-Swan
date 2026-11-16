@@ -12,8 +12,10 @@
 //   POST { action: 'edit_reply', mailboxId, actionId, body }          → the owner's own edit
 //   POST { action: 'send_reply', mailboxId, actionId, body, how }     → how 'send' (in the thread) | 'drafts' (to the mailbox's Drafts)
 //   POST { action: 'dismiss_reply', mailboxId, actionId }
-//   POST { action: 'cleanup', mailboxId, op, messageIds, label }      → archive | trash, ≤ CLEANUP_CHUNK per call
-//   POST { action: 'undo_cleanup', mailboxId, actionId }              → back into the inbox, within UNDO_DAYS
+//   POST { action: 'cleanup', mailboxId, op, messageIds, label, joinActionId? } → archive | trash, ≤ CLEANUP_CHUNK per call;
+//        later chunks pass the first chunk's actionId so one batch is one entry
+//   POST { action: 'undo_cleanup', mailboxId, actionId }              → back into the inbox, within UNDO_DAYS; ≤ UNDO_CHUNK per
+//        call, `remaining` says how many are still out (call again until 0)
 //   POST { action: 'add_rule', mailboxId, match, afterDays }          → archive from this sender after N days (never trash)
 //   POST { action: 'remove_rule', mailboxId, match }
 //   POST { action: 'set_labels', mailboxId, on }                      → write categories into the mailbox, or stop (and clear ours)
@@ -298,14 +300,16 @@ export default withLambda(async (event) => {
         if (body.action === 'cleanup') {
             const ids = Array.isArray(body.messageIds) ? (body.messageIds as unknown[]).map(Number) : [];
             const op = body.op === 'trash' ? 'trash' : 'archive';
-            const r = await applyCleanup(db, box, op, ids, String(body.label ?? ''));
+            // Later chunks of one batch join the first chunk's entry, so the Done list shows ONE clean-up with one Undo.
+            const joinActionId = Number.isInteger(Number(body.joinActionId)) && Number(body.joinActionId) > 0 ? Number(body.joinActionId) : null;
+            const r = await applyCleanup(db, box, op, ids, String(body.label ?? ''), joinActionId);
             const verb = op === 'trash' ? 'Moved to trash' : 'Archived';
             return json(200, { ok: true, actionId: r.action.id, moved: r.moved, failed: r.failed,
                 message: `${verb}: ${r.moved}.${r.failed ? ` ${r.failed} could not be moved.` : ''} You can undo this for ${UNDO_DAYS} days.` });
         }
         if (body.action === 'undo_cleanup') {
             const r = await undoCleanup(db, box, Number(body.actionId));
-            return json(200, { ok: true, restored: r.restored, failed: r.failed,
+            return json(200, { ok: true, restored: r.restored, failed: r.failed, remaining: r.remaining,
                 message: `Put back in your inbox: ${r.restored}.${r.failed ? ` ${r.failed} could not be put back.` : ''}` });
         }
     } catch (err) {

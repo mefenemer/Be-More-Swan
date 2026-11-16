@@ -28,7 +28,7 @@ import { cursorExpired, readerFor } from '../src/utils/mail-reader';
 import { mayPoll } from '../netlify/functions/poll-mailboxes';
 import { normaliseSenderEntry } from '../netlify/functions/mailboxes';
 import { ASSISTANT_BUILD } from '../src/config/assistant-build-manifest';
-import { buildReplySystem, buildReplyUser, draftGaps, parseReplyDraft, replyRecipient, sendableReason, suggestCleanup, CLEANUP_CHUNK, UNDO_DAYS } from '../src/utils/mailbox-actions';
+import { buildReplySystem, buildReplyUser, draftGaps, itemsToRestore, joinCleanupPayload, parseReplyDraft, replyRecipient, sendableReason, suggestCleanup, CLEANUP_CHUNK, UNDO_CHUNK, UNDO_DAYS } from '../src/utils/mailbox-actions';
 import { replySubject } from '../src/utils/mail-writer';
 import { buildRawReply } from '../src/utils/mail-writer/gmail';
 import { mergeOutlookCategories } from '../src/utils/mail-writer/graph';
@@ -472,6 +472,34 @@ check('clean-up applies at most a chunk per request, to this mailbox\'s inbox on
     assert.ok(/ids\.length > CLEANUP_CHUNK/.test(fn));
     assert.ok(/eq\(mailboxMessages\.mailboxId, box\.id\), inArray\(mailboxMessages\.id, ids\), isNull\(mailboxMessages\.removedAt\)/.test(fn));
     assert.ok(/movedProviderId: r\.movedProviderId/.test(fn), 'the id after the move (Outlook changes it)');
+});
+
+
+check('one clean-up is ONE entry: later chunks join the first chunk\'s entry (same op, same mailbox, recent)', () => {
+    const first = { op: 'archive' as const, label: 'Notifications older than 3 days', items: [{ messageId: 1, providerMessageId: 'a', movedProviderId: 'a' }], failed: 0 };
+    const joined = joinCleanupPayload(first, [{ messageId: 2, providerMessageId: 'b', movedProviderId: 'b' }], 1);
+    assert.strictEqual(joined.items.length, 2);
+    assert.strictEqual(joined.failed, 1);
+    assert.strictEqual(joined.label, first.label);
+    const src = code('src/utils/mailbox-actions.ts');
+    const fn = src.slice(src.indexOf('export async function applyCleanup'), src.indexOf('export async function undoCleanup'));
+    assert.ok(/eq\(mailboxActions\.mailboxId, box\.id\), eq\(mailboxActions\.kind, 'cleanup'\)/.test(fn), 'only this mailbox\'s entries can be joined');
+    assert.ok(/\.op === op && j\.actedAt && Date\.now\(\) - j\.actedAt\.getTime\(\) < JOIN_WINDOW_MS/.test(fn));
+    for (const f of ['src/components/assistant-mailbox.js', 'src/components/email-assistant-cards.js']) {
+        assert.ok(/\.\.\.\(joinActionId \? \{ joinActionId \} : \{\}\)/.test(read(f)) && /if \(!joinActionId && out\.actionId\) joinActionId = out\.actionId;/.test(read(f)), f);
+    }
+});
+
+check('Undo works through a big entry in steps (no 26 s timeout) and is "undone" only when every email is back', () => {
+    const items = Array.from({ length: 95 }, (_, i) => ({ messageId: i + 1, providerMessageId: `p${i}`, movedProviderId: `p${i}`, restored: i < 10 }));
+    const todo = itemsToRestore(items);
+    assert.strictEqual(todo.length, UNDO_CHUNK);
+    assert.ok(todo.every((t) => !t.restored) && todo[0].messageId === 11);
+    const src = code('src/utils/mailbox-actions.ts');
+    assert.ok(/status: remaining === 0 \? 'undone' : a\.status/.test(src));
+    for (const f of ['src/components/assistant-mailbox.js', 'src/components/email-assistant-cards.js']) {
+        assert.ok(/if \(!out\.remaining \|\| !out\.restored\) break;/.test(read(f)), `${f} keeps calling until none remain, and stops if a call puts none back`);
+    }
 });
 
 check('every action is owner-only and refused under impersonation; drafts aren\'t assistant_records', () => {
