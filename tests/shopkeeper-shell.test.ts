@@ -62,6 +62,20 @@ check('the dashboard: a Shop tab of its own kind and Results cards from shop.ts'
     assert.ok(read('workspace.html').includes('<script src="/src/components/assistant-shop.js"></script>'));
 });
 
+check('browser check 2026-11-16: the question button asks it, Results says "No orders yet", the chat names the real button', () => {
+    assert.ok(read('src/components/assistant-dashboard-registry.js').includes("primaryAction: { label: 'Is my shop ready to sell?', kind: 'chat', send: 'Is my shop ready to sell?' }"));
+    const a = read('assistants.js');
+    assert.ok(a.includes('if (dock) { dock.ask(pa.send); return; }'), 'asked in the docked chat, not a second pop-up');
+    assert.ok(a.includes("...(pa.send ? { send: pa.send } : {})"), 'no dock: the pop-up sends it');
+    assert.ok(a.includes("_setMetricsEmptyState('shop-no-data')") && a.includes("mode === 'shop-no-data'") && a.includes("title.textContent = 'No orders yet'"));
+    const at = a.indexOf("mode === 'shop-no-data'");
+    const shopEmpty = a.slice(at, a.indexOf("mode === 'records-no-data'", at));
+    assert.ok(shopEmpty.length > 0 && !/spreadsheet|Data Hub/.test(shopEmpty), 'no Data Hub on the Shopkeeper');
+    const o = read('netlify/functions/chat-orchestrator.ts');
+    const route = o.slice(o.indexOf('    shopkeeper: {'), o.indexOf('    business_mentor: {'));
+    assert.ok(route.includes('"Save details" button') && route.includes('IS IT READY?'));
+});
+
 console.log('\nThe Shop tab and its server');
 
 check('shop.ts: this workspace\'s Shopkeeper only; shop_settings also takes the Website Assistant', () => {
