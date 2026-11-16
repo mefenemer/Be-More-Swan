@@ -2346,7 +2346,8 @@ const _RQ_DRAFT = {
         read: (d) => d.followupEmail,
         write: (d, subject, body) => ({ ...d, followupEmail: { ...(d.followupEmail || {}), subject, body } }),
         heading: 'Drafted follow-up email — read before approving',
-        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on.',
+        // Which inbox: Gmail, then Outlook, then Be More Swan's address (sync-action.ts, finish plan step 7).
+        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on — from your Gmail or Outlook if one is connected, otherwise from Be More Swan’s address with replies coming to you.',
     },
     ticket: {
         // A plain string on the record, not a { subject, body } object — normalise both ways.
@@ -2414,11 +2415,15 @@ function _rqOutreachPreview(r, statusKey) {
     // send, so this panel called our unsent draft "the message that went to the contact above" —
     // asserting the recipient has text they may never have been shown. See the Approved column note.
     const sentManually = outreach === 'sent' && (r.data || {}).outreachSentVia === 'manual';
-    const heading = sentManually ? 'The drafted email'
+    // A meeting's follow-up, once sent: which inbox it went from (stamped by sync-action.ts).
+    const meetingSentLine = r.recordType === 'meeting' ? _rqMeetingFollowupSent(r.data || {}) : '';
+    const heading = meetingSentLine ? 'The follow-up email that was sent'
+        : sentManually ? 'The drafted email'
         : outreach === 'sent' ? 'The email that was sent'
         : outreach === 'drafted' ? 'Your drafted email — ready for you to send'
         : cfg.heading;
-    const sends = sentManually
+    const sends = meetingSentLine ? meetingSentLine
+        : sentManually
         ? 'You marked this lead as contacted yourself, so this draft was never emailed from here.'
         : outreach === 'sent'
             ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
@@ -2456,6 +2461,15 @@ function _rqOutreachPreview(r, statusKey) {
         </div>
       </div>
     </details>`;
+}
+
+/** Where a meeting's follow-up went from, or '' when it has not been sent. */
+function _rqMeetingFollowupSent(d) {
+    const via = d && d.followupSentVia;
+    if (via === 'gmail') return 'This went to the attendees from your Gmail.';
+    if (via === 'outlook') return 'This went to the attendees from your Outlook.';
+    if (via === 'resend') return 'This went to the attendees from Be More Swan’s address because no inbox is connected — replies come to you. Connect Gmail or Outlook to send from your own.';
+    return '';
 }
 
 /**

@@ -37,7 +37,7 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads } from '../../db/schema';
+import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads, users } from '../../db/schema';
 import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
@@ -191,6 +191,7 @@ async function enqueueHandoffOnApproval(
     db: Db,
     orgId: number,
     record: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown },
+    approverUserId: number | null = null,
 ): Promise<void> {
     const triggerStatus = record.recordType === 'lead' ? 'QUALIFIED'
         : record.recordType === 'meeting' ? 'MEETING_BOOKED'
@@ -214,6 +215,14 @@ async function enqueueHandoffOnApproval(
                 .limit(1);
             assistantName = a?.name;
         } catch { /* name is best-effort — the email footer degrades to a generic label */ }
+        // Who approved it: Reply-To on a follow-up sent from Be More Swan's address (finish plan step 7).
+        let approverEmail: string | undefined;
+        if (approverUserId) {
+            try {
+                const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, approverUserId)).limit(1);
+                approverEmail = u?.email ?? undefined;
+            } catch { /* best-effort — the follow-up then goes with no Reply-To */ }
+        }
         fields = {
             company: data.company ?? record.title ?? undefined,
             contactName: data.contactName ?? data.attendee ?? data.with,
@@ -229,6 +238,7 @@ async function enqueueHandoffOnApproval(
             attendees: data.attendees, // [{name,email}] — emails filled in on the inbox card
             followupEmail: data.followupEmail, // { subject, body } — the reviewed draft
             assistantName,
+            approverEmail,
             attribution: 'Be More Swan',
         };
     } else {
@@ -1022,7 +1032,7 @@ export default withLambda(async (event) => {
                 // Phase 3: normalise the meeting's action items BEFORE the handoff enqueues, so the
                 // create_tasks recipes have the per-task ledger rows to sync.
                 await materialiseActionItems(db, orgId, liveRecord);
-                await enqueueHandoffOnApproval(db, orgId, liveRecord);
+                await enqueueHandoffOnApproval(db, orgId, liveRecord, userId);
             }
 
             // After the reject has committed: a rule for a rejection that did not happen would teach
