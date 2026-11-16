@@ -205,8 +205,8 @@ interface AttendeeIn { name?: unknown; email?: unknown }
 
 /**
  * Build the outbound-email payload the email_meeting_followup handler consumes: the attendee
- * recipient list, the reviewed subject/body draft, the assistant's display name (for the
- * mandatory AI disclosure footer), and the approver's address for Reply-To. Recipients come from the meeting's `attendees[{name,email}]`
+ * recipient list, the reviewed subject/body draft, the assistant's display name (the Resend
+ * From-name fallback), and the approver's address for Reply-To. Recipients come from the meeting's `attendees[{name,email}]`
  * (emails the user filled in on the inbox card); a single `contactEmail` is the fallback.
  */
 export function buildEmailPayload(
