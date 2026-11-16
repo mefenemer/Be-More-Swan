@@ -318,6 +318,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "libraryBlock",
         "myContentBlock",
         "reviewsBlock",
+        "searchQueriesBlock",
         "myAccountBlock",
         "mentorPointerBlock",
         "mentorNoPlanBlock",

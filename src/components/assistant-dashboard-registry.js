@@ -1375,7 +1375,7 @@
       reviewQueue: {
         kind: 'records',
         recordType: 'email_action',
-        subtitle: 'Drafted replies and clean-ups waiting for your approval. Coming next: for now your Email Assistant sorts and sums up your email, and changes nothing in your mailbox.',
+        subtitle: 'Your drafted replies and clean-ups are on the Emails tab, under Drafts and Clean-up — open an email and press "Draft a reply". Nothing is sent or moved until you press the button for it.',
       },
       hubTab: {
         id: 'datahub',

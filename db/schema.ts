@@ -670,6 +670,26 @@ export const workspaceIntegrations = pgTable("workspace_integrations", {
   index("workspace_integrations_org_idx").on(t.organisationId),
 ]);
 
+// "Searches that found you" (db/z-search-console-queries.sql, docs/google-trends-plan.md Phase 1b). A
+// snapshot of the latest 28-day window from the workspace's own Search Console property, replaced daily
+// by ingest-gsc-metrics.ts. Only properties that match the workspace's own site are kept.
+export const searchConsoleQueries = pgTable("search_console_queries", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  property: text("property").notNull(),
+  query: text("query").notNull(),
+  clicks: integer("clicks").notNull().default(0),
+  impressions: integer("impressions").notNull().default(0),
+  ctr: real("ctr"),
+  position: real("position"),
+  windowStart: date("window_start", { mode: "string" }).notNull(),
+  windowEnd: date("window_end", { mode: "string" }).notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+}, (t) => [
+  unique("search_console_queries_organisation_id_property_query_key").on(t.organisationId, t.property, t.query),
+  index("search_console_queries_org_idx").on(t.organisationId, t.impressions),
+]);
+
 // The Email Assistant's mailboxes (db/z-mailboxes.sql, docs/email-assistant-plan.md §3.3). One row per
 // PERSON's mailbox, not per workspace: only `userId` ever sees it. Its token lives in the vault under
 // its own `vaultRefKey`. Disconnecting deletes the row and, by cascade, every mailboxMessages row.
@@ -723,6 +743,28 @@ export const mailboxMessages = pgTable("mailbox_messages", {
 }, (t) => [
   unique("mailbox_messages_mailbox_id_provider_message_id_key").on(t.mailboxId, t.providerMessageId),
   index("mailbox_messages_mailbox_received_idx").on(t.mailboxId, t.receivedAt),
+]);
+
+// What the Email Assistant proposes and the user approves (db/z-mailbox-actions.sql): drafted replies and
+// clean-up batches, with what Undo needs. Owner-only (userId) — never assistant_records, which every member
+// with access to the assistant can read.
+export const mailboxActions = pgTable("mailbox_actions", {
+  id: serial().primaryKey(),
+  mailboxId: integer("mailbox_id").notNull().references(() => mailboxes.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),                       // 'reply' | 'cleanup'
+  status: text("status").notNull().default("waiting"), // waiting | sent | drafted | applied | undone | dismissed | failed
+  messageId: integer("message_id").references(() => mailboxMessages.id, { onDelete: "set null" }),
+  payload: jsonb("payload").notNull().default({}),
+  result: jsonb("result"),
+  actedAt: timestamp("acted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("mailbox_actions_mailbox_status_idx").on(t.mailboxId, t.status),
+  index("mailbox_actions_user_idx").on(t.organisationId, t.userId),
+  uniqueIndex("mailbox_actions_one_waiting_reply").on(t.messageId).where(sql`kind = 'reply' AND status = 'waiting'`),
 ]);
 
 // Manually-entered, date-stamped follower counts. LinkedIn's member API does not expose a

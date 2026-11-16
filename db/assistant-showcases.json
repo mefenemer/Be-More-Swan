@@ -534,7 +534,7 @@
       "Live preview, desktop and phone",
       "Your brand colours and logo",
       "No invented facts, ever",
-      "Shop, bookings, forms and reviews"
+      "Buy buttons, bookings, forms and reviews"
     ],
     "steps": [
       {
@@ -579,7 +579,7 @@
       },
       {
         "title": "Sell, take bookings and hear from customers",
-        "body": "Sell your products with checkout on your own Stripe account; we take no cut. Take bookings for appointments, classes and events, with deposits, day-before reminders, a change-or-cancel link and sync with your Google or Outlook calendar. Contact and sign-up forms send enquiries to your email and sign-ups to your mailing list."
+        "body": "Put Buy buttons on your products, with checkout on your own Stripe account; we take no cut. Take bookings for appointments, classes and events, with deposits, day-before reminders, a change-or-cancel link and sync with your Google or Outlook calendar. Contact and sign-up forms send enquiries to your email and sign-ups to your mailing list."
       },
       {
         "title": "Reviews, your blog, and a second pair of eyes",
@@ -605,7 +605,7 @@
       },
       {
         "q": "Can I sell online or take bookings?",
-        "a": "Yes. Add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up."
+        "a": "Yes. Put Buy buttons on your products, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up."
       },
       {
         "q": "Can my blog be on my website?",
