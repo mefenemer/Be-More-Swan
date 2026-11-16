@@ -1062,6 +1062,12 @@
       discussionsTab: {
         label: 'Discussions',
       },
+      // "Watch list" tab (assistant-watch-list.js → lead-watch.ts). Buying triggers Phase 2: Companies
+      // House news on customers (won), leads with a register match and companies added by hand. Fixed
+      // wording, no model; nothing is sent to anyone. ⚠️ The chat-orchestrator prompt names this tab.
+      watchListTab: {
+        label: 'Watch list',
+      },
       // No conversationsTab (retired 2026-10-27): the conversations are the Outreach tab's
       // Following up / Replied / Finished stages — see reviewQueue.staged above.
       // Strategy tab (assistant-strategy.js → strategy-proposals.ts). Phase 5a §7: changes the

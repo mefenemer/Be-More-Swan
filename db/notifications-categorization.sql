@@ -103,6 +103,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'site_booking_changed' THEN 'state_change'      -- a customer cancelled or moved their booking (call site passes category)
     WHEN 'site_review_received' THEN 'suggested_action'  -- a customer sent a review that waits for approval (call site passes category)
     WHEN 'leads_expiring_soon' THEN 'suggested_action'   -- leads about to leave the Outreach queue
+    WHEN 'watch_list_news' THEN 'suggested_action'       -- Watch list: Companies House news on a watched company
     -- state_change
     WHEN 'goal_autonomous_adjustment' THEN 'state_change'  -- SMART Goals AC3.3.3
     WHEN 'billing_renewed' THEN 'state_change'

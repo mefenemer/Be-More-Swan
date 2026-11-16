@@ -158,6 +158,29 @@ Watch list gains customers (won leads) and manual additions (GUI + chat). PSC01/
 controller" signals. Needs `lead_watch` from why-now Phase 2, plus columns `fhrs_id`, `place_id`, `watch_kind
 ('lead' | 'customer' | 'manual')`.
 
+> **Built 2026-11-16** (branch `feat/buying-triggers-phase2`). `db/z-lead-watch.sql` (lead_watch, lead_watch_signals,
+> lead_watch_settings; additive, both DBs) + `db/sequence-halt-company-closed.sql` (NOT additive: re-adds the halt
+> reason CHECK; until it runs the halt is recorded as `manual`). Built without why-now Phase 1/2: the Watch list has
+> its own table and tab, so it needs neither; a lead's signals also go into `data.intel.signals` when it was researched.
+> - **Who is watched:** every Lead Generator (switch on the tab, default ON): customers (won) always, leads with a
+>   Companies House match (newest first, `LEAD_WATCH_MAX_PER_ASSISTANT`, default 300), companies added by hand (up to
+>   200). Lost / disqualified / do-not-contact / deleted leads are paused, never deleted (the baseline is kept).
+> - **How:** daily `dispatch-lead-watch` (05:10 UTC) → `run-lead-watch-background`: sync, then filing history per
+>   company (+ status every 4th check), every 7 days / 3 after good news / 30 when the stream is healthy, paced under
+>   600 calls per 5 min. The Companies House **stream** (`dispatch-ch-stream`, every 30 min) is built but does nothing
+>   until `COMPANIES_HOUSE_STREAM_KEY` (a separate streaming key) is set. First check is silent.
+> - **Signals (fixed wording, `src/lib/triggers/ch-watch.ts`):** AP01/AP02 new director, TM01 director left, AD01
+>   office moved, MR01 new charge, PSC01–03 new owner or controller, PSC07 owner left, status → liquidation /
+>   administration / receivership / dissolved… A closing company stops the lead's follow-ups (`company_closed`).
+>   Positive news restarts the lead's 30-day deletion countdown. `signal_captured` goes to the revenue ledger.
+> - **Telling the user:** one Team Chat note + Inbox notification (`watch_list_news`) per assistant per daily run;
+>   neutral-only news is shown on the tab, not sent. Not yet sent in the workspace's own morning (runs 05:10 UTC).
+> - **GUI + chat:** Lead Generator ▸ **Watch list** tab (`assistant-watch-list.js` → `lead-watch.ts`) and the chat's
+>   `watch_action_proposal` card (add by number or name, stop / restart watching, switch on/off), same endpoint.
+> - Erasure deletes the watch row; the export includes all three tables; Admin ▸ Buying triggers shows the totals.
+> - Off switch: `LEAD_WATCH_ENABLED=off`. Not built here: a help article, the morning-summary line, sending in the
+>   workspace's own time zone, the "Has a reason now" filter on the Leads table (why-now Phase 1).
+
 **Phase 3: Find from triggers.** "New food & drink premises" source in Settings + chat, matcher, Companies House match,
 corporate-only email gate, letter draft for the rest (letter sending = #30 Phase 3).
 

@@ -101,8 +101,24 @@ async function overview(q: Record<string, string | undefined>) {
     const lastResult = { ...(src?.last_result || {}) };
     delete (lastResult as Record<string, unknown>).state;
 
+    // Phase 2: the Watch list, across every workspace. Its own catch: db/z-lead-watch.sql may not be applied.
+    let watch: Record<string, unknown> | null = null;
+    try {
+        const [w] = await db.execute(sql`
+            SELECT (SELECT count(*)::int FROM lead_watch WHERE paused_reason IS NULL) AS watching,
+                   (SELECT count(DISTINCT ai_assistant_id)::int FROM lead_watch WHERE paused_reason IS NULL) AS assistants,
+                   (SELECT count(*)::int FROM lead_watch_signals WHERE created_at > now() - interval '7 days') AS signals7d,
+                   (SELECT to_char(last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM trigger_sources WHERE source = 'lead_watch') AS "lastRunAt",
+                   (SELECT last_result FROM trigger_sources WHERE source = 'lead_watch') AS "lastResult",
+                   (SELECT to_char(last_ok_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM trigger_sources WHERE source = 'ch_stream_filings') AS "streamOkAt"`) as Array<Record<string, unknown>>;
+        watch = { ...w, streamConfigured: !!String(process.env.COMPANIES_HOUSE_STREAM_KEY ?? '').trim() };
+    } catch (err) {
+        if (!isMissingTable(err)) console.warn('[admin-triggers] watch stats failed', err);
+    }
+
     return {
         setUp: true,
+        watch,
         filters: { days, area, trade },
         source: {
             key: FSA_SOURCE,

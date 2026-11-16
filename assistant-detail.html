@@ -806,6 +806,13 @@
         <span id="discussions-tab-label">Discussions</span>
         <span id="discussions-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Watch list — lead roles only (watchListTab: lead_qualifier). Companies House news on customers,
+           leads and companies added by hand (buying triggers Phase 2). Badge = news in the last 7 days.
+           assistant-watch-list.js → lead-watch.ts. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-watchlist" id="maintab-btn-watchlist" data-maintab="watchlist" class="main-tab-btn hidden">
+        <span id="watchlist-tab-label">Watch list</span>
+        <span id="watchlist-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
            (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
       <button type="button" role="tab" aria-selected="true" tabindex="0" aria-controls="maintab-datahub" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
@@ -1201,6 +1208,9 @@
   <div id="maintab-discussions" role="tabpanel" aria-labelledby="maintab-btn-discussions" class="main-tab-content hidden">
     <div id="discussions-host"></div>
   </div><!-- /maintab-discussions -->
+  <div id="maintab-watchlist" role="tabpanel" aria-labelledby="maintab-btn-watchlist" class="main-tab-content hidden">
+    <div id="watchlist-host"></div>
+  </div><!-- /maintab-watchlist -->
 
   <!-- Strategy — lead roles only, and only when `strategy_agent` is enabled for the workspace.
        assistant-strategy.js resolves that gate on init (there is no client-side feature map to
