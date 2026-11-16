@@ -10,13 +10,13 @@
 //                                → PATCH the matching HubSpot contact/company properties.
 //   xero_log_note              — aging_invoices_table row (accounts_receivable_clerk)
 //                                → push a history note onto the matching Xero invoice.
-//   slack_post_summary         — action_item_assignment (meeting_note_taker)
+//   slack_post_summary         — an approved meeting (meeting_note_taker), via its recipe
 //                                → post the summary + tasks as Block Kit via chat.postMessage.
 //   salesforce_update_record   — data_diff_view (crm_enricher, primaryCrm=salesforce)
 //                                → find the Contact/Account via SOQL, PATCH the enriched fields.
 //   zendesk_add_internal_note  — ticket_triage_view (tier1_support_agent)
 //                                → push a private (internal) comment onto the Zendesk ticket.
-//   notion_create_page         — action_item_assignment (meeting_note_taker, destination=notion)
+//   notion_create_page         — an approved meeting (meeting_note_taker), via its recipe
 //                                → create a Notion page: summary paragraph + to_do blocks.
 //   qbo_log_note               — aging_invoices_table row (accounts_receivable_clerk,
 //                                accountingPlatform=quickbooks) → resolve the QBO invoice
@@ -43,24 +43,27 @@
 // endpoint paths only, no query params or payloads).
 
 import { Handler } from '@netlify/functions';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { actionItems, organisations } from '../../db/schema';
+import { actionItems, assistantRecords, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
 import { publishThreads, THREADS_TEXT_MAX, publishYouTube, YOUTUBE_TITLE_MAX, YOUTUBE_DESCRIPTION_MAX } from '../../src/utils/social-publish';
 import { sendGmailMessage } from '../../src/utils/gmail';
+import { sendOutlookMessage } from '../../src/utils/outlook';
+import { followupSentMessage, sendMeetingFollowup, type FollowupResult } from '../../src/utils/meeting-followup-send';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import {
     createAsanaTask as createAsanaTaskShared, createJiraIssue as createJiraIssueShared, type TicketRef,
 } from '../../src/utils/pm-tickets';
+import { createTasksResult, fileTickets, notConnectedResult } from '../../src/utils/meeting-action-items';
 
 type Db = ReturnType<typeof getDb>;
 
-// Resend is the no-inbox fallback for email_meeting_followup (guarded: resend v6 throws at
+// Resend is the no-inbox fallback for email_meeting_followup (after Gmail and Outlook) (guarded: resend v6 throws at
 // construction when the key is missing, which would crash this module at import).
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM_DOMAIN = process.env.OUTBOUND_EMAIL_DOMAIN || 'outbound.bemoreswan.com';
@@ -736,10 +739,11 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
 }
 
 // ── Email: send a meeting follow-up to attendees from the user's inbox ─────────
-// Primary path is the org's connected Gmail (sendGmailMessage — the user's own inbox);
-// when no inbox is connected it falls back to the Be More Swan outbound domain via Resend,
-// so approving a meeting always sends. Both paths inject the mandatory AI disclosure footer
-// (US-GOV-3.1.2). Recipients + reviewed subject/body are built by scenario-engine.buildEmailPayload.
+// Gmail, then Outlook, then Be More Swan's address via Resend (src/utils/meeting-followup-send.ts,
+// finish plan step 7). Every path injects the mandatory AI disclosure footer (US-GOV-3.1.2).
+// Recipients, the reviewed subject/body and the approver's Reply-To are built by
+// scenario-engine.buildEmailPayload. Which route was used is stamped on the meeting
+// (followupSentVia / followupSentAt) so the Inbox can say so.
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -747,7 +751,9 @@ interface EmailFollowupPayload {
     to?: unknown;            // string[] of attendee email addresses
     subject?: unknown;
     body?: unknown;
-    assistantName?: unknown; // for the disclosure footer + fallback From line
+    assistantName?: unknown; // for the disclosure footer
+    replyTo?: unknown;       // the approving user's address — Reply-To on the Resend fallback
+    meetingRecordId?: unknown;
 }
 
 async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId: number, payload: EmailFollowupPayload) {
@@ -765,39 +771,51 @@ async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId
     const assistantName = typeof payload.assistantName === 'string' && payload.assistantName.trim()
         ? payload.assistantName.trim() : 'Your Be More Swan assistant';
     // The workspace's AI-notice wording decides whether the assistant is named (see ai-email-footer.ts).
-    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText })
+    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText, name: organisations.name })
         .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
     const finalBody = injectAiFooter(rawBody, assistantName, null, false, orgRow?.text ?? null);
-    const plural = recipients.length === 1 ? '' : 's';
+    const replyTo = typeof payload.replyTo === 'string' && EMAIL_RE.test(payload.replyTo.trim()) ? payload.replyTo.trim() : null;
 
-    // Primary: send from the org's connected Gmail (the user's own inbox). One message to all
-    // attendees — they were in the meeting together, so a shared To line is expected.
+    let sent: FollowupResult;
     try {
-        const sent = await sendGmailMessage(db, organisationId, { to: recipients.join(', '), subject, body: finalBody });
-        await logApiCall(db, { userId, endpoint: 'gmail.googleapis.com/gmail/v1/users/me/messages/send', httpStatus: 200 });
-        return json(200, { success: true, message: `Follow-up sent to ${recipients.length} attendee${plural} from your Gmail.`, platformPostId: sent.id });
+        sent = await sendMeetingFollowup(
+            { recipients, subject, body: finalBody, businessName: orgRow?.name || assistantName, replyTo },
+            {
+                gmail: (m) => sendGmailMessage(db, organisationId, m),
+                outlook: (m) => sendOutlookMessage(db, organisationId, m),
+                resend: resend ? async (m) => {
+                    const r = await resend.emails.send(m);
+                    const e = (r as { error?: { message?: string } })?.error;
+                    return { id: (r as { data?: { id?: string } })?.data?.id ?? null, error: e ? (e.message || 'Resend refused it') : null };
+                } : null,
+                fromDomain: FROM_DOMAIN,
+            },
+        );
     } catch (err) {
-        if (!(err instanceof IntegrationError)) throw err;
-        // Gmail isn't connected — fall through to the Resend fallback.
+        await logApiCall(db, { userId, endpoint: 'meeting-followup', httpStatus: 502 });
+        return json(502, { error: err instanceof Error ? err.message : 'The follow-up email could not be sent.' });
     }
+    const endpoint = {
+        gmail: 'gmail.googleapis.com/gmail/v1/users/me/messages/send',
+        outlook: 'graph.microsoft.com/v1.0/me/sendMail',
+        resend: 'resend.com/emails',
+        dev: 'resend.com/emails (dev)',
+    }[sent.via];
+    await logApiCall(db, { userId, endpoint, httpStatus: 200 });
+    if (sent.via === 'dev') console.log(`[DEV] email_meeting_followup to ${recipients.join(', ')}: subject="${subject}" (no inbox, no RESEND_API_KEY)`);
 
-    // Fallback: send from the Be More Swan outbound domain via Resend (no inbox connected).
-    if (!resend) {
-        console.log(`[DEV] email_meeting_followup to ${recipients.join(', ')}: subject="${subject}" (no Gmail, no RESEND_API_KEY)`);
-        await logApiCall(db, { userId, endpoint: 'resend.com/emails (dev)', httpStatus: 200 });
-        return json(200, { success: true, message: `Follow-up prepared for ${recipients.length} attendee${plural} (dev mode — not actually sent).` });
+    // Stamp the meeting so the Inbox can say which inbox it went from. Best-effort: the email has gone.
+    const meetingId = Number(payload.meetingRecordId);
+    if (Number.isInteger(meetingId) && meetingId > 0 && sent.via !== 'dev') {
+        try {
+            await db.update(assistantRecords)
+                .set({ data: sql`${assistantRecords.data} || ${JSON.stringify({ followupSentVia: sent.via, followupSentAt: new Date().toISOString() })}::jsonb`, updatedAt: new Date() })
+                .where(and(eq(assistantRecords.id, meetingId), eq(assistantRecords.organisationId, organisationId), eq(assistantRecords.recordType, 'meeting')));
+        } catch (err) {
+            console.error('[sync-action] follow-up sent but the meeting could not be stamped (non-fatal)', err);
+        }
     }
-    const result = await resend.emails.send({
-        from: `${assistantName} via Be More Swan <assistant@${FROM_DOMAIN}>`,
-        to: recipients,
-        subject,
-        text: finalBody,
-    });
-    const sendError = (result as { error?: { message?: string } })?.error;
-    await logApiCall(db, { userId, endpoint: 'resend.com/emails', httpStatus: sendError ? 502 : 200 });
-    if (sendError) return json(502, { error: `The follow-up email could not be sent${sendError.message ? `: ${sendError.message}` : '.'}` });
-    const emailId = (result as { data?: { id?: string } })?.data?.id ?? null;
-    return json(200, { success: true, message: `Follow-up sent to ${recipients.length} attendee${plural} from Be More Swan.`, platformPostId: emailId });
+    return json(200, { success: true, message: followupSentMessage(sent.via, recipients.length), platformPostId: sent.id, via: sent.via });
 }
 
 // ── PM task push: create one Jira/Asana ticket per approved action item ─────────
@@ -895,10 +913,8 @@ async function handleCreateTasks(
                     eq(actionItems.meetingRecordId, meetingRecordId),
                     inArray(actionItems.syncStatus, SYNCABLE_STATUSES),
                 ));
-            return json(200, {
-                success: true, synced: 0, failed: 0, skipped: rows.length, total: rows.length,
-                message: `${providerLabel(provider)} isn't connected — ${rows.length} action item${rows.length === 1 ? '' : 's'} left unsynced.`,
-            });
+            const r = notConnectedResult(providerLabel(provider), rows.length);
+            return json(r.status, r.body);
         }
         throw err;
     }
@@ -916,32 +932,25 @@ async function handleCreateTasks(
 
     // File one ticket per action item. A single bad task never blocks the rest: its row is
     // stamped 'failed' (auto-retries on the next job attempt) while the others sync.
-    let synced = 0, failed = 0;
-    for (const row of rows) {
-        try {
-            const ticket = provider === 'jira'
-                ? await createJiraIssue(token.accessToken, token.tenantId, siteUrl, payload, row)
-                : await createAsanaTask(token.accessToken, payload, row);
+    const { synced, failed } = await fileTickets(rows, (row) => provider === 'jira'
+        ? createJiraIssue(token.accessToken, token.tenantId, siteUrl, payload, row)
+        : createAsanaTask(token.accessToken, payload, row), async (o) => {
+        if (o.ok) {
             await db.update(actionItems).set({
-                syncStatus: 'synced', provider, externalTicketId: ticket.id, externalUrl: ticket.url,
+                syncStatus: 'synced', provider, externalTicketId: o.ticket.id, externalUrl: o.ticket.url,
                 errorMessage: null, syncedAt: new Date(), updatedAt: new Date(),
-            }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 200 });
-            synced++;
-        } catch (e) {
+            }).where(eq(actionItems.id, o.row.id));
+        } else {
             await db.update(actionItems).set({
-                syncStatus: 'failed', provider,
-                errorMessage: String((e as Error)?.message ?? 'The task tracker rejected the ticket.').slice(0, 500),
-                updatedAt: new Date(),
-            }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 502 });
-            failed++;
+                syncStatus: 'failed', provider, errorMessage: o.error, updatedAt: new Date(),
+            }).where(eq(actionItems.id, o.row.id));
         }
-    }
+        await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: o.ok ? 200 : 502 });
+    });
 
-    const message = `${synced} of ${rows.length} action item${rows.length === 1 ? '' : 's'} filed to ${providerLabel(provider)}${failed ? `, ${failed} failed` : ''}.`;
+    const result = createTasksResult(providerLabel(provider), synced, failed, rows.length);
     // Job-level: succeed if anything synced; total failure surfaces as 502 so the job retries.
-    return json(synced === 0 && failed > 0 ? 502 : 200, { success: synced > 0, synced, failed, skipped: 0, total: rows.length, message });
+    return json(result.status, result.body);
 }
 
 // ── Action registry ────────────────────────────────────────────────────────────

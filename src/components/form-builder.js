@@ -24,6 +24,7 @@
   const SEG_API = '/.netlify/functions/audience-segments';
   const SEQ_API = '/.netlify/functions/newsletter-sequences';
   const ASSETS_API = '/.netlify/functions/content-assets';
+  const PRODUCTS_API = '/.netlify/functions/org-products';
   const MAX_FIELDS = 12;
 
   const esc = (s) => (window.escapeHtml ? window.escapeHtml(s) : String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
@@ -40,8 +41,9 @@
     { key: 'select', label: 'Dropdown', make: () => ({ type: 'select', label: 'Your question', options: opts(['Option 1', 'Option 2']), target: { kind: 'custom', key: '' } }) },
     { key: 'radio', label: 'Multiple choice', make: () => ({ type: 'radio', label: 'Your question', options: opts(['Option 1', 'Option 2']), target: { kind: 'custom', key: '' } }) },
     { key: 'checkbox', label: 'Checkboxes', make: () => ({ type: 'checkbox', label: 'Your question', options: opts(['Option 1', 'Option 2']), target: { kind: 'tag' } }) },
+    { key: 'number', label: 'Number', make: () => ({ type: 'number', label: 'Your question', range: { min: null, max: null }, target: { kind: 'custom', key: '' } }) },
   ];
-  const TYPE_LABELS = { email: 'Email', text: 'Short answer', textarea: 'Long answer', phone: 'Phone', select: 'Dropdown', radio: 'Multiple choice', checkbox: 'Checkboxes' };
+  const TYPE_LABELS = { email: 'Email', text: 'Short answer', textarea: 'Long answer', phone: 'Phone', number: 'Number', select: 'Dropdown', radio: 'Multiple choice', checkbox: 'Checkboxes' };
   const CONTACT_LABELS = { first_name: 'First name', last_name: 'Last name', company: 'Company', phone: 'Phone' };
   function opts(labels) { return labels.map((l) => ({ value: l, label: l })); }
 
@@ -84,7 +86,7 @@
       tab: 'questions',
       openField: null,
       previewAs: 'hosted',
-      segments: [], sequences: [], images: [], documents: [], rewardUploading: false, rewardError: null,
+      segments: [], sequences: [], images: [], documents: [], products: [], rewardUploading: false, rewardError: null,
       slugState: null,
       dragFrom: null,
       dirty: false,
@@ -100,8 +102,11 @@
 
   async function loadLists() {
     const get = (url) => fetch(url, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-    const [seg, seq, assets] = await Promise.all([get(SEG_API), get(SEQ_API), get(ASSETS_API)]);
+    const [seg, seq, assets, prods] = await Promise.all([get(SEG_API), get(SEQ_API), get(ASSETS_API), get(PRODUCTS_API)]);
     if (!S) return;
+    // A calculator's price(<id>) picker: active products with a number for a price (fixed or "from").
+    S.products = (prods.products || []).filter((p) => p.status === 'active' && p.priceAmount != null && (p.priceType === 'fixed' || p.priceType === 'from'))
+      .map((p) => ({ id: p.id, name: p.name || 'Product', price: p.price || '' }));
     S.segments = (seg.segments || []).filter((x) => x.kind !== 'tag' && x.kind !== 'dynamic');
     S.sequences = (seq.sequences || []).filter((x) => x.triggerEvent === 'form');
     const groups = assets.assets || {};
@@ -111,7 +116,7 @@
     S.documents = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || [])
       .filter((a) => a.assetType === 'document' && a.status !== 'rejected')
       .map((a) => ({ id: a.id, name: a.name || 'Untitled PDF' }));
-    if (S.tab === 'after' || S.tab === 'look' || S.tab === 'words') renderPanel();
+    if (S.tab === 'after' || S.tab === 'look' || S.tab === 'words' || S.tab === 'calc') renderPanel();
     renderPreview();
   }
 
@@ -187,7 +192,7 @@
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 
-  const TABS = [['questions', 'Questions'], ['quiz', 'Quiz'], ['look', 'Look'], ['words', 'Words'], ['share', 'Sharing'], ['after', 'After sign-up']];
+  const TABS = [['questions', 'Questions'], ['quiz', 'Quiz'], ['calc', 'Calculator'], ['look', 'Look'], ['words', 'Words'], ['share', 'Sharing'], ['after', 'After sign-up']];
   const MAX_QUIZ_RESULTS = 5;
   const rid = () => 'r_' + Math.random().toString(36).slice(2, 12);
   const blankResult = (n) => ({ id: rid(), title: `Result ${n}`, body: '', tag: '', ctaLabel: '', ctaUrl: null });
@@ -201,6 +206,7 @@
     const p = $('fb-panel');
     p.innerHTML = S.tab === 'questions' ? panelQuestions()
       : S.tab === 'quiz' ? panelQuiz()
+      : S.tab === 'calc' ? panelCalc()
       : S.tab === 'look' ? panelLook()
       : S.tab === 'words' ? panelWords()
       : S.tab === 'share' ? panelShare()
@@ -260,6 +266,10 @@
         ${f.type === 'checkbox' && (f.options || []).length <= 1 ? '' : `${label('Placeholder', 'form-q-placeholder')}${input(`data-fb-f="${i}" data-k="placeholder" maxlength="120"`, f.placeholder)}`}
         ${label('Help text', 'form-q-help')}${input(`data-fb-f="${i}" data-k="help" maxlength="200"`, f.help)}
         ${f.type === 'email' ? '' : `<label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-f="${i}" data-k="required" ${f.required ? 'checked' : ''}> <span data-explain="form-q-required">Required</span></label>`}
+        ${f.type === 'number' ? `<div class="grid grid-cols-2 gap-x-3">
+          <div>${label('Lowest allowed', 'form-q-number-min')}${input(`type="number" step="any" data-fb-range="${i}" data-k="min" placeholder="No limit"`, f.range && f.range.min != null ? f.range.min : '')}</div>
+          <div>${label('Highest allowed', 'form-q-number-max')}${input(`type="number" step="any" data-fb-range="${i}" data-k="max" placeholder="No limit"`, f.range && f.range.max != null ? f.range.max : '')}</div>
+        </div>` : ''}
         ${isChoice ? `${label('Choices — one per line', 'form-q-choices')}<textarea data-fb-f="${i}" data-k="options" rows="4" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc((f.options || []).map((o) => o.label).join('\n'))}</textarea>` : ''}
         ${f.type === 'email' || where === 'contact' ? '' : `
           ${label('Save the answer as', 'form-q-saves-to')}
@@ -318,6 +328,76 @@
       <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2"><span data-explain="form-quiz-points">Which result each answer points to</span></p>
       ${pointRows}
       <button type="button" data-fb-quiz-off class="mt-3 text-xs font-bold text-red-600 cursor-pointer">Stop being a quiz</button>`;
+  }
+
+  // A calculator (FR#43 Phase 2): number and choice questions go into a formula the SERVER works out
+  // (src/utils/form-calculator.ts — never eval) and the visitor sees the number after signing up.
+  const CALC_INPUT_TYPES = ['number', 'select', 'radio', 'checkbox'];
+  const calcNames = () => S.def.fields.filter((f) => CALC_INPUT_TYPES.includes(f.type) && f.target && f.target.kind === 'custom')
+    .map((f) => ({ f, name: f.target.key || keyFrom(f.label) })).filter((x) => x.name);
+  const blankCalc = () => ({ formula: '', label: 'Your estimate', format: 'money', currency: 'GBP', decimals: 0, spread: 10, unit: '', body: '', ctaLabel: '', ctaUrl: null });
+
+  /** The preview's stand-in number — the real one is worked out on the server after they sign up. */
+  function sampleValue(c) {
+    const one = (n) => {
+      const o = { minimumFractionDigits: c.decimals || 0, maximumFractionDigits: c.decimals || 0 };
+      try {
+        if (c.format === 'money') return new Intl.NumberFormat('en-GB', Object.assign({ style: 'currency', currency: c.currency || 'GBP' }, o)).format(n);
+      } catch (e) { /* unknown currency */ }
+      const s = new Intl.NumberFormat('en-GB', o).format(n);
+      return c.format === 'percent' ? s + '%' : s;
+    };
+    const base = c.format === 'percent' ? 25 : 1000;
+    const s = c.spread > 0 ? `${one(base * (1 - c.spread / 100))} – ${one(base * (1 + c.spread / 100))}` : one(base);
+    return c.unit ? `${s} ${c.unit}` : s;
+  }
+
+  function panelCalc() {
+    const c = S.def.calculator;
+    if (!c) {
+      return `
+        <p class="text-sm text-gray-700 mb-2"><span class="font-bold" data-explain="form-calc">Turn this form into a calculator</span></p>
+        <p class="text-sm text-gray-500 mb-4">Visitors answer your questions and get a number — "Rough cost of your new kitchen", "How much could you save?". You write the sum; we work it out when they press the button, and the lead lands in your Audience with their answers.</p>
+        ${S.def.quiz ? '<p class="text-sm text-amber-700 mb-3">This form is a quiz. A form can be a quiz or a calculator — turning on the calculator stops it being a quiz.</p>' : ''}
+        <button type="button" data-fb-calc-on class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Make it a calculator</button>`;
+    }
+    const names = calcNames();
+    const chip = (text, ins, title) => `<button type="button" data-fb-calc-insert="${esc(ins)}" title="${esc(title || '')}" class="px-2 py-0.5 rounded-md border border-gray-300 bg-gray-50 text-xs font-mono cursor-pointer hover:border-emerald-500">${esc(text)}</button>`;
+    const choiceQs = S.def.fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.type === 'radio' || f.type === 'select' || f.type === 'checkbox') && f.target && f.target.kind === 'custom' && (f.options || []).length);
+    const sel = (k, value, options) => `<select data-fb-calc="${k}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">${options.map(([v, l]) => `<option value="${v}" ${String(value) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    return `
+      <p class="text-sm text-gray-500 mb-4">Write the sum using your questions' names. Only numbers, names, + − × ÷, brackets, min, max, round, ceil, floor and price work.</p>
+      ${label('The sum', 'form-calc-formula')}
+      <textarea data-fb-calc="formula" rows="2" maxlength="300" placeholder="e.g. max(150, area * finish + extras)" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono mb-2">${esc(c.formula)}</textarea>
+      <p class="text-xs font-bold text-gray-500 mb-1"><span data-explain="form-calc-names">Your questions</span></p>
+      <div class="flex flex-wrap gap-1.5 mb-2">${names.length ? names.map(({ f, name }) => chip(name, name, f.label)).join('') : '<span class="text-xs text-amber-700">Add a Number, Multiple choice, Dropdown or Checkboxes question saved to a field — those are what the sum uses.</span>'}</div>
+      <div class="flex flex-wrap gap-1.5 mb-2">${['+', '-', '*', '/', '(', ')', 'min(', 'max(', 'round('].map((x) => chip(x, x)).join('')}</div>
+      ${S.products.length ? `<p class="text-xs font-bold text-gray-500 mb-1"><span data-explain="form-calc-price">Your prices</span></p>
+      <div class="flex flex-wrap gap-1.5 mb-4">${S.products.slice(0, 30).map((p) => chip(`${p.name}${p.price ? ` · ${p.price}` : ''}`, `price(${p.id})`, `price(${p.id}) — always today's price`)).join('')}</div>` : '<div class="mb-4"></div>'}
+      ${choiceQs.length ? `<p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2"><span data-explain="form-calc-amounts">What each choice is worth</span></p>
+      ${choiceQs.map(({ f, i }) => `
+        <div class="mb-3">
+          <p class="text-sm font-bold text-gray-900 mb-1">${esc(f.label)} <span class="font-mono text-xs text-gray-400">${esc(f.target.key || keyFrom(f.label))}</span></p>
+          ${f.options.map((o, k) => `<label class="flex items-center gap-2 text-sm text-gray-700 mb-1"><span class="flex-1 min-w-0 truncate">${esc(o.label)}</span>
+            <input type="number" step="any" data-fb-amount="${i}" data-o="${k}" value="${typeof o.amount === 'number' ? o.amount : ''}" placeholder="0" class="w-32 px-2 py-1 rounded-lg border border-gray-300 text-sm"></label>`).join('')}
+          ${f.type === 'checkbox' ? '<p class="text-[11px] text-gray-400">Ticked boxes add up.</p>' : ''}
+        </div>`).join('')}` : ''}
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-4 mb-2">What they see</p>
+      ${label('Above the number', 'form-calc-label')}${input('data-fb-calc="label" maxlength="80"', c.label)}
+      <div class="grid grid-cols-2 gap-x-3">
+        <div>${label('Show it as', 'form-calc-format')}${sel('format', c.format, [['money', 'Money'], ['number', 'A number'], ['percent', 'A percentage']])}</div>
+        <div>${c.format === 'money' ? `${label('Currency', 'form-calc-currency')}${sel('currency', c.currency, [['GBP', '£ GBP'], ['USD', '$ USD'], ['EUR', '€ EUR'], ['AUD', '$ AUD'], ['CAD', '$ CAD']])}` : ''}</div>
+        <div>${label('Decimal places', 'form-calc-decimals')}${sel('decimals', c.decimals, [[0, '0'], [1, '1'], [2, '2']])}</div>
+        <div>${label('Show a range', 'form-calc-spread')}${sel('spread', c.spread, [[0, 'No — one number'], [5, '± 5%'], [10, '± 10%'], [15, '± 15%'], [20, '± 20%'], [25, '± 25%']])}</div>
+      </div>
+      ${label('After the number (optional)', 'form-calc-unit')}${input('data-fb-calc="unit" maxlength="30" placeholder="e.g. per month"', c.unit)}
+      ${label('What they read', 'form-calc-body')}<textarea data-fb-calc="body" rows="3" maxlength="1200" placeholder="e.g. A rough guide — we confirm the price after a free visit." class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc(c.body)}</textarea>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+        <div>${label('Button (optional)', 'form-calc-button')}${input('data-fb-calc="ctaLabel" maxlength="40" placeholder="Book a visit"', c.ctaLabel)}</div>
+        <div>${label('Button link', 'form-calc-link')}${input('data-fb-calc="ctaUrl" maxlength="500" placeholder="https://…"', c.ctaUrl || '')}</div>
+      </div>
+      <p class="text-[11px] text-gray-400 mb-3">Saving checks the sum. If something's wrong you'll see why, and visitors get your ordinary thank-you until it's fixed. The preview shows an example number — the real one is worked out from each visitor's answers when they press the button.</p>
+      <button type="button" data-fb-calc-off class="text-xs font-bold text-red-600 cursor-pointer">Stop being a calculator</button>`;
   }
 
   function colour(k, v, title) {
@@ -499,7 +579,8 @@
         style: { ...d.style, logoUrl: null }, senderName: 'Your business',
       }, $('fb-preview'), {
         surface: 'preview', previewAs: S.previewAs, preview: true,
-        previewResult: d.quiz && d.quiz.results && d.quiz.results[0] ? d.quiz.results[0] : null,
+        previewResult: d.quiz && d.quiz.results && d.quiz.results[0] ? d.quiz.results[0]
+          : d.calculator ? { title: d.calculator.label || 'Your estimate', value: sampleValue(d.calculator), body: d.calculator.body, ctaLabel: d.calculator.ctaLabel, ctaUrl: d.calculator.ctaUrl } : null,
         // The library thumbnail stands in for the logo: an unsaved logo has no signed path yet.
         previewLogoUrl: img ? img.url : null,
       });
@@ -535,10 +616,41 @@
     if (mv && !mv.disabled) { move(Number(mv.getAttribute('data-fb-move')), Number(mv.getAttribute('data-dir'))); return; }
     const rm = t.closest('[data-fb-remove]');
     if (rm) { S.def.fields.splice(Number(rm.getAttribute('data-fb-remove')), 1); touched(); renderPanel(); renderPreview(); return; }
+    if (t.closest('[data-fb-calc-on]')) {
+      // A form is a quiz OR a calculator — turning this on stops it being a quiz.
+      S.def.quiz = null;
+      S.def.fields.forEach((f) => (f.options || []).forEach((o) => { delete o.scores; }));
+      S.def.calculator = blankCalc();
+      if (S.def.purpose === 'newsletter' || S.def.purpose === 'quiz') S.def.purpose = 'calculator';
+      if (S.def.content.buttonLabel === 'Subscribe' || S.def.content.buttonLabel === 'See my result') S.def.content.buttonLabel = 'Work it out';
+      touched(); renderPanel(); renderPreview(); return;
+    }
+    if (t.closest('[data-fb-calc-off]')) {
+      S.def.calculator = null;
+      S.def.fields.forEach((f) => (f.options || []).forEach((o) => { delete o.amount; }));
+      touched(); renderPanel(); renderPreview(); return;
+    }
+    const ins = t.closest('[data-fb-calc-insert]');
+    if (ins && S.def.calculator) {
+      // Insert at the cursor in the formula box (or at the end).
+      const box = $('fb-panel').querySelector('[data-fb-calc="formula"]');
+      const text = ins.getAttribute('data-fb-calc-insert');
+      const v = S.def.calculator.formula || '';
+      const at = box && typeof box.selectionStart === 'number' ? box.selectionStart : v.length;
+      const pad = (s) => (/^[a-z0-9_(]/i.test(s) && at > 0 && /[a-z0-9_)]$/i.test(v.slice(0, at)) ? ' ' : '') + s;
+      const add = /^[+\-*/]$/.test(text) ? ` ${text} ` : pad(text);
+      S.def.calculator.formula = (v.slice(0, at) + add + v.slice(at)).slice(0, 300);
+      touched();
+      if (box) { box.value = S.def.calculator.formula; box.focus(); const pos = Math.min(at + add.length, box.value.length); box.setSelectionRange(pos, pos); }
+      return;
+    }
     if (t.closest('[data-fb-quiz-on]')) {
+      // A quiz OR a calculator — making it a quiz stops it being a calculator.
+      S.def.calculator = null;
+      S.def.fields.forEach((f) => (f.options || []).forEach((o) => { delete o.amount; }));
       S.def.quiz = { results: [blankResult(1), blankResult(2)] };
-      if (S.def.purpose === 'newsletter') S.def.purpose = 'quiz';
-      if (S.def.content.buttonLabel === 'Subscribe') S.def.content.buttonLabel = 'See my result';
+      if (S.def.purpose === 'newsletter' || S.def.purpose === 'calculator') S.def.purpose = 'quiz';
+      if (S.def.content.buttonLabel === 'Subscribe' || S.def.content.buttonLabel === 'Work it out') S.def.content.buttonLabel = 'See my result';
       touched(); renderPanel(); renderPreview(); return;
     }
     if (t.closest('[data-fb-quiz-off]')) {
@@ -618,10 +730,15 @@
       if (!f) return;
       if (k === 'required') f.required = t.checked;
       else if (k === 'options') {
-        // Keep a quiz answer's points when its wording is unchanged (matched by label).
-        const before = new Map((f.options || []).map((o) => [o.label, o.scores]));
+        // Keep a quiz answer's points and a calculator choice's amount when its wording is unchanged (matched by label).
+        const before = new Map((f.options || []).map((o) => [o.label, o]));
         f.options = opts(t.value.split('\n').map((x) => x.trim()).filter(Boolean)).slice(0, 20)
-          .map((o) => (before.get(o.label) ? Object.assign(o, { scores: before.get(o.label) }) : o));
+          .map((o) => {
+            const old = before.get(o.label);
+            if (old && old.scores) o.scores = old.scores;
+            if (old && typeof old.amount === 'number') o.amount = old.amount;
+            return o;
+          });
       }
       else if (k === 'where') { f.target = t.value === 'tag' ? { kind: 'tag' } : { kind: 'custom', key: keyFrom(f.label) }; touched(); renderPanel(); renderPreview(); return; }
       else f[k] = t.value;
@@ -643,6 +760,31 @@
       // The answer menus name each result by its title — refresh them once the title is done.
       if (e.type === 'change' && k === 'title') renderPanel();
       return;
+    }
+    if (t.hasAttribute('data-fb-range')) {
+      const f = d.fields[Number(t.getAttribute('data-fb-range'))];
+      if (!f) return;
+      const n = t.value.trim() === '' ? null : Number(t.value);
+      f.range = Object.assign({ min: null, max: null }, f.range, { [t.getAttribute('data-k')]: Number.isFinite(n) ? n : null });
+      touched(); renderPreview(); return;
+    }
+    if (t.hasAttribute('data-fb-calc') && d.calculator) {
+      const k = t.getAttribute('data-fb-calc');
+      if (k === 'ctaUrl') d.calculator.ctaUrl = t.value.trim() || null;
+      else if (k === 'decimals' || k === 'spread') d.calculator[k] = Number(t.value) || 0;
+      else d.calculator[k] = t.value;
+      touched(); renderPreview();
+      // The currency menu shows only for money.
+      if (k === 'format' && e.type === 'change') renderPanel();
+      return;
+    }
+    if (t.hasAttribute('data-fb-amount')) {
+      const f = d.fields[Number(t.getAttribute('data-fb-amount'))];
+      const o = f && f.options[Number(t.getAttribute('data-o'))];
+      if (!o) return;
+      const n = t.value.trim() === '' ? null : Number(t.value);
+      if (Number.isFinite(n)) o.amount = n; else delete o.amount;
+      touched(); return;
     }
     if (t.hasAttribute('data-fb-points')) {
       const f = d.fields[Number(t.getAttribute('data-fb-points'))];

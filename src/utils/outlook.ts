@@ -25,6 +25,11 @@ export interface OutlookSendResult {
  * @throws IntegrationError when Outlook isn't connected (from getFreshAccessToken)
  * @throws Error when Graph rejects the send
  */
+/** "a@x.com, b@y.com" → Graph's toRecipients, one per address. Pure. */
+export function outlookRecipients(to: string): { emailAddress: { address: string } }[] {
+    return to.split(',').map((a) => a.trim()).filter(Boolean).map((address) => ({ emailAddress: { address } }));
+}
+
 export async function sendOutlookMessage(
     db: Db,
     organisationId: number,
@@ -50,7 +55,9 @@ export async function sendOutlookMessage(
             message: {
                 subject,
                 body: msg.html ? { contentType: 'HTML', content: msg.html } : { contentType: 'Text', content: body },
-                toRecipients: [{ emailAddress: { address: to } }],
+                // A comma-separated list becomes one recipient each (a meeting follow-up goes to every
+                // attendee at once); a single address is unchanged.
+                toRecipients: outlookRecipients(to),
                 // Per-thread inbound alias, so a reply routes back to THIS conversation rather
                 // than to the sender's own mailbox where nothing would observe it.
                 ...(msg.replyTo ? { replyTo: [{ emailAddress: { address: msg.replyTo.replace(/[\r\n]+/g, ' ').trim() } }] } : {}),

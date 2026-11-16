@@ -1881,6 +1881,24 @@ function _detailRqCountLabel(shown, total) {
     return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
 }
 
+// A role's own "New …" form, from the Overview button or a records queue's tab header (registry
+// primaryAction / reviewQueue.newAction). Today: the Meeting Note Taker's "New meeting"
+// (meeting-minutes-form.js). On save the Inbox opens on Review, so the new meeting is in view.
+function _openRoleForm(kind, data) {
+    if (kind !== 'meetingForm') return;
+    if (!window.MeetingMinutesForm) { window.showToast?.('That form didn\u2019t load. Refresh the page and try again.'); return; }
+    window.MeetingMinutesForm.open({
+        assistantId: data.id,
+        assistantName: data.name,
+        onSaved: () => {
+            window._activateMainTab?.('review-queue');
+            window.detailRqOpenStatus?.('review');
+            window._refreshAssistantMetrics?.();
+            window._detailRqRefreshColumnCounts?.();
+        },
+    });
+}
+
 // An empty Review column is the first thing a new hire sees, and "No posts awaiting review" alone
 // left them nowhere to go. Say when the next draft is due (the Autopilot card has already worked it
 // out, or why nothing is coming) and offer the page's own Create button, so this is the same
@@ -2332,7 +2350,8 @@ const _RQ_DRAFT = {
         read: (d) => d.followupEmail,
         write: (d, subject, body) => ({ ...d, followupEmail: { ...(d.followupEmail || {}), subject, body } }),
         heading: 'Drafted follow-up email — read before approving',
-        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on.',
+        // Which inbox: Gmail, then Outlook, then Be More Swan's address (sync-action.ts, finish plan step 7).
+        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on — from your Gmail or Outlook if one is connected, otherwise from Be More Swan’s address with replies coming to you.',
     },
     ticket: {
         // A plain string on the record, not a { subject, body } object — normalise both ways.
@@ -2400,11 +2419,15 @@ function _rqOutreachPreview(r, statusKey) {
     // send, so this panel called our unsent draft "the message that went to the contact above" —
     // asserting the recipient has text they may never have been shown. See the Approved column note.
     const sentManually = outreach === 'sent' && (r.data || {}).outreachSentVia === 'manual';
-    const heading = sentManually ? 'The drafted email'
+    // A meeting's follow-up, once sent: which inbox it went from (stamped by sync-action.ts).
+    const meetingSentLine = r.recordType === 'meeting' ? _rqMeetingFollowupSent(r.data || {}) : '';
+    const heading = meetingSentLine ? 'The follow-up email that was sent'
+        : sentManually ? 'The drafted email'
         : outreach === 'sent' ? 'The email that was sent'
         : outreach === 'drafted' ? 'Your drafted email — ready for you to send'
         : cfg.heading;
-    const sends = sentManually
+    const sends = meetingSentLine ? meetingSentLine
+        : sentManually
         ? 'You marked this lead as contacted yourself, so this draft was never emailed from here.'
         : outreach === 'sent'
             ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
@@ -2442,6 +2465,15 @@ function _rqOutreachPreview(r, statusKey) {
         </div>
       </div>
     </details>`;
+}
+
+/** Where a meeting's follow-up went from, or '' when it has not been sent. */
+function _rqMeetingFollowupSent(d) {
+    const via = d && d.followupSentVia;
+    if (via === 'gmail') return 'This went to the attendees from your Gmail.';
+    if (via === 'outlook') return 'This went to the attendees from your Outlook.';
+    if (via === 'resend') return 'This went to the attendees from Be More Swan’s address because no inbox is connected — replies come to you. Connect Gmail or Outlook to send from your own.';
+    return '';
 }
 
 /**
@@ -7325,8 +7357,15 @@ function _applyDashboardRegistry(data) {
         }
         if (sub) { sub.classList.toggle('hidden', into); sub.style.display = into ? 'none' : ''; }
     }
-    // Records queues have no post-generation button; blog re-points it at Blog Studio.
-    toggleBtn('detail-rq-primary-btn', !rqIsRecords);
+    // Records queues have no post-generation button; blog re-points it at Blog Studio. A records
+    // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
+    const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
+    toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    if (rqNew) {
+        setText('detail-rq-primary-label', rqNew.label);
+        const rqBtn = document.getElementById('detail-rq-primary-btn');
+        if (rqBtn) rqBtn.onclick = () => _openRoleForm(rqNew.kind, data);
+    }
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
     // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent
@@ -7483,7 +7522,9 @@ function _applyDashboardRegistry(data) {
     } else if (pa) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
-            if (pa.kind === 'chat') {
+            if (pa.kind === 'meetingForm') {
+                paBtn.onclick = () => _openRoleForm(pa.kind, data);
+            } else if (pa.kind === 'chat') {
                 // The same pop-up as the header Chat button — this was a full page load, so the two
                 // doors into one conversation behaved differently (review, 2026-10-22).
                 paBtn.onclick = () => {

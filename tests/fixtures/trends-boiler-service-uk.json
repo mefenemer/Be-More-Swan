@@ -1,0 +1,587 @@
+{
+ "_note": "DataForSEO Google Trends explore reply, boiler service / United Kingdom, Phase 0 run 2026-11-15 (trimmed to the fields the engine reads).",
+ "status_code": 20000,
+ "status_message": "Ok.",
+ "items": [
+  {
+   "type": "google_trends_graph",
+   "data": [
+    {
+     "date_from": "2025-11-09",
+     "missing_data": false,
+     "values": [
+      76
+     ]
+    },
+    {
+     "date_from": "2025-11-16",
+     "missing_data": false,
+     "values": [
+      95
+     ]
+    },
+    {
+     "date_from": "2025-11-23",
+     "missing_data": false,
+     "values": [
+      77
+     ]
+    },
+    {
+     "date_from": "2025-11-30",
+     "missing_data": false,
+     "values": [
+      72
+     ]
+    },
+    {
+     "date_from": "2025-12-07",
+     "missing_data": false,
+     "values": [
+      60
+     ]
+    },
+    {
+     "date_from": "2025-12-14",
+     "missing_data": false,
+     "values": [
+      58
+     ]
+    },
+    {
+     "date_from": "2025-12-21",
+     "missing_data": false,
+     "values": [
+      45
+     ]
+    },
+    {
+     "date_from": "2025-12-28",
+     "missing_data": false,
+     "values": [
+      61
+     ]
+    },
+    {
+     "date_from": "2026-01-04",
+     "missing_data": false,
+     "values": [
+      95
+     ]
+    },
+    {
+     "date_from": "2026-01-11",
+     "missing_data": false,
+     "values": [
+      80
+     ]
+    },
+    {
+     "date_from": "2026-01-18",
+     "missing_data": false,
+     "values": [
+      72
+     ]
+    },
+    {
+     "date_from": "2026-01-25",
+     "missing_data": false,
+     "values": [
+      67
+     ]
+    },
+    {
+     "date_from": "2026-02-01",
+     "missing_data": false,
+     "values": [
+      72
+     ]
+    },
+    {
+     "date_from": "2026-02-08",
+     "missing_data": false,
+     "values": [
+      63
+     ]
+    },
+    {
+     "date_from": "2026-02-15",
+     "missing_data": false,
+     "values": [
+      77
+     ]
+    },
+    {
+     "date_from": "2026-02-22",
+     "missing_data": false,
+     "values": [
+      81
+     ]
+    },
+    {
+     "date_from": "2026-03-01",
+     "missing_data": false,
+     "values": [
+      77
+     ]
+    },
+    {
+     "date_from": "2026-03-08",
+     "missing_data": false,
+     "values": [
+      88
+     ]
+    },
+    {
+     "date_from": "2026-03-15",
+     "missing_data": false,
+     "values": [
+      69
+     ]
+    },
+    {
+     "date_from": "2026-03-22",
+     "missing_data": false,
+     "values": [
+      84
+     ]
+    },
+    {
+     "date_from": "2026-03-29",
+     "missing_data": false,
+     "values": [
+      67
+     ]
+    },
+    {
+     "date_from": "2026-04-05",
+     "missing_data": false,
+     "values": [
+      76
+     ]
+    },
+    {
+     "date_from": "2026-04-12",
+     "missing_data": false,
+     "values": [
+      75
+     ]
+    },
+    {
+     "date_from": "2026-04-19",
+     "missing_data": false,
+     "values": [
+      68
+     ]
+    },
+    {
+     "date_from": "2026-04-26",
+     "missing_data": false,
+     "values": [
+      66
+     ]
+    },
+    {
+     "date_from": "2026-05-03",
+     "missing_data": false,
+     "values": [
+      63
+     ]
+    },
+    {
+     "date_from": "2026-05-10",
+     "missing_data": false,
+     "values": [
+      67
+     ]
+    },
+    {
+     "date_from": "2026-05-17",
+     "missing_data": false,
+     "values": [
+      67
+     ]
+    },
+    {
+     "date_from": "2026-05-24",
+     "missing_data": false,
+     "values": [
+      57
+     ]
+    },
+    {
+     "date_from": "2026-05-31",
+     "missing_data": false,
+     "values": [
+      62
+     ]
+    },
+    {
+     "date_from": "2026-06-07",
+     "missing_data": false,
+     "values": [
+      73
+     ]
+    },
+    {
+     "date_from": "2026-06-14",
+     "missing_data": false,
+     "values": [
+      64
+     ]
+    },
+    {
+     "date_from": "2026-06-21",
+     "missing_data": false,
+     "values": [
+      60
+     ]
+    },
+    {
+     "date_from": "2026-06-28",
+     "missing_data": false,
+     "values": [
+      67
+     ]
+    },
+    {
+     "date_from": "2026-07-05",
+     "missing_data": false,
+     "values": [
+      56
+     ]
+    },
+    {
+     "date_from": "2026-07-12",
+     "missing_data": false,
+     "values": [
+      62
+     ]
+    },
+    {
+     "date_from": "2026-07-19",
+     "missing_data": false,
+     "values": [
+      73
+     ]
+    },
+    {
+     "date_from": "2026-07-26",
+     "missing_data": false,
+     "values": [
+      71
+     ]
+    },
+    {
+     "date_from": "2026-08-02",
+     "missing_data": false,
+     "values": [
+      81
+     ]
+    },
+    {
+     "date_from": "2026-08-09",
+     "missing_data": false,
+     "values": [
+      71
+     ]
+    },
+    {
+     "date_from": "2026-08-16",
+     "missing_data": false,
+     "values": [
+      80
+     ]
+    },
+    {
+     "date_from": "2026-08-23",
+     "missing_data": false,
+     "values": [
+      77
+     ]
+    },
+    {
+     "date_from": "2026-08-30",
+     "missing_data": false,
+     "values": [
+      83
+     ]
+    },
+    {
+     "date_from": "2026-09-06",
+     "missing_data": false,
+     "values": [
+      81
+     ]
+    },
+    {
+     "date_from": "2026-09-13",
+     "missing_data": false,
+     "values": [
+      80
+     ]
+    },
+    {
+     "date_from": "2026-09-20",
+     "missing_data": false,
+     "values": [
+      72
+     ]
+    },
+    {
+     "date_from": "2026-09-27",
+     "missing_data": false,
+     "values": [
+      72
+     ]
+    },
+    {
+     "date_from": "2026-10-04",
+     "missing_data": false,
+     "values": [
+      87
+     ]
+    },
+    {
+     "date_from": "2026-10-11",
+     "missing_data": false,
+     "values": [
+      89
+     ]
+    },
+    {
+     "date_from": "2026-10-18",
+     "missing_data": false,
+     "values": [
+      100
+     ]
+    },
+    {
+     "date_from": "2026-10-25",
+     "missing_data": false,
+     "values": [
+      92
+     ]
+    },
+    {
+     "date_from": "2026-11-01",
+     "missing_data": false,
+     "values": [
+      98
+     ]
+    },
+    {
+     "date_from": "2026-11-08",
+     "missing_data": false,
+     "values": [
+      95
+     ]
+    },
+    {
+     "date_from": "2026-11-15",
+     "missing_data": true,
+     "values": [
+      89
+     ]
+    }
+   ]
+  },
+  {
+   "type": "google_trends_queries_list",
+   "data": {
+    "top": [
+     {
+      "query": "gas boiler service",
+      "value": 100
+     },
+     {
+      "query": "british gas",
+      "value": 49
+     },
+     {
+      "query": "british gas service",
+      "value": 48
+     },
+     {
+      "query": "british gas service boiler",
+      "value": 47
+     },
+     {
+      "query": "british gas boiler",
+      "value": 46
+     },
+     {
+      "query": "british gas boiler service",
+      "value": 45
+     },
+     {
+      "query": "boiler service uk",
+      "value": 37
+     },
+     {
+      "query": "boiler insurance",
+      "value": 20
+     },
+     {
+      "query": "annual boiler service",
+      "value": 14
+     },
+     {
+      "query": "boiler service cover",
+      "value": 14
+     },
+     {
+      "query": "boiler cover",
+      "value": 14
+     },
+     {
+      "query": "oil boiler service",
+      "value": 14
+     },
+     {
+      "query": "boiler service london",
+      "value": 13
+     },
+     {
+      "query": "boiler service plan",
+      "value": 12
+     },
+     {
+      "query": "boiler service price",
+      "value": 12
+     },
+     {
+      "query": "worcester boiler",
+      "value": 11
+     },
+     {
+      "query": "how much is boiler service",
+      "value": 11
+     },
+     {
+      "query": "gas boiler service near me",
+      "value": 11
+     },
+     {
+      "query": "book boiler service",
+      "value": 11
+     },
+     {
+      "query": "combi boiler service",
+      "value": 11
+     },
+     {
+      "query": "combi boiler",
+      "value": 10
+     },
+     {
+      "query": "gas boiler service cost",
+      "value": 10
+     },
+     {
+      "query": "how much is a boiler service",
+      "value": 9
+     },
+     {
+      "query": "free boiler service",
+      "value": 8
+     },
+     {
+      "query": "scottish power boiler service",
+      "value": 8
+     }
+    ],
+    "rising": [
+     {
+      "query": "oak furnitureland",
+      "value": 10300
+     },
+     {
+      "query": "what is a double boiler",
+      "value": 8950
+     },
+     {
+      "query": "cheap boiler service",
+      "value": 400
+     },
+     {
+      "query": "boiler service in london",
+      "value": 400
+     },
+     {
+      "query": "boiler insurance",
+      "value": 300
+     },
+     {
+      "query": "british gas service plan",
+      "value": 190
+     },
+     {
+      "query": "scottish power boiler service",
+      "value": 190
+     },
+     {
+      "query": "british gas boiler service plan",
+      "value": 190
+     },
+     {
+      "query": "boiler service quote",
+      "value": 150
+     },
+     {
+      "query": "boiler service southampton",
+      "value": 150
+     },
+     {
+      "query": "best boiler service plan",
+      "value": 140
+     },
+     {
+      "query": "boiler service manchester",
+      "value": 140
+     },
+     {
+      "query": "annual boiler service price",
+      "value": 130
+     },
+     {
+      "query": "gas boiler service plan",
+      "value": 130
+     },
+     {
+      "query": "gas boiler service london",
+      "value": 130
+     },
+     {
+      "query": "boiler service uk",
+      "value": 130
+     },
+     {
+      "query": "free boiler service",
+      "value": 120
+     },
+     {
+      "query": "boiler service edinburgh",
+      "value": 120
+     },
+     {
+      "query": "boiler service price",
+      "value": 80
+     },
+     {
+      "query": "boiler service london",
+      "value": 80
+     },
+     {
+      "query": "boiler service plan",
+      "value": 60
+     },
+     {
+      "query": "gas boiler service near me",
+      "value": 50
+     }
+    ]
+   }
+  }
+ ]
+}

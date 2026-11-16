@@ -8,6 +8,7 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { mailboxesDueForSync, triggerMailboxSync } from '../../src/utils/mailbox-sync';
+import { pruneOldActions } from '../../src/utils/mailbox-actions';
 
 export const config = { schedule: '*/10 * * * *' };
 
@@ -32,9 +33,11 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
         console.error('[poll-mailboxes] could not list mailboxes', err instanceof Error ? err.message : err);
         return [] as number[];
     });
+    // Drafted replies and clean-up records are kept 30 days after they were acted on, then deleted.
+    const pruned = await pruneOldActions(getDb()).catch(() => 0);
     let dispatched = 0;
     for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
-    console.log('[poll-mailboxes]', { due: due.length, dispatched });
+    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned });
     return { due: due.length, dispatched };
 }
 

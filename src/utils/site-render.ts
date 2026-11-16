@@ -416,6 +416,12 @@ function signupFieldHtml(f: SiteSignupForm['fields'][number]): string {
         return `<label>${esc(f.label)}${help}<select name="${esc(name)}"${req}><option value="">Choose…</option>${f.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select></label>`;
     }
     if (f.type === 'textarea') return `<label>${esc(f.label)}${help}<textarea name="${esc(name)}" rows="4" maxlength="2000"${ph}${req}></textarea></label>`;
+    if (f.type === 'number') {
+        // A calculator's number question (FR#43 Phase 2). The limits are a hint here; the server enforces them.
+        const r = (f as { range?: { min: number | null; max: number | null } }).range;
+        const lim = `${r?.min != null && Number.isFinite(r.min) ? ` min="${r.min}"` : ''}${r?.max != null && Number.isFinite(r.max) ? ` max="${r.max}"` : ''}`;
+        return `<label>${esc(f.label)}${help}<input type="number" name="${esc(name)}" step="any" inputmode="decimal"${lim}${ph}${req}></label>`;
+    }
     const type = f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : 'text';
     const auto = f.type === 'email' ? ' autocomplete="email"' : f.type === 'phone' ? ' autocomplete="tel"' : '';
     return `<label>${esc(f.label)}${help}<input type="${type}" name="${esc(name)}" maxlength="300"${auto}${ph}${req}></label>`;

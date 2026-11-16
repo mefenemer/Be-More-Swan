@@ -1104,6 +1104,14 @@ node_bundler = "esbuild"
 [functions.ingest-gsc-metrics]
   schedule = "0 6 * * *"
 
+# The Google Trends engine's tick (docs/google-trends-plan.md Phase 1, src/utils/search-trends.ts): HOURLY
+# because DataForSEO Standard tasks answer in 1–4 minutes, so each tick collects what the last one posted;
+# each term is refreshed weekly. Wakes search-trends-background.ts only when something is due (no provider
+# call otherwise). :23 past, off the :00/:07/:15/:30/:45 batch. Staging: run-search-trends-refresh
+# (staging-crons.yml).
+[functions.refresh-search-trends]
+  schedule = "23 * * * *"
+
 # US-ADM-2.3.1: Stripe↔DB nightly billing reconciliation — 02:00 UTC every day
 [functions.reconcile-billing]
   schedule = "0 2 * * *"
@@ -1286,6 +1294,11 @@ node_bundler = "esbuild"
 # construction: it opens a brand-new session and sends a "write me a post" prompt immediately,
 # so the whole cold path is inside one budget. Same remedy as generate-ai-image above.
 [functions.chat-orchestrator]
+  timeout = 26
+
+# The Meeting Note Taker's "New meeting" form (meeting-minutes.ts): one model call over a transcript of
+# up to ~2 hours, the same work as a chat turn with an attached transcript, so the same budget.
+[functions.meeting-minutes]
   timeout = 26
 
 # The Business Mentor's page (mentor.ts): "Get feedback" is one model call on the Mentor's model

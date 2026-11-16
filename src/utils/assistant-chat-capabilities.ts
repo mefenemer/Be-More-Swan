@@ -129,7 +129,9 @@ export const ROUTE_FLAG_SOURCES: Record<string, ChatSource> = {
     usesSiteAuditSnapshot: { label: 'Its website checks', kind: 'data', sees: 'Its site, scores and suggested fixes by id.', source: 'src/utils/site-audit-snapshot.ts', applies: (c) => !!c.route?.flags.includes('usesSiteAuditSnapshot') },
     usesMentorSnapshot: { label: 'The whole workspace', kind: 'data', sees: "The workspace overview: every assistant's state and set-up, goals, results, strategy documents, research, commitments, track record; customers only when asked (names and dates).", source: 'src/utils/mentor-snapshot.ts', applies: (c) => !!c.route?.flags.includes('usesMentorSnapshot') },
     usesSiteSnapshot: { label: 'Its website', kind: 'data', sees: 'Its site: pages and sections by id, pictures, publish state.', source: 'src/utils/site-store.ts', applies: (c) => !!c.route?.flags.includes('usesSiteSnapshot') },
-    acceptsAttachments: { label: 'Files the user attaches', kind: 'data', sees: 'Pictures and documents attached in this conversation (paperclip, drag or paste).', source: 'src/utils/chat-attachments.ts', applies: (c) => !!c.route?.flags.includes('acceptsAttachments') },
+    acceptsAttachments: { label: 'Files the user attaches', kind: 'data', sees: 'Pictures and documents attached in this conversation (paperclip, drag or paste).', source: 'src/utils/chat-attachments.ts', applies: (c) => !!c.route?.flags.includes('acceptsAttachments') && !c.route?.flags.includes('transcriptAttachments') },
+    transcriptAttachments: { label: 'Meeting transcripts the user attaches', kind: 'data', sees: 'A transcript file attached in this conversation (.txt, .docx, .pdf, or a .vtt/.srt caption file from Zoom, Teams or Google Meet, with timings removed), up to about 2 hours of talk. The newest one in full; earlier ones by name only. No pictures.', source: 'src/utils/meeting-transcript.ts', applies: (c) => !!c.route?.flags.includes('transcriptAttachments') },
+    usesMeetingsSnapshot: { label: 'Its meetings', kind: 'data', sees: 'Its latest meetings by id: waiting, approved or rejected, how many action items, which attendees have no email, and the follow-up email of the ones waiting.', source: 'src/utils/chat-meeting-action.ts', applies: (c) => !!c.route?.flags.includes('usesMeetingsSnapshot'), cards: () => ['meeting_action_proposal'] },
     contentSnapshot: { label: 'Its own posts / articles / emails', kind: 'data', sees: 'Its own queue column by column (drafts, scheduled, published), with guest review comments on posts.', source: 'src/utils/content-snapshot.ts', applies: (c) => !!c.route?.contentSnapshot },
     usesAudienceSnapshot: { label: 'The Audience', kind: 'data', sees: 'Audience counts, segments, tags, sign-up forms and custom fields. Never individual people.', source: 'src/utils/chat-audience.ts', applies: (c) => !!c.route?.flags.includes('usesAudienceSnapshot') },
 };
@@ -202,6 +204,7 @@ export const CARD_LABELS: Record<string, string> = {
     intro_offer: 'Change the intro offer / free trial',
     kb_article_proposal: 'Add a Knowledge Base article',
     lead_action_proposal: 'Approve, reject or contact leads',
+    meeting_action_proposal: 'Approve or reject a meeting, add an attendee’s email, change the follow-up email',
     lead_scoring_card: 'Score a lead against the ideal customer profile',
     listing_decisions: 'Approve or remove listings',
     listings_add: 'Add listings (events, directory entries)',

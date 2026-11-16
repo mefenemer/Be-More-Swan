@@ -16,6 +16,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { chatAttachments, chatMessages, chatSessions, contentAssets } from '../../db/schema';
 import { MAX_WORDS_CHARS, readWordsFile, tidyWords } from './site-words';
+import { TRANSCRIPT_MAX_CHARS, isCaptionFile, stripCaptionTimestamps, transcriptAttachmentsBlock } from './meeting-transcript';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -27,10 +28,17 @@ export type RawAttachment =
 
 export interface AcceptedAttachment { kind: 'image' | 'document'; name: string; assetId: number | null; text: string | null; }
 
-/** Read and check what the browser sent. Throws a plain-words Error the owner can act on. */
-export async function readAttachments(db: Db, orgId: number, raw: unknown): Promise<AcceptedAttachment[]> {
+/**
+ * Read and check what the browser sent. Throws a plain-words Error the owner can act on.
+ * `transcripts` (the Meeting Note Taker): documents only, caption files (.vtt/.srt) read with their
+ * timings stripped, and up to TRANSCRIPT_MAX_CHARS instead of one website page's worth.
+ */
+export async function readAttachments(db: Db, orgId: number, raw: unknown, opts: { transcripts?: boolean } = {}): Promise<AcceptedAttachment[]> {
     const list = Array.isArray(raw) ? raw : [];
     if (list.length > ATTACHMENT_LIMITS.perTurn) throw new Error(`Attach up to ${ATTACHMENT_LIMITS.perTurn} files at a time.`);
+    if (opts.transcripts && list.some((a) => a && a.kind === 'image')) {
+        throw new Error('Attach the meeting transcript as a file (.txt, .docx, .pdf, .vtt or .srt). Pictures can\'t be read as a transcript.');
+    }
     const out: AcceptedAttachment[] = [];
     const imageIds = list.filter((a) => a && a.kind === 'image').map((a) => Number(a.assetId)).filter((n) => Number.isInteger(n) && n > 0);
     const owned = imageIds.length
@@ -48,9 +56,12 @@ export async function readAttachments(db: Db, orgId: number, raw: unknown): Prom
             const name = String(a.name || 'document').slice(0, 120);
             const data = typeof a.data === 'string' ? Buffer.from(a.data, 'base64') : Buffer.alloc(0);
             if (data.length > ATTACHMENT_LIMITS.documentBytes) throw new Error(`"${name}" is too large (the limit is 4 MB).`);
-            const text = tidyWords(await readWordsFile(name, String(a.type || ''), data));
+            const caption = opts.transcripts && isCaptionFile(name);
+            const text = tidyWords(caption ? stripCaptionTimestamps(data.toString('utf8')) : await readWordsFile(name, String(a.type || ''), data));
             if (!text) throw new Error(`No words could be read from "${name}". If it's a scanned PDF, paste the words in instead.`);
-            if (text.length > MAX_WORDS_CHARS) throw new Error(`"${name}" is longer than one page can hold. Split it, or attach one part at a time.`);
+            if (opts.transcripts) {
+                if (text.length > TRANSCRIPT_MAX_CHARS) throw new Error(`"${name}" is longer than about 2 hours of talk. Split it, and attach one part at a time.`);
+            } else if (text.length > MAX_WORDS_CHARS) throw new Error(`"${name}" is longer than one page can hold. Split it, or attach one part at a time.`);
             out.push({ kind: 'document', name, assetId: null, text });
         }
     }
@@ -69,12 +80,16 @@ export function attachmentLine(items: AcceptedAttachment[]): string {
     return items.length ? `📎 Attached: ${items.map((a) => a.name).join(', ')}` : '';
 }
 
-/** What the assistant sees each turn: this conversation's attachments, newest first. */
-export async function buildAttachmentsBlock(db: Db, orgId: number, sessionId: number): Promise<string | null> {
+/**
+ * What the assistant sees each turn: this conversation's attachments, newest first. For transcripts
+ * (meeting-transcript.ts) the newest one comes in full and the rest by name.
+ */
+export async function buildAttachmentsBlock(db: Db, orgId: number, sessionId: number, opts: { transcripts?: boolean } = {}): Promise<string | null> {
     const rows = await db.select().from(chatAttachments)
         .where(and(eq(chatAttachments.chatSessionId, sessionId), eq(chatAttachments.organisationId, orgId)))
         .orderBy(desc(chatAttachments.createdAt), desc(chatAttachments.id)).limit(ATTACHMENT_LIMITS.listed);
     if (!rows.length) return null;
+    if (opts.transcripts) return transcriptAttachmentsBlock(rows.filter((r) => r.kind === 'document').map((r) => ({ id: r.id, name: r.name, text: r.text })));
     const lines = ['FILES THEY HAVE ATTACHED IN THIS CONVERSATION (newest first):'];
     for (const r of rows) {
         if (r.kind === 'image' && r.assetId) lines.push(`- Picture "${r.name}" — assetId ${r.assetId}`);

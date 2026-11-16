@@ -2,7 +2,7 @@
 
 2026-11-15. **Owner decision 2026-11-15: "Quiz first"** — go on interactive tools, quiz first, in the Form Builder
 (not a new assistant), no free-form generated code. **Phase 1 (Quiz) built** on branch `feat/fr43-quiz` (§8).
-Still open: plan placement (decision 3) — Phase 1 ships on every plan, like forms.
+Decision 3 (2026-11-16): quizzes and calculators on every plan. **Phase 2 (calculators) built** on branch `feat/fr43-calculators` (§9).
 
 The ask: *"Consider how we can incorporate Claude Artifacts into Be More Swan, whether as a dedicated new assistant
 or whether the creation of these artifacts falls under an existing assistant. Will it add value? Will users want to
@@ -118,3 +118,32 @@ already connected. What makes it worse: fewer templates and question types at fi
 - Proof: `tests/form-quiz.test.ts` (13 checks) — fails on staging before, passes after.
 - Not in Phase 1: one-question-at-a-time steps, scored bands ("score 0–5 / 6–10"), Lead Generator view of quiz
   answers, Social Assistant suggesting the quiz link.
+
+## 9. Phase 2 — calculators (2026-11-16)
+
+Owner (2026-11-16): quizzes AND calculators on every plan (decision 3 closed).
+
+- **Formula engine** (`src/utils/form-calculator.ts`): a hand-written parser — numbers, the questions' saved-as
+  names, + − × ÷ (× and ÷ accepted), brackets, `min`, `max`, `round(x, places)`, `ceil`, `floor`, `price(<id>)`.
+  Nothing else exists; never `eval` or `Function`. Capped at 300 characters, 120 tokens, 20 levels deep; results
+  over 10¹² and dividing by zero give no answer. Formats as money (GBP/USD/EUR/AUD/CAD), number or percent, 0–2
+  decimals, an optional ± range (0–50 %) and words after the number.
+- **Definition** (`form-definition.ts`): a new `number` question (optional min/max, saved to a contact field,
+  never a contact column), `options[].amount` on a calculator's choice questions (ticked boxes add up), and
+  `calculator: { formula, label, format, currency, decimals, spread, unit, body, ctaLabel, ctaUrl }`. A form is a
+  quiz OR a calculator — a quiz wins. A formula that doesn't parse is KEPT with a warning; visitors get the
+  ordinary thank-you until it's fixed. `publicDefinition()` strips the formula and amounts.
+- **Prices** (`calculator-prices.ts`): `price(<id>)` reads the FORM's own workspace's product at submit time —
+  active, fixed or "from" price only. A failed lookup costs the visitor their number, never their sign-up.
+- **Reply / embed / hosted page**: the subscribe reply carries `result: { id: 'calc', title, value, amount, body,
+  ctaLabel, ctaUrl }` on every success after validation; the embed shows the number large in the accent colour.
+  The submission keeps `calc_value`.
+- **Website section** (no script): `/_sent?…&r=calc&v=<n>&vs=<HMAC>` — the number is signed over the form id
+  (JWT_SECRET), so a typed-in number shows the ordinary thank-you; the words and format come from the stored form.
+- **Builder**: a **Calculator** tab — the sum with click-to-insert names, operators and the workspace's priced
+  products; what each choice is worth; how it's shown. A **Number** question with lowest/highest allowed.
+- **Chat**: the Email Marketing Assistant can draft a calculator (`CALCULATORS` block). It uses listed prices as
+  plain numbers (the prompt has no product ids), so `price()` is a builder feature.
+- **No database change.** Proof: `tests/form-calculator.test.ts` (13 checks) — fails on staging, passes after.
+- Not in Phase 2: a live number before sign-up (the number is the reason to leave an email), result bands that
+  tag the contact ("under £5k"), calculator stats on the forms list.

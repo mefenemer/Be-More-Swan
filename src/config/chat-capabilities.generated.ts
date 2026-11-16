@@ -136,12 +136,17 @@ export const GENERATED_CHAT_MANIFEST = {
             "craftInChat": []
         },
         "meeting_note_taker": {
-            "flags": [],
+            "flags": [
+                "acceptsAttachments",
+                "transcriptAttachments",
+                "usesMeetingsSnapshot"
+            ],
             "contentSnapshot": null,
             "offersOwnCards": true,
-            "maxTokens": 2048,
+            "maxTokens": 4096,
             "cards": [
-                "action_item_assignment"
+                "action_item_assignment",
+                "meeting_action_proposal"
             ],
             "craftInChat": []
         },
@@ -300,8 +305,10 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesMentorSnapshot",
         "usesSiteSnapshot",
         "acceptsAttachments",
+        "transcriptAttachments",
         "contentSnapshot",
-        "usesAudienceSnapshot"
+        "usesAudienceSnapshot",
+        "usesMeetingsSnapshot"
     ],
     "promptBlocks": [
         "rolePrompt",
@@ -402,6 +409,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "lead_scoring_card",
         "listing_decisions",
         "listings_add",
+        "meeting_action_proposal",
         "mentor_break_even",
         "mentor_business_profile",
         "mentor_business_stage",

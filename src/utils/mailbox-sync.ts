@@ -14,7 +14,10 @@ import { mailboxes, mailboxMessages, organisations } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { resolveBaseUrl } from './base-url';
 import { isFeatureEnabled } from './feature-flags';
-import { EMAIL_ASSISTANT_FLAG, MailboxError, getMailboxAccessToken, parseMailboxSettings, type MailboxRow } from './mailboxes';
+import { EMAIL_ASSISTANT_FLAG, MailboxError, getMailboxAccessToken, labelsOn, parseMailboxSettings, type MailboxRow } from './mailboxes';
+import { writerFor } from './mail-writer';
+import { senderMatches, categoryLabel } from './email-sort';
+import { mailboxActions } from '../../db/schema';
 import { cursorExpired, providerHttpError, readerFor } from './mail-reader';
 import {
     buildTriageSystem, buildTriageUser, headerSort, parseTriageResponse, privateSort, senderRuleSort, trimEmailBody,
@@ -78,13 +81,13 @@ async function takeLease(db: Db, mailboxId: number): Promise<MailboxRow | null> 
     return rows[0] ?? null;
 }
 
-export interface SyncOutcome { ran: boolean; read: number; sorted: number; aiSorted: number; error?: string }
+export interface SyncOutcome { ran: boolean; read: number; sorted: number; aiSorted: number; labelled: number; ruleArchived: number; error?: string }
 
 /** One read-and-sort run for a mailbox. Never throws. */
 export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOutcome> {
     const box = await takeLease(db, mailboxId);
-    if (!box) return { ran: false, read: 0, sorted: 0, aiSorted: 0 };
-    const out: SyncOutcome = { ran: true, read: 0, sorted: 0, aiSorted: 0 };
+    if (!box) return { ran: false, read: 0, sorted: 0, aiSorted: 0, labelled: 0, ruleArchived: 0 };
+    const out: SyncOutcome = { ran: true, read: 0, sorted: 0, aiSorted: 0, labelled: 0, ruleArchived: 0 };
     let lastError: string | null = null;
     try {
         if (!(await isFeatureEnabled(box.organisationId, EMAIL_ASSISTANT_FLAG))) return out;
@@ -129,11 +132,17 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
             .where(and(eq(mailboxMessages.mailboxId, box.id), eq(mailboxMessages.sortedBy, 'pending'), isNull(mailboxMessages.removedAt)))
             .orderBy(desc(mailboxMessages.receivedAt)).limit(SORT_PER_RUN);
 
+        // Newly sorted emails whose category is then written into the mailbox (labels, when on).
+        const toLabel: { providerMessageId: string; category: string }[] = [];
+        const providerIdOf = new Map(pending.map((m) => [m.id, m.providerMessageId]));
         const save = async (id: number, r: SortResult) => {
             await db.update(mailboxMessages).set({
                 category: r.category, priority: r.priority, summary: r.summary, reason: r.reason, sortedBy: r.sortedBy, updatedAt: new Date(),
             }).where(eq(mailboxMessages.id, id));
             out.sorted++;
+            const pid = providerIdOf.get(id);
+            // Private stays unlabelled: a "Private" label would point at exactly what the owner wants left alone.
+            if (pid && r.category !== 'private') toLabel.push({ providerMessageId: pid, category: categoryLabel(r.category) });
         };
 
         const forAi: { id: number; input: TriageInput }[] = [];
@@ -173,6 +182,18 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
                 }
             }
         }
+
+        // ── 3. Write the categories into the mailbox (D4: on for business unless the owner turned it off) ──
+        const writer = writerFor(box.provider);
+        if (writer && toLabel.length && labelsOn(box.kind, settings)) {
+            const labeller = writer.labeller(token);
+            for (let i = 0; i < toLabel.length; i += 4) {
+                await Promise.all(toLabel.slice(i, i + 4).map((l) => labeller.set(l.providerMessageId, l.category).then(() => { out.labelled++; }).catch(() => undefined)));
+            }
+        }
+
+        // ── 4. The owner's archive rules (D5: a rule may archive, never trash) ──
+        if (writer && settings.archiveRules.length) out.ruleArchived = await runArchiveRules(db, box, writer, token, settings.archiveRules);
     } catch (err) {
         if (err instanceof MailboxError) lastError = err.message;
         else if (providerHttpError(err)?.status === 401) {
@@ -190,6 +211,50 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
             .where(eq(mailboxes.id, box.id)).catch(() => undefined);
     }
     return out;
+}
+
+/** Emails a run's rules may archive (the rest wait for the next run). */
+const RULE_ARCHIVE_PER_RUN = 50;
+
+/** The emails an archive rule applies to now: from the sender, old enough, still in the inbox, not needing the user. Pure. */
+export function ruleMatches(
+    messages: readonly { id: number; fromAddress: string | null; receivedAt: Date | null; priority: string | null; removedAt: Date | null }[],
+    rule: { match: string; afterDays: number },
+    now: Date = new Date(),
+): number[] {
+    const cutoff = now.getTime() - rule.afterDays * 86_400_000;
+    return messages.filter((m) => !m.removedAt && m.priority !== 'now' && m.priority !== 'today'
+        && senderMatches(m.fromAddress, rule.match) && m.receivedAt && m.receivedAt.getTime() <= cutoff).map((m) => m.id);
+}
+
+/** Archive what the owner's rules cover, recorded per rule so the Done list can undo it. Never throws. */
+async function runArchiveRules(db: Db, box: MailboxRow, writer: NonNullable<ReturnType<typeof writerFor>>, token: string,
+    rules: { match: string; afterDays: number }[]): Promise<number> {
+    const live = await db.select({ id: mailboxMessages.id, providerMessageId: mailboxMessages.providerMessageId, fromAddress: mailboxMessages.fromAddress,
+        receivedAt: mailboxMessages.receivedAt, priority: mailboxMessages.priority, removedAt: mailboxMessages.removedAt })
+        .from(mailboxMessages).where(and(eq(mailboxMessages.mailboxId, box.id), isNull(mailboxMessages.removedAt)));
+    let done = 0;
+    for (const rule of rules) {
+        if (done >= RULE_ARCHIVE_PER_RUN) break;
+        const ids = ruleMatches(live, rule).slice(0, RULE_ARCHIVE_PER_RUN - done);
+        if (!ids.length) continue;
+        const items: { messageId: number; providerMessageId: string; movedProviderId: string }[] = [];
+        for (const m of live.filter((x) => ids.includes(x.id))) {
+            try {
+                const r = await writer.archive(token, m.providerMessageId);
+                await db.update(mailboxMessages).set({ removedAt: new Date(), updatedAt: new Date() }).where(eq(mailboxMessages.id, m.id));
+                items.push({ messageId: m.id, providerMessageId: m.providerMessageId, movedProviderId: r.movedProviderId });
+            } catch { /* left in the inbox; the next run tries again */ }
+        }
+        if (items.length) {
+            done += items.length;
+            await db.insert(mailboxActions).values({
+                mailboxId: box.id, organisationId: box.organisationId, userId: box.userId, kind: 'cleanup', status: 'applied', actedAt: new Date(),
+                payload: { op: 'archive', label: `Your rule: archive email from ${rule.match} after ${rule.afterDays} day${rule.afterDays === 1 ? '' : 's'}`, items, failed: 0 },
+            }).catch(() => undefined);
+        }
+    }
+    return done;
 }
 
 /** The provider's name, for messages the user reads. Pure. */
