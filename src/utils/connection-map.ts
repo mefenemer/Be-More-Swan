@@ -93,7 +93,9 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     tier1_support_agent:       ['support', 'chat'],
     client_onboarding_guide:   ['email', 'esign', 'knowledge'],
     standup_summarizer:        ['chat', 'project_mgmt'],
-    meeting_note_taker:        ['calendar', 'knowledge'],
+    // 'email' (2026-11-16): its follow-up email sends from the workspace's own Gmail or Outlook
+    // (src/utils/meeting-followup-send.ts), so those mailbox cards belong on its Connections tab.
+    meeting_note_taker:        ['email', 'calendar', 'knowledge'],
     // Its mailbox is connected on its own Emails tab (mailbox-oauth.ts → mailboxes table), not a workspace
     // connection, so it needs none of these; 'knowledge' lets it read Brand Assets like any assistant.
     email_assistant:           ['knowledge'],
@@ -167,11 +169,12 @@ export type MailboxProvider = (typeof MAILBOX_PROVIDERS)[number];
 // halves are independent: the Gmail/Outlook grants are workspace-wide and real for everybody, but
 // only these roles have code that actually sends through them (lead_qualifier → lead-generation.ts
 // `send_outreach`; newsletter_editor → newsletter-send.ts, the small-list route when no sending
-// domain is verified). Marking `email` live for a role with nothing to render would make the category
+// domain is verified; meeting_note_taker → sync-action.ts email_meeting_followup, Gmail then Outlook,
+// src/utils/meeting-followup-send.ts). Marking `email` live for a role with nothing to render would make the category
 // VANISH from the Connections grid — no connector card, and no "coming soon" card either — which is
 // the failure mode this module's header warns about. So a role joins this set at the same time as
 // the code that uses the mailbox, never before.
-export const MAILBOX_ROLES = new Set<string>(['lead_qualifier', 'newsletter_editor']);
+export const MAILBOX_ROLES = new Set<string>(['lead_qualifier', 'newsletter_editor', 'meeting_note_taker']);
 
 export function usesOutreachMailbox(a: AssistantRole | null | undefined): boolean {
     return !!(a?.roleKey && MAILBOX_ROLES.has(a.roleKey));

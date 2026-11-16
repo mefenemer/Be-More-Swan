@@ -170,6 +170,17 @@ check('Email is live for the Email Marketing Assistant, which sends through a co
     assert.equal(supportedToolsForAssistant(a).find(t => t.key === 'email')?.available, true);
 });
 
+// The Minute Taker's follow-up email sends from the workspace's Gmail, then Outlook
+// (meeting-followup-send.ts), so its Connections tab must offer both mailboxes above its recipes.
+// It shipped without this (2026-11-16): the recipe enabled with no inbox to connect anywhere, and
+// every follow-up fell through to Be More Swan's address.
+check('the Minute Taker is a mailbox role: Gmail and Outlook on its Connections tab', () => {
+    const a = { roleKey: 'meeting_note_taker', role: 'Minute Taker' };
+    assert.equal(usesOutreachMailbox(a), true);
+    assert.equal(supportedToolsForAssistant(a).find(t => t.key === 'email')?.available, true);
+    assert.ok(ROLE_CONNECTIONS.meeting_note_taker.includes('email'));
+});
+
 // A role marked as a mailbox role must actually be allowed the email category — otherwise
 // usesOutreachMailbox() is true, the server sends mailboxProviders, and the grid renders mailbox
 // cards for a category the policy would never have shown. Fail loudly on that mismatch.
