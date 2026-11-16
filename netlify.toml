@@ -1159,6 +1159,10 @@ node_bundler = "esbuild"
 # sync pulls existing-customer domains from the CRM daily. docs/integration-scenario-library-plan.md.
 [functions.process-scenario-jobs]
   schedule = "*/10 * * * *"
+# Staging's HTTP twin of process-scenario-jobs (staging-crons.yml): a batch of hand-offs can call
+# Slack, Notion, Jira, Asana and a mail provider in turn, so it gets the full synchronous budget.
+[functions.run-scenario-jobs]
+  timeout = 26
 [functions.suppression-sync]
   schedule = "0 4 * * *"
 # US-GOV-2.1.1: Daily digest for stale pending HITL actions — 09:00 UTC every day
