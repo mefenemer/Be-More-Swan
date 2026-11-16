@@ -24,6 +24,15 @@ export interface ShopSnapshotInput {
     orders: { id: number; itemName: string; quantity: number; amountTotal: number; currency: string; customerName: string | null; status: string; refundedAmount: number; createdAt: Date }[];
 }
 
+/** What still stops the shop taking orders, in the order the Shop tab lists it. Empty = ready. */
+export function shopStepsLeft(input: Pick<ShopSnapshotInput, 'connected' | 'chargesEnabled' | 'shop'>): string[] {
+    const steps: string[] = [];
+    if (!input.chargesEnabled) steps.push(input.connected ? 'finish setting up Stripe' : 'connect Stripe');
+    const missing = missingFields(input.shop);
+    if (missing.length) steps.push(`fill in the Delivery & returns details (missing: ${missing.join(', ')})`);
+    return steps;
+}
+
 /** Pure: the snapshot text from what was read (tests call this directly). */
 export function shopSnapshotText(input: ShopSnapshotInput): string {
     const missing = missingFields(input.shop);
@@ -53,9 +62,14 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         const ex = (s.exceptions || []).map((k) => RETURN_EXCEPTIONS[k as keyof typeof RETURN_EXCEPTIONS]).filter(Boolean);
         if (ex.length) lines.push(`- Not returnable for a change of mind: ${ex.join('; ')}.`);
     }
-    lines.push(input.chargesEnabled && !missing.length
-        ? '- So: the shop CAN take orders now.'
-        : '- So: the shop can NOT take orders yet.');
+    // The steps left, named and counted here, so the chat never adds one of its own: on 2026-11-16 (the
+    // showcase sample run on staging) it answered "is my shop ready?" with "two things still need doing",
+    // the second being to "confirm your returns window", when only Stripe was left.
+    const left = shopStepsLeft(input);
+    lines.push(left.length
+        ? `- So: the shop can NOT take orders yet. Steps left (${left.length}): ${left.join('; ')}. Nothing else is required.`
+        : '- So: the shop CAN take orders now. Nothing is left to set up.');
+    lines.push(`- Optional, never a step left to do: phone, VAT number, extra terms, the days to cancel (${s?.returnsDays ?? 14} set; 14 is the legal minimum) and the things that can't be returned for a change of mind.`);
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {

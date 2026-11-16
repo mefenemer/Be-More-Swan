@@ -28,6 +28,7 @@ const META = {
     mystery_shopper:       { name: 'Mystery Shopper',                accent: '#db2777' },
     website_assistant:     { name: 'Website Assistant',              accent: '#7c3aed' },
     video_producer:        { name: 'Video Producer',                 accent: '#ea580c' },
+    shopkeeper:            { name: 'Shopkeeper Assistant',           accent: '#16a34a' },
 };
 
 const only = process.argv.slice(2);
