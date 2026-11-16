@@ -51,6 +51,14 @@ test('shared data only: the loader never selects an organisation id per term', (
     assert.match(src, /count\(distinct \$\{orgTrendTerms\.organisationId\}\)/, 'only a COUNT of workspaces');
 });
 
+test('no bare Date inside a raw sql fragment (prod 2026-11-16: the spend query failed)', () => {
+    const src = read('src/utils/search-trends-admin.ts');
+    for (const m of src.matchAll(/sql<[^>]*>`([^`]*)`/g)) {
+        assert.doesNotMatch(m[1], /\$\{d30\}|\$\{d1\}|\$\{now\}/, `raw Date in: ${m[1].slice(0, 80)}`);
+    }
+    assert.match(src, /\$\{d30Iso\}::timestamp/);
+});
+
 test('page: nav entry under System ▸ Health, title, loader, escaped rows', () => {
     const html = read('admin.html');
     assert.match(html, /\{ view: 'search-trends',\s+icon: '📈', label: 'Search trends',\s+perm: 'platform_config',\s+group: 'Health' \}/);

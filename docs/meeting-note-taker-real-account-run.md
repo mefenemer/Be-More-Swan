@@ -60,7 +60,7 @@ In run B, also try the chat review cards before approving:
 
 | Connection | Pass when |
 |---|---|
-| Follow-up email (A: Gmail) | Arrives at both addresses **from your Gmail**, and is in Gmail's Sent. AI notice at the foot. Inbox card says "This went to the attendees from your Gmail." |
+| Follow-up email (A: Gmail) | Arrives at both addresses **from your Gmail**, and is in Gmail's Sent. No AI notice at the foot (owner 2026-11-16: approved = sent as yours). Inbox card says "This went to the attendees from your Gmail." |
 | Follow-up email (B: Outlook) | Arrives **from your Outlook**, all three attendees on one email (Cara added in chat), in Outlook's Sent Items. Inbox says "…from your Outlook." |
 | Follow-up email (C: Resend) | From **your business name** at `assistant@outbound.bemoreswan.com`; **Reply-To is you** (reply to it and check it reaches you). Inbox says "…because no inbox is connected — replies come to you. Connect Gmail or Outlook…" |
 | Slack (A) | One summary post in the channel listing every action item and its owner. No task messages (decision 10). |

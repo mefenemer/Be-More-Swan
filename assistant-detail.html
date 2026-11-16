@@ -1990,17 +1990,19 @@
     <!-- AC1: Workspace panel — rendered by integrations.js after profile-bio generation -->
     <div id="profile-bio-chat-panel" class="hidden bg-white border border-emerald-200 rounded-2xl shadow-sm overflow-hidden"></div>
 
-    <!-- Enable-able recipes first (Integration Scenario Library, filtered to this assistant's
-         role), rendered by src/components/assistant-integrations.js; self-hides when the role
-         has no relevant recipes. Part of the same unified "Synced actions" section. -->
-    <div id="assistant-integrations-host" class="hidden"></div>
-
-    <!-- Connector capability grid — live connectors to connect + "coming soon" categories,
-         populated by integrations.js (initAssistantConnections). Categories already covered by
-         an enable-able recipe above are suppressed here to avoid duplicate cards. -->
+    <!-- Connections FIRST, then the recipes that use them (owner, 2026-11-16): you connect a tool,
+         then switch on what it does. Connector capability grid — live connectors to connect +
+         "coming soon" categories, populated by integrations.js (initAssistantConnections).
+         Categories already covered by an enable-able recipe below are suppressed here to avoid
+         duplicate cards. -->
     <div id="connections-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">
       <div class="col-span-full flex items-center justify-center py-16 text-gray-500 text-sm">Loading…</div>
     </div>
+
+    <!-- Enable-able recipes (Integration Scenario Library, filtered to this assistant's role),
+         rendered by src/components/assistant-integrations.js; self-hides when the role has no
+         relevant recipes. Part of the same unified "Synced actions" section. -->
+    <div id="assistant-integrations-host" class="hidden"></div>
 
     <!-- US-AUD-4.2.1 SC4: Emergency Revocation — Revoke All Connections (workspace-wide) -->
     <div class="bg-red-50 rounded-2xl border border-red-100 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
