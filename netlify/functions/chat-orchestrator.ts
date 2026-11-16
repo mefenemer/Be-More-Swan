@@ -159,6 +159,8 @@ import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-invent
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt, meetingHubRecord, normaliseMinutesCard } from '../../src/utils/meeting-minutes';
+import { persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 import { linkedPagesBlock } from '../../src/utils/chat-links';
@@ -510,14 +512,6 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     return { content: raw.trim(), uiElement: null };
 }
 
-// Display labels for the meeting-note-taker's taskDestination onboarding values
-// (src/config/assistant-onboarding-schemas.js) — named in the meeting prompt.
-const TASK_DESTINATION_LABELS: Record<string, string> = {
-    notion: 'Notion',
-    jira: 'Jira',
-    asana: 'Asana',
-    monday: 'Monday.com',
-};
 
 /** Pull one onboarding answer out of the (untyped) onboardingContext JSON blob. */
 function onboardingValue(rc: RouteContext, key: string): unknown {
@@ -995,7 +989,6 @@ EXISTING EMAILS — you can act on the single emails listed below, each named by
 // records whose `data` is a renderable uiElement wire shape; upsert on
 // (assistant, recordType, title) so re-processing a record refreshes it.
 
-type HubRecord = { recordType: string; title: string; status: string | null; data: unknown };
 
 export function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
     if (!uiElement || typeof uiElement !== 'object') return [];
@@ -1011,11 +1004,9 @@ export function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
             const title = str(ui.recordName);
             return title ? [{ recordType: 'enrichment', title, status: 'proposed', data: ui }] : [];
         }
-        case 'action_item_assignment': {
-            const title = str(ui.meetingTitle) ?? `Meeting notes — ${new Date().toISOString().slice(0, 10)}`;
-            const open = Array.isArray(ui.tasks) ? ui.tasks.length : 0;
-            return [{ recordType: 'meeting', title, status: open ? 'open' : 'no actions', data: ui }];
-        }
+        case 'action_item_assignment':
+            // The "New meeting" form files its meetings the same way (src/utils/meeting-minutes.ts).
+            return [meetingHubRecord(ui)];
         case 'aging_invoices_table': {
             // One hub record per invoice row so "last chased" / pause state can be
             // tracked per client; data stays a renderable one-row aging table.
@@ -1462,50 +1453,6 @@ async function attachmentRoleKey(
     } catch {
         return null;
     }
-}
-
-async function persistHubRecords(
-    db: ReturnType<typeof getDb>,
-    orgId: number,
-    aiAssistantId: number,
-    records: HubRecord[],
-): Promise<number[]> {
-    const ids: number[] = [];
-    if (records.length === 0) return ids;
-    try {
-        for (const rec of records) {
-            const [existing] = await db
-                .select({ id: assistantRecords.id })
-                .from(assistantRecords)
-                .where(and(
-                    eq(assistantRecords.organisationId, orgId),
-                    eq(assistantRecords.aiAssistantId, aiAssistantId),
-                    eq(assistantRecords.recordType, rec.recordType),
-                    eq(assistantRecords.title, rec.title),
-                ))
-                .limit(1);
-            if (existing) {
-                await db.update(assistantRecords)
-                    .set({ status: rec.status, data: rec.data, source: 'chat', updatedAt: new Date() })
-                    .where(eq(assistantRecords.id, existing.id));
-                ids.push(existing.id);
-            } else {
-                const [made] = await db.insert(assistantRecords).values({
-                    organisationId: orgId,
-                    aiAssistantId,
-                    recordType: rec.recordType,
-                    title: rec.title,
-                    status: rec.status,
-                    source: 'chat',
-                    data: rec.data,
-                }).returning({ id: assistantRecords.id });
-                if (made) ids.push(made.id);
-            }
-        }
-    } catch (err) {
-        console.error('[chat-orchestrator] hub record persistence failed:', err);
-    }
-    return ids;
 }
 
 // ── Knowledge Base retrieval (tier1_support_agent) ────────────────────────────
@@ -2625,70 +2572,23 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // items with implied owners. Wire shape: reply + action_item_assignment uiElement,
     // matching the ActionItemAssignmentCard renderer in disruptive-ui-registry.js.
     meeting_note_taker: {
-        model: DEFAULT_MODEL,
-        // A 60-minute transcript's minutes, attendees and follow-up outgrew 2048 (finish plan step 4).
-        maxTokens: 4096,
+        model: MEETING_MINUTES_MODEL,
+        maxTokens: MEETING_MINUTES_MAX_TOKENS,
         acceptsAttachments: true,
         transcriptAttachments: true,
-        buildRolePrompt: (rc) => {
-            const meetingPlatform = onboardingValue(rc, 'meetingPlatform');
-            const taskDestination = onboardingValue(rc, 'taskDestination');
-            const summaryFormat = onboardingValue(rc, 'summaryFormat');
-            // Display label for where the action items go once the meeting is approved.
-            const destinationLabel = TASK_DESTINATION_LABELS[String(taskDestination)]
-                ?? (taskDestination ? String(taskDestination) : 'your task tracker');
-            return [
-                sharedContextBlock(rc),
-                `You are an executive assistant who turns raw meeting transcripts and messy meeting notes into crisp minutes. When the user pastes a transcript, notes, or a recap, extract four things: a concise executive summary, the concrete decisions the meeting reached, any risks or blockers raised, and every specific action item with its implied owner. Work only from the text the user provides; you cannot join a call or listen to a recording.
+        // The rules and JSON shape are shared with the "New meeting" form (src/utils/meeting-minutes.ts).
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            buildMeetingMinutesPrompt({
+                meetingPlatform: onboardingValue(rc, 'meetingPlatform'),
+                taskDestination: onboardingValue(rc, 'taskDestination'),
+                summaryFormat: onboardingValue(rc, 'summaryFormat'),
+                channelBlock: `When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their notes or attach the transcript file (.txt, .docx, .pdf, or a .vtt/.srt caption file from Zoom, Teams or Google Meet) with the paperclip. They can also use "New meeting" on the Inbox tab. Pasted transcripts may arrive across several consecutive messages — wait until the user says the transcript is complete (or clearly stops pasting) before summarising, and say you are ready for the next chunk in the meantime. An ATTACHED transcript is always complete: write it up at once.
 
-Nothing leaves the workspace until the user approves the meeting — in the Inbox tab, or with Approve on your card. Approving sends it to the connections switched on for this assistant (for example the follow-up email to attendees, a Slack summary, a Notion page, or one ticket per action item in Jira or Asana). So never say the minutes, the email or the tasks HAVE been sent, posted or synced: say they are waiting for the user's approval. Attendees with no email address will not get the follow-up until the user adds one in the Inbox.
-
-Note-taking policy (from setup):
-- Meeting platform: ${meetingPlatform ?? 'not specified'} — refer to it by name when talking about where meetings and recordings live.
-- Task destination: ${destinationLabel} — extracted action items are prepared for sync there; use its terminology when discussing tasks.
-- Summary format: ${summaryFormat === 'paragraph_narrative'
-    ? 'Paragraph narrative — meetingSummary must be one flowing prose paragraph that reads like formal minutes, with no bullet points.'
-    : 'Executive bullet points — meetingSummary must be 3-6 crisp bullet lines (each starting with "• "), leading with decisions and outcomes.'}
-
-Attribution rules: assignee is the person the meeting content implies owns the task ("I'll send the deck" → that speaker; "Sarah to chase legal" → Sarah). Use "Unassigned" when no owner is implied. dueDate is the deadline stated or clearly implied ("by Friday", "before the next call"), echoed as plain text; use null when none was given. Never invent owners, dates, or action items that are not in the source material.
-
-Decisions are firm conclusions the group agreed on ("we're going with vendor A", "launch slips to Q4") — not open discussion or individual opinions; return an empty array when the meeting reached none. Risks are threats, blockers, or concerns raised ("legal sign-off may not land in time", "the API rate limit could break at scale") — return an empty array when none surfaced. Never invent decisions or risks that are not in the source material.
-
-When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their notes or attach the transcript file (.txt, .docx, .pdf, or a .vtt/.srt caption file from Zoom, Teams or Google Meet) with the paperclip. Pasted transcripts may arrive across several consecutive messages — wait until the user says the transcript is complete (or clearly stops pasting) before summarising, and say you are ready for the next chunk in the meantime. An ATTACHED transcript is always complete: write it up at once.
-
-${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}
-
-meetingTitle names this meeting in the user's Meeting Notes library — derive it from the content ("Q3 pipeline review", "Weekly ops sync") plus the meeting date when one is stated; never leave it generic when the content names the meeting.
-
-attendees lists every person the transcript shows was present or is named as an owner, as { name, email }. Transcripts rarely include email addresses, so set email to null unless it appears verbatim — the user fills the missing addresses in before the follow-up is sent. Return an empty array when no people are named.
-
-followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. Set followupEmail to null only when there is no meeting content yet.
-
-${spreadsheetFallback(meetingPlatform, 'Meeting Notes', 'a meeting transcript or rough notes')}
-
-Return STRICT JSON (no markdown, no prose outside the JSON):
-{
-  "reply": "your conversational message to the user",
-  "uiElement": {                      // or null when there is no meeting content yet
-    "type": "action_item_assignment",
-    "meetingTitle": "<short name for this meeting, e.g. 'Q3 pipeline review — 4 Jul'>",
-    "meetingSummary": "<the executive summary, in the configured format>",
-    "decisionsMade": ["<a firm decision the meeting reached>", ...],   // [] when none were reached
-    "identifiedRisks": ["<a risk, blocker, or concern raised>", ...],  // [] when none surfaced
-    "targetDestination": ${JSON.stringify(destinationLabel)},
-    "attendees": [ { "name": "<attendee name>", "email": "<email if stated verbatim>" | null }, ... ],  // [] when none named
-    "followupEmail": {                  // or null when there is no meeting content yet
-      "subject": "<a concise follow-up subject line>",
-      "body": "<the ready-to-review recap email to attendees>"
-    },
-    "tasks": [
-      { "description": "<specific action item>", "assignee": "<owner name, or 'Unassigned'>", "dueDate": "<deadline as stated>" | null },
-      ...
-    ]
-  }
-}`,
-            ].join('\n\n');
-        },
+${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}`,
+                trailingBlock: spreadsheetFallback(onboardingValue(rc, 'meetingPlatform'), 'Meeting Notes', 'a meeting transcript or rough notes'),
+            }),
+        ].join('\n\n'),
         parseResponse: parseStructuredReply,
     },
 
@@ -3933,6 +3833,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
+        // Minutes are cleaned the same way as the "New meeting" form's (meeting-minutes.ts); a minutes
+        // card with nothing extracted is dropped, and any other card (a support request) passes through.
+        if (route === ROUTES.meeting_note_taker) {
+            const t = (uiElement as { type?: unknown } | null)?.type;
+            if (t === 'action_item_assignment' || t === 'ActionItemAssignmentCard') uiElement = normaliseMinutesCard(uiElement);
+        }
         let content = parsed.content;
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
