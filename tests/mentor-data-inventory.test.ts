@@ -50,6 +50,8 @@ const ALWAYS_READERS = [
     'src/utils/mentor-morning.ts',
     // The site page directory: every chat reads it, and the snapshot its gaps (docs/site-directory-plan.md).
     'src/utils/site-directory-store.ts',
+    // "Searches that found you": the Mentor's chat reads them every turn (chat-search-queries.ts → gsc-queries.ts).
+    'src/utils/gsc-queries.ts',
 ].filter((f) => { try { read(f); return true; } catch { return false; } }).map((f) => [f, read(f)] as const);
 
 const base: MentorSnapshotData = {
