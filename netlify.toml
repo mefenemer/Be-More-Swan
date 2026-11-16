@@ -1257,6 +1257,12 @@ node_bundler = "esbuild"
   schedule = "*/10 * * * *"
   timeout = 26
 
+# Top lists Phase 2: "Make it a carousel" renders a cover plus one brand card per list item (up to
+# 20) one after another and uploads each to R2. Netlify's synchronous max, so a long list is not
+# killed half way (nothing is written until every slide exists, so a timeout changes nothing).
+[functions.make-carousel]
+  timeout = 26
+
 # Epic 1, US1: synchronous AI image generation submits to Fal and polls until the images
 # are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
 # instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.

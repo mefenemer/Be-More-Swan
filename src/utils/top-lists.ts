@@ -54,6 +54,85 @@ export function countArticleItems(markdown: string): number {
     return sequentialRun(nums);
 }
 
+// ── Phase 2: a list post as a carousel (plan §6, decisions 3 and 4) ─────────────────────────────
+// "Make it a carousel" turns the numbered items already in a list caption into slides: a cover card
+// with the post's opening line, then one brand card per item. No AI call — the words are the ones
+// the user already approved in the caption, so the slides can never say something the post doesn't.
+
+/** Platforms whose carousel format is live (src/config/post-formats.ts), and that format's key. */
+export const CAROUSEL_FORMAT_BY_PLATFORM: Readonly<Record<string, string>> = {
+    instagram: 'ig_carousel',
+    threads: 'th_carousel',
+};
+
+/** The carousel format for a platform, or null where carousels are not live yet (LinkedIn: li_document is planned). */
+export function carouselFormatFor(platform: string | null | undefined): string | null {
+    return CAROUSEL_FORMAT_BY_PLATFORM[String(platform ?? '').toLowerCase()] ?? null;
+}
+
+/** The most slides either live carousel format takes (ig_carousel / th_carousel maxItems). */
+export const CAROUSEL_MAX_SLIDES = 20;
+
+/** The longest text a slide shows. A brand card is a headline, not a paragraph. */
+export const SLIDE_TEXT_MAX = 90;
+
+const ITEM_LINE = /^\s*(?:\*\*)?(\d{1,2})(?:️?⃣|[.)]|\s[-–—:])\s*(?:\*\*)?\s*(.+)$/;
+
+/**
+ * The text of each numbered item in a list caption, in order — the same run countCaptionItems
+ * counts (starting at 1, stopping at a gap or repeat), with the "1." and any bold markers removed.
+ */
+export function captionListItems(caption: string): string[] {
+    const items: string[] = [];
+    for (const line of String(caption || '').split(/\r?\n/)) {
+        const m = line.match(ITEM_LINE);
+        if (!m) continue;
+        const n = Number(m[1]);
+        if (n === items.length + 1) items.push(m[2].replace(/\*\*/g, '').trim());
+        else if (items.length) break;
+    }
+    return items.length >= MIN_LIST_ITEMS ? items : [];
+}
+
+/** Cut text to `max` characters at a word boundary, adding an ellipsis when anything was cut. */
+function clip(text: string, max: number): string {
+    const t = text.replace(/\s+/g, ' ').trim();
+    if (t.length <= max) return t;
+    const cut = t.slice(0, max - 1);
+    const at = cut.lastIndexOf(' ');
+    return `${(at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
+/** An item's slide words: "3. " plus its first sentence, clipped to fit a card. */
+export function slideTextForItem(n: number, item: string): string {
+    const first = item.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? item;
+    return clip(`${n}. ${first}`, SLIDE_TEXT_MAX);
+}
+
+export interface CarouselSlideTexts {
+    /** The cover card: the caption's opening line, with its count made to match the items. */
+    cover: string;
+    /** One per item, in order. */
+    items: string[];
+}
+
+/**
+ * The words for every slide of a list caption's carousel, or null when the caption holds no list
+ * of at least MIN_LIST_ITEMS numbered items. The cover is the first line before the list; a caption
+ * that starts straight at item 1 gets `fallbackTitle` (the card headline) as its cover instead.
+ * Pure.
+ */
+export function carouselSlideTexts(caption: string, fallbackTitle?: string | null): CarouselSlideTexts | null {
+    const fixed = fixCaptionListCount(String(caption ?? ''));
+    const items = captionListItems(fixed);
+    if (!items.length) return null;
+    const firstLine = fixed.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? '';
+    const coverSource = ITEM_LINE.test(firstLine) ? String(fallbackTitle ?? '').trim() : firstLine;
+    const cover = clip(fixListCount(coverSource || `${items.length} things worth knowing`, items.length), SLIDE_TEXT_MAX);
+    // Instagram and Threads take at most 20 slides: the cover plus the first 19 items.
+    return { cover, items: items.slice(0, CAROUSEL_MAX_SLIDES - 1).map((item, i) => slideTextForItem(i + 1, item)) };
+}
+
 /** The length of the run 1, 2, 3… at the start of `nums` (duplicates and gaps end it). */
 function sequentialRun(nums: number[]): number {
     let n = 0;

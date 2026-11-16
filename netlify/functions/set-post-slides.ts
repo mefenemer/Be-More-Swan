@@ -17,7 +17,8 @@
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
+import { scheduledPosts, contentAssets } from '../../db/schema';
+import { writePostSlides } from '../../src/utils/post-slides';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { postFormatSpec } from '../../src/config/post-formats';
@@ -86,24 +87,8 @@ export default withLambda(async (event) => {
     // cross-post sibling gets the same carousel. See src/utils/crosspost-media.ts.
     const targetIds = await mediaTargetPostIds(db, { postId, orgId, applyToGroup: body.applyToGroup });
 
-    // Rewrite the junction rows to match the requested order exactly, then mirror into the legacy
-    // array. Both, always: the publishers read the array and newer queries read the junction, so
-    // writing one without the other means the post publishes something different from what it shows.
-    await db.delete(scheduledPostAssets).where(inArray(scheduledPostAssets.scheduledPostId, targetIds));
-    if (assetIds.length) {
-        await db.insert(scheduledPostAssets)
-            .values(targetIds.flatMap(id => assetIds.map((contentAssetId, position) => ({ scheduledPostId: id, contentAssetId, position }))))
-            .onConflictDoNothing();
-    }
-    await db.update(scheduledPosts)
-        .set({
-            contentAssetIds: assetIds,
-            // Re-attaching media clears the "this post's media was deleted" flag, same as
-            // attach-draft-media does.
-            ...(assetIds.length ? { mediaMissing: false, mediaMissingNote: null } : {}),
-            updatedAt: new Date(),
-        })
-        .where(inArray(scheduledPosts.id, targetIds));
+    // Junction rows and the legacy array, together — src/utils/post-slides.ts.
+    await writePostSlides(db, targetIds, assetIds);
 
     const slides = await resolvePostMediaList(db, assetIds);
 

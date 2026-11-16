@@ -1076,6 +1076,11 @@
           message = d.action === 'voiceover' ? `Voiceover added.${timedLine}${editor.open ? '' : ' Open the post to hear it.'}`
             : d.action === 'captions' ? `Captions saved.${timedLine}`
             : `Done.${timedLine}`;
+        } else if (d.action === 'carousel') {
+          // The post editor's "Make it a carousel" — make-carousel.ts, one task, every Instagram /
+          // Threads row of the post at once.
+          const r = await postActionCall('make-carousel', { postId: d.postId });
+          message = `Done — ${r.slideCount} slides: a cover and one per item.${editor.open ? '' : ' Open the post to see them.'}`;
         } else if (d.action === 'video_version') {
           // The Review Queue's "Make a video version" — video-projects.ts `from_post`. Free: it plans
           // a storyboard on the Video Producer's Videos tab; making the video is a click there.

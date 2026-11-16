@@ -123,5 +123,24 @@ item has real substance. They fail as filler or as a "we're #1" ad.
   and generate-post writes it in a best-effort UPDATE. Until it runs, a picked shape is ignored.
   It is deliberately not in `db/schema.ts`: Drizzle would add it to every job INSERT.
 - Tests: `tests/top-lists.test.ts` (18 checks). Three older source-scan tests were updated to the new lines.
-- Not done in Phase 1: Shape on the post editor's "Draft with AI" button. Not checked in a browser yet.
+- Browser-checked on staging 2026-11-16 (Shape moved to the editor by #623; live Top list draft titled "Five checks" over 5 items). Live on prod via #633.
 
+
+## 10. Phase 2 — "Make it a carousel" (built 2026-11-16)
+
+- **One server action:** `netlify/functions/make-carousel.ts` (`POST { postId }`). It reads the numbered items already in
+  the caption (`carouselSlideTexts` in `top-lists.ts`, with no AI call, so a slide never says something the post doesn't).
+  It renders a **cover** (the opening line, count fixed) plus **one brand card per item** ("3. " + the item's first
+  sentence, at most 90 characters), at 4:5. The slides go on every Instagram / Threads row of the post that can still
+  change, and the row's format switches to `ig_carousel` / `th_carousel` in the same update. The caption is unchanged.
+  LinkedIn, Facebook and X rows are untouched (LinkedIn waits for `li_document`). At most 20 slides: the cover plus 19 items.
+- **Cost (decision 4):** a new `carousel` task kind at 1. The endpoint asks for capacity before rendering and records one
+  task after the slides are saved, however many slides or rows. ⚠️ **SQL:** re-run `db/z-task-costs.sql` on BOTH DBs to
+  add the `carousel` row so it shows in Admin ▸ Task costs (idempotent; until then the code default of 1 applies).
+- **GUI:** the post editor's Write step gets **"Make it a carousel"** under "Talk it through". It shows only on an
+  editable Instagram / Threads post with 2+ numbered items, saves what is on screen first, and reloads after.
+- **Chat:** a `carousel` post action (`chat-post-action.ts`) on the confirm card, which calls the same endpoint. It is
+  offered only when asked, never on the model's own initiative (decision 3).
+- **Shared:** `src/utils/post-slides.ts` `writePostSlides` writes the junction rows and the legacy array together, for
+  both `set-post-slides.ts` and `make-carousel.ts`.
+- Tests: `tests/top-lists-carousel.test.ts` (12 checks).

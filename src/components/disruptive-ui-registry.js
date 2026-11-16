@@ -5489,7 +5489,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
   // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'
-  //   |'voiceover'|'captions'|'time_text', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,
+  //   |'voiceover'|'captions'|'time_text'|'carousel', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,
   //   script?, voice?, voiceName?, captions?, captionStyle?, timeText? }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
@@ -5518,6 +5518,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     time_text: { head: 'Time the text to the voice', button: 'Time the text', busy: 'Listening for the words…' },
     // The post editor's "Bring back" on a removed or rejected post (restore-post.ts).
     restore: { head: 'Bring this post back', button: 'Bring it back', busy: 'Bringing it back…' },
+    // The post editor's "Make it a carousel" on a Top list post (make-carousel.ts, Top lists Phase 2).
+    carousel: { head: 'Make it a carousel', button: 'Make the slides', busy: 'Making the slides…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -5565,6 +5567,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
         <p class="text-xs text-gray-600 mt-2">Free. Captions are added when the video is made.</p>` : ''}
       ${!blocked && ui.action === 'time_text' ? '<p class="text-xs text-gray-600 mt-3">Each text box on the post shows while its words are being said. A box whose words are never said keeps its timing. Free.</p>' : ''}
+      ${!blocked && ui.action === 'carousel' ? `<p class="text-xs text-gray-600 mt-3">A cover slide plus one branded slide per numbered item, made from the words already in the post. Its caption stays as it is${labels.length ? ` and it becomes a ${esc(labels.join(' and '))} carousel` : ''}; any picture on it is replaced by the slides. Uses ${window.taskCost('carousel')}.</p>` : ''}
       ${!blocked && ui.action === 'video_version' ? '<p class="text-xs text-gray-600 mt-3">Your Video Producer plans a short video saying what this post says — free. You check the storyboard on its Videos tab before anything is made; the cost of making it is shown there first. This post stays as it is.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
