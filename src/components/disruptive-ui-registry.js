@@ -4703,12 +4703,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   //   identifiedRisks?: string[], targetDestination, channel?,
   //   attendees?: [{ name, email: string|null }, ...],
   //   followupEmail?: { subject, body } | null,
-  //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
-  // targetDestination echoes the onboarding taskDestination label and picks the sync
-  // route: 'Notion' creates a page (summary paragraph + to_do blocks) via
-  // /api/actions/sync (notion_create_page); anything else posts the summary + tasks
-  // to Slack as Block Kit (slack_post_summary), where an optional ui.channel ('#name'
-  // or channel id) picks the channel, defaulting to #general.
+  //   tasks: [{ description, assignee, dueDate: string|null }, ...],
+  //   recordId?: number }   // the saved meeting record (chat-orchestrator stamps it)
+  // Nothing is sent from this card (finish plan step 3, owner 2026-11-15): Approve is the Inbox's own
+  // PATCH on assistant-records, so the approval fires the same hand-offs (follow-up email, Slack,
+  // Notion, Jira/Asana tickets) as approving in the Inbox, and only then. It used to post the
+  // UNAPPROVED summary straight to Slack or Notion. No recordId (an older transcript) = no button;
+  // the Inbox link under the card is the way in.
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
@@ -4724,14 +4725,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const followup = (ui.followupEmail && typeof ui.followupEmail === 'object') ? ui.followupEmail : null;
     if (!ui.meetingSummary && !decisions.length && !risks.length && tasks.length === 0) return null; // nothing extracted — fall back to text-only
 
-    const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
-      ? ui.targetDestination.trim() : 'your task tracker';
-    const isNotion = destination.toLowerCase() === 'notion';
-    const syncActionType = isNotion ? 'notion_create_page' : 'slack_post_summary';
-    // Only Notion has a native create action today; every other destination (Jira,
-    // Asana, Monday, "your task tracker") is fulfilled by posting to Slack — the
-    // button must say what actually happens.
-    const syncLabel = isNotion ? 'Notion' : 'Slack';
+    const recordId = Number.isInteger(Number(ui.recordId)) && Number(ui.recordId) > 0 ? Number(ui.recordId) : null;
+    const missingEmails = attendees.filter((a) => !a.email).length;
 
     // Summary / Decisions / Risks stack above the action-item table. Each section
     // carries a bottom divider unless it is the last thing before the footer (the
@@ -4819,47 +4814,38 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>` : ''}
 
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-sync-status>${isNotion
-          ? `Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Notion.`
-          : `Posts the summary and ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Slack${destination.toLowerCase() !== 'slack' ? ` (direct ${esc(destination)} sync is coming — Slack is the delivery channel today)` : ''}.`}</p>
-        <button type="button" data-sync-action
-          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          ${isNotion ? 'Sync to Notion' : 'Post to Slack'}
-        </button>
+        <p class="text-xs text-gray-500" data-approve-status>Nothing is sent until you approve. Approving sends it to the connections switched on for this assistant.${missingEmails
+          ? ` ${missingEmails} attendee${missingEmails === 1 ? ' has' : 's have'} no email address and won't get the follow-up — add ${missingEmails === 1 ? 'it' : 'them'} in the Inbox first.`
+          : ''}</p>
+        ${recordId ? `<button type="button" data-approve-meeting
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">Approve</button>` : ''}
       </div>
     `;
 
-    // Live behaviour: create a Notion page or post to Slack, per the destination.
-    const statusLine = el.querySelector('[data-sync-status]');
+    // Approve = the Inbox's PATCH (assistants.js _detailRqRecordAct), never a send of its own.
+    const statusLine = el.querySelector('[data-approve-status]');
     el.addEventListener('click', async (e) => {
-      const button = e.target.closest('[data-sync-action]');
-      if (!button || button.disabled) return;
+      const button = e.target.closest('[data-approve-meeting]');
+      if (!button || button.disabled || !recordId) return;
 
       button.disabled = true;
-      button.textContent = 'Syncing…';
-      statusLine.className = 'text-xs text-gray-400';
+      button.textContent = 'Approving…';
       try {
-        const data = await postSyncAction(syncActionType, {
-          meetingSummary: ui.meetingSummary ?? null,
-          decisionsMade: decisions,
-          identifiedRisks: risks,
-          targetDestination: ui.targetDestination ?? null,
-          channel: ui.channel ?? null,
-          tasks: tasks.map((t) => ({
-            description: t.description,
-            assignee: t.assignee ?? null,
-            dueDate: t.dueDate ?? null,
-          })),
+        const res = await fetch('/.netlify/functions/assistant-records', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: recordId, approvalStatus: 'approved' }),
         });
-        button.textContent = 'Synced ✓';
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn\u2019t work. Nothing was sent.');
+        button.textContent = 'Approved ✓';
         button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-        statusLine.textContent = data.message || `Synced to ${syncLabel}.`;
+        statusLine.textContent = 'Approved. It goes to your switched-on connections now; the Inbox shows what synced.';
         statusLine.className = 'text-xs font-semibold text-emerald-700';
       } catch (err) {
         button.disabled = false;
-        button.textContent = 'Retry sync';
-        button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-        statusLine.textContent = err.message || `Could not sync to ${syncLabel}.`;
+        button.textContent = 'Try again';
+        statusLine.textContent = err.message || 'That didn\u2019t work. Nothing was sent.';
         statusLine.className = 'text-xs font-semibold text-red-600';
       }
     });
