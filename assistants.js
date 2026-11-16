@@ -8866,6 +8866,20 @@ function _detailCollect(currentData) {
             || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
+    // Only the fields of cards this role shows (registry profileKeysOff). A hidden card's field keeps
+    // its stored value, or stays absent: never the page's social default ("3 times a week", Mon–Fri…).
+    // Runs before the role's own set-up answers below, so a schema field of the same name still wins.
+    const _stored = currentData.context || {};
+    const _keep = (key) => {
+        if (Object.prototype.hasOwnProperty.call(_stored, key)) newContext[key] = _stored[key];
+        else delete newContext[key];
+    };
+    (window.AssistantDashboardRegistry?.profileKeysOff?.(currentData.roleKey) || []).forEach(_keep);
+    // Trigger / Content Source are the generic Operational Setup block (#operation-generic), shown only to
+    // roles without set-up questions of their own; platforms are carried, never edited here.
+    const _genericOn = !document.getElementById('operation-generic')?.classList.contains('hidden');
+    if (!_genericOn) { _keep('trigger_type'); _keep('content_source'); }
+    if (!Object.prototype.hasOwnProperty.call(_stored, 'primary_platforms')) delete newContext.primary_platforms;
     if (!window._pillarsTextDirty) delete newContext.content_pillars;
     // ⚠️ Same rule for Blog / Email topics (records since docs/pillar-records-plan.md §7): the page's copy
     // is never sent, or a save built before a topic change could reconcile the rows back to an old list.
@@ -8925,6 +8939,14 @@ function _detailCollect(currentData) {
             strictRules: strictLines,
         }
     };
+    // Same rule for the copies in configuration.inputs: a role without the generic block keeps what it had.
+    if (!_genericOn) {
+        const storedInputs = currentData.configuration?.inputs || {};
+        for (const k of ['trigger_type', 'content_source', 'triggerText', 'sourceText', 'platforms']) {
+            if (Object.prototype.hasOwnProperty.call(storedInputs, k)) newConfiguration.inputs[k] = storedInputs[k];
+            else delete newConfiguration.inputs[k];
+        }
+    }
 
     return { newContext, newConfiguration };
 }
@@ -9073,7 +9095,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const newName = nameInput ? nameInput.value.trim() : null;
         // Per-assistant AI disclosure (EU AI Act Art. 52) — saved alongside the context.
         const disclosureEl = document.getElementById('edit_ai_disclosure');
-        const disclosureText = disclosureEl ? disclosureEl.value.trim() : undefined;
+        // Sent only when it changed: an assistant saved without one (rows made outside hire-assistant.ts)
+        // got '' on EVERY autosave, and the server refuses '' on an active assistant (422
+        // DISCLOSURE_MISSING), so even renaming it failed. Clearing a stored one is still refused there.
+        const _disclosureNow = disclosureEl ? disclosureEl.value.trim() : undefined;
+        const disclosureText = _disclosureNow !== undefined && _disclosureNow !== String(currentData.disclosureText || '').trim()
+            ? _disclosureNow : undefined;
         try {
             const body = { assistantId: parseInt(assistantId), newContext, newConfiguration };
             if (newName) body.newName = newName;

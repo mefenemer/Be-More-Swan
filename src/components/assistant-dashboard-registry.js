@@ -1479,5 +1479,34 @@
     el.textContent = baseLabel;
   }
 
-  window.AssistantDashboardRegistry = { get, REGISTRY, setTabCount };
+  /**
+   * Which saved settings belong to which card on Profile ▸ settings, keyed by the SAME registry flags
+   * that show or hide those cards (assistants.js _applyDashboardRegistry). The settings page saves the
+   * whole onboarding_context in one PUT, and it used to write every Social Media field for every role:
+   * renaming a Shopkeeper on staging (2026-11-16) wrote posting_frequency "3 times a week", posting
+   * days and times, platform_strategy, publishPolicy, strategyAgentEnabled… into its set-up answers.
+   * _detailCollect now leaves out the fields of every card the role does not show, so a stored value
+   * rides through unchanged and an absent one stays absent.
+   * Pure: tests/detail-autosave-role-fields.test.ts loads this file in a vm.
+   */
+  const PROFILE_FIELD_GROUPS = [
+    { card: 'module-posting-schedule', keys: ['posting_frequency', 'posting_days', 'posting_times', 'posting_timezone'],
+      on: (m) => m.hasPostingSchedule !== false && m.hasScheduleCard !== false },
+    { card: 'module-social-strategy', keys: ['platform_strategy'], on: (m) => m.hasSocialStrategy !== false },
+    { card: 'module-creative-objective', keys: ['primary_objective', 'core_message', 'cta', 'incentive'], on: (m) => m.hasCreativeBrief !== false },
+    { card: 'module-creative-audience', keys: ['target_audience', 'tone_of_voice'], on: (m) => m.hasCreativeBrief !== false },
+    { card: 'module-reference-style', keys: ['reference_style_url'], on: (m) => m.hasCreativeBrief !== false },
+    { card: 'module-sales-context', keys: ['sales_objections'], on: (m) => m.hasSalesContext !== false },
+    { card: 'module-content-automation', keys: ['publishPolicy', 'allowAiMediaAutoPublish'], on: (m) => m.hasContentAutomation !== false },
+    { card: 'module-strategy-agent', keys: ['strategyAgentEnabled'], on: (m, cfg) => !!cfg.strategyTab },
+  ];
+
+  /** The onboarding_context keys the settings page must NOT write for this role (its cards are hidden). */
+  function profileKeysOff(roleKey) {
+    const cfg = get(roleKey);
+    const mods = cfg.modules || {};
+    return PROFILE_FIELD_GROUPS.filter((g) => !g.on(mods, cfg)).flatMap((g) => g.keys);
+  }
+
+  window.AssistantDashboardRegistry = { get, REGISTRY, setTabCount, PROFILE_FIELD_GROUPS, profileKeysOff };
 })();
