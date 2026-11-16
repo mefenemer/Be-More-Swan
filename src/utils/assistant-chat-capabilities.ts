@@ -24,6 +24,7 @@ import { MY_CONTENT_ROLES } from './chat-my-content';
 import { INSPO_ROLES, KB_ROLES } from './chat-library';
 import { EMAIL_REVIEW_ROLES } from './chat-reviews';
 import { SEARCH_QUERY_ROLES } from './chat-search-queries';
+import { SEARCH_TREND_ROLES } from './chat-search-trends';
 import { roleHasCta } from './chat-call-to-action';
 import { hasPostingSchedule } from './chat-schedule';
 import { pillarProfileFor } from './pillar-profiles';
@@ -99,6 +100,7 @@ export const PROMPT_BLOCK_SOURCES: Record<string, ChatSource> = {
     libraryBlock: { label: 'Its Knowledge Base or Inspo', kind: 'actions', sees: 'What is in its Knowledge Base (Support) or Inspo library (Social, Blog), and can propose adding to it.', source: 'src/utils/chat-library.ts', applies: (c) => cards(c) && (KB_ROLES.includes(c.roleKey) || INSPO_ROLES.includes(c.roleKey)), cards: (c) => (KB_ROLES.includes(c.roleKey) ? ['kb_article_proposal'] : ['inspo_proposal']) },
     myContentBlock: { label: 'My Content', kind: 'data', sees: 'What is in My Content (pictures, videos, documents) for the asset types its page shows.', source: 'src/utils/chat-my-content.ts', applies: (c) => cards(c) && c.roleKey in MY_CONTENT_ROLES },
     reviewsBlock: { label: 'Customer reviews', kind: 'data', sees: 'Customer reviews it can quote in emails.', source: 'src/utils/chat-reviews.ts', applies: (c) => cards(c) && EMAIL_REVIEW_ROLES.includes(c.roleKey) },
+    searchTrendsBlock: { label: 'Search trends', kind: 'data', sees: 'Google Trends for the search terms the workspace tracks: each term\'s busy months last year, whether interest is rising now, and related searches (Business Information ▸ What People Search). Can propose adding, approving or removing a term, or suggesting some, which the user confirms.', source: 'src/utils/chat-search-trends.ts', applies: (c) => SEARCH_TREND_ROLES.includes(c.roleKey), when: 'always; says so when no terms are tracked yet', cards: () => ['search_terms'] },
     searchQueriesBlock: { label: 'Searches that found them', kind: 'data', sees: 'The top Google searches that showed their own site over the latest Search Console window (the list in Blog setup ▸ Search performance).', source: 'src/utils/chat-search-queries.ts', applies: (c) => SEARCH_QUERY_ROLES.includes(c.roleKey), when: 'only while Google Search Console is connected and has searches to report' },
     myAccountBlock: { label: "The user's My Account", kind: 'data', sees: "The signed-in person's own My Account settings, read-only.", source: 'src/utils/chat-my-account.ts', applies: every },
     mentorPointerBlock: { label: 'Business Mentor pointer', kind: 'rule', sees: 'May point the user to the Business Mentor for bigger questions; never passes work to it.', source: 'netlify/functions/chat-orchestrator.ts', applies: (c) => !isMentor(c), when: 'only while the workspace has an active Business Mentor' },
@@ -248,6 +250,7 @@ export const CARD_LABELS: Record<string, string> = {
     site_audit_website_request: 'Set the website to check',
     site_changes: 'Change pages and sections of the website',
     site_directory: 'Re-read the website or leave a page out of the directory',
+    search_terms: 'Track, approve or stop tracking a Google search term, or suggest some',
     site_draft_request: 'Draft a new website',
     site_import_decision: 'Keep or drop imported pages',
     site_import_products: 'Import products from their old site',

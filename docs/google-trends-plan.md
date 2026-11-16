@@ -243,3 +243,32 @@ trial is left.
 - **Not yet:** `trackTrendTerm` / `untrackTrendTerm` exist but nothing calls them. The terms tab, the Haiku first
   fill, chat cards, the `<search_trends>` blocks and the Admin terms list are Phase 2.
 - Tests in `tests/search-trends.test.ts`, run against a real Phase 0 reply (`tests/fixtures/trends-boiler-service-uk.json`).
+
+**Phase 2 built (2026-11-16, branch `feat/trends-mentor-blog`).** The Business Mentor and the Blog Writer. No new tables.
+- **One loader and one prompt block:** `src/utils/search-trends-read.ts`. For each term it gives:
+  - which way interest is moving (the last 4 weeks against the 8 before; ±20% counts as rising or falling);
+  - the next busy month;
+  - one plain sentence describing it.
+  - `<search_trends>` is fenced as data, says "relative interest, never counts" and calls seasons last year's
+    pattern rather than a forecast.
+- **Choosing terms:** `src/utils/search-trend-terms.ts`.
+  - Haiku suggests 8 broad terms from the industry, description, Products & Services and blog keywords. They are
+    saved as suggestions and only fetched once approved.
+  - The country comes from the owner's time zone.
+  - `applyTrendTermAction` is the one server action for the GUI and chat. The endpoint is
+    `netlify/functions/search-trends.ts`; viewers can read but not change the list.
+- **GUI:** a new **Business Information ▸ What People Search** tab and Blog setup ▸ Search performance ▸ "What people
+  search for" share one renderer, `src/components/search-trends-view.js`.
+  - Blog setup shows a sparkline, the busy months, a rising/falling pill and related searches.
+  - In Blog setup, a related search opens the Blog Writer's chat with a request typed in.
+- **Chat:** `chat-search-trends.ts` adds the block to `blog_writer` and `business_mentor`.
+  - The `search_terms` card (`chat-search-terms-card.ts`) can add, approve, approve all, remove or suggest. It is
+    rebuilt against the stored list and put back after the routes rebuild their cards.
+- **Blog ideation:** approved terms with data are offered as angles on undirected slots.
+- **Mentor weekly review:** the code-only checks (`mentor-content-checks.ts`) flag a busy season starting in 1–2
+  months, and suggested terms still waiting for approval.
+- **Help:** `db/z-search-trends-help-2026-11-16.sql`.
+- **Tests:** `tests/search-trends-phase2.test.ts`. The two views were driven in headless Chromium (desktop and
+  phone) against a stubbed API.
+- **Phase 3 (not built):** Social and Email timely angles, calendar markers, and the on-demand chat look-up with a
+  fair-use cap (§10 Q5).
