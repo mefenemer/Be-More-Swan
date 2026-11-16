@@ -50,6 +50,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its morning summaries (docs/morning-summary-plan.md): the newest sent in the last two days', ['mentor_mornings'], 'Its morning summaries'),
     ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
+    // Phase 1 of docs/google-trends-plan.md: the engine only, nothing reads it in chat yet. Phase 2 adds the
+    // <search_trends> block and moves this to `always` (with a reader in tests/mentor-data-inventory.test.ts).
+    ...group('on_request', 'The Google search terms the workspace tracks for trends (their data is shared, relative interest only, in search_trend_terms)', ['org_trend_terms'], 'The search terms you track on Google Trends'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars
