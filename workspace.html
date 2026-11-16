@@ -1638,6 +1638,13 @@ window.showComplianceModals = function showComplianceModals(force) {
                     <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h8M8 14h5m-9 7l3.5-3.5H19a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v15z"/></svg>
                     <span class="text-[11px] font-bold">Talk it through in chat</span>
                   </button>
+                  <!-- Top lists Phase 2: "Make it a carousel" (make-carousel.ts). Shown by _pceSyncCarouselBtn
+                       only on an Instagram / Threads post whose caption holds a numbered list. -->
+                  <button type="button" id="pce-carousel-go" onclick="_pceMakeCarousel()"
+                    class="hidden btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path stroke-linecap="round" d="M19 7v10M22 9v6"/></svg>
+                    <span id="pce-carousel-label" class="text-[11px] font-bold">Make it a carousel</span>
+                  </button>
                   <p id="pce-ai-msg" class="text-[10px] text-gray-400"></p>
                 </div>
                 <div class="space-y-1.5">
@@ -14916,6 +14923,70 @@ async function _pceDraftWithAI() {
     }
 }
 
+// ── Make it a carousel (Top lists Phase 2) ──────────────────────────────────────────────────────
+// make-carousel.ts turns the numbered items in the caption into a cover + one brand card per item,
+// on every Instagram / Threads row of this post, for one task. The same server action backs the
+// chat's `carousel` post action. The button only shows where the server would accept it: an
+// editable post with a carousel platform and a numbered list of 2+ items (the server re-checks).
+
+/** Numbered items in a caption, counted the way top-lists.ts countCaptionItems does: a run from 1. */
+function _pceListItemCount(caption) {
+    let n = 0;
+    for (const line of String(caption || '').split(/\r?\n/)) {
+        const m = line.match(/^\s*(?:\*\*)?(\d{1,2})(?:️?⃣|[.)]|\s[-–—:])\s*\S/);
+        if (!m) continue;
+        if (Number(m[1]) === n + 1) n++;
+        else if (n > 0) break;
+    }
+    return n;
+}
+
+function _pceSyncCarouselBtn(post, editable) {
+    const btn = _pceEl('pce-carousel-go');
+    if (!btn) return;
+    const platforms = [...new Set([post?.platform, ..._rqReviewGroupIds.map(id => _rqPostCache[id]?.platform)].filter(Boolean))];
+    const onCarouselPlatform = platforms.some(p => p === 'instagram' || p === 'threads');
+    const show = !!editable && onCarouselPlatform && _pceListItemCount(post?.caption) >= 2;
+    btn.classList.toggle('hidden', !show);
+    btn.classList.toggle('flex', show);
+    const cost = window.taskCost ? window.taskCost('carousel') : '';
+    btn.title = `A cover slide plus one branded slide per numbered item, on Instagram and Threads.${cost ? ` Uses ${cost}.` : ''}`;
+}
+
+async function _pceMakeCarousel() {
+    const postId = _rqReviewPostId;
+    if (postId == null) return;
+    const btn = _pceEl('pce-carousel-go');
+    const label = _pceEl('pce-carousel-label');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = 'Making the slides…';
+    _pceSetAiMsg('');
+    const ids = [..._rqReviewGroupIds];
+    // The same events a chat card sends: the editor saves what is on screen first, then reloads.
+    const editor = { postIds: ids, open: false, ready: null };
+    document.dispatchEvent(new CustomEvent('post:actionStarting', { detail: editor }));
+    let ok = false;
+    let message = '';
+    try {
+        if (editor.ready) await editor.ready;
+        const res = await fetch('/.netlify/functions/make-carousel', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ postId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || `That didn’t work (HTTP ${res.status}).`);
+        ok = true;
+        message = `Done — ${d.slideCount} slides: a cover and one per item.`;
+    } catch (err) {
+        _pceSetAiMsg(err.message || 'The slides couldn’t be made.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+        if (label) label.textContent = 'Make it a carousel';
+    }
+    document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: 'carousel', ok, message } }));
+    if (ok) window.showToast?.(message, { icon: '✅' });
+}
+
 async function _pcePollAiDraft() {
     const poll = _pceAiPoll;
     if (!poll?.jobId) return;
@@ -18114,6 +18185,7 @@ function _pceSyncForPost(post) {
         // while they move between this post's platform tabs.
         if ((_pceEl('pce-ai-shape')?.options.length || 0) <= 1) gpRenderShapeOptions();
     }
+    _pceSyncCarouselBtn(post, editable);
     if (!editable) {
         // Same width as the editor, deliberately. A published post opened from the Calendar used to
         // narrow to max-w-lg on the reasoning that the wide layout exists to fit an inspector beside
@@ -21927,7 +21999,7 @@ document.addEventListener('post:actionFinished', (e) => {
     const d = e.detail || {};
     if (!d.ok || !_pceChatIsThisPost(d.postIds)) return;
     if (d.action === 'video_version') return;   // the post itself is unchanged
-    if (['shorter', 'longer', 'voiceover', 'captions', 'time_text'].includes(d.action)) {
+    if (['shorter', 'longer', 'voiceover', 'captions', 'time_text', 'carousel'].includes(d.action)) {
         _rqOpenPostReview(_rqReviewPostId, { refresh: true });
         return;
     }

@@ -1,7 +1,7 @@
 // src/utils/chat-post-action.ts
 // The Social Media chat's hands on posts that ALREADY exist: approve, reject, try a failed one
 // again, move one to another time, remove one nobody wants, bring back one removed or rejected, and
-// make one shorter or longer.
+// make one shorter or longer, or turn a Top list post into a carousel.
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -16,7 +16,7 @@
 // the model said about the post with what is actually true (its platforms, status, time, wording).
 // The card in disruptive-ui-registry.js shows those facts; only the user's click acts, and the click
 // calls the SAME endpoints the Posts tab does (approve-post, reject-post, retry-failed-post,
-// reschedule-post-chat, scheduled-posts DELETE for remove, restore-post for restore, rewrite-post-text + scheduled-posts PATCH
+// reschedule-post-chat, scheduled-posts DELETE for remove, restore-post for restore, make-carousel for carousel, rewrite-post-text + scheduled-posts PATCH
 // for shorter / longer — the post editor's own two buttons; video-projects `from_post` for video_version, the Review
 // Queue's "Make a video version"), so every gate those apply — a disconnected account, an open compliance
 // warning, a time in the past — applies here too. Nothing here writes.
@@ -31,11 +31,12 @@ import type { getDb } from '../../db/client';
 import { scheduledPosts } from '../../db/schema';
 import { cleanScript, isVoiceId, DEFAULT_VOICE, VOICES } from '../lib/tts';
 import { normalizeCaptionStyle, type CaptionStyle } from '../lib/captions';
+import { carouselFormatFor, carouselSlideTexts } from './top-lists';
 
 type Db = ReturnType<typeof getDb>;
 
 export const POST_ACTION_PROPOSAL_TYPE = 'post_action_proposal';
-export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version', 'voiceover', 'captions', 'time_text', 'restore'] as const;
+export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version', 'voiceover', 'captions', 'time_text', 'restore', 'carousel'] as const;
 export type PostAction = typeof POST_ACTIONS[number];
 
 /** Which rows each action applies to — the statuses its endpoint accepts. */
@@ -66,6 +67,9 @@ const ACTIONABLE: Record<PostAction, readonly string[]> = {
     time_text: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
     // restore-post.ts (the post editor's "Bring back"): the two statuses of the Archived column.
     restore: ['rejected', 'cancelled'],
+    // make-carousel.ts ("Make it a carousel", Top lists Phase 2): any row whose media can still change
+    // (isMediaEditable). Only Instagram / Threads rows are kept — see the platform filter below.
+    carousel: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
 };
 
 /** Said on the card when the post is not in a state the action applies to. */
@@ -82,6 +86,7 @@ const NOT_NOW: Record<PostAction, string> = {
     captions: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     time_text: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     restore: 'Only a post that was removed or rejected can be brought back, and this one wasn’t.',
+    carousel: 'This post can’t become a carousel now: it has already gone out, is publishing, or was removed or rejected — or it isn’t on Instagram or Threads.',
 };
 
 const TEXT_MAX = 200;
@@ -190,7 +195,8 @@ export async function resolvePostActionProposal(
             : [{ id: post.id, status: post.status, platform: post.platform }];
 
         const allowed = ACTIONABLE[req.action];
-        const rows = group.filter((r) => allowed.includes(r.status));
+        // A carousel only goes on the rows whose platform has a live carousel format (make-carousel.ts).
+        const rows = group.filter((r) => allowed.includes(r.status) && (req.action !== 'carousel' || !!carouselFormatFor(r.platform)));
         // Named row first: it is the one reschedule-post-chat reads the user's words for, and the
         // others are aligned to the time it resolves (as the review modal does).
         rows.sort((a, b) => (a.id === post.id ? -1 : b.id === post.id ? 1 : a.id - b.id));
@@ -218,6 +224,10 @@ export async function resolvePostActionProposal(
             } else if (req.action === 'time_text' && !hasText) {
                 videoBlocked = 'This post has no text boxes on it to time.';
             }
+        }
+        // A carousel is made from the numbered list in the caption: without one there is nothing to slide.
+        if (req.action === 'carousel' && rows.length && !carouselSlideTexts(String(post.caption ?? ''))) {
+            videoBlocked = 'This post has no numbered list to turn into slides. A carousel needs at least 2 numbered items in the caption.';
         }
         const voice = req.action === 'voiceover' && req.voice ? VOICES.find((v) => v.id === req.voice) : null;
 
