@@ -54,7 +54,6 @@ import { publishThreads, THREADS_TEXT_MAX, publishYouTube, YOUTUBE_TITLE_MAX, YO
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { followupSentMessage, sendMeetingFollowup, type FollowupResult } from '../../src/utils/meeting-followup-send';
-import { injectAiFooter } from '../../src/utils/ai-email-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import {
     createAsanaTask as createAsanaTaskShared, createJiraIssue as createJiraIssueShared, type TicketRef,
@@ -740,7 +739,10 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
 
 // ── Email: send a meeting follow-up to attendees from the user's inbox ─────────
 // Gmail, then Outlook, then Be More Swan's address via Resend (src/utils/meeting-followup-send.ts,
-// finish plan step 7). Every path injects the mandatory AI disclosure footer (US-GOV-3.1.2).
+// finish plan step 7). NO AI disclosure footer (owner, 2026-11-16): a person read and approved this
+// email, so it goes out as theirs — like approved Lead Generator outreach. The EU AI Act's labelling
+// duty (Art. 50) covers chatbots and text published to inform the public, and exempts human-reviewed
+// text anyway; a follow-up to the people in the meeting is neither.
 // Recipients, the reviewed subject/body and the approver's Reply-To are built by
 // scenario-engine.buildEmailPayload. Which route was used is stamped on the meeting
 // (followupSentVia / followupSentAt) so the Inbox can say so.
@@ -751,7 +753,7 @@ interface EmailFollowupPayload {
     to?: unknown;            // string[] of attendee email addresses
     subject?: unknown;
     body?: unknown;
-    assistantName?: unknown; // for the disclosure footer
+    assistantName?: unknown; // the From name on the Resend fallback when the business has no name
     replyTo?: unknown;       // the approving user's address — Reply-To on the Resend fallback
     meetingRecordId?: unknown;
 }
@@ -770,10 +772,10 @@ async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId
 
     const assistantName = typeof payload.assistantName === 'string' && payload.assistantName.trim()
         ? payload.assistantName.trim() : 'Your Be More Swan assistant';
-    // The workspace's AI-notice wording decides whether the assistant is named (see ai-email-footer.ts).
-    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText, name: organisations.name })
+    const [orgRow] = await db.select({ name: organisations.name })
         .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
-    const finalBody = injectAiFooter(rawBody, assistantName, null, false, orgRow?.text ?? null);
+    // Sent exactly as approved: the approver read every word of it, so no footer is added.
+    const finalBody = rawBody;
     const replyTo = typeof payload.replyTo === 'string' && EMAIL_RE.test(payload.replyTo.trim()) ? payload.replyTo.trim() : null;
 
     let sent: FollowupResult;

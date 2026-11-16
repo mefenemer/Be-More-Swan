@@ -100,6 +100,9 @@ const msg = { recipients: ['ana@x.com', 'bo@y.com'], subject: 'Thanks', body: 'R
     const handler = sync.slice(sync.indexOf('async function handleEmailMeetingFollowup('), sync.indexOf('// ── PM task push:'));
     assert.ok(handler.includes('sendMeetingFollowup(') && handler.includes('outlook: (m) => sendOutlookMessage(db, organisationId, m)'));
     assert.ok(handler.includes('businessName: orgRow?.name'), 'the From name is the business');
+    // Owner 2026-11-16: an approved follow-up goes out exactly as approved — no AI disclosure footer.
+    assert.ok(!/injectAiFooter|aiDisclosureFooterText/.test(handler) && handler.includes('const finalBody = rawBody;'), 'no AI footer on an approved follow-up');
+    assert.ok(!sync.includes("from '../../src/utils/ai-email-footer'"), 'sync-action no longer imports the footer');
     assert.ok(handler.includes('followupSentVia: sent.via'), 'the meeting is stamped with the route');
     assert.ok(!handler.includes('via Be More Swan <assistant@'), 'the old assistant-name From line is gone');
     const recs = read('netlify/functions/assistant-records.ts');
