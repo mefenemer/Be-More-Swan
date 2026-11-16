@@ -199,7 +199,7 @@ console.log('\n──── 5. Part of the Watch list, not a second system ─�
 
 check('one daily run: website checks follow the Companies House check inside the same budget', () => {
     const run = read('netlify/functions/run-lead-watch-background.ts');
-    assert.match(run, /checkDueWatches\(db, \{ deadline: started \+ CH_MS \}\)[\s\S]*syncSiteWatch\(db\)[\s\S]*checkDueSiteWatches\(db, \{ deadline: started \+ RUN_MS \}\)[\s\S]*rollUpSignals/);
+    assert.match(run, /checkDueWatches\(db, \{ deadline: started \+ CH_MS \}\)[\s\S]*syncSiteWatch\(db\)[\s\S]*checkDueSiteWatches\(db, \{ deadline: started \+ RUN_MS( - 90_000)? \}\)[\s\S]*rollUpSignals/);
 });
 
 check('one switch: the Watch list\'s own setting pauses website watching too', () => {

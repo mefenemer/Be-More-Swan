@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { checkDueWatches, isLeadWatchEnabled, isMissingTable, rollUpSignals, syncWatchList, WATCH_SOURCE } from '../../src/utils/lead-watch';
 import { notifyRollUp } from '../../src/utils/lead-watch-effects';
 import { checkDueSiteWatches, syncSiteWatch } from '../../src/utils/lead-site-watch';
+import { checkLaunches } from '../../src/utils/lead-launch-watch';
 
 const RUN_MS = 12 * 60_000;
 const CH_MS = 7 * 60_000;
@@ -39,7 +40,13 @@ export default withLambda(async (event) => {
         // (Why now Phase 2, src/utils/lead-site-watch.ts) with what is left. Both feed the one daily note.
         result.check = await checkDueWatches(db, { deadline: started + CH_MS });
         result.siteSync = await syncSiteWatch(db);
-        result.siteCheck = await checkDueSiteWatches(db, { deadline: started + RUN_MS });
+        // Leave the last 90 s for the monthly first-website look (buying triggers Phase 4, lead-launch-watch.ts).
+        result.siteCheck = await checkDueSiteWatches(db, { deadline: started + RUN_MS - 90_000 });
+        try {
+            result.launchCheck = await checkLaunches(db, { deadline: started + RUN_MS });
+        } catch (err) {
+            result.launchCheck = { error: err instanceof Error ? err.message : String(err) };
+        }
         result.notesSent = await rollUpSignals(db, (g) => notifyRollUp(db, g));
         result.ok = true;
     } catch (err) {

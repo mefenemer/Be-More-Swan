@@ -7278,6 +7278,9 @@ export const leadWatch = pgTable("lead_watch", {
   lastError: text("last_error"),
   pausedReason: text("paused_reason"),
   addedByUserId: integer("added_by_user_id"),
+  // Phase 4 (db/z-site-markers.sql): the monthly first-website look (crt.sh).
+  crtshCheckedAt: timestamp("crtsh_checked_at", { withTimezone: true }),
+  launchDomain: text("launch_domain"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [unique("lead_watch_ai_assistant_id_ch_number_key").on(t.aiAssistantId, t.chNumber)]);
@@ -7323,6 +7326,8 @@ export const leadSiteWatch = pgTable("lead_site_watch", {
   careersSource: text("careers_source"),
   careersHash: text("careers_hash"),
   careersTitles: jsonb("careers_titles"),
+  // Phase 4 (db/z-site-markers.sql): tools last seen on the home page. NULL = never read.
+  siteMarkers: jsonb("site_markers"),
   checksDone: integer("checks_done").notNull().default(0),
   nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),

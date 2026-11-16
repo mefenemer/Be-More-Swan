@@ -35,7 +35,8 @@ import {
 import { resolveSearchArea } from '../lib/discovery-search-area';
 import { readTerritoryPlan } from '../config/territory-plan';
 import { isRetentionDeleted } from '../config/lead-retention';
-import { applySignalToLead, isMissingTable, maxPerAssistant, watchingOn } from './lead-watch';
+import { applySignalToLead, hasColumn, isMissingTable, maxPerAssistant, watchingOn } from './lead-watch';
+import { siteChangesToSignals } from '../lib/triggers/site-watch';
 import { recordEvent } from './revenue-ledger';
 import { getBlueprintVersion } from './blueprint-version';
 import { getIcpSnapshot } from './icp-snapshot';
@@ -198,6 +199,8 @@ interface SiteRow {
     team_names: unknown;
     careers_hash: string | null;
     careers_titles: unknown;
+    /** Phase 4: tools seen on the home page last time. NULL = never read (or the column is not there yet). */
+    site_markers: unknown;
     title: string | null;
 }
 
@@ -206,6 +209,7 @@ export interface SiteLookResult {
     patch: {
         teamNames?: string[]; careersHash?: string; careersSource?: string | null; careersTitles?: string[];
         secCik?: string; secLinkTriedAt?: boolean; secLastAccession?: string | null;
+        siteMarkers?: string[];
     };
     error: string | null;
 }
@@ -229,6 +233,14 @@ export async function lookAtLeadSite(row: SiteRow, day: string): Promise<SiteLoo
             patch.careersHash = look.careersHash;
             patch.careersSource = look.careersSource;
             patch.careersTitles = look.jobs.map((j) => j.title);
+        }
+        // Buying triggers Phase 4: a tool ADDED to the home page (ads, booking, shop, a rebuild).
+        if (look.markers) {
+            const prev = Array.isArray(row.site_markers) ? (row.site_markers as unknown[]).map(String) : null;
+            for (const s of siteChangesToSignals(prev, look.markers, row.domain, day)) {
+                signals.push({ ...s, kind: s.kind as SiteSignal['kind'], source: 'site' });
+            }
+            patch.siteMarkers = look.markers;
         }
     } else errors.push('site_unreachable');
 
@@ -309,7 +321,9 @@ async function claimDueSites(db: Db, limit: number): Promise<SiteRow[]> {
         )
         SELECT c.assistant_record_id, c.organisation_id, c.ai_assistant_id, c.domain, c.country, c.sec_cik,
                to_char(c.sec_link_tried_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS sec_link_tried_at,
-               c.sec_last_accession, c.team_names, c.careers_hash, c.careers_titles, r.title
+               c.sec_last_accession, c.team_names, c.careers_hash, c.careers_titles,
+               -- to_jsonb(c): reads the Phase 4 column without failing before db/z-site-markers.sql adds it.
+               to_jsonb(c) -> 'site_markers' AS site_markers, r.title
           FROM claimed c JOIN assistant_records r ON r.id = c.assistant_record_id`) as unknown as SiteRow[];
 }
 
@@ -324,6 +338,7 @@ export async function checkDueSiteWatches(db: Db, opts: { deadline: number }): P
         throw err;
     }
     const day = today();
+    const hasMarkers = await hasColumn(db, 'lead_site_watch', 'site_markers');
     while (Date.now() < opts.deadline) {
         const rows = await claimDueSites(db, CLAIM_BATCH);
         if (!rows.length) return out;
@@ -347,6 +362,7 @@ export async function checkDueSiteWatches(db: Db, opts: { deadline: number }): P
                         sec_cik = COALESCE(${p.secCik ?? null}, sec_cik),
                         sec_link_tried_at = CASE WHEN ${p.secLinkTriedAt === true} THEN now() ELSE sec_link_tried_at END,
                         sec_last_accession = COALESCE(${p.secLastAccession ?? null}, sec_last_accession),
+                        ${hasMarkers && p.siteMarkers ? sql`site_markers = ${JSON.stringify(p.siteMarkers)}::jsonb,` : sql``}
                         checks_done = checks_done + 1,
                         last_checked_at = now(), last_error = ${look.error},
                         next_check_at = now() + make_interval(days => ${nextSiteCheckDays(saved)}),
