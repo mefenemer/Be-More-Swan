@@ -23,6 +23,7 @@ import {
     type TriggerSubject,
 } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
+import { claimMeetingHandoff, finishMeetingHandoff, runsOncePerMeeting } from '../../src/utils/meeting-handoff-once';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 25;
@@ -97,8 +98,27 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
             const actorId = await resolveActorUserId(db, job.organisationId, active.integrationId);
             if (actorId == null) { errors.push(`${scenario.scenarioKey}: no actor user`); continue; }
 
+            // The follow-up email, Slack summary and Notion page reach people: once per meeting, however
+            // many times it is approved or this job is retried (src/utils/meeting-handoff-once.ts).
+            const once = runsOncePerMeeting(subject.recordType, scenario.actionType, subject.recordId);
+            if (once) {
+                const claim = await claimMeetingHandoff(db, job.organisationId, Number(subject.recordId), scenario.actionType);
+                if (claim === 'done') {
+                    console.log(`[process-scenario-jobs] ${scenario.scenarioKey} already done for meeting ${subject.recordId}; not sent again`);
+                    continue;
+                }
+                if (claim === 'busy') { errors.push(`${scenario.scenarioKey}: another run is sending it`); continue; }
+            }
+
             const payload = buildActionPayload(scenario.actionType, subject, mappings);
-            const result = await runAction(db, actorId, job.organisationId, scenario.actionType, payload);
+            let result: Awaited<ReturnType<typeof runAction>>;
+            try {
+                result = await runAction(db, actorId, job.organisationId, scenario.actionType, payload);
+            } catch (err) {
+                if (once) await finishMeetingHandoff(db, job.organisationId, Number(subject.recordId), scenario.actionType, false);
+                throw err;
+            }
+            if (once) await finishMeetingHandoff(db, job.organisationId, Number(subject.recordId), scenario.actionType, result.statusCode < 400);
             await logApiCall(db, {
                 userId: actorId,
                 integrationId: active.integrationId ?? null,

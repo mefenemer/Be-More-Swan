@@ -39,6 +39,7 @@ import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads, users } from '../../db/schema';
 import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
+import { keepServerOwnedMeetingKeys } from '../../src/utils/meeting-handoff-once';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -873,6 +874,14 @@ export default withLambda(async (event) => {
                 if (!body.data || typeof body.data !== 'object') return json(400, { error: 'data must be an object.' });
                 if (JSON.stringify(body.data).length > MAX_DATA_CHARS) return json(400, { error: 'data payload too large.' });
                 patch.data = body.data;
+                // A meeting's "already sent" stamps belong to the server (meeting-handoff-once.ts). The Inbox
+                // saves the whole `data` it loaded, which can predate a send; keep the stamps so an edit can
+                // never make a re-approval send the follow-up, Slack post or Notion page again.
+                const [stored] = await db.select({ recordType: assistantRecords.recordType, data: assistantRecords.data })
+                    .from(assistantRecords)
+                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                    .limit(1);
+                if (stored?.recordType === 'meeting') patch.data = keepServerOwnedMeetingKeys(body.data as Record<string, unknown>, stored.data);
             } else if (body.dataMerge !== undefined) {
                 // Top-level keys merged onto the STORED data, server-side. For a caller that does not
                 // hold the whole record — the chat's "Move to Outreach" card sets one key, and `data`
