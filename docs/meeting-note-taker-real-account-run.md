@@ -117,7 +117,7 @@ ORDER BY meeting_record_id, id;
 | Chat review cards | B | ⚠️ | add-email ✅ (card from a local run of the same code), shorten ✅, approve ✅ | the deployed chat lost its card 3 times out of 6 — see §6 |
 | No inbox = no email | C | ✅ | meeting 921, 17 Nov | switch-on refused (409 no_mailbox); a switch left on reads "On, but not sending"; the chat's approve card warned; approved → nothing sent, `followupNotSent` stamped, job completed (no retries); Inbox showed "Follow-up not sent"; **Send the follow-up now** refused with no mailbox, then (Gmail reconnected) sent once via Gmail and refused a second press ("already sent") |
 | Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
-| Long transcript (60 min file, step 4) | any | ⏳ | | the 26 s limit, unproven so far |
+| Long transcript (60 min file, step 4) | any | ✅ | 14.1 s, 10.0 s, 9.8 s on deployed staging ("New meeting") | a synthetic 58-minute, 8,433-word, six-speaker meeting with 25 action items; 24–25 action items, 8 decisions, 8–9 risks back each time; well inside the 26 s limit (room for ~1.5–2 h; the form refuses over ~2 h) |
 
 When every row passes, step 9 (go live) can start, after the Note Taker rename PR.
 
@@ -169,6 +169,12 @@ Notion's connection only allowed `/api/auth/callback` (staging callback added); 
 and approve cards came back for each: **9 of 9 cards**, no dropped-card rows. Not approved (Gmail connected).
 - A Gmail sign-in done outside the browser pane never reached staging (no row saved) — nothing to fix, but
   "connected" should be checked on staging, not taken from the sign-in screen.
+
+**Timing-test finding (2026-11-17): a meeting with the same title overwrote the earlier one.** The three
+timing runs all landed in ONE record (#925): records were matched on the title forever, so a later meeting
+the model titled alike replaced the earlier one's summary, decisions and action items — even an approved
+one. Fixed (`src/utils/hub-records.ts`): only a meeting still waiting for approval and written in the last
+hour is refreshed; anything else is a new meeting, with the date and time added when the title is taken.
 
 **Still open:**
 - ~~Resend fallback (run C)~~ — **decided 2026-11-17: removed.** The owner does not want customers'
