@@ -24,6 +24,7 @@ import {
 } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
 import { claimMeetingHandoff, finishMeetingHandoff, runsOncePerMeeting } from '../../src/utils/meeting-handoff-once';
+import { sendWebhookOnce, webhookLedger } from '../../src/utils/webhook-handoff-once';
 import { TASK_TOOL_RECIPES } from '../../src/config/recipe-settings';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -89,26 +90,37 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
         try {
             const mappings = (active.fieldMappings ?? {}) as Record<string, unknown>;
 
-            // Tier 2 universal webhook — POST the mapped envelope to the user's catch URL.
+            // Tier 2 universal webhook — POST the mapped envelope to the user's catch URL, ONCE: a retry of
+            // this job because another recipe failed must not POST the same meeting/lead to their Zap again
+            // (src/utils/webhook-handoff-once.ts). A webhook that itself fails is still retried.
             if (active.webhookUrl) {
-                const res = await fetch(active.webhookUrl, {
+                const webhookUrl = active.webhookUrl;
+                const sent = await sendWebhookOnce(webhookLedger(db, job, scenario.scenarioKey), () => fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(buildWebhookPayload(subject, mappings)),
-                });
-                const actorId = await resolveActorUserId(db, job.organisationId, active.integrationId);
-                if (actorId) {
-                    await logApiCall(db, {
-                        userId: actorId,
-                        // active.integrationId is a workspace_integrations id; the log's column references
-                        // system_connections, so it is not passed (vault.ts logApiCall).
-                        integrationId: null,
-                        activeScenarioId: active.id,
-                        endpoint: (() => { try { return new URL(active.webhookUrl!).host; } catch { return 'webhook'; } })(),
-                        httpStatus: res.status,
-                    });
+                }));
+                if (sent.outcome === 'already_sent') {
+                    console.log(`[process-scenario-jobs] ${scenario.scenarioKey} already POSTed for ${subject.recordType} ${subject.recordId}; not sent again`);
+                    continue;
                 }
-                if (!res.ok) errors.push(`${scenario.scenarioKey}: webhook ${res.status}`);
+                if (sent.outcome === 'busy') { errors.push(`${scenario.scenarioKey}: another run is sending it`); continue; }
+                if (sent.outcome === 'sent' || sent.outcome === 'failed') {
+                    const actorId = await resolveActorUserId(db, job.organisationId, active.integrationId);
+                    if (actorId) {
+                        await logApiCall(db, {
+                            userId: actorId,
+                            // active.integrationId is a workspace_integrations id; the log's column references
+                            // system_connections, so it is not passed (vault.ts logApiCall).
+                            integrationId: null,
+                            activeScenarioId: active.id,
+                            endpoint: (() => { try { return new URL(webhookUrl).host; } catch { return 'webhook'; } })(),
+                            httpStatus: sent.status,
+                        });
+                    }
+                }
+                if (sent.outcome === 'failed') errors.push(`${scenario.scenarioKey}: webhook ${sent.status}`);
+                if (sent.outcome === 'error') errors.push(`${scenario.scenarioKey}: ${sent.error.message}`);
                 continue;
             }
 

@@ -33,6 +33,9 @@ export interface TriggerSubject {
     // Run only these action types (a retry of one hand-off, e.g. "Send the follow-up now" on a meeting
     // whose follow-up was not sent). Absent = every matching recipe.
     onlyActions?: string[];
+    // Server-owned: webhook recipes THIS job has already POSTed (webhook-handoff-once.ts), so a retry of
+    // the job skips them. Never set when queueing.
+    webhooksSent?: string[];
 }
 
 /** Normalise a domain the SAME way discovered_leads does: lowercase, strip protocol,
