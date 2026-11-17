@@ -205,6 +205,6 @@ test('a live article: the card says plainly that the change is live', async ({ p
     await input(page).fill('Change it');
     await input(page).press('Enter');
     await page.getByRole('button', { name: 'Use this' }).click();
-    await expect(page.getByText('live on your blog now', { exact: false })).toBeVisible();
+    await expect(page.getByText('changed on your live blog', { exact: false })).toBeVisible();
     expect(pageErrors).toEqual([]);
 });
