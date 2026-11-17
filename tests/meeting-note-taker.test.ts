@@ -138,7 +138,7 @@ async function main() {
     // The minutes rules moved to src/utils/meeting-minutes.ts (step 5), shared with the New meeting form.
     assert.ok(read('src/utils/meeting-minutes.ts').includes('Nothing leaves the workspace until the user approves the meeting'));
     // The card learns its record id before the reply is saved, so Approve survives a reload.
-    const persistAt = orch.indexOf('const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);');
+    const persistAt = orch.indexOf('const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId: lastMeetingRecordId ?? null });');
     const replyAt = orch.indexOf('const [assistantMessage] = await db.transaction(');
     assert.ok(persistAt > 0 && replyAt > persistAt, 'meeting record written before the reply row');
     assert.ok(orch.includes('recordId: hubRecordIds[0]'));

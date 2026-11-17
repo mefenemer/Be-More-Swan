@@ -4816,7 +4816,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Written before the reply so a meeting card can carry its record's id: its Approve button
         // uses the Inbox's own PATCH, the one way anything leaves the workspace (finish plan step 3).
         // The id rides on the card only, after the record's own copy of the card was saved.
-        const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+        // A revised meeting card in this conversation updates the meeting its last card filed (hub-records.ts):
+        // its id rides on that card (recordId, set just below on the turn it was filed).
+        const lastMeetingRecordId = [...history].reverse()
+            .map((h) => h.uiElementJson as { type?: unknown; recordId?: unknown } | null)
+            .find((u) => !!u && (u.type === 'action_item_assignment' || u.type === 'ActionItemAssignmentCard') && Number.isInteger(u.recordId))?.recordId as number | undefined;
+        const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId: lastMeetingRecordId ?? null });
         if (hubRecords.length === 1 && hubRecords[0].recordType === 'meeting' && hubRecordIds.length === 1
             && uiElement && typeof uiElement === 'object') {
             uiElement = { ...(uiElement as Record<string, unknown>), recordId: hubRecordIds[0] };

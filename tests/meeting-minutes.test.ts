@@ -81,7 +81,8 @@ assert.match(meetingFormMessage({ text: 'Tom left early', fileText: 'Ana: Hi.', 
 // ── 5. Both paths call the same functions ─────────────────────────────────────────
 const orch = read('netlify/functions/chat-orchestrator.ts');
 const fn = read('netlify/functions/meeting-minutes.ts');
-for (const name of ['buildMeetingMinutesPrompt(', 'normaliseMinutesCard(', 'meetingHubRecord(', 'persistHubRecords(', 'MEETING_MINUTES_MODEL', 'MEETING_MINUTES_MAX_TOKENS']) {
+// The form calls persistHubRecordsWithTitles (it returns the saved title) — the same writer in hub-records.ts.
+for (const name of ['buildMeetingMinutesPrompt(', 'normaliseMinutesCard(', 'meetingHubRecord(', 'persistHubRecords', 'MEETING_MINUTES_MODEL', 'MEETING_MINUTES_MAX_TOKENS']) {
     assert.ok(orch.includes(name), `chat uses ${name}`);
     assert.ok(fn.includes(name), `the form uses ${name}`);
 }

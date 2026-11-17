@@ -9,7 +9,8 @@
 // Run:  npx tsx tests/hub-records-same-title.test.ts
 
 import assert from 'node:assert/strict';
-import { meetingWriteDecision, titleWithTime, stableJson, timedTitlePattern, persistHubRecords, type HubRecord } from '../src/utils/hub-records';
+import { readFileSync } from 'node:fs';
+import { meetingWriteDecision, titleWithTime, stableJson, timedTitlePattern, persistHubRecords, persistHubRecordsWithTitles, type HubRecord } from '../src/utils/hub-records';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -117,6 +118,40 @@ function fakeDb(rows: { meeting?: unknown[]; byTitle?: unknown[] }) {
         const { db, writes } = fakeDb({ meeting: [{ id: 925, title: t, approvalStatus: 'pending_approval', data: A }] });
         assert.deepEqual(await persistHubRecords(db, 1, 2, [meeting(A)]), [925]);
         assert.equal(writes()[0].kind, 'update');
+    });
+
+    await check('chat revision: a same-titled new card updates the meeting this chat last filed, while waiting (#722 review)', () => {
+        const filed = [{ id: 925, title: t, approvalStatus: 'pending_approval', data: A }];
+        assert.deepEqual(meetingWriteDecision(filed, meeting(B), now, 925), { refresh: 925 }, 'different content, same chat: a revision');
+        assert.deepEqual(meetingWriteDecision([{ ...filed[0], approvalStatus: 'approved' }], meeting(B), now, 925), { insert: `${t} (17 Nov 2026, 17:12)` }, 'an approved meeting is never revised');
+        assert.deepEqual(meetingWriteDecision(filed, meeting(B), now, 999), { insert: `${t} (17 Nov 2026, 17:12)` }, 'another chat\'s meeting is not revised');
+        assert.deepEqual(meetingWriteDecision([], meeting(B), now, 925), { insert: t }, 'a renamed card is a new meeting');
+    });
+
+    await check('persist: a chat revision updates in place and returns the saved title', async () => {
+        const dated = `${t} (17 Nov 2026, 16:40)`;
+        const { db, writes } = fakeDb({ meeting: [{ id: 926, title: dated, approvalStatus: 'pending_approval', data: A }] });
+        const saved = await persistHubRecordsWithTitles(db, 1, 2, [meeting(B)], { reviseMeetingId: 926 });
+        assert.deepEqual(saved, [{ id: 926, title: dated }]);
+        assert.equal(writes()[0].kind, 'update');
+        assert.deepEqual(writes()[0].arg.data, B);
+    });
+
+    await check('persist: the form (no reviseMeetingId) never revises — a different meeting is its own record', async () => {
+        const { db, writes } = fakeDb({ meeting: [{ id: 925, title: t, approvalStatus: 'pending_approval', data: A }] });
+        const saved = await persistHubRecordsWithTitles(db, 1, 2, [meeting(B)]);
+        assert.equal(writes()[0].kind, 'insert');
+        assert.match(saved[0].title, / \(\d{1,2} \w{3} \d{4}, \d{2}:\d{2}\)$/, 'the saved title carries the time');
+    });
+
+    await check('wiring: chat passes the last meeting card\'s recordId; the form returns the saved title', () => {
+        const orch = readFileSync('netlify/functions/chat-orchestrator.ts', 'utf8');
+        assert.ok(orch.includes("(u.type === 'action_item_assignment' || u.type === 'ActionItemAssignmentCard') && Number.isInteger(u.recordId)"));
+        assert.ok(orch.includes('persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId: lastMeetingRecordId ?? null })'));
+        const form = readFileSync('netlify/functions/meeting-minutes.ts', 'utf8');
+        assert.ok(form.includes('const [saved] = await persistHubRecordsWithTitles(db, orgId, assistant.id, [record]);'));
+        assert.ok(form.includes('return json(200, { recordId: saved.id, title: saved.title, card });'));
+        assert.ok(!form.includes('reviseMeetingId'), 'the form never revises');
     });
 
     console.log(`\n${passed} passed`);

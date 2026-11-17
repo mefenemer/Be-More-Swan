@@ -20,7 +20,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { readAttachments } from '../../src/utils/chat-attachments';
-import { persistHubRecords } from '../../src/utils/hub-records';
+import { persistHubRecordsWithTitles } from '../../src/utils/hub-records';
 import {
     FORM_CHANNEL_BLOCK, MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt,
     meetingHubRecord, normaliseMinutesCard,
@@ -144,7 +144,9 @@ export default withLambda(async (event) => {
         return json(422, { error: reply });
     }
     const record = meetingHubRecord(card as unknown as Record<string, unknown>);
-    const [recordId] = await persistHubRecords(db, orgId, assistant.id, [record]);
-    if (!recordId) return json(500, { error: 'The minutes were written but couldn\'t be saved. Try again.' });
-    return json(200, { recordId, title: record.title, card });
+    // Every pasted set of notes is its own meeting (the form never revises). The title returned is the one SAVED,
+    // which has the date and time added when another meeting already has it — so it matches the Inbox.
+    const [saved] = await persistHubRecordsWithTitles(db, orgId, assistant.id, [record]);
+    if (!saved) return json(500, { error: 'The minutes were written but couldn\'t be saved. Try again.' });
+    return json(200, { recordId: saved.id, title: saved.title, card });
 });
