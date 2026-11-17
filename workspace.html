@@ -5930,7 +5930,7 @@ function formatCurrency(amount, currency) {
       if (state === 'completed') detail = `<p class="text-xs text-emerald-600 mt-0.5">Completed</p>`;
       else if (state === 'action') {
         detail = `<p class="text-xs text-amber-600 font-semibold mt-0.5">Action required</p>
-          <a href="${meta.wizard}?draftId=${item.draftId}&step=${s.step}" class="btn-primary inline-flex items-center gap-1 mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition">Continue this step →</a>`;
+          <a href="${meta.wizard}${meta.wizard.includes('?') ? '&' : '?'}draftId=${item.draftId}&step=${s.step}" class="btn-primary inline-flex items-center gap-1 mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition">Continue this step →</a>`;
       }
       else if (state === 'processing') {
         // AC2.3: active loading state + reassurance copy.

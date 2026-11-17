@@ -45,4 +45,10 @@ const CATALOGUE = '/workspace.html?view=catalog';
   }
 }
 
+// 4. "Continue this step" may point at workspace.html?view=catalog, so it must join with & then.
+{
+  const ws = read('workspace.html');
+  assert.ok(ws.includes("${meta.wizard}${meta.wizard.includes('?') ? '&' : '?'}draftId="), 'Continue link must not add a second ?');
+}
+
 console.log('onboarding-page-forwards: all checks passed');
