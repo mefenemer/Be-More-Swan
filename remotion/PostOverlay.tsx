@@ -21,7 +21,7 @@ import type { LookStyle } from '../src/lib/video-look';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
 import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
-import { bubbleBox, captionLiftPct, coverFramesFromPieces, seriesClock, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
+import { bubbleBox, captionLiftPct, coverFramesFromPieces, layoutsWithScreens, seriesClock, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
 
 /**
  * One clip of the timeline.
@@ -308,7 +308,9 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
     const { width, height, fps, durationInFrames } = useVideoConfig();
     const boxes = (overlays || []).filter((o) => o && String(o.text || '').trim());
     const tracks = (audio || []).filter((a) => a && a.src);
-    const timeline = timelineOf({ clips, videoSrc, videoTrim });
+    // A presenter piece whose screen didn't reach the render goes back to full frame (scene-cover.ts).
+    const timeline = layoutsWithScreens(timelineOf({ clips, videoSrc, videoTrim }),
+        new Set((covers || []).filter((c) => c && c.src && c.endS > c.startS).map((c) => c.id)));
     const captionTrack = captions && Array.isArray(captions.cues) && captions.cues.length ? captions : null;
     // Only the families these boxes actually name — a render with two overlays should not wait on
     // eight downloads, and a render with none should not wait at all. Captions add their one face.

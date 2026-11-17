@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverFramesFromPieces, coverWindow, readSceneCover, seriesClock, windowBox, type TimelineCover,
+    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverFramesFromPieces, coverWindow, layoutsWithScreens, readSceneCover, seriesClock, windowBox, type TimelineCover,
 } from '../src/lib/scene-cover';
 import { enforceStoryboard, type Scene, type VideoBrief } from '../src/lib/storyboard';
 import { assetsForShape, timelineCovers, timesOf } from '../src/utils/video-producer';
@@ -200,6 +200,20 @@ check('a screen behind the presenter lasts exactly as long as the pieces under i
     const clock = seriesClock([{ seconds: 2.68, frames: 81 }, { seconds: 1, frames: 30 }], 30);
     assert.strictEqual(clock(2.67), 81);
     assert.strictEqual(clock(2.69), 81);
+});
+
+check('a screen the render left out puts its presenter back full frame (review of #705)', () => {
+    const pieces = [
+        { id: 'a', layout: 'hidden' as const, coverId: 'vp_cover_s2' },
+        { id: 'b', layout: 'bubble' as const, corner: 'tr', size: 'small', coverId: 'vp_cover_s3' },
+        { id: 'c' },
+        { id: 'd', layout: 'bubble' as const },
+    ];
+    const out = layoutsWithScreens(pieces, new Set(['vp_cover_s3']));
+    assert.deepStrictEqual(out.map((p) => (p as { layout?: string }).layout ?? 'full'), ['full', 'bubble', 'full', 'bubble']);
+    assert.strictEqual((out[1] as { corner?: string }).corner, 'tr', 'a screen that arrived keeps its corner');
+    assert.ok(!('corner' in out[0]) && out[0].coverId === 'vp_cover_s2');
+    assert.ok(read('remotion/PostOverlay.tsx').includes('const timeline = layoutsWithScreens(timelineOf({ clips, videoSrc, videoTrim }),'));
 });
 
 check('geometry: the bubble and window sit in their corner, and bottom captions step above them', () => {

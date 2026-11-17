@@ -32,7 +32,8 @@ import type { TimelineCover } from '../lib/scene-cover';
 
 /**
  * The timeline's walkthrough covers with a fetchable src each (scene-cover.ts). A cover whose file is gone, or
- * isn't what it says it is, is left out: the presenter then shows full frame there, never a failed render.
+ * isn't what it says it is, is left out: the composition then puts the presenter back full frame there
+ * (layoutsWithScreens), never a failed render and never a hidden presenter over black.
  */
 export async function resolveCovers(db: Db, covers: TimelineCover[] | undefined, orgId: number, presign: (key: string, ttl: number) => Promise<string>) {
     const list = (covers ?? []).filter((c) => c && c.endS > c.startS && Number.isInteger(c.assetId));

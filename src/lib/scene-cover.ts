@@ -205,6 +205,19 @@ export function seriesClock(clips: Array<{ seconds: number; frames: number }>, f
 }
 
 /**
+ * The presenter's pieces with only the layouts whose screen actually reached the render. A screen the worker
+ * left out (its file deleted before "Try the render again", or no link) must not leave the presenter hidden
+ * over black: its pieces go back to full frame. Pieces with no cover id are left as they are. Pure.
+ */
+export function layoutsWithScreens<T extends { layout?: 'bubble' | 'hidden'; coverId?: string }>(clips: T[], screens: Set<string>): T[] {
+    return clips.map((c) => {
+        if (!c.layout || !c.coverId || screens.has(c.coverId)) return c;
+        const { layout: _l, corner: _c, size: _s, ...rest } = c as T & { corner?: unknown; size?: unknown };
+        return rest as T;
+    });
+}
+
+/**
  * Each behind-the-presenter cover's frame range, from the pieces that carry its id (applyCovers): from the first
  * piece's first frame to the last piece's last. Covers no piece carries (a window, or none matched) are left to
  * the clock. `clips` are in Series order with their frame lengths. Pure.
