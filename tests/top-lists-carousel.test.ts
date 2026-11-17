@@ -149,4 +149,13 @@ check('the editor shows a carousel of brand cards as slides, not as one card (br
     assert.match(read('workspace.html'), /const capable = !!post && !post\.brandCard && /, 'the strip hides for a brandCard post');
 });
 
+check('after a carousel the editor asks the format router again, never reusing the no-media answer (2026-11-17)', () => {
+    const ws = read('workspace.html');
+    const i = ws.indexOf("'time_text', 'carousel'].includes(d.action)");
+    assert.ok(i > 0);
+    const block = ws.slice(i, i + 900);
+    assert.ok(block.indexOf('_rqRoutesFor = null;') > 0 && block.indexOf('_rqRoutesFor = null;') < block.indexOf('_rqOpenPostReview('), 'cleared before the refresh');
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /the cover's number is corrected to the items there really are/);
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
