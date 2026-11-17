@@ -229,17 +229,36 @@ export async function deleteSecretsByPrefix(
 
 /**
  * Log an integration API call. Caller must strip query params from endpoint (SC6).
+ *
+ * ⚠️ NEVER THROWS. It is an audit line written AFTER the real work, and it used to abort that work: a
+ * Jira/Asana run filed one ticket then stopped, and a Slack failure's real reason was replaced by a
+ * logging error (Meeting Note Taker real-account run, 2026-11-16). `integration_id` references
+ * system_connections; workspace_integrations ids (every OAuth connector since) are a different table,
+ * so a caller passing one broke the insert on its foreign key. A foreign-key miss is retried without
+ * the reference; anything else is logged and dropped.
  */
 export async function logApiCall(
     db: NodePgDatabase<any>,
     opts: { userId: number; integrationId?: number | null; endpoint: string; httpStatus?: number | null; activeScenarioId?: number | null }
 ): Promise<void> {
-    const { integrationApiCalls } = await import('../../db/schema');
-    await db.insert(integrationApiCalls).values({
-        userId: opts.userId,
-        integrationId: opts.integrationId ?? null,
-        endpoint: opts.endpoint,
-        httpStatus: opts.httpStatus ?? null,
-        activeScenarioId: opts.activeScenarioId ?? null,
-    });
+    try {
+        const { integrationApiCalls } = await import('../../db/schema');
+        const row = {
+            userId: opts.userId,
+            integrationId: opts.integrationId ?? null,
+            endpoint: opts.endpoint,
+            httpStatus: opts.httpStatus ?? null,
+            activeScenarioId: opts.activeScenarioId ?? null,
+        };
+        try {
+            await db.insert(integrationApiCalls).values(row);
+        } catch (err) {
+            const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+            if (code !== '23503') throw err;
+            // A reference that points at a row of another table (or one since deleted): keep the line.
+            await db.insert(integrationApiCalls).values({ ...row, integrationId: null, activeScenarioId: null });
+        }
+    } catch (err) {
+        console.error('[vault] logApiCall failed (the call it records is unaffected)', opts.endpoint, err);
+    }
 }

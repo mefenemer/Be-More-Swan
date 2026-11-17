@@ -199,14 +199,26 @@ interface SlackSummaryPayload {
 }
 interface SlackTask { description?: unknown; assignee?: unknown; dueDate?: unknown }
 
-async function resolveSlackChannelId(db: Db, userId: number, accessToken: string, name: string): Promise<string | null> {
+/**
+ * A public channel's id by name, or — with `name` null — the workspace's DEFAULT channel (Slack's
+ * `is_general`). Workspaces created since 2023 have no #general: theirs is #all-<workspace-name>, so
+ * the old hard-coded '#general' failed with channel_not_found in every new workspace (found in the
+ * Meeting Note Taker real-account run, 2026-11-17). Null when the list can't be read or has no match.
+ */
+export function pickSlackChannel(channels: Array<{ id: string; name: string; is_general?: boolean }> | undefined, name: string | null): string | null {
+    const list = channels ?? [];
+    if (name === null) return list.find((c) => c.is_general)?.id ?? list.find((c) => c.name === 'general')?.id ?? null;
+    return list.find((c) => c.name === name)?.id ?? null;
+}
+
+async function resolveSlackChannelId(db: Db, userId: number, accessToken: string, name: string | null): Promise<string | null> {
     const res = await fetch('https://slack.com/api/conversations.list?types=public_channel&exclude_archived=true&limit=200', {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
     await logApiCall(db, { userId, endpoint: 'slack.com/api/conversations.list', httpStatus: res.status });
-    const data: { ok?: boolean; channels?: Array<{ id: string; name: string }> } = await res.json().catch(() => ({}));
+    const data: { ok?: boolean; channels?: Array<{ id: string; name: string; is_general?: boolean }> } = await res.json().catch(() => ({}));
     if (!data.ok) return null;
-    return data.channels?.find((c) => c.name === name)?.id ?? null;
+    return pickSlackChannel(data.channels, name);
 }
 
 async function handleSlackPostSummary(db: Db, userId: number, organisationId: number, payload: SlackSummaryPayload) {
@@ -217,11 +229,19 @@ async function handleSlackPostSummary(db: Db, userId: number, organisationId: nu
 
     const { accessToken } = await getFreshAccessToken(db, organisationId, 'slack');
 
-    // Channel: explicit payload.channel wins; default #general. Resolve names to ids via
-    // conversations.list; fall back to the raw value (chat:write.public covers public channels).
-    let channel = typeof payload.channel === 'string' && payload.channel.trim() ? payload.channel.trim() : '#general';
-    if (channel.startsWith('#')) {
-        channel = (await resolveSlackChannelId(db, userId, accessToken, channel.slice(1))) ?? channel;
+    // Channel: an explicit payload.channel wins (a name is resolved to its id; an id is used as is).
+    // Without one, the workspace's own default channel — Slack's is_general — not a hard-coded #general,
+    // which newer workspaces don't have (pickSlackChannel). chat:write.public covers public channels.
+    const asked = typeof payload.channel === 'string' && payload.channel.trim() ? payload.channel.trim() : null;
+    let channel: string;
+    if (!asked) {
+        const def = await resolveSlackChannelId(db, userId, accessToken, null);
+        if (!def) return json(502, { error: 'Slack rejected the message (no default channel found — choose a channel for this recipe).' });
+        channel = def;
+    } else if (asked.startsWith('#')) {
+        channel = (await resolveSlackChannelId(db, userId, accessToken, asked.slice(1))) ?? asked;
+    } else {
+        channel = asked;
     }
 
     const blocks: unknown[] = [
@@ -947,7 +967,9 @@ async function handleCreateTasks(
                 syncStatus: 'failed', provider, errorMessage: o.error, updatedAt: new Date(),
             }).where(eq(actionItems.id, o.row.id));
         }
-        await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: o.ok ? 200 : 502 });
+        // The token's integrationId is NOT passed: it is a workspace_integrations id, and the log's column
+        // references system_connections. Passing it broke the insert and stopped the loop after one ticket.
+        await logApiCall(db, { userId, endpoint, httpStatus: o.ok ? 200 : 502 });
     });
 
     const result = createTasksResult(providerLabel(provider), synced, failed, rows.length);

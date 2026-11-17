@@ -83,7 +83,9 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
                 if (actorId) {
                     await logApiCall(db, {
                         userId: actorId,
-                        integrationId: active.integrationId ?? null,
+                        // active.integrationId is a workspace_integrations id; the log's column references
+                        // system_connections, so it is not passed (vault.ts logApiCall).
+                        integrationId: null,
                         activeScenarioId: active.id,
                         endpoint: (() => { try { return new URL(active.webhookUrl!).host; } catch { return 'webhook'; } })(),
                         httpStatus: res.status,
@@ -121,7 +123,7 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
             if (once) await finishMeetingHandoff(db, job.organisationId, Number(subject.recordId), scenario.actionType, result.statusCode < 400);
             await logApiCall(db, {
                 userId: actorId,
-                integrationId: active.integrationId ?? null,
+                integrationId: null, // a workspace_integrations id — the log column references system_connections
                 activeScenarioId: active.id,
                 endpoint: `scenario/${scenario.scenarioKey}`,
                 httpStatus: result.statusCode,
