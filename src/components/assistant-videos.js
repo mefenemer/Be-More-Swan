@@ -968,6 +968,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   /** Who speaks, and the switch to the other (never both in one video). */
   function voiceLineHtml(v) {
     if (!(v.brief && v.brief.voiceover)) return '';
+    // An AI presenter speaks in their own voice: no switch to the owner's (review of #721).
+    if (v.brief.presenter) return `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Presenter:</span> ${esc(window.PresenterPicker?.describe(v.brief.presenter.id) || v.brief.presenter.id)}, made by AI, speaking in ${esc(window.VoicePicker?.describe(v.brief.voice) || 'their own voice')}.</p>`;
     const busy = state.busy.has(v.id) ? 'disabled' : '';
     return isOwn(v)
       ? `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> your own. <button type="button" data-vid-act="voice-mode" data-mode="ai" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Use an AI voice instead</button></p>`

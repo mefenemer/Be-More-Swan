@@ -392,7 +392,8 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         if (mode && current) {
             const before = new Map(current.scenes.map((x) => [x.id, x]));
             const assets = { ...((p.sceneAssets ?? {}) as Record<string, number>) };
-            for (const sc of storyboard.scenes) { const b = before.get(sc.id); if (!b || sceneLooks(b) !== sceneLooks(sc)) delete assets[sc.id]; }
+            // A presenter clip is its scene's spoken line: a changed or moved line makes it again (review of #721).
+            for (const sc of storyboard.scenes) { const b = before.get(sc.id); if (!b || sceneLooks(b) !== sceneLooks(sc) || (sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))) delete assets[sc.id]; }
             const voiceSame = scriptOf(current) === scriptOf(storyboard);
             kept = { sceneAssets: assets, ...(voiceSame ? {} : { voiceoverAssetId: null }), ...(mode === 'notes' ? { momentNotes: [] } : {}) };
             if (current.music) storyboard = { ...storyboard, music: current.music };
@@ -829,7 +830,8 @@ async function sourceScene(db: Db, args: {
 }
 
 /** How long one presenter clip may take at the model before it is cancelled (Kling AI Avatar took 4–6 min for 10 s). */
-export const PRESENTER_ATTEMPT_MS = 11 * 60 * 1000;
+// 8 minutes: the wait starts after the voiceover is made, and the whole build has a 15-minute ceiling (review of #721).
+export const PRESENTER_ATTEMPT_MS = 8 * 60 * 1000;
 
 /**
  * An AI presenter speaking one scene's line (docs/video-producer-screen-walkthrough-plan.md §11.1, A2). The scene's

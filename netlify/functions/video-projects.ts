@@ -473,6 +473,9 @@ export default withLambda(async (event) => {
         // AI voice or the owner's own (never both in one video). Switching drops the voice the video had:
         // an AI voiceover is made again (shown on "Make the video"); own recordings are asked for line by line.
         let voiceReset: Record<string, unknown> = {};
+        // A presenter speaks in their own (AI) voice: the owner's recording would be lip-synced onto a made-up
+        // face, or leave every presenter scene with nothing to say (review of #721).
+        if (body.voiceMode === 'own' && brief.presenter) return json(409, { error: 'This video has an AI presenter, who speaks in their own voice. Make a video without a presenter to record it yourself.' });
         if ((body.voiceMode === 'own' || body.voiceMode === 'ai') && brief.voiceover !== false && (body.voiceMode === 'own') !== (brief.ownVoice === true)) {
             if (body.voiceMode === 'own') brief.ownVoice = true; else delete brief.ownVoice;
             sb.scenes = sb.scenes.map(({ voiceAssetId: _a, voiceS: _s, ...rest }) => rest);
@@ -484,6 +487,9 @@ export default withLambda(async (event) => {
     }
 
     // ── The owner's own voice (own-voice.ts): one scene's line, or one recording of the whole script ──
+    if ((action === 'set_line_voice' || action === 'set_voice_file') && (row.brief as VideoBrief | null)?.presenter) {
+        return json(409, { error: 'This video has an AI presenter, who speaks in their own voice.' });
+    }
     if (action === 'set_line_voice' || action === 'set_voice_file') {
         if (!['planned', 'failed', 'render_failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
         const brief = row.brief as VideoBrief;

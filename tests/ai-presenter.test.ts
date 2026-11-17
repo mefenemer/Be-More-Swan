@@ -161,4 +161,14 @@ check('review of #721: the clip covers the last scene, the charge never exceeds 
     assert.ok('brief' in fr && fr.brief.voice === 'fr_adina', 'a French voice chosen → she speaks French, in the French woman\'s voice');
 });
 
+check('second review of #721: no own voice on a presenter video, moved lines remake the clip, the wait fits the build', () => {
+    const fn = read('netlify/functions/video-projects.ts');
+    assert.ok(fn.includes("if (body.voiceMode === 'own' && brief.presenter) return json(409,"));
+    assert.ok(fn.includes("if ((action === 'set_line_voice' || action === 'set_voice_file') && (row.brief as VideoBrief | null)?.presenter) {"));
+    assert.ok(read('src/components/assistant-videos.js').includes('if (v.brief.presenter) return `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Presenter:</span>'));
+    const vp = read('src/utils/video-producer.ts');
+    assert.ok(vp.includes("(sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))"));
+    assert.ok(vp.includes('export const PRESENTER_ATTEMPT_MS = 8 * 60 * 1000;'));
+});
+
 console.log(`\nai-presenter: ${passed} passed`);
