@@ -494,7 +494,7 @@ ${document.getElementById('acceptance_criteria_rules').value || missingFallback}
 
   function prevStep() {
     if (currentStep > 2) { currentStep--; updateUI(); }
-    else { window.location.href = `onboarding.html?tier=${currentTierKey}`; }
+    else { window.location.href = 'workspace.html?view=catalog'; }
   }
 
   function addWorkflowStep() {

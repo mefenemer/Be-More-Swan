@@ -2380,7 +2380,7 @@
     })) {
       try {
         if (draftId) await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { method: 'DELETE' });
-        window.location.href = 'onboarding.html?restart=true';
+        window.location.href = 'workspace.html?view=catalog';
       } catch (e) { window.showToast?.("Could not clear draft.", { icon: '⚠️' }); }
     }
   }

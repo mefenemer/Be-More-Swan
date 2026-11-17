@@ -36,4 +36,13 @@ const CATALOGUE = '/workspace.html?view=catalog';
   assert.ok(!read('assistant-setup.html').includes("replace('onboarding.html')"), 'assistant-setup must not send roles to onboarding.html');
 }
 
+// 3. No page links or navigates to onboarding.html (comments may still name it).
+{
+  const { readdirSync } = require('node:fs') as typeof import('node:fs');
+  const navigates = /(href=["']|location\.(href|replace)\b[^;\n]*["'`]|wizard:\s*["'`]|\|\|\s*["'`])\/?onboarding\.html/;
+  for (const f of readdirSync(root).filter((n: string) => n.endsWith('.html') && n !== 'onboarding.html')) {
+    assert.ok(!navigates.test(read(f)), `${f} still sends people to onboarding.html`);
+  }
+}
+
 console.log('onboarding-page-forwards: all checks passed');
