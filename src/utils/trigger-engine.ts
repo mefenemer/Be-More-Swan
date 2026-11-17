@@ -37,8 +37,8 @@ const CONCURRENCY = 1;
 const REBASELINE_AFTER_DAYS = 30;
 // Must stay ABOVE REBASELINE_AFTER_DAYS: a council's seen rows are only deleted after the council itself
 // has dropped back to "needs a baseline", so a deleted row can never come back as a false event.
-const SEEN_KEEP_DAYS = 45;
-const EVENT_KEEP_DAYS = 90;
+export const SEEN_KEEP_DAYS = 45;
+export const EVENT_KEEP_DAYS = 90;
 const BULK_MIN = 50;
 const BULK_SHARE = 0.25;
 // Companies House allows 600 requests per 5 minutes per key, shared with lead research. One request a
@@ -164,18 +164,18 @@ export function dedupeSeen(rows: Array<{ id: string; baseline: boolean }>): Arra
     return [...byId.values()];
 }
 
-async function markSeen(db: Db, all: Array<{ id: string; baseline: boolean }>): Promise<void> {
+export async function markSeen(db: Db, all: Array<{ id: string; baseline: boolean }>, source: string = FSA_SOURCE): Promise<void> {
     const rows = dedupeSeen(all);
     for (let i = 0; i < rows.length; i += 5000) {
         const chunk = JSON.stringify(rows.slice(i, i + 5000));
         await db.execute(sql`
             INSERT INTO trigger_seen (source, subject_id, baseline)
-            SELECT ${FSA_SOURCE}, x.id, x.baseline FROM jsonb_to_recordset(${chunk}::jsonb) AS x(id text, baseline boolean)
+            SELECT ${source}, x.id, x.baseline FROM jsonb_to_recordset(${chunk}::jsonb) AS x(id text, baseline boolean)
             ON CONFLICT (source, subject_id) DO UPDATE SET last_seen_at = now()`);
     }
 }
 
-async function insertEvents(db: Db, events: TriggerEvent[]): Promise<number> {
+export async function insertEvents(db: Db, events: TriggerEvent[]): Promise<number> {
     let inserted = 0;
     for (let i = 0; i < events.length; i += 500) {
         const chunk = JSON.stringify(events.slice(i, i + 500).map((e) => ({
@@ -198,12 +198,12 @@ async function insertEvents(db: Db, events: TriggerEvent[]): Promise<number> {
 }
 
 /** Match not-yet-checked events to Companies House, oldest first, until the cap or the deadline. */
-export async function checkCompanies(db: Db, deadline: number, max = CH_MAX_PER_RUN): Promise<NonNullable<FsaPollResult['companyChecks']>> {
+export async function checkCompanies(db: Db, deadline: number, max = CH_MAX_PER_RUN, source: string = FSA_SOURCE): Promise<NonNullable<FsaPollResult['companyChecks']>> {
     const stats = { checked: 0, hits: 0, corporate: 0, misses: 0, errors: 0 } as NonNullable<FsaPollResult['companyChecks']>;
     if (!isCompaniesHouseConfigured()) return { ...stats, stoppedBy: 'not_configured' };
     const rows = await db.execute(sql`
         SELECT id, name, postcode FROM trigger_events
-        WHERE company_checked_at IS NULL AND source = ${FSA_SOURCE}
+        WHERE company_checked_at IS NULL AND source = ${source}
         ORDER BY first_seen_at, id LIMIT ${max}`) as Array<{ id: number; name: string | null; postcode: string | null }>;
     for (const r of rows) {
         if (Date.now() > deadline) { stats.stoppedBy = 'deadline'; break; }

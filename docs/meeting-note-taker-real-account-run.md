@@ -5,6 +5,11 @@ connection is marked Live until **every** one below passes; then step 9 moves th
 
 Staging: https://staging--bemoreswan.netlify.app (steps 2–7 deployed at `bc761ed3`, 2026-11-16).
 
+**Status (2026-11-17):** runs A and A2 done in Marmalade Productions (org 58), Minute Taker "Orbit Scribe"
+(assistant 66), meetings 918 and 919. Gmail, Slack, Notion and Jira pass; Asana, Outlook and the chat
+cards wait on run B; the Resend fallback waits on run C and a decision (§6). Eleven bugs found and fixed
+on the way (§6).
+
 ## 0. Before you start
 
 1. **The hand-off queue must drain on staging.** Approving a meeting queues its hand-offs in
@@ -14,12 +19,14 @@ Staging: https://staging--bemoreswan.netlify.app (steps 2–7 deployed at `bc761
    delivers these irregularly, often an hour or more apart) or run the workflow by hand:
    **Actions → Staging crons → Run workflow, branch `staging`** (leave *force* off: only due jobs run).
 2. One workspace on staging, one **Meeting Note Taker** assistant. Note its id.
-3. On that assistant's **Connections** tab, switch on these recipes:
-   - **Email a Follow-Up to Attendees** (`email_meeting_followup`)
-   - **Post Booked Meeting to Slack** (`slack_meeting_summary`): pick the channel
-   - **Create a Notion Page from Meeting Notes** (`notion_create_page`)
-   - **Create Jira Tickets from Action Items** (`jira_create_tasks`): the project key, issue type Task
-   - **Create Asana Tasks from Action Items** (`asana_create_tasks`): the project id
+3. On that assistant's **Connections** tab (sections by purpose since #676; "recipes" are now
+   **actions**), connect each tool and switch on its action:
+   - **Send emails:** Gmail or Outlook, then **Email a Follow-Up to Attendees**
+   - **Post to team chat:** Slack, then **Post Booked Meeting to Slack** — pick the channel from the list
+     (blank = the workspace's main channel)
+   - **Save notes and documents:** Notion, then **Create a Notion Page from Meeting Notes**
+   - **Create tasks:** Jira **or** Asana (one at a time since #671), then its action — pick the project
+     from the list
 4. Use a test Slack channel, Jira project, Asana project and Notion page you don't mind filling. Use your
    own addresses (or colleagues who expect it) as the attendees: **these emails really go out.**
 
@@ -99,14 +106,47 @@ ORDER BY meeting_record_id, id;
 
 | Connection | Run | Pass? | Link / evidence | Notes |
 |---|---|---|---|---|
-| Gmail follow-up | A | | | |
-| Slack summary | A | | | |
-| Notion page | A | | | |
-| Jira tickets | A | | | |
-| Outlook follow-up | B | | | |
-| Asana tickets | B | | | |
-| Chat review cards | B | | | |
-| Resend fallback (name + Reply-To) | C | | | |
-| Long transcript (60 min file, step 4) | any | | | the 26 s limit, unproven so far |
+| Write-up ("New meeting" form) | A, A2 | ✅ | meetings 918, 919 | 1 decision, 1 risk, 4 action items, follow-up email; Cara correctly without an address |
+| Gmail follow-up | A, A2 | ✅ | sent 16 Nov 13:59 and 17 Nov 06:38 (`followupSentVia: gmail`) | arrived at both `+` addresses; meeting 918 went twice before #663 (duplicate send, fixed); AI footer dropped by #660 |
+| Slack summary | A2 | ✅ | posted 17 Nov 07:42 to the workspace's main channel | first try failed (#general doesn't exist in new workspaces, real error hidden by a logging bug) — fixed by #668 |
+| Notion page | A2 | ✅ | created 17 Nov 06:38 | needed the staging redirect URI added to the Notion connection |
+| Jira tickets | A2 | ✅ | SCRUM-5, SCRUM-6, SCRUM-7 | stopped after one ticket until #668; three of four because Asana was also on (split, fixed by #671) |
+| Asana tickets | A2 / B | ⏳ | 1 task (1220597676877372) from the split | a full four-task run is part of run B |
+| Outlook follow-up | B | ⏳ | | |
+| Chat review cards | B | ⏳ | | add Cara's address, shorten the follow-up, approve |
+| Resend fallback (name + Reply-To) | C | ⛔ | | blocked: `outbound.bemoreswan.com` is not verified in Resend (prod too) — see §6 |
+| Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
+| Long transcript (60 min file, step 4) | any | ⏳ | | the 26 s limit, unproven so far |
 
 When every row passes, step 9 (go live) can start, after the Note Taker rename PR.
+
+## 6. What the run found
+
+| # | Found | Fixed by |
+|---|---|---|
+| 1 | Staging never ran approval hand-offs (`process-scenario-jobs` is scheduled = prod only) | #643 `run-scenario-jobs` + staging crons |
+| 2 | Minute Taker offered no Gmail/Outlook to connect, so follow-ups fell through to Resend | #658 (`MAILBOX_ROLES`) |
+| 3 | Connections listed below the actions that need them | #659, then the sections in #676 |
+| 4 | AI footer on a human-approved follow-up | #660 (dropped — owner decision) |
+| 5 | Re-approving (or a retried job) sent the follow-up / Slack / Notion again | #663 once-per-meeting stamps |
+| 6 | Connect buttons on actions returned to the Integrations page, not the assistant | #664 |
+| 7 | A failed audit-log insert aborted hand-offs (Jira/Asana stopped after one ticket, Slack's error hidden) | #668 |
+| 8 | Slack posted to a #general newer workspaces don't have | #668 (the workspace's main channel) |
+| 9 | Typed Jira key / Asana id, an editable issue type, Slack asked for meaningless fields | #671 pickers |
+| 10 | Jira and Asana both on split a meeting's tasks | #671 one task tool per assistant |
+| 11 | "Recipes" and a cluttered panel | #676 sections by purpose, tool → its actions |
+
+**Setup on staging, not code:** Slack's app credentials were placeholders (new app created); Jira used an
+app owned by another Atlassian account (switched to hello@bemoreswan.com's app, staging callback added);
+Notion's connection only allowed `/api/auth/callback` (staging callback added); the archived Minute Taker
+"Lux" (past its deletion date — the purge job never runs on staging) blocked hiring one (deleted).
+
+**Still open:**
+- **Resend fallback (run C):** verify `outbound.bemoreswan.com` in Resend (recommended — keeps
+  follow-ups away from login-email reputation) or set `OUTBOUND_EMAIL_DOMAIN=bemoreswan.com` in Netlify.
+  Until then the no-inbox fallback fails everywhere, prod included.
+- **Before go-live (step 9):** production's Slack/Notion/Jira/Asana apps need the prod redirect URIs,
+  public distribution (Atlassian "Sharing", Asana "Any workspace", Slack public distribution) and a
+  privacy-policy link on each consent screen.
+- Gmail connected for sending is separate from the Email Assistant's mailbox: connecting once should be
+  enough (follow-up).

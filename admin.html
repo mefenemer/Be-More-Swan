@@ -1162,6 +1162,39 @@
           <p class="text-sm text-gray-500 max-w-2xl">New food and drink businesses, read every morning from the FSA's public ratings list (premises "Awaiting Inspection" that weren't there yesterday, often before they open) and matched to Companies House. <strong>Only you can see this.</strong> It's here to measure how many there are and how many can be reached before any customer is offered it.</p>
           <button type="button" id="bt-run-btn" onclick="btRunNow()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border" title="Reads every council's list again now. Takes a few minutes.">Run now</button>
         </div>
+        <!-- Phase 5 (Admin only): Food premises (FSA) | Hiring (Reed). Same page, two feeds. -->
+        <div class="flex gap-2 mb-5" role="tablist" aria-label="Which feed">
+          <button type="button" role="tab" id="bt-tab-food" aria-selected="true" onclick="btShowFeed('food')" class="px-4 py-1.5 text-sm font-bold rounded-full border bg-gray-900 text-white border-gray-900">Food premises (FSA)</button>
+          <button type="button" role="tab" id="bt-tab-hiring" aria-selected="false" onclick="btShowFeed('hiring')" class="px-4 py-1.5 text-sm font-bold rounded-full border bg-white text-gray-700 border-gray-300">Hiring (Reed)</button>
+        </div>
+        <div id="bt-hiring" class="hidden space-y-6">
+          <p class="text-sm text-gray-500 max-w-2xl">Local businesses advertising jobs on Reed, read every morning for a fixed set of roles in big cities, direct employers only, matched to Companies House. <strong>Only you can see this.</strong> It measures how many there are and how many are small companies before any customer is offered it. Jobs from <a href="https://www.reed.co.uk" target="_blank" rel="noopener" class="underline">Reed.co.uk</a>.</p>
+          <p id="bth-error" class="hidden text-sm font-semibold text-red-600"></p>
+          <div id="bth-status" class="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-700"></div>
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label for="bth-days" class="text-xs font-bold text-gray-500 uppercase">Period</label>
+              <select id="bth-days" onchange="loadReedHiring()" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                <option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option>
+              </select>
+            </div>
+          </div>
+          <div id="bth-tiles" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+          <div class="grid lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+              <p class="text-sm font-bold text-gray-900 mb-3">By role</p>
+              <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1 pr-2">Role</th><th class="py-1 pr-2 text-right">New jobs</th><th class="py-1 pr-2 text-right">Small employer</th><th class="py-1 text-right">Company</th></tr></thead><tbody id="bth-roles"></tbody></table>
+            </div>
+            <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+              <p class="text-sm font-bold text-gray-900 mb-3">By city</p>
+              <table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1 pr-2">City</th><th class="py-1 pr-2 text-right">New jobs</th><th class="py-1 pr-2 text-right">Small employer</th><th class="py-1 text-right">Company</th></tr></thead><tbody id="bth-areas"></tbody></table>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-200 p-4 overflow-x-auto">
+            <p class="text-sm font-bold text-gray-900 mb-3">Latest new jobs</p>
+            <ul id="bth-events" class="divide-y divide-gray-100"></ul>
+          </div>
+        </div>
         <div id="bt-not-setup" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 mb-5">
           <strong>Not set up on this database yet.</strong> Apply <span class="font-mono">db/z-trigger-events.sql</span> in the Neon SQL Editor, then reload this page.
         </div>
@@ -11018,6 +11051,62 @@ function _btMsg(id, msg) {
   const el = document.getElementById(id);
   el.textContent = msg || '';
   el.classList.toggle('hidden', !msg);
+}
+
+// Phase 5: switch between the FSA feed and the Reed hiring feed. The FSA view's controls are left untouched.
+function btShowFeed(which) {
+  const hiring = which === 'hiring';
+  for (const [id, on] of [['bt-tab-food', !hiring], ['bt-tab-hiring', hiring]]) {
+    const b = document.getElementById(id);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+    b.className = `px-4 py-1.5 text-sm font-bold rounded-full border ${on ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'}`;
+  }
+  document.getElementById('bt-hiring').classList.toggle('hidden', !hiring);
+  for (const id of ['bt-body', 'bt-not-setup', 'bt-note']) if (hiring) document.getElementById(id).classList.add('hidden');
+  if (hiring) loadReedHiring(); else loadBuyingTriggers();
+}
+
+async function loadReedHiring() {
+  _btMsg('bth-error', '');
+  const days = document.getElementById('bth-days').value || '30';
+  try {
+    const d = await api(`${BT_API}?source=reed_jobs&days=${encodeURIComponent(days)}`);
+    if (d.setUp === false) { _btMsg('bth-error', 'Not set up on this database yet (db/z-trigger-events.sql).'); return; }
+    btRenderHiring(d);
+  } catch (e) {
+    _btMsg('bth-error', e.message);
+  }
+}
+
+function btRenderHiring(d) {
+  const s = d.source, r = s.lastResult || {}, m = d.measures;
+  const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
+  const status = [];
+  if (!s.configured) status.push('<span class="font-bold text-amber-700">REED_API_KEY is not set (or this deploy predates it), so nothing is read.</span>');
+  if (!s.enabled) status.push('<span class="font-bold text-red-600">Switched off</span> (TRIGGER_SOURCE_REED_JOBS=off).');
+  status.push(`Last run: <strong>${_btEsc(_btWhen(s.lastRunAt))}</strong>.`);
+  if (r.queries) status.push(`${r.queriesRead} of ${r.queries} role + city searches read${(r.failedQueries || []).length ? ` (failed: ${_btEsc(r.failedQueries.slice(0, 6).join(', '))}${r.failedQueries.length > 6 ? '…' : ''})` : ''}; ${Number(r.jobsListed || 0).toLocaleString('en-GB')} jobs listed from direct employers; ${r.agenciesSkipped || 0} agency jobs left out; ${r.newEvents ?? 0} new.`);
+  if (!s.baselineDoneAt) status.push('<span class="font-bold text-amber-700">First look not finished.</span> The first read of each search is recorded silently (jobs already advertised are not news), so new jobs start appearing from the following day.');
+  if (r.companyChecks) status.push(`Companies House: ${r.companyChecks.checked} checked last run, ${r.companyChecks.hits} matched.`);
+  status.push(`Roles: ${_btEsc(s.roles.join(', '))}. Cities: ${_btEsc(s.locations.join(', '))} (within 10 miles).`);
+  document.getElementById('bth-status').innerHTML = status.join(' ');
+  const tile = (label, value, sub) => `<div class="bg-white rounded-2xl border border-gray-200 p-4"><p class="text-xs font-bold text-gray-500 uppercase">${label}</p><p class="text-2xl font-black text-gray-900 mt-1">${value}</p><p class="text-xs text-gray-500 mt-1">${sub}</p></div>`;
+  document.getElementById('bth-tiles').innerHTML = [
+    tile('New jobs', Number(m.total).toLocaleString('en-GB'), `${m.employers} employers`),
+    tile('Small employer', pct(m.small, m.total), 'at most 2 of the day’s jobs'),
+    tile('Company', pct(m.corporate, m.total), 'Ltd/PLC/LLP match: can be emailed'),
+    tile('Small + company', pct(m.smallCorporate, m.total), 'the ones worth offering'),
+    tile('Postcode given', pct(m.hasPostcode, m.total), 'helps the company match'),
+  ].join('');
+  const rows = (list) => list.map((x) => `<tr class="border-t border-gray-100"><td class="py-1 pr-2">${_btEsc(x.key || '–')}</td><td class="py-1 pr-2 text-right">${x.count}</td><td class="py-1 pr-2 text-right">${pct(x.small, x.count)}</td><td class="py-1 text-right">${pct(x.corporate, x.count)}</td></tr>`).join('') || '<tr><td colspan="4" class="py-2 text-gray-500">Nothing yet.</td></tr>';
+  document.getElementById('bth-roles').innerHTML = rows(d.byRole);
+  document.getElementById('bth-areas').innerHTML = rows(d.byArea);
+  document.getElementById('bth-events').innerHTML = d.events.map((e) => `
+    <li class="py-2 text-sm">
+      <p class="font-bold text-gray-900">${_btEsc(e.employer || 'An employer')} ${e.small ? '<span class="text-xs font-semibold text-green-700">small</span>' : ''} ${e.company ? `<a href="${_btEsc(e.company.url)}" target="_blank" rel="noopener" class="text-xs underline text-blue-700">${_btEsc(e.company.number)}${e.company.corporate ? '' : ' (not a company)'}</a>` : (e.companyChecked ? '<span class="text-xs text-gray-500">no company match</span>' : '')}</p>
+      <p class="text-gray-700">${_btEsc(e.label)}</p>
+      ${e.url ? `<a href="${_btEsc(e.url)}" target="_blank" rel="noopener" class="text-xs underline text-blue-700">See the job on Reed</a>` : ''}
+    </li>`).join('') || '<li class="py-2 text-sm text-gray-500">No new jobs in this period yet.</li>';
 }
 
 async function loadBuyingTriggers() {

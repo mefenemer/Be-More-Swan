@@ -1978,8 +1978,8 @@
   <div id="tab-platforms" class="detail-tab-content hidden space-y-6">
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
       <div>
-        <h3 class="text-lg font-bold text-gray-900">Synced actions</h3>
-        <p class="text-sm text-gray-500 mt-1">The tools this assistant can plug into. Connect one and switch on the action you want — or see what's coming soon. Connections are shared across your workspace and credentials are encrypted, never visible to anyone.</p>
+        <h3 class="text-lg font-bold text-gray-900">Connections</h3>
+        <p class="text-sm text-gray-500 mt-1">Connect a tool, then choose what this assistant does with it. Open a section to read more first. Connections are shared across your workspace, and credentials are encrypted and never visible to anyone.</p>
       </div>
       <span id="platforms-save-status" class="text-sm font-bold text-emerald-800 shrink-0 transition-all"></span>
     </div>
@@ -1999,9 +1999,9 @@
       <div class="col-span-full flex items-center justify-center py-16 text-gray-500 text-sm">Loading…</div>
     </div>
 
-    <!-- Enable-able recipes (Integration Scenario Library, filtered to this assistant's role),
-         rendered by src/components/assistant-integrations.js; self-hides when the role has no
-         relevant recipes. Part of the same unified "Synced actions" section. -->
+    <!-- Actions (the Integration Scenario Library's recipes, filtered to this assistant's role) are drawn
+         INSIDE the sections above by integrations.js (window._syncedActionGroups from
+         src/components/assistant-integrations.js). This host is only the fallback and stays hidden. -->
     <div id="assistant-integrations-host" class="hidden"></div>
 
     <!-- US-AUD-4.2.1 SC4: Emergency Revocation — Revoke All Connections (workspace-wide) -->
