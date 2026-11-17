@@ -10,6 +10,7 @@ import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasPermission } from '../../src/utils/rbac';
 import { systemStatus } from '../../src/utils/system-registry';
+import { listApprovals } from '../../src/utils/pr-approvals';
 
 const jwtSecret = process.env.JWT_SECRET;
 const json = (statusCode: number, body: unknown) => ({
@@ -34,5 +35,7 @@ async function requireSuperAdmin(event: Parameters<Handler>[0]): Promise<boolean
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
     if (!(await requireSuperAdmin(event))) return json(403, { error: 'Forbidden' });
+    // Admin → Systems → Approvals (docs/review-tiers-plan.md, Phase 3): the last merged PRs, tier and review.
+    if (event.queryStringParameters?.view === 'approvals') return json(200, await listApprovals(getDb(), 40));
     return json(200, await systemStatus(event.headers?.host || event.headers?.['x-forwarded-host']));
 });
