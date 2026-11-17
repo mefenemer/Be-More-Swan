@@ -28,6 +28,15 @@ export interface FollowupSenders {
 export interface FollowupResult { via: FollowupVia; id: string | null }
 
 /** Thrown when neither Gmail nor Outlook is connected: nothing was sent. */
+/**
+ * A follow-up refused because no Gmail or Outlook is connected — sync-action.ts answers 409 with
+ * code 'no_mailbox'. Final, not retryable: process-scenario-jobs.ts must not re-queue the job for it.
+ * Pure.
+ */
+export function isNoMailboxResult(statusCode: number, body: unknown): boolean {
+    return statusCode === 409 && !!body && typeof body === 'object' && (body as { code?: unknown }).code === 'no_mailbox';
+}
+
 export class NoMailboxError extends Error {
     readonly code = 'no_mailbox';
     constructor() {
