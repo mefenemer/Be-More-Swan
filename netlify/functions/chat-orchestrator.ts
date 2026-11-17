@@ -126,7 +126,7 @@ import { buildSearchTrendsBlock, SEARCH_TREND_ROLES } from '../../src/utils/chat
 import { resolveSearchTermsCard, SEARCH_TERMS_CARD_TYPE } from '../../src/utils/chat-search-terms-card';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, JSON_FORMAT_RETRY, strictJsonReplyIsProse, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -3966,19 +3966,23 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // failed retry leaves the first reply exactly as it was, and the missing-card note below still applies.
         // Only with time to spare inside the 26s request: the reply above took under 10s, and the retry gets 10s at most.
         const retryMs = cardRetryTimeoutMs({ requestElapsedMs: Date.now() - requestStartedAt, replyElapsedMs: Date.now() - replyStartedAt });
-        if (route.parseResponse === parseStructuredReply && retryMs > 0 && proseReplyLostItsCard(raw, parsed)) {
+        // The Minute Taker's replies are ALWAYS one JSON object, so any prose (or empty) reply is asked again
+        // (confirm-card-reply.ts strictJsonReplyIsProse) — not only one that points at a card.
+        const strictProse = route === ROUTES.meeting_note_taker && strictJsonReplyIsProse(raw, parsed);
+        if (route.parseResponse === parseStructuredReply && retryMs > 0 && (strictProse || proseReplyLostItsCard(raw, parsed))) {
             try {
                 const retry = await anthropic.messages.create(adaptForModel({
                     model: chatModel,
                     max_tokens: route.maxTokens,
                     system: sanitizeForModel(system),
-                    messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
+                    messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw.trim() || '(no reply)' }, { role: 'user' as const, content: strictProse ? JSON_FORMAT_RETRY : CARD_FORMAT_RETRY }]),
                 }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: retryMs, maxRetries: 0 });
                 await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);
                 console.warn('[chat-orchestrator] prose reply pointed at a card it did not send — asked again as JSON', { role: assistantRow.roleKey, sessionId: session.id, recovered: !!reparsed.uiElement });
-                if (reparsed.uiElement) { raw = again; parsed = reparsed; }
+                // Kept when it brings a card — or, after an EMPTY first reply, any words at all.
+                if (reparsed.uiElement || (strictProse && !raw.trim() && reparsed.content.trim())) { raw = again; parsed = reparsed; }
             } catch (err) {
                 console.warn('[chat-orchestrator] card format retry failed', { role: assistantRow.roleKey, error: String(err) });
             }
