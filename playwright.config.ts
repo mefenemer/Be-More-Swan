@@ -14,7 +14,8 @@ export default defineConfig({
     // Locally the html report is always kept and live progress is written for SwanJira's
     // "Automated tests" tab (e2e/live-progress-reporter.ts).
     reporter: process.env.CI
-        ? [['list'], ['html', { open: 'never' }]]
+        // json: scripts/ci-e2e-issue.mjs reads it to name the failed tests in the staging issue.
+        ? [['list'], ['html', { open: 'never' }], ['json', { outputFile: 'playwright-json/results.json' }]]
         : [['list'], ['html', { open: 'never' }], ['./e2e/live-progress-reporter.ts']],
     use: {
         baseURL: `http://127.0.0.1:${port}`,
