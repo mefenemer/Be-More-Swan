@@ -18,6 +18,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { startTriggerPoll, isCorporateCompanyType, CORPORATE_COMPANY_TYPES } from '../../src/utils/trigger-engine';
 import { FSA_SOURCE, isFsaSourceEnabled, fhrsLabel } from '../../src/lib/triggers/fsa-fhrs';
 import { isCompaniesHouseConfigured } from '../../src/lib/companies-house';
+import { REED_SOURCE, REED_ROLES, REED_LOCATIONS, isReedConfigured, isReedSourceEnabled, reedLabel } from '../../src/lib/triggers/reed-jobs';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -41,6 +42,76 @@ function isMissingTable(err: unknown): boolean {
 }
 
 const n = (v: unknown) => Number(v ?? 0) || 0;
+
+/**
+ * Phase 5 (Admin only): the Reed hiring feed. Same measures as the FSA view where they mean the same thing;
+ * "small employer" = this employer had at most 2 of the jobs read that day (a chain has dozens).
+ */
+async function reedOverview(q: Record<string, string | undefined>) {
+    const db = getDb();
+    const days = [7, 30, 90].includes(Number(q.days)) ? Number(q.days) : 30;
+    const area = (q.area || '').trim().slice(0, 120) || null;
+    const trade = (q.trade || '').trim().slice(0, 120) || null;
+    const where = sql`source = ${REED_SOURCE} AND first_seen_at >= now() - make_interval(days => ${days})
+        ${area ? sql`AND area = ${area}` : sql``} ${trade ? sql`AND ${trade} = ANY(trade_codes)` : sql``}`;
+    const small = sql`COALESCE((payload ->> 'employerJobsInRun')::int, 1) <= 2`;
+    const [src] = await db.execute(sql`
+        SELECT to_char(baseline_done_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS baseline_done_at,
+               to_char(last_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_run_at, last_result
+        FROM trigger_sources WHERE source = ${REED_SOURCE}`) as Array<{ baseline_done_at: string | null; last_run_at: string | null; last_result: Record<string, unknown> | null }>;
+    const [m] = await db.execute(sql`
+        SELECT count(*) AS total, count(DISTINCT subject_id) AS employers,
+               count(*) FILTER (WHERE ${small}) AS small,
+               count(*) FILTER (WHERE postcode IS NOT NULL) AS has_postcode,
+               count(*) FILTER (WHERE company_checked_at IS NOT NULL) AS checked,
+               count(*) FILTER (WHERE company_number IS NOT NULL) AS matched,
+               count(*) FILTER (WHERE company_type = ANY(${CORPORATE_SQL_LIST}::text[])) AS corporate,
+               count(*) FILTER (WHERE ${small} AND company_type = ANY(${CORPORATE_SQL_LIST}::text[])) AS small_corporate
+        FROM trigger_events WHERE ${where}`) as Array<Record<string, string>>;
+    const perDay = await db.execute(sql`
+        SELECT occurred_on::text AS day, count(*) AS count FROM trigger_events WHERE ${where} GROUP BY 1 ORDER BY 1`) as Array<{ day: string; count: string }>;
+    const group = (col: ReturnType<typeof sql>) => db.execute(sql`
+        SELECT ${col} AS key, count(*) AS count, count(*) FILTER (WHERE ${small}) AS small,
+               count(*) FILTER (WHERE company_type = ANY(${CORPORATE_SQL_LIST}::text[])) AS corporate
+        FROM trigger_events WHERE ${where} GROUP BY 1 ORDER BY count(*) DESC LIMIT 40`) as Promise<Array<Record<string, string>>>;
+    const byArea = await group(sql`area`);
+    const byRole = await group(sql`payload ->> 'role'`);
+    const events = await db.execute(sql`
+        SELECT id, name, postcode, area, occurred_on::text AS occurred_on, payload, company_number, company_type,
+               company_checked_at IS NOT NULL AS company_checked
+        FROM trigger_events WHERE ${where} ORDER BY first_seen_at DESC, id DESC LIMIT 200`) as Array<Record<string, any>>;
+    const lastResult = { ...(src?.last_result || {}) };
+    delete (lastResult as Record<string, unknown>).state;
+    const map = (r: Record<string, string>) => ({ key: r.key, count: n(r.count), small: n(r.small), corporate: n(r.corporate) });
+    return {
+        setUp: true,
+        filters: { days, area, trade },
+        source: {
+            key: REED_SOURCE, enabled: isReedSourceEnabled(), configured: isReedConfigured(),
+            companiesHouseConfigured: isCompaniesHouseConfigured(),
+            baselineDoneAt: src?.baseline_done_at ?? null, lastRunAt: src?.last_run_at ?? null, lastResult,
+            roles: [...REED_ROLES], locations: [...REED_LOCATIONS],
+        },
+        measures: {
+            total: n(m?.total), employers: n(m?.employers), small: n(m?.small), hasPostcode: n(m?.has_postcode),
+            checked: n(m?.checked), matched: n(m?.matched), corporate: n(m?.corporate), smallCorporate: n(m?.small_corporate),
+        },
+        perDay: perDay.map((r) => ({ day: r.day, count: n(r.count) })),
+        byArea: byArea.map(map),
+        byRole: byRole.map(map),
+        events: events.map((e) => ({
+            id: Number(e.id), employer: e.name, postcode: e.postcode, area: e.area, occurredOn: e.occurred_on,
+            jobTitle: e.payload?.jobTitle ?? null, location: e.payload?.location ?? null, url: e.payload?.url ?? null,
+            role: e.payload?.role ?? null, small: Number(e.payload?.employerJobsInRun ?? 1) <= 2,
+            label: reedLabel({ occurredOn: e.occurred_on, payload: e.payload || {}, area: e.area }).text,
+            company: e.company_number ? {
+                number: e.company_number, type: e.company_type, corporate: isCorporateCompanyType(e.company_type),
+                url: `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(e.company_number)}`,
+            } : null,
+            companyChecked: !!e.company_checked,
+        })),
+    };
+}
 
 async function overview(q: Record<string, string | undefined>) {
     const db = getDb();
@@ -163,7 +234,10 @@ export default withLambda(async (event) => {
     if (!admin) return json(403, { error: 'You need the platform_config permission for this page.' });
     const headers = event.headers as Record<string, string | undefined>;
     try {
-        if (event.httpMethod === 'GET') return json(200, await overview(event.queryStringParameters || {}));
+        if (event.httpMethod === 'GET') {
+            const q = event.queryStringParameters || {};
+            return json(200, q.source === REED_SOURCE ? await reedOverview(q) : await overview(q));
+        }
         if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
         let body: any;
         try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Bad JSON.' }); }

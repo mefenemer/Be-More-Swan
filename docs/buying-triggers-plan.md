@@ -208,6 +208,16 @@ enrichment early instead of waiting for day 14/45).
 {role}". Filter out recruitment agencies (Reed flags them). ATS boards keep doing the watching.
 
 > The email to Reed is drafted for the owner to send: docs/reed-api-terms-email.md (2026-11-16).
+>
+> **Reed cleared, Admin-only build 2026-11-17** (branch `feat/buying-triggers-phase5-reed`). The owner registered with
+> Reed and confirmed the use may proceed; `REED_API_KEY` is in Netlify. Owner chose **Admin only first** (the customer
+> "find" machinery is Phase 3, behind the 15 Dec reading). `src/lib/triggers/reed-jobs.ts` + `src/utils/reed-poll.ts`:
+> after the FSA read each morning, 8 roles × 8 cities (direct employers, within 10 miles, up to 300 jobs a search),
+> first read silent, a job is news only if posted in the last 3 days, agencies left out, matched to Companies House,
+> kept 90 days. Only employer, title, location, date and link are stored (our promise to Reed). Admin ▸ Buying
+> triggers ▸ **Hiring (Reed)**: new jobs, % small employer (≤ 2 of the day's jobs), % company, by role and city.
+> First live look: chef jobs in Bristol were 141, nearly all pub chains (2 small-employer jobs); bookkeeper jobs in
+> Leeds were 8, all small employers. Off switch: `TRIGGER_SOURCE_REED_JOBS=off`. No SQL.
 
 **Phase 6 (if decision 5 = yes): Maps signals.** Serper place lookup per watched local lead every 14 days; store our own
 counts only (rating, review count, first seen). Signals: review spike (≥ 2× the 90-day rate), rating drop of 0.3 or
