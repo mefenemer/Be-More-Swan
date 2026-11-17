@@ -24,6 +24,7 @@ import {
 } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
 import { claimMeetingHandoff, finishMeetingHandoff, runsOncePerMeeting } from '../../src/utils/meeting-handoff-once';
+import { TASK_TOOL_RECIPES } from '../../src/config/recipe-settings';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 25;
@@ -61,6 +62,16 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
     const matches = await getMatchingOutboundScenarios(
         db, job.organisationId, job.assistantId ?? null, job.triggerEvent, subject.newStatus,
     );
+
+    // One task tool per assistant (src/config/recipe-settings.ts). The page now switches the other off, but
+    // an assistant set up before that may still have Jira AND Asana on — and both would split one meeting's
+    // action items between them. Run only the one switched on (or saved) most recently.
+    const taskTools = matches.filter((m) => TASK_TOOL_RECIPES.includes(m.scenario.scenarioKey));
+    if (taskTools.length > 1) {
+        const keep = taskTools.reduce((a, b) => (new Date(b.active.updatedAt ?? 0).getTime() > new Date(a.active.updatedAt ?? 0).getTime() ? b : a));
+        for (const m of taskTools) if (m !== keep) matches.splice(matches.indexOf(m), 1);
+        console.warn(`[process-scenario-jobs] job ${job.id}: more than one task tool on for assistant ${job.assistantId}; using ${keep.scenario.scenarioKey} only`);
+    }
 
     if (matches.length === 0) {
         await db.update(scenarioJobs).set({ status: 'completed', updatedAt: new Date() }).where(eq(scenarioJobs.id, job.id));

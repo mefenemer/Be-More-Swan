@@ -145,6 +145,7 @@
       if (!res.ok) throw new Error('status ' + res.status);
       state.scenarios = (await res.json()).scenarios || [];
       render();
+      openPendingSetup();
     } catch (e) {
       // Degrade quietly — the platform grid + Revoke All above stay usable.
       h.innerHTML = '<p class="text-sm text-gray-400">Couldn’t load synced actions.</p>';
@@ -195,6 +196,15 @@
     else webhookWrap.classList.add('hidden');
 
     const map = (s.active && s.active.fieldMappings) || {};
+    // Recipes with real settings (src/config/recipe-settings.ts): pickers filled from the tool, not the
+    // catalogue's field-mapping form (recipe-settings-form.js, shared with integrations.html).
+    if (Array.isArray(s.settings) && s.settings.length && window.RecipeSettingsForm) {
+      window.RecipeSettingsForm.render(m.querySelector('[data-ai-fields]'), s, map);
+      m.querySelector('[data-ai-save]').textContent = s.active ? 'Save changes' : 'Switch on';
+      m.classList.remove('hidden');
+      m.classList.add('flex');
+      return;
+    }
     const fields = Array.isArray(s.fieldSchema) ? s.fieldSchema : [];
     m.querySelector('[data-ai-fields]').innerHTML = fields.length
       ? '<p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Field mapping</p>' + fields.map((f) => {
@@ -209,6 +219,23 @@
     m.classList.add('flex');
   }
 
+  // One task tool per assistant: the server switched the other one off — say so, in plain words.
+  function switchedOffNote(s, switchedOff) {
+    if (!s || !Array.isArray(switchedOff) || !switchedOff.length) return '';
+    return 'Tasks now go to ' + s.providerName + '. ' + switchedOff.join(' and ') + ' is switched off — one task tool at a time.';
+  }
+
+  // Just connected a tool (workspace.html sets this from ?oauth_success=): open its recipe's settings
+  // when they are still missing, so the next step — choose the project or channel — is right there.
+  function openPendingSetup() {
+    const provider = window._pendingRecipeSetup;
+    if (!provider) return;
+    window._pendingRecipeSetup = null;
+    const s = relevantScenarios().find((x) => x.providerKey === provider && Array.isArray(x.settings) && x.settings.length
+      && (!x.active || x.settings.some((d) => d.required && !((x.active.fieldMappings || {})[d.key]))));
+    if (s && s.connection) openModal(s);
+  }
+
   function closeModal() {
     if (!modalEl) return;
     modalEl.classList.add('hidden');
@@ -220,8 +247,14 @@
     if (!editing) return;
     const m = modalEl;
     const errEl = m.querySelector('[data-ai-error]');
-    const fieldMappings = {};
-    m.querySelectorAll('[data-ai-map]').forEach((i) => { if (i.value.trim()) fieldMappings[i.getAttribute('data-ai-map')] = i.value.trim(); });
+    let fieldMappings = {};
+    if (Array.isArray(editing.settings) && editing.settings.length && window.RecipeSettingsForm) {
+      const got = window.RecipeSettingsForm.collect(m.querySelector('[data-ai-fields]'), editing);
+      if (got.error) { errEl.textContent = got.error; errEl.classList.remove('hidden'); return; }
+      fieldMappings = got.fieldMappings;
+    } else {
+      m.querySelectorAll('[data-ai-map]').forEach((i) => { if (i.value.trim()) fieldMappings[i.getAttribute('data-ai-map')] = i.value.trim(); });
+    }
     const payload = { scenarioId: editing.id, assistantId: Number(state.assistantId), fieldMappings };
     if (editing.tier === 2) {
       const url = m.querySelector('[data-ai-webhook-url]').value.trim();
@@ -237,7 +270,7 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not enable this recipe.');
       closeModal();
-      window.showToast && window.showToast('Recipe enabled.');
+      window.showToast && window.showToast(switchedOffNote(editing, data.switchedOff) || 'Recipe enabled.');
       load();
     } catch (e) {
       errEl.textContent = String(e.message || 'Could not enable this recipe.'); errEl.classList.remove('hidden');
@@ -262,7 +295,13 @@
         tog.disabled = true;
         try {
           const res = await fetch(API + '/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: id, isEnabled: next }) });
-          if (res.ok) load();
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const s = state.scenarios.find((x) => x.active && x.active.id === id);
+            const note = switchedOffNote(s, data.switchedOff);
+            if (note && window.showToast) window.showToast(note);
+            load();
+          }
         } catch (err) { /* leave the card as-is on failure */ } finally { tog.disabled = false; }
         return;
       }

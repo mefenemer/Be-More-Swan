@@ -53,9 +53,12 @@ export async function createJiraIssue(
     project: { projectKey: string; issueType?: string | null }, input: TicketInput,
 ): Promise<TicketRef> {
     if (!cloudId) throw new Error('Jira site is missing — reconnect Jira.');
-    const projectKey = project.projectKey.trim();
+    // Jira keys are upper case; a key typed or saved as "Scrum" is SCRUM (owner, 2026-11-17).
+    const projectKey = project.projectKey.trim().toUpperCase();
     if (!projectKey) throw new Error('No Jira project was chosen.');
-    const issueType = project.issueType?.trim() || 'Task';
+    // "Task" unless asked otherwise — and when the project has no Task type, its standard issue type
+    // (jiraIssueTypeFor), so a project set up differently never fails every ticket.
+    const issueType = project.issueType?.trim() || await jiraIssueTypeFor(accessToken, cloudId, projectKey);
 
     const fields: Record<string, unknown> = {
         project: { key: projectKey },
@@ -103,6 +106,40 @@ export async function createAsanaTask(accessToken: string, projectGid: string, i
         throw new Error(detail);
     }
     return { id: body.data.gid, url: body.data.permalink_url ?? null };
+}
+
+const issueTypeCache = new Map<string, string>();
+
+/**
+ * The issue type to file tickets as: "Task" when the project has it, otherwise its first standard
+ * (non-sub-task, non-epic) type. "Task" when the project can't be read — the create call then reports
+ * the real problem. Cached per site + project for the life of the function instance.
+ */
+export async function jiraIssueTypeFor(accessToken: string, cloudId: string, projectKey: string): Promise<string> {
+    const cacheKey = `${cloudId}:${projectKey}`;
+    const hit = issueTypeCache.get(cacheKey);
+    if (hit) return hit;
+    try {
+        const res = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project/${encodeURIComponent(projectKey)}`, {
+            headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+        });
+        if (!res.ok) return 'Task';
+        const data: { issueTypes?: Array<{ name?: string; subtask?: boolean; hierarchyLevel?: number }> } = await res.json().catch(() => ({}));
+        const chosen = pickJiraIssueType(data.issueTypes ?? []);
+        issueTypeCache.set(cacheKey, chosen);
+        return chosen;
+    } catch {
+        return 'Task';
+    }
+}
+
+/** "Task" if present (any case), else the first standard type, else "Task". Pure. */
+export function pickJiraIssueType(types: Array<{ name?: string; subtask?: boolean; hierarchyLevel?: number }>): string {
+    const named = types.filter((t) => t && t.name);
+    const task = named.find((t) => t.name!.toLowerCase() === 'task' && !t.subtask);
+    if (task) return task.name!;
+    const standard = named.find((t) => !t.subtask && (t.hierarchyLevel ?? 0) === 0 && t.name!.toLowerCase() !== 'epic');
+    return standard?.name ?? 'Task';
 }
 
 /** Projects a ticket can be filed into. Capped — a picker of hundreds is not a picker. */

@@ -4780,6 +4780,9 @@ function formatCurrency(amount, currency) {
       // Return the user to the assistant they were configuring, on the tab the flow came from
       // (Connections unless it named another) and, for the review queue, the right column.
       if (assistantId && typeof window.routeToAssistantDetail === 'function') {
+        // The Connections tab opens the just-connected tool's settings if they are still missing
+        // (assistant-integrations.js openPendingSetup) — e.g. choose the Jira project straight away.
+        if (!returnTab) window._pendingRecipeSetup = platform;
         window._assistantDetailInitialTab = returnTab || 'platforms';
         if (returnRqStatus) window._assistantDetailInitialRqStatus = returnRqStatus;
         window.routeToAssistantDetail(assistantId);
@@ -6354,6 +6357,7 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-shop.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
      scoped to the assistant + filtered to its role (integration-scenarios.ts). -->
+<script src="/src/components/recipe-settings-form.js"></script>
 <script src="/src/components/assistant-integrations.js"></script>
 <!-- Lead Generator (lead_qualifier) "Review Lead Ideas" flow — Overview button + modal;
      proposes/approves lead ideas and files scored leads via lead-generation.ts. -->
