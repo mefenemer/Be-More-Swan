@@ -60,7 +60,7 @@ import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
-import { AI_PRESENTER_FLAG } from '../../src/lib/presenters';
+import { AI_PRESENTER_FLAG, briefForWorkspace } from '../../src/lib/presenters';
 import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -251,9 +251,8 @@ export default withLambda(async (event) => {
         // video_producer) — a chat card that names no voice gets the voice the owner chose at hire.
         // An AI presenter only where the ai_presenter flag is on: otherwise the brief is read without one
         // (and so with the voice chosen, not the presenter's) — never a priced feature by the back door.
-        const rawBrief = body.brief && typeof body.brief === 'object' ? { ...(body.brief as Record<string, unknown>) } : body.brief;
-        if (rawBrief && typeof rawBrief === 'object' && (rawBrief as Record<string, unknown>).presenter
-            && !await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) delete (rawBrief as Record<string, unknown>).presenter;
+        const hasPresenter = !!(body.brief && typeof body.brief === 'object' && (body.brief as Record<string, unknown>).presenter);
+        const rawBrief = briefForWorkspace(body.brief, !hasPresenter || await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false));
         const parsed = readBrief(withSetupDefaults(rawBrief, a.onboardingContext));
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
@@ -270,7 +269,7 @@ export default withLambda(async (event) => {
             if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: (await getTaskCosts()).weights.footage_review, message: TASK_LIMIT_MESSAGE });
         }
         const started = await startProject(db, {
-            organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,
+            organisationId: orgId, assistantId, createdBy: userId, brief: rawBrief, onboardingContext: a.onboardingContext, origin: 'user', headers,
         });
         if (!started.ok) return json(400, { error: started.error });
         return json(202, { project: await projectView(db, orgId, started.row) });

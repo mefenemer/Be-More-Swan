@@ -7,9 +7,9 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { readBrief, buildTasks, sceneOverlays } from '../src/utils/video-producer';
+import { readBrief, buildTasks, sceneOverlays, assetsForShape } from '../src/utils/video-producer';
 import { enforceStoryboard, estimateCredits, presenterBlock, type Scene, type VideoBrief } from '../src/lib/storyboard';
-import { PRESENTER_KEY_SCENES, presenterAudioWindow, presenterFaceKey, presenterTasks, readBriefPresenter, AI_PRESENTER_FLAG } from '../src/lib/presenters';
+import { PRESENTER_KEY_SCENES, briefForWorkspace, presenterAudioWindow, presenterFaceKey, presenterTasks, readBriefPresenter, AI_PRESENTER_FLAG } from '../src/lib/presenters';
 import { containsAi, containsRealisticAi } from '../src/utils/video-render';
 import { DEFAULT_TASK_WEIGHTS, formatCost } from '../src/config/task-weights';
 import { mediaCostUsd } from '../src/utils/ai-usage';
@@ -101,7 +101,7 @@ check('the flag: off for customers until the Terms notice, and the server never 
     assert.ok(/VALUES \('ai_presenter', FALSE, 0, NULL,/.test(sql) && sql.includes("(1, 'ai_presenter', 2)") && /ON CONFLICT \(key\) DO NOTHING/.test(sql));
     assert.ok(read('db/z-task-costs.sql').includes("(1, 'ai_presenter', 2)"));
     const fn = read('netlify/functions/video-projects.ts');
-    assert.ok(fn.includes("&& !await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) delete (rawBrief as Record<string, unknown>).presenter;"));
+    assert.ok(fn.includes('const rawBrief = briefForWorkspace(body.brief, !hasPresenter || await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false));'));
     assert.ok(fn.includes('aiPresenter: await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false),'));
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes("if (!await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) return '';"), 'the chat lists presenters only with the flag');
@@ -110,7 +110,7 @@ check('the flag: off for customers until the Terms notice, and the server never 
 check('the build makes presenter scenes in parallel, charged per second only when made', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes("if (scene.source === 'ai_presenter') return makePresenterScene(i);"));
-    assert.ok(vp.includes("await settle('presenter', VIDEO_CREDIT_COST, !!clip, presenterTasks(durations[i], presenterPerSecond));"));
+    assert.ok(vp.includes("await settle('presenter', VIDEO_CREDIT_COST, !!clip, Math.min("), 'settled as presenter work, only when made');
     assert.ok(vp.includes("storyboard.scenes[i].source === 'ai_video' || storyboard.scenes[i].source === 'ai_presenter'"), 'alongside the AI clips');
     assert.ok(vp.includes('presignR2Get(presenterFaceKey(p.id, args.shape), 3600)') && vp.includes('falSubmit(PRESENTER_MODEL, { image_url: imageUrl, audio_url: audioUrl })'));
     assert.ok(vp.includes("renderParams: { kind: 'ai_presenter', presenterId: p.id, aiStyle: 'realistic' }"));
@@ -127,6 +127,38 @@ check('the Videos tab and the chat offer a presenter only where the flag is on',
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("typeof ui.presenter === 'string' && /^[a-z]{2,20}$/.test(ui.presenter)"));
     // A pick is never lost when the form re-renders while the picker is open (A1 review note).
     assert.ok(read('src/components/presenter-picker.js').includes('if (!row.isConnected) {'));
+});
+
+check('review of #721: the gate strips the brief that is SAVED, not a copy', () => {
+    const raw = { message: 'A tour of our booking system for new clients', presenter: { id: 'amara' }, voice: 'en_gb_archer' };
+    const off = briefForWorkspace(raw, false) as Record<string, unknown>;
+    assert.ok(!('presenter' in off) && off.voice === 'en_gb_archer' && 'presenter' in raw, 'a copy without the presenter; the request is untouched');
+    assert.strictEqual(briefForWorkspace(raw, true), raw);
+    const saved = readBrief(off);
+    assert.ok('brief' in saved && !saved.brief.presenter && saved.brief.voice === 'en_gb_archer', 'saved without a presenter, in the voice chosen');
+    const fn = read('netlify/functions/video-projects.ts');
+    assert.ok(fn.includes('brief: rawBrief, onboardingContext: a.onboardingContext,'), 'startProject gets the stripped brief');
+    assert.ok(!fn.includes('brief: body.brief, onboardingContext'), 'never the raw request');
+});
+
+check('review of #721: a new voiceover remakes every presenter clip, and the cost shown counts them', () => {
+    const sb = { title: 't', caption: 'c', scenes: [{ id: 's1', beat: 'hook', voiceover: 'Hi', source: 'ai_presenter', targetS: 3 }] } as unknown as Parameters<typeof buildTasks>[0];
+    const costs = { weights: { ...DEFAULT_TASK_WEIGHTS }, videoTasksPerSecond: 4, chatMessagesPerTask: 10 } as unknown as Parameters<typeof buildTasks>[2];
+    assert.strictEqual(buildTasks(sb, brief({ presenter: { id: 'amara' } }), costs, { sceneAssets: { s1: 9 }, voiceoverAssetId: null } as never), 6 + DEFAULT_TASK_WEIGHTS.ai_voiceover,
+        'a kept clip with the voiceover to be made again is counted');
+    const vp = read('src/utils/video-producer.ts');
+    assert.ok(vp.includes("for (const s of storyboard.scenes) if (s.source === 'ai_presenter') delete done[s.id];"));
+});
+
+check('review of #721: the clip covers the last scene, the charge never exceeds the cost shown, other shapes remake it, the voice\'s language is followed', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.ok(vp.includes('const want = Math.ceil((args.endS - w.startS + PRESENTER_AUDIO_TAIL_S) * rate);'), 'padded with silence past the voice file');
+    assert.ok(vp.includes("s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'ai_presenter').map((s) => done[s.id])"), 'its real length is known to the timeline');
+    assert.ok(vp.includes('Math.min(presenterTasks(durations[i], presenterPerSecond), presenterTasks(scene.targetS, presenterPerSecond))'));
+    const sb = { title: 't', caption: 'c', scenes: [{ id: 's1', beat: 'hook', voiceover: 'Hi', source: 'ai_presenter', targetS: 3 }, { id: 's2', beat: 'value', voiceover: 'x', source: 'stock_video', targetS: 3 }] } as unknown as Parameters<typeof assetsForShape>[0];
+    assert.deepStrictEqual(assetsForShape(sb, { s1: 9, s2: 10 }), { s2: 10 }, 'a presenter clip is made again for the new shape');
+    const fr = readBrief({ message: 'Une visite de notre système de réservation', presenter: { id: 'amara' }, voice: 'fr_nicolas' });
+    assert.ok('brief' in fr && fr.brief.voice === 'fr_adina', 'a French voice chosen → she speaks French, in the French woman\'s voice');
 });
 
 console.log(`\nai-presenter: ${passed} passed`);

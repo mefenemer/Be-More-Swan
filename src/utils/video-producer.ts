@@ -55,7 +55,7 @@ import {
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import { applyCovers, cornerOf, coverWindow, type TimelineCover } from '../lib/scene-cover';
-import { AI_PRESENTER_FLAG, PRESENTERS, PRESENTER_MODEL, presenterAudioWindow, presenterById, presenterFaceKey, presenterTasks, presenterVoice, readBriefPresenter } from '../lib/presenters';
+import { AI_PRESENTER_FLAG, PRESENTERS, PRESENTER_AUDIO_TAIL_S, PRESENTER_MODEL, presenterAudioWindow, presenterById, presenterFaceKey, presenterTasks, presenterVoice, readBriefPresenter } from '../lib/presenters';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
@@ -147,7 +147,8 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
     // voice for the video's language (presenterVoice), so the voiceover is on and the voice is theirs.
     const presenter = footage.length ? null : readBriefPresenter(b.presenter);
     const language = languageLabel(b.language) ? String(b.language) : null;
-    const presenterVoiceId = presenter ? presenterVoice(presenterById(presenter.id)!, language ?? 'en') : null;
+    // The language the video is in: the brief's, else the chosen voice's (a French voice on the form, or French at hire).
+    const presenterVoiceId = presenter ? presenterVoice(presenterById(presenter.id)!, language ?? (isVoiceId(b.voice) ? voiceLanguage(b.voice) : 'en')) : null;
     return {
         brief: {
             purpose: String(b.purpose ?? 'promo').slice(0, 60),
@@ -445,7 +446,10 @@ export interface MadeSoFar { sceneAssets?: unknown; voiceoverAssetId?: number | 
 /** The storyboard's scenes and voiceover still to be made (what costs). Pure. */
 export function stillToMake(storyboard: Storyboard, made?: MadeSoFar): { scenes: Scene[]; voiceover: boolean } {
     const done = (made?.sceneAssets && typeof made.sceneAssets === 'object' ? made.sceneAssets : {}) as Record<string, number>;
-    return { scenes: storyboard.scenes.filter((s) => !done[s.id]), voiceover: !made?.voiceoverAssetId };
+    // A presenter clip lip-syncs a slice of THIS voiceover: a voiceover still to be made means every presenter clip
+    // is made again too (review of #721), so the cost shown counts them.
+    const voiceover = !made?.voiceoverAssetId;
+    return { scenes: storyboard.scenes.filter((s) => !done[s.id] || (voiceover && s.source === 'ai_presenter')), voiceover };
 }
 
 /** Tasks a build holds under the single task allowance — the same weights the ledger records. Pure. */
@@ -848,7 +852,12 @@ async function makePresenterClip(db: Db, args: {
     const rate = pcm.sampleRate;
     const w = presenterAudioWindow(args.startS, args.endS, pcm.channels[0].length / rate);
     if (w.endS - w.startS < 0.5) throw new Error('The presenter has too little to say in this scene.');
-    const slice = pcm.channels[0].slice(Math.floor(w.startS * rate), Math.ceil(w.endS * rate));
+    // The last scene runs past the last word (sceneTimingsFromWords adds 0.4 s), beyond the end of the voice file:
+    // pad with silence so the clip always covers the scene plus the tail — a clip shorter than its scene fails the
+    // whole render ("No frame found", review of #721).
+    const want = Math.ceil((args.endS - w.startS + PRESENTER_AUDIO_TAIL_S) * rate);
+    const cut = pcm.channels[0].slice(Math.floor(w.startS * rate), Math.ceil(w.endS * rate));
+    const slice = cut.length >= want ? cut : (() => { const f = new Float32Array(want); f.set(cut); return f; })();
     const audio = await persistBufferToR2({ orgId: args.orgId, bytes: Buffer.from(wavBytes({ channels: [slice], sampleRate: rate })), contentType: 'audio/wav', folder: 'video-producer' });
     const [audioUrl, imageUrl] = await Promise.all([presignR2Get(audio.storageKey, 3600), presignR2Get(presenterFaceKey(p.id, args.shape), 3600)]);
     const job = await falSubmit(PRESENTER_MODEL, { image_url: imageUrl, audio_url: audioUrl });
@@ -860,7 +869,7 @@ async function makePresenterClip(db: Db, args: {
     }
     if (!done) { await falCancel(job.statusUrl); throw new Error('The presenter clip took too long and was abandoned.'); }
     const v = extractVideo(await falResult(job.responseUrl));
-    const seconds = Math.round((w.endS - w.startS) * 100) / 100;
+    const seconds = Math.round((slice.length / rate) * 100) / 100;
     await logMediaCost(PRESENTER_MODEL, { durationSeconds: seconds }, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId, sessionId: 'fal-presenter' });
     const stored = await persistRemoteMediaToR2({ orgId: args.orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI presenter' });
     const [asset] = await db.insert(contentAssets).values({
@@ -957,6 +966,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                     voiceoverAssetId = vo.assetId;
                     words = vo.words;
                     await settle('voiceover', VOICEOVER_CREDIT_COST, true);
+                    // Presenter clips kept from before were synced to the OLD voiceover: made again from this one.
+                    for (const s of storyboard.scenes) if (s.source === 'ai_presenter') delete done[s.id];
                 } catch (err) {
                     await settle('voiceover', VOICEOVER_CREDIT_COST, false);
                     throw new Error(`The voiceover could not be made (${err instanceof Error ? err.message : 'unknown error'}).`);
@@ -1009,7 +1020,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 console.error(`[video-producer] build ${projectId} presenter scene ${scene.id} failed:`, err);
             }
             // Charged by the seconds the presenter is on screen (D-A3), only when the clip was made.
-            await settle('presenter', VIDEO_CREDIT_COST, !!clip, presenterTasks(durations[i], presenterPerSecond));
+            // Never more than the cost shown before making, which counted the planned length (review of #721).
+            await settle('presenter', VIDEO_CREDIT_COST, !!clip, Math.min(presenterTasks(durations[i], presenterPerSecond), presenterTasks(scene.targetS, presenterPerSecond)));
             if (clip) done[scene.id] = clip.assetId; else failed.add(i);
             await save({});
         };
@@ -1146,7 +1158,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             levels.musicUnder = Math.min(levels.musicUnder, levels.music);
         }
         // Reused stock / AI clips: their real lengths, so a longer reworded line never runs past one.
-        const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video').map((s) => done[s.id]).filter(Boolean);
+        const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'ai_presenter').map((s) => done[s.id]).filter(Boolean);
         const clipS = new Map<number, number>();
         if (reusedIds.length) {
             const rows = await db.select({ id: contentAssets.id, durationS: contentAssets.durationS }).from(contentAssets)
@@ -1262,7 +1274,8 @@ export async function newVersion(db: Db, row: typeof videoProjects.$inferSelect,
  * studio" (staging, 2026-11-10: Pexels has few square clips). The same clip, cropped to the new frame,
  * keeps the subject the owner checked.
  */
-const RESHOOT_FOR_SHAPE = new Set(['brand_card']);
+// A presenter clip is made for its shape from that shape's face (presenterFaceKey), never cropped from another.
+const RESHOOT_FOR_SHAPE = new Set(['brand_card', 'ai_presenter']);
 
 /**
  * What another shape of a finished video keeps: the voiceover, every picture and clip — the owner's

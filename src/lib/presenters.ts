@@ -64,6 +64,16 @@ export function presenterLanguages(p: Presenter, voices: CatalogueVoice[] = offe
  */
 export const AI_PRESENTER_FLAG = 'ai_presenter';
 
+/**
+ * The brief as this workspace may have it: without the presenter unless the ai_presenter flag is on. Applied to the
+ * brief that is SAVED (video-projects create → startProject), never only to a copy (review of #721). Pure.
+ */
+export function briefForWorkspace<T>(raw: T, presenterAllowed: boolean): T {
+    if (presenterAllowed || !raw || typeof raw !== 'object' || Array.isArray(raw) || !('presenter' in (raw as object))) return raw;
+    const { presenter: _dropped, ...rest } = raw as Record<string, unknown>;
+    return rest as T;
+}
+
 /** Without "Show me throughout", the presenter is in at most this many scenes: the opening, the call to action and one key moment (D-A7). */
 export const PRESENTER_KEY_SCENES = 3;
 
