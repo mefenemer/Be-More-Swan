@@ -31,15 +31,15 @@ import {
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
 import { listAsanaProjects, listJiraProjects } from '../../src/utils/pm-tickets';
 import { listSlackChannels } from '../../src/utils/slack-channels';
+import { MAILBOX_RECIPE_PROVIDER, NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-// Providers whose Tier-1 recipes activate without a connected integration: they resolve a
-// connection at run time if one exists (e.g. Gmail) and otherwise use a built-in fallback,
-// so the library must not gate them behind a "Connect first" step.
-const CONNECTION_OPTIONAL_PROVIDERS = new Set(['email']);
+// The email recipes (the meeting follow-up) have no provider grant of their own: they send from the
+// workspace's Gmail or Outlook, and ONLY from there (owner, 2026-11-17 — no mailbox, no email). So their
+// "connection" is the connected mailbox, and they can't be switched on without one.
 
 /** Last path segment of the original /api/integrations/:resource URL. */
 function resourceOf(event: { rawUrl?: string; path?: string }): string {
@@ -100,6 +100,7 @@ export default withLambda(async (event) => {
             const connected = await db.select({ id: workspaceIntegrations.id, provider: workspaceIntegrations.provider, status: workspaceIntegrations.status })
                 .from(workspaceIntegrations).where(eq(workspaceIntegrations.organisationId, organisationId));
             const connectedByProvider = new Map(connected.map((c) => [c.provider, c]));
+            const mailbox = await connectedMailbox(db, organisationId);
 
             return json(200, {
                 scenarios: scenarios.map(({ scenario, provider, roadmapVotes }) => ({
@@ -111,8 +112,8 @@ export default withLambda(async (event) => {
                     providerName: provider?.displayName ?? scenario.providerKey,
                     providerCategory: provider?.category ?? null,
                     roadmapVotes: roadmapVotes ?? null,
-                    connection: connectedByProvider.get(scenario.providerKey) ?? null,
-                    connectionOptional: CONNECTION_OPTIONAL_PROVIDERS.has(scenario.providerKey),
+                    connection: scenario.providerKey === MAILBOX_RECIPE_PROVIDER ? mailbox : (connectedByProvider.get(scenario.providerKey) ?? null),
+                    needsMailbox: scenario.providerKey === MAILBOX_RECIPE_PROVIDER,
                     active: activeByScenario.get(scenario.id) ?? null,
                 })),
             });
@@ -185,12 +186,13 @@ export default withLambda(async (event) => {
                 fieldMappings = cleaned.mappings;
             }
 
-            // Tier-1 native recipes need a connected OAuth grant; Tier-2 needs a webhook URL.
-            // Connection-optional providers (e.g. email) activate with neither — they resolve a
-            // connection at run time or fall back to a built-in sender.
+            // Tier-1 native recipes need a connected OAuth grant; Tier-2 needs a webhook URL; the email
+            // recipes need a connected Gmail or Outlook (the sender resolves which one at run time).
             if (scenario.tier === 2) {
                 if (!webhookUrl) return json(400, { error: 'A webhook URL is required for this scenario.' });
-            } else if (!integrationId && !CONNECTION_OPTIONAL_PROVIDERS.has(scenario.providerKey)) {
+            } else if (scenario.providerKey === MAILBOX_RECIPE_PROVIDER) {
+                if (!(await connectedMailbox(db, organisationId))) return json(409, { error: NO_MAILBOX_MESSAGE, code: 'no_mailbox' });
+            } else if (!integrationId) {
                 return json(400, { error: `Connect ${scenario.providerKey} first, then activate this scenario.` });
             }
 
@@ -218,6 +220,14 @@ export default withLambda(async (event) => {
             const id = Number(body.activeScenarioId);
             const isEnabled = Boolean(body.isEnabled);
             if (!id) return json(400, { error: 'activeScenarioId is required.' });
+            if (isEnabled) {
+                const [target] = await db.select({ providerKey: integrationScenarios.providerKey })
+                    .from(activeScenarios).innerJoin(integrationScenarios, eq(activeScenarios.scenarioId, integrationScenarios.id))
+                    .where(and(eq(activeScenarios.id, id), eq(activeScenarios.organisationId, organisationId))).limit(1);
+                if (target?.providerKey === MAILBOX_RECIPE_PROVIDER && !(await connectedMailbox(db, organisationId))) {
+                    return json(409, { error: NO_MAILBOX_MESSAGE, code: 'no_mailbox' });
+                }
+            }
             const [row] = await db.update(activeScenarios).set({ isEnabled, updatedAt: new Date() })
                 .where(and(eq(activeScenarios.id, id), eq(activeScenarios.organisationId, organisationId))).returning();
             if (!row) return json(404, { error: 'Active scenario not found.' });

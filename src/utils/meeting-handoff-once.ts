@@ -31,7 +31,7 @@ export const ONCE_PER_MEETING_ACTIONS: ReadonlySet<string> = new Set([
 export const CLAIM_TTL_MINUTES = 15;
 
 /** The data keys the server owns on a meeting record — an Inbox edit that sends a stale `data` must keep them. */
-export const SERVER_OWNED_MEETING_KEYS = ['handoffs', 'followupSentVia', 'followupSentAt'] as const;
+export const SERVER_OWNED_MEETING_KEYS = ['handoffs', 'followupSentVia', 'followupSentAt', 'followupNotSent'] as const;
 
 export type HandoffClaim = 'claimed' | 'done' | 'busy';
 

@@ -810,7 +810,7 @@ const CONN_SECTIONS = [
     { cat: 'social', title: 'Social accounts', short: 'The accounts this assistant posts to.',
       long: 'Connect the social accounts this assistant publishes to. Each one can be switched on or off for this assistant without disconnecting it.' },
     { cat: 'email', title: 'Send emails', short: 'Emails go from your own inbox.',
-      long: 'Connect Gmail or Outlook and emails go from your own inbox — Gmail first, then Outlook. With neither connected, meeting follow-ups go from Be More Swan’s address and replies come to you.' },
+      long: 'Connect Gmail or Outlook and emails go from your own inbox — Gmail first, then Outlook — so replies come straight to you. Nothing is emailed until one of them is connected.' },
     { cat: 'project_mgmt', title: 'Create tasks', short: 'Action items become tasks in Jira or Asana.',
       long: 'Choose ONE task tool — Jira or Asana. When you approve a meeting, each action item becomes a task there, with its owner and due date. Switching one on switches the other off.' },
     { cat: 'chat', title: 'Post to team chat', short: 'Share summaries in Slack.',

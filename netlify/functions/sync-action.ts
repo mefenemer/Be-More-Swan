@@ -44,16 +44,15 @@
 
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { actionItems, assistantRecords, organisations } from '../../db/schema';
+import { actionItems, assistantRecords } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
 import { publishThreads, THREADS_TEXT_MAX, publishYouTube, YOUTUBE_TITLE_MAX, YOUTUBE_DESCRIPTION_MAX } from '../../src/utils/social-publish';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
-import { followupSentMessage, sendMeetingFollowup, type FollowupResult } from '../../src/utils/meeting-followup-send';
+import { NoMailboxError, followupSentMessage, sendMeetingFollowup, type FollowupResult } from '../../src/utils/meeting-followup-send';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import {
     createAsanaTask as createAsanaTaskShared, createJiraIssue as createJiraIssueShared, type TicketRef,
@@ -61,11 +60,6 @@ import {
 import { createTasksResult, fileTickets, notConnectedResult } from '../../src/utils/meeting-action-items';
 
 type Db = ReturnType<typeof getDb>;
-
-// Resend is the no-inbox fallback for email_meeting_followup (after Gmail and Outlook) (guarded: resend v6 throws at
-// construction when the key is missing, which would crash this module at import).
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_DOMAIN = process.env.OUTBOUND_EMAIL_DOMAIN || 'outbound.bemoreswan.com';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -758,14 +752,14 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
 }
 
 // ── Email: send a meeting follow-up to attendees from the user's inbox ─────────
-// Gmail, then Outlook, then Be More Swan's address via Resend (src/utils/meeting-followup-send.ts,
-// finish plan step 7). NO AI disclosure footer (owner, 2026-11-16): a person read and approved this
+// Gmail, then Outlook, and nothing else (src/utils/meeting-followup-send.ts; owner, 2026-11-17: no mailbox,
+// no email — Be More Swan never sends it from its own domain). NO AI disclosure footer (owner, 2026-11-16): a person read and approved this
 // email, so it goes out as theirs — like approved Lead Generator outreach. The EU AI Act's labelling
 // duty (Art. 50) covers chatbots and text published to inform the public, and exempts human-reviewed
 // text anyway; a follow-up to the people in the meeting is neither.
-// Recipients, the reviewed subject/body and the approver's Reply-To are built by
-// scenario-engine.buildEmailPayload. Which route was used is stamped on the meeting
-// (followupSentVia / followupSentAt) so the Inbox can say so.
+// Recipients and the reviewed subject/body are built by scenario-engine.buildEmailPayload. Which inbox
+// was used is stamped on the meeting (followupSentVia / followupSentAt) so the Inbox can say so; with no
+// inbox, `followupNotSent` is stamped instead and the Inbox offers "Send the follow-up now".
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -773,8 +767,6 @@ interface EmailFollowupPayload {
     to?: unknown;            // string[] of attendee email addresses
     subject?: unknown;
     body?: unknown;
-    assistantName?: unknown; // the From name on the Resend fallback when the business has no name
-    replyTo?: unknown;       // the approving user's address — Reply-To on the Resend fallback
     meetingRecordId?: unknown;
 }
 
@@ -790,53 +782,45 @@ async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId
     const rawBody = typeof payload.body === 'string' ? payload.body.trim() : '';
     if (!rawBody) return json(400, { error: 'The follow-up email has no body to send.' });
 
-    const assistantName = typeof payload.assistantName === 'string' && payload.assistantName.trim()
-        ? payload.assistantName.trim() : 'Your Be More Swan assistant';
-    const [orgRow] = await db.select({ name: organisations.name })
-        .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
     // Sent exactly as approved: the approver read every word of it, so no footer is added.
     const finalBody = rawBody;
-    const replyTo = typeof payload.replyTo === 'string' && EMAIL_RE.test(payload.replyTo.trim()) ? payload.replyTo.trim() : null;
+    const meetingId = Number(payload.meetingRecordId);
+    // Stamp the meeting. Best-effort: the email has gone (or was never going to).
+    const stamp = async (fields: Record<string, unknown>, drop: string[]) => {
+        if (!(Number.isInteger(meetingId) && meetingId > 0)) return;
+        try {
+            let data = sql`${assistantRecords.data} || ${JSON.stringify(fields)}::jsonb`;
+            for (const k of drop) data = sql`(${data}) - ${k}::text`;
+            await db.update(assistantRecords)
+                .set({ data, updatedAt: new Date() })
+                .where(and(eq(assistantRecords.id, meetingId), eq(assistantRecords.organisationId, organisationId), eq(assistantRecords.recordType, 'meeting')));
+        } catch (err) {
+            console.error('[sync-action] the meeting could not be stamped after the follow-up (non-fatal)', err);
+        }
+    };
 
     let sent: FollowupResult;
     try {
         sent = await sendMeetingFollowup(
-            { recipients, subject, body: finalBody, businessName: orgRow?.name || assistantName, replyTo },
+            { recipients, subject, body: finalBody },
             {
                 gmail: (m) => sendGmailMessage(db, organisationId, m),
                 outlook: (m) => sendOutlookMessage(db, organisationId, m),
-                resend: resend ? async (m) => {
-                    const r = await resend.emails.send(m);
-                    const e = (r as { error?: { message?: string } })?.error;
-                    return { id: (r as { data?: { id?: string } })?.data?.id ?? null, error: e ? (e.message || 'Resend refused it') : null };
-                } : null,
-                fromDomain: FROM_DOMAIN,
             },
         );
     } catch (err) {
+        if (err instanceof NoMailboxError) {
+            // Nothing sent, and nothing will be until a mailbox is connected — say so on the meeting.
+            await stamp({ followupNotSent: { reason: 'no_mailbox', at: new Date().toISOString() } }, []);
+            await logApiCall(db, { userId, endpoint: 'meeting-followup (no mailbox)', httpStatus: 409 });
+            return json(409, { error: err.message, code: err.code });
+        }
         await logApiCall(db, { userId, endpoint: 'meeting-followup', httpStatus: 502 });
         return json(502, { error: err instanceof Error ? err.message : 'The follow-up email could not be sent.' });
     }
-    const endpoint = {
-        gmail: 'gmail.googleapis.com/gmail/v1/users/me/messages/send',
-        outlook: 'graph.microsoft.com/v1.0/me/sendMail',
-        resend: 'resend.com/emails',
-        dev: 'resend.com/emails (dev)',
-    }[sent.via];
+    const endpoint = sent.via === 'gmail' ? 'gmail.googleapis.com/gmail/v1/users/me/messages/send' : 'graph.microsoft.com/v1.0/me/sendMail';
     await logApiCall(db, { userId, endpoint, httpStatus: 200 });
-    if (sent.via === 'dev') console.log(`[DEV] email_meeting_followup to ${recipients.join(', ')}: subject="${subject}" (no inbox, no RESEND_API_KEY)`);
-
-    // Stamp the meeting so the Inbox can say which inbox it went from. Best-effort: the email has gone.
-    const meetingId = Number(payload.meetingRecordId);
-    if (Number.isInteger(meetingId) && meetingId > 0 && sent.via !== 'dev') {
-        try {
-            await db.update(assistantRecords)
-                .set({ data: sql`${assistantRecords.data} || ${JSON.stringify({ followupSentVia: sent.via, followupSentAt: new Date().toISOString() })}::jsonb`, updatedAt: new Date() })
-                .where(and(eq(assistantRecords.id, meetingId), eq(assistantRecords.organisationId, organisationId), eq(assistantRecords.recordType, 'meeting')));
-        } catch (err) {
-            console.error('[sync-action] follow-up sent but the meeting could not be stamped (non-fatal)', err);
-        }
-    }
+    await stamp({ followupSentVia: sent.via, followupSentAt: new Date().toISOString() }, ['followupNotSent']);
     return json(200, { success: true, message: followupSentMessage(sent.via, recipients.length), platformPostId: sent.id, via: sent.via });
 }
 
