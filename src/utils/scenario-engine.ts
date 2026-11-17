@@ -30,6 +30,9 @@ export interface TriggerSubject {
     newStatus?: string;                  // 'QUALIFIED' | 'MEETING_BOOKED' | 'CLOSED_WON' | 'CLOSED_LOST'
     // Flat bag of BMS canonical fields recipes map FROM (e.g. company, contactEmail, aiSummary).
     fields: Record<string, unknown>;
+    // Run only these action types (a retry of one hand-off, e.g. "Send the follow-up now" on a meeting
+    // whose follow-up was not sent). Absent = every matching recipe.
+    onlyActions?: string[];
 }
 
 /** Normalise a domain the SAME way discovered_leads does: lowercase, strip protocol,
@@ -205,8 +208,7 @@ interface AttendeeIn { name?: unknown; email?: unknown }
 
 /**
  * Build the outbound-email payload the email_meeting_followup handler consumes: the attendee
- * recipient list, the reviewed subject/body draft, the assistant's display name (the Resend
- * From-name fallback), and the approver's address for Reply-To. Recipients come from the meeting's `attendees[{name,email}]`
+ * recipient list and the reviewed subject/body draft. Recipients come from the meeting's `attendees[{name,email}]`
  * (emails the user filled in on the inbox card); a single `contactEmail` is the fallback.
  */
 export function buildEmailPayload(
@@ -234,10 +236,7 @@ export function buildEmailPayload(
         to: recipients,
         subject: emailSubject,
         body,
-        assistantName: typeof f.assistantName === 'string' ? f.assistantName : '',
-        // The person who approved the meeting: Reply-To when it goes from Be More Swan's address
-        // (no inbox connected), so replies reach them. The meeting id lets the handler stamp the route.
-        replyTo: typeof f.approverEmail === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.approverEmail.trim()) ? f.approverEmail.trim() : null,
+        // The meeting id lets the handler stamp which inbox it went from (or that it was not sent).
         meetingRecordId: subject.recordId ?? null,
     };
 }

@@ -4917,7 +4917,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Meeting Action Proposal Card (Meeting Note Taker chat) ─────────
   // { type: 'meeting_action_proposal', action: 'approve'|'add_email'|'edit_followup'|'reject', recordId,
-  //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, missing?, tasks?,
+  //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, noMailbox?, missing?, tasks?,
   //   attendeeName?, email?, attendees?, before?, followupEmail?, note? }
   //
   // The Inbox's buttons on a meeting, from chat (finish plan step 6). Every fact comes from the meeting's
@@ -4956,8 +4956,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       const missing = Array.isArray(ui.missing) ? ui.missing : [];
       detail = `
         <p class="text-sm text-gray-700 mt-2">Approving sends it to the connections switched on for this assistant${Number(ui.tasks) ? `, including ${esc(String(ui.tasks))} action item${Number(ui.tasks) === 1 ? '' : 's'} for your task tracker` : ''}.</p>
-        ${to.length ? `<p class="text-xs text-gray-600 mt-2 break-words">Follow-up email to: ${to.map((x) => esc(x)).join(', ')}</p>` : ''}
-        ${missing.length ? `<p class="text-xs text-amber-800 mt-2">No email address for ${missing.map((x) => esc(x)).join(', ')} — they won’t get the follow-up. Ask me to add ${missing.length === 1 ? 'it' : 'them'} first, or add ${missing.length === 1 ? 'it' : 'them'} in the Inbox.</p>` : ''}`;
+        ${ui.noMailbox
+          ? `<p class="text-xs text-amber-800 mt-2">The follow-up email won’t be sent: no Gmail or Outlook is connected, and follow-ups only go from your own inbox. Connect one on the Connections tab first — or approve now and use “Send the follow-up now” in the Inbox once it’s connected.</p>`
+          : to.length ? `<p class="text-xs text-gray-600 mt-2 break-words">Follow-up email to: ${to.map((x) => esc(x)).join(', ')}</p>` : ''}
+        ${missing.length && !ui.noMailbox ? `<p class="text-xs text-amber-800 mt-2">No email address for ${missing.map((x) => esc(x)).join(', ')} — they won’t get the follow-up. Ask me to add ${missing.length === 1 ? 'it' : 'them'} first, or add ${missing.length === 1 ? 'it' : 'them'} in the Inbox.</p>` : ''}`;
     } else if (ui.action === 'add_email') {
       detail = `<p class="text-sm text-gray-700 mt-2"><span class="font-bold">${esc(ui.attendeeName || 'Attendee')}</span> · <span class="break-all">${esc(ui.email || '')}</span></p>`;
     } else if (ui.action === 'edit_followup') {

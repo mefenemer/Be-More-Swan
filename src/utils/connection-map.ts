@@ -169,8 +169,8 @@ export type MailboxProvider = (typeof MAILBOX_PROVIDERS)[number];
 // halves are independent: the Gmail/Outlook grants are workspace-wide and real for everybody, but
 // only these roles have code that actually sends through them (lead_qualifier → lead-generation.ts
 // `send_outreach`; newsletter_editor → newsletter-send.ts, the small-list route when no sending
-// domain is verified; meeting_note_taker → sync-action.ts email_meeting_followup, Gmail then Outlook,
-// src/utils/meeting-followup-send.ts). Marking `email` live for a role with nothing to render would make the category
+// domain is verified; meeting_note_taker → sync-action.ts email_meeting_followup, Gmail then Outlook and nothing
+// else, src/utils/meeting-followup-send.ts). Marking `email` live for a role with nothing to render would make the category
 // VANISH from the Connections grid — no connector card, and no "coming soon" card either — which is
 // the failure mode this module's header warns about. So a role joins this set at the same time as
 // the code that uses the mailbox, never before.

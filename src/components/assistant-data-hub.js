@@ -3755,7 +3755,11 @@
       ? `<button type="button" data-recipe-toggle="${s.active.id}" data-enabled="${on ? '1' : '0'}"
            class="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap">
            <span class="w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-600' : 'bg-gray-400'}"></span>${on ? 'On' : 'Off'}</button>`
-      : (s.tier !== 2 && !s.connection && !s.connectionOptional)
+      : (s.tier !== 2 && !s.connection && s.needsMailbox)
+        // Follow-ups only go from the user's own inbox (owner, 2026-11-17) — never from Be More Swan's address.
+        ? `<a href="/api/oauth/gmail/connect${Number(state.assistantId) > 0 ? `?assistantId=${Number(state.assistantId)}` : ''}"
+             class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect Gmail or Outlook</a>`
+      : (s.tier !== 2 && !s.connection)
         ? `<a href="/api/oauth/${esc(s.providerKey)}/connect${Number(state.assistantId) > 0 ? `?assistantId=${Number(state.assistantId)}` : ''}"
              class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect ${esc(s.providerName)}</a>`
         : `<button type="button" data-recipe-setup class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition whitespace-nowrap">Set it up</button>`;
