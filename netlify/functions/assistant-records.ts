@@ -37,7 +37,7 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads } from '../../db/schema';
+import { actionItems, activeScenarios, aiAssistants, assistantRecords, contentRules, discoveredLeads, integrationScenarios } from '../../db/schema';
 import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
 import { keepServerOwnedMeetingKeys } from '../../src/utils/meeting-handoff-once';
 import { NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
@@ -184,6 +184,9 @@ async function attachActionItemSync<T extends { id: number; recordType: string }
         return records;
     }
 }
+
+/** Shown when "Send the follow-up now" is pressed with the follow-up email switched off. */
+const FOLLOWUP_OFF_MESSAGE = 'The follow-up email is switched off for this assistant. Switch it on in Connections, then send it.';
 
 // Integration Scenario Library — fire the outbound "Handoff" push (Scenario Type A) when a
 // Review Queue record first goes live. lead → QUALIFIED, meeting → MEETING_BOOKED; the
@@ -873,6 +876,19 @@ export default withLambda(async (event) => {
                 const md = (m.data && typeof m.data === 'object') ? m.data as Record<string, unknown> : {};
                 if (md.followupSentAt) return json(409, { error: 'This follow-up has already been sent.' });
                 if (!(await connectedMailbox(db, orgId))) return json(409, { error: NO_MAILBOX_MESSAGE, code: 'no_mailbox' });
+                // The job only runs ENABLED recipes, so with the follow-up switched off it would finish
+                // having sent nothing while the toast said "Sending" (PR #695 review, 2026-11-17).
+                const [followupOn] = await db.select({ id: activeScenarios.id })
+                    .from(activeScenarios)
+                    .innerJoin(integrationScenarios, eq(activeScenarios.scenarioId, integrationScenarios.id))
+                    .where(and(
+                        eq(activeScenarios.organisationId, orgId),
+                        eq(activeScenarios.assistantId, m.aiAssistantId),
+                        eq(activeScenarios.isEnabled, true),
+                        eq(integrationScenarios.actionType, 'email_meeting_followup'),
+                    ))
+                    .limit(1);
+                if (!followupOn) return json(409, { error: FOLLOWUP_OFF_MESSAGE, code: 'followup_off' });
                 await enqueueHandoffOnApproval(db, orgId, m, ['email_meeting_followup']);
                 return json(200, { queued: true });
             }
