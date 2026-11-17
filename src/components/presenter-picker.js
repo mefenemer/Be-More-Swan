@@ -73,7 +73,7 @@
           </div>
         </div>
         <div data-pp-list class="overflow-y-auto min-h-0 flex-1 px-5 py-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3" style="grid-auto-rows:max-content"></div>
-        <p class="px-5 pb-4 pt-1 text-[11px] text-gray-500">Every presenter is made by AI and isn't a real person. Videos with an AI presenter are labelled as made with AI. Each one can speak any language your voices cover.</p>
+        <p class="px-5 pb-4 pt-1 text-[11px] text-gray-500">Every presenter is made by AI and isn't a real person. Each one can speak any language your voices cover.</p>
       </div>`;
     document.body.appendChild(back);
     const $ = (s) => back.querySelector(s);
