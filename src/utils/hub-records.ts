@@ -23,6 +23,9 @@
 // send the out-of-date follow-up (#722 review). So the chat passes `reviseMeetingId`, the record its last
 // meeting card in this conversation filed; a new card with the same title updates that record while it is
 // still waiting. The "New meeting" form never passes it: every pasted set of notes is its own meeting.
+// Only a real follow-up counts (chatRevisionTarget): the meeting card must be in the reply JUST BEFORE this
+// message, and this message must be a short instruction with no attachment. Pasting a second meeting into the
+// same chat is long (or attached), so it is a new meeting even when the model titles it alike (#722 review 2).
 
 import { and, desc, eq, like, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -72,6 +75,25 @@ export function titleWithTime(title: string, now: Date): string {
 /** LIKE pattern for "<title> (…" with the title's own % _ \ taken literally. Pure. */
 export function timedTitlePattern(title: string): string {
     return `${title.replace(/[\\%_]/g, (c) => `\\${c}`)} (%`;
+}
+
+/** Longest message still read as an instruction about the last minutes ("make Sam the owner of task 2"). */
+export const REVISION_MAX_CHARS = 400;
+
+type HistoryRow = { role: string; uiElementJson: unknown };
+
+/**
+ * Pure: the meeting record a chat turn may REVISE, or null. Only when the reply right before this message
+ * carried a meeting card with its record id, and this message is a short typed instruction with nothing
+ * attached. Anything else — a pasted or attached set of notes, or the card further back — is a new meeting.
+ */
+export function chatRevisionTarget(history: readonly HistoryRow[], typed: string, attachmentCount: number): number | null {
+    if (attachmentCount > 0 || String(typed ?? '').trim().length > REVISION_MAX_CHARS) return null;
+    const last = history[history.length - 1];
+    if (!last || last.role !== 'assistant') return null;
+    const u = last.uiElementJson as { type?: unknown; recordId?: unknown } | null;
+    if (!u || (u.type !== 'action_item_assignment' && u.type !== 'ActionItemAssignmentCard')) return null;
+    return Number.isInteger(u.recordId) ? (u.recordId as number) : null;
 }
 
 export type HubWriteOptions = {

@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { meetingWriteDecision, titleWithTime, stableJson, timedTitlePattern, persistHubRecords, persistHubRecordsWithTitles, type HubRecord } from '../src/utils/hub-records';
+import { meetingWriteDecision, titleWithTime, stableJson, timedTitlePattern, persistHubRecords, persistHubRecordsWithTitles, chatRevisionTarget, REVISION_MAX_CHARS, type HubRecord } from '../src/utils/hub-records';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -144,10 +144,32 @@ function fakeDb(rows: { meeting?: unknown[]; byTitle?: unknown[] }) {
         assert.match(saved[0].title, / \(\d{1,2} \w{3} \d{4}, \d{2}:\d{2}\)$/, 'the saved title carries the time');
     });
 
-    await check('wiring: chat passes the last meeting card\'s recordId; the form returns the saved title', () => {
+    await check('revision only for a short follow-up right after the meeting card (#722 review 2)', () => {
+        const card = { role: 'assistant', uiElementJson: { type: 'action_item_assignment', recordId: 925 } };
+        const user = { role: 'user', uiElementJson: null };
+        assert.equal(chatRevisionTarget([user, card], 'Make Sam the owner of task 2', 0), 925);
+        assert.equal(chatRevisionTarget([user, card], 'x'.repeat(REVISION_MAX_CHARS + 1), 0), null, 'a pasted second meeting is long: new meeting');
+        assert.equal(chatRevisionTarget([user, card], 'here are the notes', 1), null, 'an attached second meeting: new meeting');
+        assert.equal(chatRevisionTarget([card, user, { role: 'assistant', uiElementJson: null }], 'fix task 2', 0), null, 'the card further back: not a revision');
+        assert.equal(chatRevisionTarget([user, { role: 'assistant', uiElementJson: { type: 'lead_scoring_card', recordId: 1 } }], 'x', 0), null);
+        assert.equal(chatRevisionTarget([], 'x', 0), null);
+    });
+
+    await check('a different meeting pasted into the same chat is inserted dated; the first is untouched (#722 review 2)', async () => {
+        const history = [{ role: 'user', uiElementJson: null }, { role: 'assistant', uiElementJson: { type: 'action_item_assignment', recordId: 925 } }];
+        const pastedNotes = 'Notes from the 3pm meeting:\n' + 'Ali: hiring plan, post the job by Friday. '.repeat(20);
+        const { db, writes } = fakeDb({ meeting: [{ id: 925, title: t, approvalStatus: 'pending_approval', data: A }] });
+        await persistHubRecords(db, 1, 2, [meeting(B)], { reviseMeetingId: chatRevisionTarget(history, pastedNotes, 0) });
+        const w = writes();
+        assert.equal(w.length, 1);
+        assert.equal(w[0].kind, 'insert', 'meeting A is not updated');
+        assert.match(w[0].arg.title, / \(\d{1,2} \w{3} \d{4}, \d{2}:\d{2}\)$/);
+    });
+
+    await check('wiring: chat decides the revision with chatRevisionTarget; the form returns the saved title', () => {
         const orch = readFileSync('netlify/functions/chat-orchestrator.ts', 'utf8');
-        assert.ok(orch.includes("(u.type === 'action_item_assignment' || u.type === 'ActionItemAssignmentCard') && Number.isInteger(u.recordId)"));
-        assert.ok(orch.includes('persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId: lastMeetingRecordId ?? null })'));
+        assert.ok(orch.includes('const reviseMeetingId = chatRevisionTarget(history, typed, attached.length);'));
+        assert.ok(orch.includes('persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId })'));
         const form = readFileSync('netlify/functions/meeting-minutes.ts', 'utf8');
         assert.ok(form.includes('const [saved] = await persistHubRecordsWithTitles(db, orgId, assistant.id, [record]);'));
         assert.ok(form.includes('return json(200, { recordId: saved.id, title: saved.title, card });'));

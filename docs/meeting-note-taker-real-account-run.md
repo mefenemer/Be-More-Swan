@@ -175,9 +175,9 @@ timing runs all landed in ONE record (#925): records were matched on the title f
 the model titled alike replaced the earlier one's summary, decisions and action items — even an approved
 one. Fixed (`src/utils/hub-records.ts`): a meeting is only refreshed by an IDENTICAL re-run (same title or that
 title with a date and time added, still waiting for approval, exactly the same content); anything else is a new
-meeting, with the date and time added when the title is taken. A revision in chat (a same-titled new card in the
-conversation that filed the meeting) updates that meeting while it is still waiting; the New meeting form never
-revises. A one-hour window (#719) was replaced (PR after
+meeting, with the date and time added when the title is taken. A revision in chat — a short typed follow-up
+(≤400 characters, nothing attached) right after the meeting card — updates that meeting while it is still waiting;
+a second set of notes pasted into the same chat is a new meeting, and the New meeting form never revises. A one-hour window (#719) was replaced (PR after
 #719's review): it still let two different meetings filed within the hour overwrite each other, and it had been
 applied to leads, invoices and tickets too, which must keep refreshing by title.
 
