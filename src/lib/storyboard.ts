@@ -22,6 +22,7 @@ import { isStillMotion, type StillMotion } from './still-motion';
 import { readNameCaption, type LowerThirdStyle, type NameCaption } from './lower-third';
 import type { VideoLook } from './video-look';
 import { readSceneText, type TextAnim, type TextPos, type TextStyle, type TextWhen } from './scene-text';
+import { readSceneCover, type SceneCover } from './scene-cover';
 import { COUNTDOWN_MAX_ITEMS, COUNTDOWN_MIN_ITEMS, COUNTDOWN_VIDEO_BRIEF, countdownNumber, fixListCount } from '../utils/top-lists';
 
 export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
@@ -161,6 +162,11 @@ export interface Scene {
     cutWords?: Array<{ start: number; end: number }>;
     /** Who is on screen, as a lower-third name caption (src/lib/lower-third.ts). */
     nameCaption?: NameCaption;
+    /**
+     * Walkthrough layout (src/lib/scene-cover.ts): a screen shown with or instead of the presenter while they
+     * keep talking. Own-video scenes only. Absent = the presenter full frame.
+     */
+    cover?: SceneCover;
     /** The words' place, timing, look and entrance (src/lib/scene-text.ts). Absent = as before 2026-11-10. */
     textPos?: TextPos;
     textWhen?: TextWhen;
@@ -304,6 +310,10 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             if (cw.length) scene.cutWords = cw;
             // Its own sound: the scene IS the segment. Under a voiceover the voice sets the cut.
             if (ownSound) scene.targetS = round1(segment.outS - segment.inS);
+            // A screen over (or beside) the presenter: only the brief's own videos or the library's pictures.
+            const cover = readSceneCover(o.cover, { own: new Map([...ownById].map(([id, v]) => [id, v.durationS])), library: libraryIds });
+            if (cover) scene.cover = cover;
+            else if (o.cover) changes.push(`Scene ${i + 1}: that screen isn't one of your chosen videos or pictures, so the presenter shows full frame.`);
         }
         const text = clip(o.onScreenText, 60);
         if (text) { scene.onScreenText = text; Object.assign(scene, readSceneText(o as Record<string, unknown>)); }

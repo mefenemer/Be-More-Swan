@@ -50,7 +50,7 @@ check('no card, null, or a list of nothing is no card', () => {
 
 check('the structured parser uses it, and says when cards were left for later', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
-    const fn = src.slice(src.indexOf('function parseStructuredReply('), src.indexOf('function parseStructuredReply(') + 1200);
+    const fn = src.slice(src.indexOf('function parseStructuredReply('), src.indexOf('function parseStructuredReply(') + 2000);
     assert.ok(fn.includes('firstCard(parsed)'));
     assert.ok(fn.includes('MORE_CARDS_NOTE'));
     assert.ok(MORE_CARDS_NOTE.includes('one card at a time'));

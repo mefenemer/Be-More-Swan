@@ -45,7 +45,7 @@ import { prGate } from './pr-review-gate';
 import { approvalNoteWithReview } from '../src/utils/pr-review';
 import { classifySql, sqlHash } from '../src/utils/issue-sql';
 import { stagingCiState, fetchStagingCommit } from '../src/utils/issue-fix-proof';
-import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
+import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureForNewPr, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
 
 const arg = (a: string[], n: string) => { const i = a.indexOf(n); return i !== -1 ? a[i + 1] : undefined; };
 const STATUSES = ['open', 'planned', 'brief_ready', 'in_progress', 'on_hold', 'released', 'declined', 'duplicate'];
@@ -101,7 +101,7 @@ async function main() {
             await printChecklist();
         } else if (cmd === 'start') {
             const r = await sql`UPDATE feature_requests SET status = 'in_progress', updated_at = now() WHERE id = ${id} AND status NOT IN ('released', 'declined', 'duplicate') RETURNING id`;
-            if (!r.length) throw new Error(`#${id} is released, declined, a duplicate, or missing.`);
+            if (!r.length) throw new Error(`#${id} is released, declined, a duplicate, or missing. (A released request's next phase: record its PR with \`pr\` — that reopens it.)`);
             await note('Started building.');
             console.log(`#${id} → In progress (Claude working).`);
         } else if (cmd === 'note') {
@@ -128,15 +128,11 @@ async function main() {
             const proofReady = !!(await loadFeatureProof(db, id));
             if (sqlText && !proofReady) throw new Error('This feature has SQL: run db/z-feature-pipeline-proof.sql on this DB first, so the SQL can be tracked and gated.');
             await sql`UPDATE feature_requests SET dev_pr_url = ${pr} WHERE id = ${id}`;
-            if (proofReady) {
-                // A new PR starts its checks again: its SQL, staging merge, CI and deploys are re-proved.
-                await sql`
-                    UPDATE feature_requests SET dev_sql = ${sqlText}, dev_sql_safety = ${safety}, dev_sql_hash = ${sqlText ? sqlHash(sqlText) : null},
-                           dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
-                           dev_merged_at = NULL, dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
-                           dev_prod_sql_status = NULL, dev_prod_sql_result = NULL, dev_prod_sql_ran_at = NULL, dev_prod_merged_at = NULL, live_at = NULL,
-                           updated_at = now()
-                     WHERE id = ${id}`;
+            // A new PR starts its checks again; a Released request is reopened (resetFeatureForNewPr says why).
+            const reopened = proofReady ? (await resetFeatureForNewPr(db, id, { sqlText, safety })).reopened : false;
+            if (reopened) {
+                await note('Reopened: it was Released, and this PR ships more of it. Back to In progress until the production deploy contains this PR, then the live check moves it to Released again. No one was notified.');
+                console.log(`#${id}: was Released → In progress (the live check releases it again once this PR is live).`);
             }
             await note(`Pull request: ${pr}.${sqlText ? ` Needs SQL (${safety}).` : ' No database change.'}\n\n${summary}`);
             console.log(`#${id}: PR recorded${sqlText ? `, SQL ${safety}` : ''}.`);

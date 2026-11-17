@@ -50,7 +50,10 @@ export function withoutCardPlaceholder(content: string): string {
  * can't hold this either, so the server says so plainly beside the reply.
  */
 const POINTS_AT_CARD = new RegExp([
-    /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b/.source,
+    // "prepared/created/made/set up/queued" too (staging 2026-11-17, Minute Taker run B: "I've prepared a card to add …
+    // Nothing changes until you confirm it on the card" over no card).
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put|prepared|created|made|set up|queued)\b[^.\n]{0,40}\bcard\b/.source,
+    /\b(?:confirm|approve|accept|save|check)\b[^.\n]{0,24}\bon the card\b/.source,
     /\bcard\s+(?:below|above|here)\b/.source,
     // "The card is below this time", "this time the card really is below" (prod 2026-11-07, org 40).
     /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
@@ -118,6 +121,22 @@ export function proseReplyLostItsCard(raw: string, parsed: { content: string; ui
     if (raw.trimStart().startsWith('{') || /"(?:reply|uiElement)"\s*:/.test(raw)) return false;   // a broken JSON attempt, not prose
     return replyPointsAtCard(parsed.content);
 }
+/**
+ * Minute Taker run B/C (staging 2026-11-17): on a route whose instructions say EVERY reply is one JSON object,
+ * a reply that is plain text — or nothing — is a format fault however it is worded. The model sees only the TEXT
+ * of its earlier replies, so after a few turns it copied that shape: "Here are the minutes for …" with no
+ * envelope and no minutes card, so no meeting was ever filed (and no "card below" wording to catch). Pure.
+ */
+export function strictJsonReplyIsProse(raw: string, parsed: { uiElement: unknown }): boolean {
+    if (parsed.uiElement) return false;
+    const t = raw.trim();
+    if (!t) return true;   // an empty reply
+    return !t.startsWith('{') && !/"(?:reply|uiElement)"\s*:/.test(t);
+}
+
+/** The retry sent when strictJsonReplyIsProse: model-only, never stored or shown. */
+export const JSON_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text (or empty), but every reply must be the one JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>} or null}. If the user\'s message held meeting notes or a transcript, uiElement is the minutes card. If they asked to change, approve or reject a meeting, it is the meeting_action_proposal card. Send your answer again as that JSON object and nothing else.';
+
 /**
  * How long the "send that again as JSON" retry may take, or 0 to skip it. The request has 26 s in all.
  */
@@ -230,5 +249,14 @@ export function firstCard(parsed: Record<string, unknown>): { card: unknown | nu
             if (cards.length) return { card: cards[0], extra: cards.length - 1 };
         }
     }
+    // The card under some other key ("card", "proposal", the card's own type name…) — but only an object that
+    // IS a card (a string `type`), and only when exactly one is there (Minute Taker run B, staging 2026-11-17:
+    // "I've prepared a card" over a reply whose card never reached the page).
+    // An explicit `"uiElement": null` is the model saying "no card" — keep it (#703 review).
+    if ('uiElement' in parsed && parsed.uiElement === null) return { card: null, extra: 0 };
+    const typed = Object.entries(parsed)
+        .filter(([k, v]) => k !== 'reply' && isCard(v) && typeof (v as { type?: unknown }).type === 'string')
+        .map(([, v]) => v);
+    if (typed.length === 1) return { card: typed[0], extra: 0 };
     return { card: null, extra: 0 };
 }

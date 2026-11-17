@@ -12,6 +12,9 @@
 //   'busy'     another run claimed it in the last CLAIM_TTL_MINUTES: retry the job later
 // The claim is one UPDATE … WHERE not sent and not freshly claimed, so two runs at once cannot both win.
 //
+// Custom webhook recipes (Zapier/Make) use the same stamp under 'webhook:<scenarioKey>' — see
+// webhook-handoff-once.ts.
+//
 // NOT the Jira/Asana ticket recipes: they already keep a per-task ledger (action_items) and a
 // re-approval is how the user retries skipped or failed tickets (materialiseActionItems), which a
 // once-stamp would stop.

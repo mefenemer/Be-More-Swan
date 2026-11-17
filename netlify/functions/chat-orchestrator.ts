@@ -60,6 +60,7 @@ import { TOP_LIST_RULES, countCaptionItems, fixCaptionListCount, fixListCount } 
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../../src/utils/newsletter-campaign-chat-draft';
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
+import { GENERATED_CHAT_MANIFEST } from '../../src/config/chat-capabilities.generated';
 import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/utils/form-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, splitProseAndCard, stripCodeFences } from '../../src/utils/model-json';
@@ -126,7 +127,7 @@ import { buildSearchTrendsBlock, SEARCH_TREND_ROLES } from '../../src/utils/chat
 import { resolveSearchTermsCard, SEARCH_TERMS_CARD_TYPE } from '../../src/utils/chat-search-terms-card';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, JSON_FORMAT_RETRY, strictJsonReplyIsProse, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -475,6 +476,11 @@ const defaultRoute: AssistantRoute = {
 /** Ends the Business Mentor's system prompt (see `system` below): its reply format, where it can't be lost. */
 const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. uiElement is ONE card object, never a list: when several changes are worth making, send the most important one as the card, and say you will send the next when they have dealt with it. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
 
+/** Shown when the model sent a card and no words: the card says the rest. */
+const CARD_ONLY_REPLY = 'Here it is — nothing changes until you confirm it on the card.';
+/** Shown when the model sent nothing at all (an empty reply, staging 2026-11-17). Never an empty bubble. */
+const EMPTY_REPLY_FALLBACK = 'Sorry — no reply came through that time. Could you send that again?';
+
 const STRUCTURED_REPLY_FALLBACK =
     "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
 
@@ -499,13 +505,40 @@ function onScreenCardBlock(uiElement: unknown): string | null {
     return `[ON SCREEN — the card under this reply, exactly as the user sees it]\n${JSON.stringify(card)}`;
 }
 
-function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
+/** Card types the browser can draw (src/components/disruptive-ui-registry.js, via the generated manifest). */
+const UI_CARD_TYPES: ReadonlySet<string> = new Set(GENERATED_CHAT_MANIFEST.uiCards);
+
+/** The text as ONE JSON object and nothing else (fences already stripped), or null. */
+function wholeJsonObject(text: string): Record<string, unknown> | null {
+    const t = text.trim();
+    if (!t.startsWith('{') || !t.endsWith('}')) return null;
+    try {
+        const v = JSON.parse(t);
+        return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+    } catch {
+        return null;
+    }
+}
+
+export function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
     const stripped = stripCodeFences(raw);
 
     // This route hand-rolled its own strip plus an outermost-{...} recovery. The shared extractor
     // does the same thing with a string-aware brace balancer, so a `}` inside a reply no longer
     // truncates the object — see src/utils/model-json.ts.
     const parsed = parseModelJson<Record<string, unknown> & { reply?: unknown; uiElement?: unknown }>(raw);
+    // The card ON ITS OWN, no envelope and no words (Minute Taker run B, staging 2026-11-17: an add-email card sent
+    // bare was read as a broken reply and the user got STRUCTURED_REPLY_FALLBACK). Kept as the card; the words
+    // are filled in by the handler (CARD_ONLY_REPLY).
+    // ⚠️ Only when the WHOLE reply is that object (#703 review): parseModelJson falls back to the first balanced
+    // {…} anywhere, so "prose, then a bare card" (prod 2026-11-08, org 40) would land here and lose its words —
+    // that shape is splitProseAndCard's, below. And only a card the page can DRAW (uiCards, generated from
+    // disruptive-ui-registry.js): {"type":"text",…} is a content block, not a card, and would put "Here it is"
+    // over nothing.
+    const bare = wholeJsonObject(stripped);
+    if (bare && typeof bare.reply !== 'string' && typeof bare.type === 'string' && !('uiElement' in bare) && UI_CARD_TYPES.has(bare.type)) {
+        return { content: '', uiElement: bare };
+    }
     if (parsed && typeof parsed.reply === 'string') {
         const { card, extra } = firstCard(parsed);
         const content = parsed.reply.trim();
@@ -1978,7 +2011,7 @@ USING A FINISHED VIDEO. A READY video is saved in My Content, and they can downl
 
 CHANGING A FINISHED VIDEO. A READY video is never changed in place: approving a replan or scene-edit card on it makes a NEW VERSION (everything already made is kept, so only what changes is made and paid for again), and the finished one stays in My Content. Tell them that. "Change it" on the "Videos" tab does the same. The list shows a READY video's scenes by number: when they ask for changes to it ("remove the branded card in scene 1", "cut the coughing", "take the words off"), offer the card yourself — a video_replan_proposal with all their notes for several changes, or a video_scene_edit for one scene. Never tell them to make the change on the "Videos" tab instead, and never say you can't change a finished video from this chat.
 
-CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "nameCaption": { "name": "...", "role": "..." } (only if it changes; null takes it off), "summary": "<one sentence: what changes>" }. Changing only the words keeps the scene's picture. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. On a scene of THEIR OWN footage in its own sound, you can cut words they said ("take out 'basically'", "cut the bit where I say the price"): add "cutPhrase": "<the words exactly as said, from that scene's words>" to the video_scene_edit; they're cut when the video is made. On the tab they can also press "✎ Edit the words" on the scene and click words to cut or keep them, like editing a transcript. The voice belongs to the whole video, not one scene, so a different voice means a new video.
+CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "nameCaption": { "name": "...", "role": "..." } (only if it changes; null takes it off), "summary": "<one sentence: what changes>" }. Changing only the words keeps the scene's picture. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. On a scene of THEIR OWN footage you can also change what people see while they talk (walkthrough layouts): add "layout": "bubble" (the screen fills the frame, them in a round corner bubble) | "cover" (the screen only; heard, not seen) | "window" (them full frame, the screen in a small corner window) | "presenter" (back to them full frame), with what's on the screen — "screenVideo": <the id of one of THAT video's own videos, from its list above>, optionally "screenStartS": <seconds into that video>, or "screenSearch": "<stock footage search words>" — and optionally "corner": "br" | "bl" | "tr" | "tl" and "bubbleSize": "small" | "medium". A screen recording is shown whole. Only their own videos chosen for that video can be the screen. On a scene of THEIR OWN footage in its own sound, you can cut words they said ("take out 'basically'", "cut the bit where I say the price"): add "cutPhrase": "<the words exactly as said, from that scene's words>" to the video_scene_edit; they're cut when the video is made. On the tab they can also press "✎ Edit the words" on the scene and click words to cut or keep them, like editing a transcript. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
 {
@@ -3955,19 +3988,23 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // failed retry leaves the first reply exactly as it was, and the missing-card note below still applies.
         // Only with time to spare inside the 26s request: the reply above took under 10s, and the retry gets 10s at most.
         const retryMs = cardRetryTimeoutMs({ requestElapsedMs: Date.now() - requestStartedAt, replyElapsedMs: Date.now() - replyStartedAt });
-        if (route.parseResponse === parseStructuredReply && retryMs > 0 && proseReplyLostItsCard(raw, parsed)) {
+        // The Minute Taker's replies are ALWAYS one JSON object, so any prose (or empty) reply is asked again
+        // (confirm-card-reply.ts strictJsonReplyIsProse) — not only one that points at a card.
+        const strictProse = route === ROUTES.meeting_note_taker && strictJsonReplyIsProse(raw, parsed);
+        if (route.parseResponse === parseStructuredReply && retryMs > 0 && (strictProse || proseReplyLostItsCard(raw, parsed))) {
             try {
                 const retry = await anthropic.messages.create(adaptForModel({
                     model: chatModel,
                     max_tokens: route.maxTokens,
                     system: sanitizeForModel(system),
-                    messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
+                    messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw.trim() || '(no reply)' }, { role: 'user' as const, content: strictProse ? JSON_FORMAT_RETRY : CARD_FORMAT_RETRY }]),
                 }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: retryMs, maxRetries: 0 });
                 await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);
                 console.warn('[chat-orchestrator] prose reply pointed at a card it did not send — asked again as JSON', { role: assistantRow.roleKey, sessionId: session.id, recovered: !!reparsed.uiElement });
-                if (reparsed.uiElement) { raw = again; parsed = reparsed; }
+                // Kept when it brings a card — or, after an EMPTY first reply, any words at all.
+                if (reparsed.uiElement || (strictProse && !raw.trim() && reparsed.content.trim())) { raw = again; parsed = reparsed; }
             } catch (err) {
                 console.warn('[chat-orchestrator] card format retry failed', { role: assistantRow.roleKey, error: String(err) });
             }
@@ -3981,6 +4018,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (t === 'action_item_assignment' || t === 'ActionItemAssignmentCard') uiElement = normaliseMinutesCard(uiElement);
         }
         let content = parsed.content;
+        // Nothing came back at all: say so rather than store an empty bubble, and keep why (stop reason) below.
+        const emptyReply = !raw.trim();
+        if (emptyReply) {
+            content = EMPTY_REPLY_FALLBACK;
+            console.warn('[chat-orchestrator] the model sent an empty reply', { role: assistantRow.roleKey, model: chatModel, stopReason: response.stop_reason, outputTokens: response.usage.output_tokens, blocks: (response.content ?? []).map((b: { type: string }) => b.type) });
+        }
         // An existing meeting (src/utils/chat-meeting-action.ts): rebuilt from its row, so a made-up id or a
         // meeting of another assistant's draws nothing. The click is the Inbox's own PATCH.
         const meetingActionReq = route === ROUTES.meeting_note_taker ? meetingActionFromUiElement(uiElement) : null;
@@ -4472,10 +4515,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let sceneEdit: VideoSceneCard | null = null;
         if (route === ROUTES.video_producer && (uiElement as { type?: unknown } | null)?.type === VIDEO_SCENE_EDIT_TYPE) {
             const req = videoSceneRequestFromUiElement(uiElement);
-            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard }).from(videoProjects)
+            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard, brief: videoProjects.brief }).from(videoProjects)
                 .where(and(eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId))).limit(1) : [];
             // A ready video too: approving the card makes a new version first (video-projects edit_scene).
-            sceneEdit = req && project && ['planned', 'failed', 'ready'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
+            sceneEdit = req && project && ['planned', 'failed', 'ready'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null, { ownVideoIds: (project.brief as { footageAssetIds?: number[] } | null)?.footageAssetIds ?? [] }) : null;
             uiElement = sceneEdit;
             if (!sceneEdit) content = 'I couldn’t set that up on the scene, so nothing has changed. Which video and scene do you mean? You can also press “Change” on the scene, on the "Videos" tab.';
         }
@@ -4747,6 +4790,27 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
             }
             content = fixed;
+            // An unreadable reply (STRUCTURED_REPLY_FALLBACK) keeps its raw text the same way: its console.warn
+            // was the only trace, and staging function logs are often empty by the time anyone looks (2026-11-17).
+            if (!droppedCard && content === STRUCTURED_REPLY_FALLBACK) {
+                droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: null, raw });
+                droppedCard.content = `${droppedCard.content} (reply could not be read)`;
+            }
+            if (!droppedCard && emptyReply) {
+                droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: null, raw: `[empty reply; stop_reason=${String(response.stop_reason)}; output_tokens=${response.usage.output_tokens}; blocks=${(response.content ?? []).map((b: { type: string }) => b.type).join(',') || 'none'}]` });
+                droppedCard.content = `${droppedCard.content} (empty reply, stop_reason ${String(response.stop_reason)})`;
+            }
+            // A card with no words: a line that points at it, never an empty bubble above it.
+            if (uiElement && !content.trim()) content = CARD_ONLY_REPLY;
+            // A bare card the route's checks then REFUSED (wrong shape, a gate, an empty minutes card…): no card AND
+            // no words. Never an empty bubble — the retry line, and the card kept in the hidden row (#703 review).
+            if (!uiElement && !content.trim()) {
+                content = STRUCTURED_REPLY_FALLBACK;
+                if (!droppedCard) {
+                    droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
+                    droppedCard.content = `${droppedCard.content} (card sent on its own was refused)`;
+                }
+            }
         }
 
         // Written before the reply so a meeting card can carry its record's id: its Approve button
