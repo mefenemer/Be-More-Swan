@@ -171,4 +171,12 @@ check('second review of #721: no own voice on a presenter video, moved lines rem
     assert.ok(vp.includes('export const PRESENTER_ATTEMPT_MS = 8 * 60 * 1000;'));
 });
 
+check('third review of #721: never a face on another gender\'s voice; three presenter scenes when the last isn\'t one', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.ok(vp.includes('const presenter = asked && presenterVoiceId && isVoiceId(presenterVoiceId) ? asked : null;'));
+    const scenesNoCta = [scene('ai_presenter'), scene('ai_presenter'), scene('ai_presenter'), scene('stock_video'), scene('brand_card')];
+    const r = enforceStoryboard({ title: 't', caption: 'c', scenes: scenesNoCta }, brief({ presenter: { id: 'amara' } }));
+    assert.strictEqual(r.storyboard.scenes.filter((x) => x.source === 'ai_presenter').length, 3, 'the earliest three keep the presenter');
+});
+
 console.log(`\nai-presenter: ${passed} passed`);

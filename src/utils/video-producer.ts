@@ -145,10 +145,12 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
     const footage = readFootageIds(b.footageAssetIds);
     // An AI presenter (A2): a catalogue presenter, never with own footage. They speak the voiceover in their own
     // voice for the video's language (presenterVoice), so the voiceover is on and the voice is theirs.
-    const presenter = footage.length ? null : readBriefPresenter(b.presenter);
+    const asked = footage.length ? null : readBriefPresenter(b.presenter);
     const language = languageLabel(b.language) ? String(b.language) : null;
     // The language the video is in: the brief's, else the chosen voice's (a French voice on the form, or French at hire).
-    const presenterVoiceId = presenter ? presenterVoice(presenterById(presenter.id)!, language ?? (isVoiceId(b.voice) ? voiceLanguage(b.voice) : 'en')) : null;
+    const presenterVoiceId = asked ? presenterVoice(presenterById(asked.id)!, language ?? (isVoiceId(b.voice) ? voiceLanguage(b.voice) : 'en')) : null;
+    // No voice of their gender in that language: no presenter, rather than their face on another voice (review of #721).
+    const presenter = asked && presenterVoiceId && isVoiceId(presenterVoiceId) ? asked : null;
     return {
         brief: {
             purpose: String(b.purpose ?? 'promo').slice(0, 60),

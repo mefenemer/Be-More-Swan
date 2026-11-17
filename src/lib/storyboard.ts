@@ -359,9 +359,11 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         if (!presenter) { s.source = 'stock_video'; if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' '); changes.push(`Scene ${i}: this video has no presenter, so stock footage is used.`); continue; }
         if (!s.voiceover.trim()) { s.source = 'stock_video'; if (!s.keywords) s.keywords = 'business'; changes.push(`Scene ${i}: the presenter needs words to say, so stock footage is used.`); continue; }
         presenterScenes++;
-        // The call to action (the last scene) always keeps them, so the others share the remaining places.
+        // The call to action (the last scene) keeps them when it uses them, so the others share the remaining places;
+        // when it doesn't, the earliest three keep them (review of #721).
         const isLast = s === scenes[scenes.length - 1];
-        if (!presenter.throughout && !isLast && presenterScenes > PRESENTER_KEY_SCENES - 1) {
+        const lastIsPresenter = scenes[scenes.length - 1].source === 'ai_presenter';
+        if (!presenter.throughout && !isLast && presenterScenes > PRESENTER_KEY_SCENES - (lastIsPresenter ? 1 : 0)) {
             s.source = 'stock_video';
             if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' ');
             changes.push(`The presenter appears in at most ${PRESENTER_KEY_SCENES} scenes — scene ${i} uses stock footage.`);
