@@ -36,7 +36,7 @@ FROM (VALUES
     ('client_onboarding_guide',   'Client Onboarding Assistant'),
     ('review_reputation_manager', 'Reputation Management Assistant'),
     ('standup_summarizer',        'Stand-up Support Assistant'),
-    ('meeting_note_taker',        'Minute Taker'),
+    ('meeting_note_taker',        'Note Taker'),  -- was 'Minute Taker'; renamed 2026-11-17 (db/z-note-taker-rename.sql)
     ('status_report_generator',   'Project Reporting Assistant'),
     ('accounts_receivable_clerk', 'Accounts Receivable Clerk'),
     ('expense_categorizer',       'Expenses Assistant'),

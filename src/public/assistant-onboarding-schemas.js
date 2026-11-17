@@ -1078,7 +1078,7 @@ function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCo
       },
       {
         title: 'Operational set-up',
-        description: 'How your Minute Taker works — where its action items go. You give it a transcript or notes (paste them in chat, or import a spreadsheet); it writes the summary, decisions and action items for your review.',
+        description: 'How your Note Taker works — where its action items go. You give it a transcript or notes (paste them in chat, or import a spreadsheet); it writes the summary, decisions and action items for your review.',
         operational: true,
         fields: [
           {

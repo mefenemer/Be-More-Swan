@@ -267,7 +267,7 @@ let _followUps = [];
 let _leadOutreach = false;
 
 // Dated items for a records/briefs assistant (opts.datedItems): an AR Clerk's invoices on their due
-// date, a Minute Taker's meetings on their own date, a Brand Designer's briefs on their deadline.
+// date, a Note Taker's meetings on their own date, a Brand Designer's briefs on their deadline.
 // Before this those calendars showed only completed runs — never one invoice, meeting or brief.
 // Read-only chips: the date belongs to the record, so moving it here would be editing a fact.
 // Shape: { key, kind, title, at: Date, derived, tab }.
@@ -544,7 +544,7 @@ async function _loadRoleExtras(t, from, to) {
     return { records: records.map(tag), followUps: followUps.map(tag), dated: dated.map(tag) };
 }
 
-// Dated items (records or briefs): an AR Clerk's invoices, a Minute Taker's meetings, campaign
+// Dated items (records or briefs): an AR Clerk's invoices, a Note Taker's meetings, campaign
 // dates, website checks, brief deadlines.
 async function _loadDatedItems(t, from, to) {
     if (t.datedSource === 'records') {
