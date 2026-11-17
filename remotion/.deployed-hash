@@ -1,5 +1,5 @@
 # Written by scripts/stamp-remotion-bundle.mjs on a site deploy. Do not edit.
 # One line per SITE: <site> <bundle-hash> <deployed-at>. A site absent here has never been
 # deployed from this working tree — it does NOT inherit another site's hash.
-staging b5a4b27e6f0ad928 2026-11-10T09:36:18.628Z
-prod b5a4b27e6f0ad928 2026-11-10T09:37:15.414Z
+staging 6130757ca7acfc40 2026-11-17T15:53:25.604Z
+prod 6130757ca7acfc40 2026-11-17T15:54:07.740Z
