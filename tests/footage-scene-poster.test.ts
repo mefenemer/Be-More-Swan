@@ -19,7 +19,7 @@ const sceneHtml = new Function(`
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const SOURCE = { own_video: 'Your footage' }; const BEAT = {}; const MOVING = ['own_video', 'stock_video', 'ai_video'];
     const state = { editing: null, busy: new Set() };
-    const mmss = (s) => String(s); const ownName = () => 'clip'; const textSummary = () => ''; const tightenHtml = () => '';
+    const mmss = (s) => String(s); const ownName = () => 'clip'; const textSummary = () => ''; const tightenHtml = () => ''; const coverSummary = () => '';
     const chatPaneAvailable = () => false;
     const FOOTAGE_API = '/.netlify/functions/footage';
     ${grab('footagePosterUrl')}

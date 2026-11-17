@@ -53,6 +53,15 @@ export interface VideoClip {
     kind?: 'image';
     holdS?: number;
     motion?: StillMotion;
+    /**
+     * Walkthrough layouts (src/lib/scene-cover.ts, Video Producer only): 'bubble' draws this clip in a round
+     * corner bubble over a screen cover; 'hidden' keeps its sound but shows nothing (a screen-only cover is
+     * seen instead). Absent = full frame, as always. Never set by the post editor (sanitiseVideoEdit drops it).
+     * ⚠️ A Remotion bundle older than 2026-11-17 draws every clip full frame — redeploy both sites first.
+     */
+    layout?: 'bubble' | 'hidden';
+    corner?: 'br' | 'bl' | 'tr' | 'tl';
+    size?: 'small' | 'medium';
 }
 
 /** Longest a single still may be held — a scene, not a slideshow. */

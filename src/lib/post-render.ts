@@ -307,6 +307,10 @@ export interface ResolvedClip {
     kind?: 'image';
     holdS?: number;
     motion?: StillMotion;
+    /** Walkthrough layout (video-edit.ts VideoClip.layout); carried through to the composition. */
+    layout?: 'bubble' | 'hidden';
+    corner?: 'br' | 'bl' | 'tr' | 'tl';
+    size?: 'small' | 'medium';
 }
 
 /**
@@ -377,6 +381,7 @@ export async function resolveEditClips(
                 ...(trim?.inS ? { inS: trim.inS } : {}),
                 ...(trim?.outS != null ? { outS: trim.outS } : {}),
                 ...(gain != null ? { gain } : {}),
+                ...(clip.layout === 'bubble' || clip.layout === 'hidden' ? { layout: clip.layout, ...(clip.corner ? { corner: clip.corner } : {}), ...(clip.size ? { size: clip.size } : {}) } : {}),
             });
         }
         if (out.length) return out;

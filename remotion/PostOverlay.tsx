@@ -21,6 +21,7 @@ import type { LookStyle } from '../src/lib/video-look';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
 import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
+import { bubbleBox, captionLiftPct, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
 
 /**
  * One clip of the timeline.
@@ -49,6 +50,28 @@ export type TimelineClip = {
     holdS?: number;
     motion?: StillMotion;
     durationInFrames?: number;
+    /** Walkthrough layout (src/lib/scene-cover.ts): a corner bubble, or heard but not seen. Absent = full frame. Added 2026-11-17. */
+    layout?: 'bubble' | 'hidden';
+    corner?: Corner;
+    size?: BubbleSize;
+};
+
+/**
+ * A screen (or stock clip / picture) shown over a stretch of the timeline (walkthrough layouts, 2026-11-17):
+ * 'bubble' and 'cover' draw it full frame BEHIND the presenter's clips, 'window' in a small corner window IN
+ * FRONT of them. Always silent: the presenter's sound runs underneath. Older bundles ignore it.
+ */
+export type CoverTrack = {
+    id: string;
+    src: string;
+    kind: 'video' | 'image';
+    startS: number;
+    endS: number;
+    inS?: number;
+    layout: CoverLayout;
+    corner?: Corner;
+    fit?: 'cover' | 'contain';
+    motion?: StillMotion;
 };
 
 /** A timed audio clip, already resolved to a fetchable URL by the worker. */
@@ -121,6 +144,9 @@ export type PostOverlayProps = {
      * tint, both under the captions and text. Added 2026-11-10; an older bundle renders ungraded.
      */
     look?: LookStyle | null;
+    /** Walkthrough covers and the bubble's size (src/lib/scene-cover.ts). Added 2026-11-17. */
+    covers?: CoverTrack[];
+    bubbleSize?: BubbleSize;
     // Frame metadata: the worker passes the base clip's real dimensions/fps/length; calculateMetadata
     // (Root.tsx) reads these so one composition serves every aspect ratio.
     width?: number;
@@ -218,13 +244,17 @@ const AnimatedBox: React.FC<{ ov: Overlay; frames: number; height: number; fps: 
  * Reads the composition's own frame (it is not inside a <Sequence>), so `t` is timeline seconds —
  * the same clock the cues were built on. One phrase at a time; between phrases, nothing.
  */
-const CaptionLayer: React.FC<{ track: CaptionTrack; height: number; fps: number }> = ({ track, height, fps }) => {
+const CaptionLayer: React.FC<{ track: CaptionTrack; height: number; fps: number; lift?: Array<{ from: number; to: number; pct: number }> }> = ({ track, height, fps, lift }) => {
     const frame = useCurrentFrame();
     const hit = cueAt(track.cues, frame / fps);
     if (!hit) return null;
     // A track queued before caption styles existed has none: the default IS the original look.
     const style = track.style || DEFAULT_CAPTION_STYLE;
-    const { fontSizePx, bottomPct, topPct, centre, sidePct, strokePx } = captionLayout(height, style);
+    const layout = captionLayout(height, style);
+    const { fontSizePx, topPct, centre, sidePct, strokePx } = layout;
+    // Bottom captions step up while a bubble or window sits at the bottom (walkthrough layouts, scene-cover.ts).
+    const up = layout.bottomPct != null && lift ? Math.max(0, ...lift.filter((w) => frame >= w.from && frame < w.to).map((w) => w.pct)) : 0;
+    const bottomPct = layout.bottomPct != null ? layout.bottomPct + up : undefined;
     const accent = track.accent || CAPTION_FALLBACK_ACCENT;
     const text = style.textColor || '#FFFFFF';
     return (
@@ -272,8 +302,8 @@ const MovingStill: React.FC<{ src: string; motion: StillMotion; frames?: number 
     );
 };
 
-export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, imageMotion, audio, videoTrim, clips, framePosition, overlays, captions, look }) => {
-    const { height, fps, durationInFrames } = useVideoConfig();
+export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, imageMotion, audio, videoTrim, clips, framePosition, overlays, captions, look, covers, bubbleSize }) => {
+    const { width, height, fps, durationInFrames } = useVideoConfig();
     const boxes = (overlays || []).filter((o) => o && String(o.text || '').trim());
     const tracks = (audio || []).filter((a) => a && a.src);
     const timeline = timelineOf({ clips, videoSrc, videoTrim });
@@ -292,6 +322,44 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
     const objectPosition = framePosition
         ? `${pct(framePosition.offsetX)} ${pct(framePosition.offsetY)}`
         : undefined;
+    // Walkthrough covers (scene-cover.ts): screens behind the presenter, windows in front.
+    const coverTracks = (covers || []).filter((c) => c && c.src && c.endS > c.startS);
+    const behind = coverTracks.filter((c) => c.layout !== 'window');
+    const windows = coverTracks.filter((c) => c.layout === 'window');
+    // Where bottom captions step up: under a bottom bubble (from the clips' places in the Series) or a bottom window.
+    const lift: Array<{ from: number; to: number; pct: number }> = [];
+    {
+        let f = 0;
+        for (const c of timeline) {
+            const d = c.durationInFrames ?? evenShare;
+            if (c.layout === 'bubble') {
+                const pctUp = captionLiftPct(width, height, { kind: 'bubble', corner: c.corner ?? 'br', size: c.size ?? bubbleSize });
+                if (pctUp > 0) lift.push({ from: f, to: f + d, pct: pctUp });
+            }
+            f += d;
+        }
+        for (const w of windows) {
+            const pctUp = captionLiftPct(width, height, { kind: 'window', corner: w.corner ?? 'bl' });
+            if (pctUp > 0) lift.push({ from: Math.round(w.startS * fps), to: Math.round(w.endS * fps), pct: pctUp });
+        }
+    }
+    const coverMedia = (c: CoverTrack, frames: number) => (c.kind === 'image'
+        ? <MovingStill src={c.src} motion={c.motion ?? 'none'} frames={frames} />
+        : <OffthreadVideo src={c.src} muted
+            style={{ width: '100%', height: '100%', objectFit: c.fit ?? 'cover', backgroundColor: 'black' }}
+            trimBefore={c.inS ? Math.max(0, Math.round(c.inS * fps)) : undefined} />);
+    const bubble = (c: TimelineClip) => {
+        const b = bubbleBox(width, height, c.corner ?? 'br', c.size ?? bubbleSize ?? 'medium');
+        return (
+            <div style={{ position: 'absolute', left: b.left, top: b.top, width: b.size, height: b.size, borderRadius: '50%', overflow: 'hidden', border: `${b.ring}px solid white`, boxShadow: '0 4px 18px rgba(0,0,0,0.35)', boxSizing: 'border-box', backgroundColor: 'black' }}>
+                <OffthreadVideo src={c.src}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%' }}
+                    volume={c.gain}
+                    trimBefore={c.inS ? Math.max(0, Math.round(c.inS * fps)) : undefined}
+                    trimAfter={c.outS != null ? Math.max(1, Math.round(c.outS * fps)) : undefined} />
+            </div>
+        );
+    };
     return (
         <AbsoluteFill style={{ backgroundColor: 'black' }}>
             {/* The timeline when there is one, otherwise the still. objectFit 'contain' on the image
@@ -300,12 +368,22 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                 instead: once several clips share one stated frame, letterboxing each of them to its
                 own shape would put black bars in the middle of a reel. */}
             <AbsoluteFill style={look && look.filter ? { filter: look.filter } : undefined}>
+            {behind.map((c) => {
+                const { from, durationInFrames: frames } = overlayFrameRange({ startS: c.startS, endS: c.endS }, fps, durationInFrames);
+                return <Sequence key={c.id} from={from} durationInFrames={frames}>{coverMedia(c, frames)}</Sequence>;
+            })}
             {timeline.length
                 ? <Series>
                     {timeline.map((c) => (
                         <Series.Sequence key={c.id} durationInFrames={c.durationInFrames ?? evenShare}>
                             {c.kind === 'image'
                                 ? <MovingStill src={c.src} motion={c.motion ?? 'none'} frames={c.durationInFrames ?? evenShare} />
+                                : c.layout === 'hidden'
+                                ? <Audio src={c.src} volume={c.gain}
+                                    trimBefore={c.inS ? Math.max(0, Math.round(c.inS * fps)) : undefined}
+                                    trimAfter={c.outS != null ? Math.max(1, Math.round(c.outS * fps)) : undefined} />
+                                : c.layout === 'bubble'
+                                ? bubble(c)
                                 : <OffthreadVideo
                                 src={c.src}
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition }}
@@ -333,6 +411,17 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                         ? <MovingStill src={imageSrc} motion={imageMotion} />
                         : <Img src={imageSrc} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />)
                     : null}
+            {windows.map((c) => {
+                const { from, durationInFrames: frames } = overlayFrameRange({ startS: c.startS, endS: c.endS }, fps, durationInFrames);
+                const w = windowBox(width, height, c.corner ?? 'bl');
+                return (
+                    <Sequence key={c.id} from={from} durationInFrames={frames} layout="none">
+                        <div style={{ position: 'absolute', left: w.left, top: w.top, width: w.width, height: w.height, borderRadius: w.radius, overflow: 'hidden', boxShadow: '0 4px 18px rgba(0,0,0,0.35)', backgroundColor: 'black' }}>
+                            {coverMedia(c, frames)}
+                        </div>
+                    </Sequence>
+                );
+            })}
             </AbsoluteFill>
             {/* The look's tint, over the picture and under every word. */}
             {look && look.tint ? <AbsoluteFill style={{ backgroundColor: look.tint, opacity: Math.min(0.5, Math.max(0, look.tintOpacity ?? 0.15)), mixBlendMode: 'soft-light' }} /> : null}
@@ -377,7 +466,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
 
             {/* Captions under the text boxes in paint order, so a box the user placed over the
                 caption area still wins. */}
-            {captionTrack ? <CaptionLayer track={captionTrack} height={height} fps={fps} /> : null}
+            {captionTrack ? <CaptionLayer track={captionTrack} height={height} fps={fps} lift={lift.length ? lift : undefined} /> : null}
 
             {boxes.map((ov) => {
                 // Half-open [startS, endS) → a <Sequence> window, computed by the shared helper so it

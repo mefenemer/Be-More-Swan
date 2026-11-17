@@ -597,6 +597,118 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
 
   /** The Text group on a scene's Change form: the words, then where / when / look / appears, beside a preview. */
+  // ── Walkthrough layouts (src/lib/scene-cover.ts — the same keys) ─────────────────────────────────
+  const COVER_LAYOUT = [['presenter', 'Presenter'], ['bubble', 'Screen + bubble'], ['cover', 'Screen only'], ['window', 'Presenter + window']];
+  const COVER_HINT = {
+    presenter: 'You, full frame.',
+    bubble: 'The screen fills the frame and you appear in a round bubble in a corner, still talking.',
+    cover: 'The screen fills the frame. You’re heard but not seen.',
+    window: 'You fill the frame, with the screen in a small window in a corner.',
+  };
+  const CORNER = [['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']];
+  const coverLayoutOf = (s) => (s.cover && s.cover.layout) || 'presenter';
+  const coverCornerOf = (c) => (c && c.corner) || (c && c.layout === 'window' ? 'bl' : 'br');
+  const ownVideosOf = (v) => ((v.brief && v.brief.footageAssetIds) || []).map((id) => ({ id, name: ownName(v, id) || `Video ${id}` }));
+  function coverScreenValue(c) {
+    if (!c) return '';
+    return c.source === 'own_video' ? `own:${c.assetId}` : c.source === 'product_photo' ? `pic:${c.assetId}` : c.source;
+  }
+  function coverSummary(v, s) {
+    const c = s.cover;
+    if (!c) return '';
+    const what = c.source === 'own_video' ? `${ownName(v, c.assetId) || 'your video'}${c.inS ? ` from ${mmss(c.inS)}` : ''}`
+      : c.source === 'product_photo' ? 'your picture' : c.source === 'stock_photo' ? `a stock photo${c.keywords ? ` of “${esc(c.keywords)}”` : ''}` : `stock footage${c.keywords ? ` of “${esc(c.keywords)}”` : ''}`;
+    const where = c.layout === 'cover' ? '' : ` · ${labelOf(CORNER, coverCornerOf(c)).toLowerCase()}`;
+    const part = c.fromS || c.toS ? ` · ${mmss(c.fromS || 0)}–${c.toS ? mmss(c.toS) : 'end'} of the scene` : '';
+    return `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">Layout:</span> ${esc(labelOf(COVER_LAYOUT, c.layout))} · ${c.source === 'own_video' ? esc(what) : what}${esc(where)}${esc(part)}</p>`;
+  }
+  /** A drawn sketch of the layout (no media): the screen as a grey panel, the presenter as the dark shape. */
+  function coverPreviewHtml(v, o) {
+    const ratio = (v.brief && v.brief.shape) === '16:9' ? '16 / 9' : (v.brief && v.brief.shape) === '1:1' ? '1 / 1' : '9 / 16';
+    const pos = (corner, size) => `${corner[0] === 't' ? 'top' : 'bottom'}:6%;${corner[1] === 'l' ? 'left' : 'right'}:6%;width:${size}`;
+    // Inline colours: the sketch's shapes must show whatever classes the built stylesheet happens to carry.
+    const SCREEN = 'background:#dbeafe;color:#1e3a8a', PERSON = 'background:#374151;color:#fff';
+    const label = (t, at) => `<span class="absolute text-[10px] font-bold" style="${at}">${t}</span>`;
+    const screen = `<div class="absolute inset-0" style="${SCREEN}">${label('Screen', 'top:8%;left:8%')}</div>`;
+    const person = `<div class="absolute inset-0" style="${PERSON}">${label('You', 'top:8%;left:8%')}</div>`;
+    let inner = person;
+    if (o.layout === 'bubble') inner = `${screen}<div class="absolute rounded-full" style="${pos(o.corner, o.size === 'small' ? '22%' : '28%')};aspect-ratio:1/1;${PERSON};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`;
+    else if (o.layout === 'cover') inner = screen;
+    else if (o.layout === 'window') inner = `${person}<div class="absolute rounded" style="${pos(o.corner, '36%')};aspect-ratio:${ratio};${SCREEN};border:1px solid #93c5fd"></div>`;
+    return `<div data-vid-cover-preview class="relative w-40 max-w-full shrink-0 rounded-md overflow-hidden border border-gray-200 self-start" style="aspect-ratio:${ratio}" role="img" aria-label="Sketch of the layout: ${esc(labelOf(COVER_LAYOUT, o.layout))}">${inner}</div>`;
+  }
+  function coverGroupHtml(v, s) {
+    if (s.source !== 'own_video') return '';
+    const c = s.cover || null;
+    const layout = coverLayoutOf(s);
+    const own = ownVideosOf(v);
+    const sel = (name, list, val) => `<select name="${name}" data-vid-cover-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(list, val)}</select>`;
+    const screens = [...own.map((x) => [`own:${x.id}`, `Your video ${x.name}`]), ['stock_video', 'Stock footage'], ['stock_photo', 'Stock photo']];
+    if (c && c.source === 'product_photo') screens.push([`pic:${c.assetId}`, 'Your picture']);
+    const screen = coverScreenValue(c) || (own.find((x) => x.id !== s.assetId) ? `own:${own.find((x) => x.id !== s.assetId).id}` : 'stock_video');
+    const off = layout === 'presenter' ? ' hidden' : '';
+    const hide = (cond) => (cond ? ' hidden' : '');
+    return `
+      <fieldset class="border border-gray-200 rounded-lg p-2 bg-white">
+        <legend class="px-1 text-[11px] font-bold text-gray-600">Layout</legend>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1 min-w-0 space-y-2">
+            <label class="block"><span class="block text-[11px] font-bold text-gray-600">What people see while you talk</span>${sel('coverLayout', COVER_LAYOUT, layout)}</label>
+            <p data-vid-cover-hint class="text-[11px] text-gray-500">${esc(COVER_HINT[layout])}</p>
+            <div data-vid-cover-more class="space-y-2${off}">
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">On the screen</span>${sel('coverScreen', screens, screen)}</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="block${hide(!screen.startsWith('own:'))}" data-vid-cover-own><span class="block text-[11px] font-bold text-gray-600">Start that video at (seconds)</span>
+                  <input name="coverIn" type="number" min="0" step="0.1" value="${esc((c && c.inS) || 0)}" data-vid-cover-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+                <label class="block${hide(!(screen === 'stock_video' || screen === 'stock_photo'))}" data-vid-cover-stock><span class="block text-[11px] font-bold text-gray-600">Search words</span>
+                  <input name="coverWords" maxlength="80" value="${esc((c && c.keywords) || '')}" placeholder="e.g. laptop dashboard" data-vid-cover-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+                <label class="block${hide(layout === 'cover')}" data-vid-cover-corner><span class="block text-[11px] font-bold text-gray-600">Corner</span>${sel('coverCorner', CORNER, coverCornerOf(c || { layout }))}</label>
+                <label class="block${hide(layout !== 'bubble')}" data-vid-cover-size><span class="block text-[11px] font-bold text-gray-600">Bubble size</span>${sel('coverSize', [['medium', 'Medium'], ['small', 'Small']], (c && c.size) || 'medium')}</label>
+                <label class="block"><span class="block text-[11px] font-bold text-gray-600">From (seconds into the scene)</span>
+                  <input name="coverFromS" type="number" min="0" step="0.1" value="${esc((c && c.fromS) || '')}" placeholder="Start" data-vid-cover-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+                <label class="block"><span class="block text-[11px] font-bold text-gray-600">To</span>
+                  <input name="coverToS" type="number" min="0" step="0.1" value="${esc((c && c.toS) || '')}" placeholder="End" data-vid-cover-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+              </div>
+              <p class="text-[11px] text-gray-500">A screen recording is shown whole, with dark edges if its shape differs. Leave From and To empty to cover the whole scene.</p>
+            </div>
+          </div>
+          ${coverPreviewHtml(v, { layout, corner: coverCornerOf(c || { layout }), size: (c && c.size) || 'medium' })}
+        </div>
+      </fieldset>`;
+  }
+  /** Show only the boxes the chosen layout and screen use, and redraw the sketch. */
+  function paintCoverGroup(f) {
+    if (!f.elements.coverLayout) return;
+    const v = state.videos.find((x) => x.id === Number(f.dataset.id));
+    const layout = f.elements.coverLayout.value;
+    const screen = f.elements.coverScreen.value;
+    f.querySelector('[data-vid-cover-hint]').textContent = COVER_HINT[layout] || '';
+    f.querySelector('[data-vid-cover-more]').classList.toggle('hidden', layout === 'presenter');
+    f.querySelector('[data-vid-cover-own]').classList.toggle('hidden', !screen.startsWith('own:'));
+    f.querySelector('[data-vid-cover-stock]').classList.toggle('hidden', !(screen === 'stock_video' || screen === 'stock_photo'));
+    f.querySelector('[data-vid-cover-corner]').classList.toggle('hidden', layout === 'cover');
+    f.querySelector('[data-vid-cover-size]').classList.toggle('hidden', layout !== 'bubble');
+    const old = f.querySelector('[data-vid-cover-preview]');
+    if (old && v) old.outerHTML = coverPreviewHtml(v, { layout, corner: f.elements.coverCorner.value, size: f.elements.coverSize.value });
+  }
+  /** The cover a Change form asks for: null for the presenter full frame; absent when the scene has no Layout group. */
+  function coverPatch(fd) {
+    if (!fd.has('coverLayout')) return {};
+    const layout = String(fd.get('coverLayout'));
+    if (layout === 'presenter') return { cover: null };
+    const screen = String(fd.get('coverScreen') || 'stock_video');
+    const n = (k) => { const x = String(fd.get(k) || '').trim(); return x === '' ? undefined : Math.max(0, Number(x) || 0); };
+    const cover = { layout, corner: String(fd.get('coverCorner') || '') || undefined, ...(layout === 'bubble' && fd.get('coverSize') === 'small' ? { size: 'small' } : {}) };
+    if (screen.startsWith('own:')) Object.assign(cover, { source: 'own_video', assetId: Number(screen.slice(4)), inS: n('coverIn') });
+    else if (screen.startsWith('pic:')) Object.assign(cover, { source: 'product_photo', assetId: Number(screen.slice(4)) });
+    else Object.assign(cover, { source: screen, keywords: String(fd.get('coverWords') || '') });
+    const fromS = n('coverFromS'), toS = n('coverToS');
+    if (fromS) cover.fromS = fromS;
+    if (toS) cover.toS = toS;
+    if (layout === 'cover') delete cover.corner;
+    return { cover };
+  }
+
   function textGroupHtml(v, s, thumb, isVideo) {
     const card = s.source === 'brand_card';
     const input = `<label class="block"><span class="block text-[11px] font-bold text-gray-600">On-screen text (optional)</span>
@@ -686,6 +798,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
                 <input name="inS" type="number" min="0" step="0.1" value="${esc(s.inS)}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">To</span>
                 <input name="outS" type="number" min="0" step="0.1" value="${esc(s.outS)}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label></div>` : ''}
+            ${coverGroupHtml(v, s)}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name caption (optional)</span>
                 <input name="ncName" maxlength="40" value="${esc((s.nameCaption && s.nameCaption.name) || '')}" placeholder="e.g. Sarah Jones" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
@@ -710,6 +823,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : '<p class="text-xs text-gray-500 mt-0.5">No voiceover in this scene.</p>'}
             ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}${textSummary(v, s)}</p>` : ''}
             ${s.nameCaption ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">Name caption:</span> ${esc(s.nameCaption.name)}${s.nameCaption.role ? ` · ${esc(s.nameCaption.role)}` : ''}</p>` : ''}
+            ${coverSummary(v, s)}
           </div>
           <div class="flex gap-2 min-w-0">
             ${media}
@@ -1773,6 +1887,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   document.addEventListener('input', (e) => {
     const f = e.target.closest && e.target.closest('[data-vid-scene-form]');
     if (f && host() && host().contains(f) && (e.target.matches('[data-vid-text-input]') || e.target.matches('[data-vid-text-opt]'))) paintTextPreview(f);
+    if (f && host() && host().contains(f) && e.target.matches('[data-vid-cover-opt]')) paintCoverGroup(f);
   });
   // Moving scenes play while pointed at (and on a tap), so they don't read as still pictures.
   document.addEventListener('mouseover', (e) => {
@@ -1902,6 +2017,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         nameCaption: String(fd.get('ncName') || '').trim() ? { name: String(fd.get('ncName')), role: String(fd.get('ncRole') || '') } : null,
         // A branded card draws its words into the picture: only the words apply there.
         ...textPatch(f, fd),
+        ...(source === 'own_video' ? coverPatch(fd) : {}),
       };
       const id = Number(f.dataset.id);
       state.editing = null;

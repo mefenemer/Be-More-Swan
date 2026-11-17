@@ -53,6 +53,7 @@ import {
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
+import { applyCovers, cornerOf, coverWindow, type TimelineCover } from '../lib/scene-cover';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
@@ -229,6 +230,8 @@ export interface ProjectTimeline {
     sourceAssetIds?: number[];
     /** The owner's chapter names, by each chapter's first scene id (src/lib/video-chapters.ts). Since 2026-11-11. */
     chapterTitles?: Record<string, string>;
+    /** Walkthrough screens over or beside the presenter (src/lib/scene-cover.ts). Since 2026-11-17. */
+    covers?: TimelineCover[];
 }
 
 /** Chapter names to keep on a rebuilt timeline: this row's own, else the version it came from. */
@@ -653,6 +656,36 @@ export function playedDurations(scenes: Scene[], durations: number[], fileS: Map
     });
 }
 
+/**
+ * The walkthrough screens on the finished timeline (src/lib/scene-cover.ts): one per own-video scene with a
+ * cover and a sourced asset, in output seconds. A video cover never runs past its file (`fileLen`): it stops
+ * early rather than asking the render for frames that don't exist. Pure.
+ */
+export function timelineCovers(scenes: Scene[], assets: Record<string, number>, times: SceneTime[], fileLen: (assetId: number) => number | null | undefined): TimelineCover[] {
+    const out: TimelineCover[] = [];
+    scenes.forEach((s, i) => {
+        const cover = s.cover;
+        const assetId = cover ? assets[`${s.id}~cover`] : undefined;
+        const st = times[i];
+        if (!cover || !assetId || s.source !== 'own_video' || !st) return;
+        const win = coverWindow(cover, st.startS, st.endS - st.startS);
+        if (!win) return;
+        const isVideo = cover.source === 'own_video' || cover.source === 'stock_video';
+        const inS = cover.source === 'own_video' ? (cover.inS ?? 0) : 0;
+        let endS = win.endS;
+        const f = isVideo ? fileLen(assetId) : null;
+        if (f) endS = Math.min(endS, win.startS + Math.max(0, f - inS - 0.05));
+        if (endS - win.startS < 0.5) return;
+        out.push({
+            id: `vp_cover_${s.id}`, assetId, kind: isVideo ? 'video' : 'image', startS: win.startS, endS: Math.round(endS * 100) / 100,
+            ...(inS ? { inS } : {}), layout: cover.layout,
+            ...(cover.layout !== 'cover' ? { corner: cornerOf(cover) } : {}), ...(cover.size ? { size: cover.size } : {}),
+            fit: cover.source === 'own_video' ? 'contain' : 'cover', ...(isVideo ? {} : { motion: 'push_in' }),
+        });
+    });
+    return out;
+}
+
 /** Where each scene sits on the finished video, from the played durations. Pure. */
 export function timesOf(scenes: Scene[], durations: number[]): SceneTime[] {
     let t = 0;
@@ -915,7 +948,32 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         await Promise.all([...todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene), others]);
         // The parallel saves can land out of order; this one writes every scene made.
         await save({});
-        const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
+        // 2b. Walkthrough screens (src/lib/scene-cover.ts): each sourced like a scene as long as its stretch,
+        // kept under "<scene id>~cover". Free sources only (own video, library picture, stock), so the cost
+        // shown before "Make the video" is unchanged.
+        const coverFailed: number[] = [];
+        for (const [i, scene] of storyboard.scenes.entries()) {
+            const cover = scene.cover;
+            if (!cover || scene.source !== 'own_video') continue;
+            const key = `${scene.id}~cover`;
+            if (done[key]) continue;
+            const win = coverWindow(cover, 0, durations[i] ?? scene.targetS);
+            if (!win) continue;
+            let made: Awaited<ReturnType<typeof sourceScene>> = null;
+            try {
+                made = await sourceScene(db, { scene: { ...scene, id: key, source: cover.source, assetId: cover.assetId, keywords: cover.keywords || scene.keywords, prompt: undefined, cover: undefined, targetS: win.endS - win.startS }, orgId, userId, assistantId: p.aiAssistantId ?? null, brandName: org?.name ?? '', exclude, kit, seed: projectId * 10 + 50 + i, shape: brief.shape ?? '9:16' });
+            } catch (err) {
+                console.error(`[video-producer] build ${projectId} scene ${scene.id} screen failed:`, err);
+            }
+            if (made?.asStill) {
+                storyboard.scenes[i] = { ...scene, cover: { ...cover, source: 'stock_photo' } };
+                await save({ storyboard });
+            }
+            if (made) done[key] = made.assetId; else coverFailed.push(i);
+        }
+        await save({});
+        const missing = [...[...failed].map((i) => ({ i, what: `scene ${i + 1}` })), ...coverFailed.map((i) => ({ i, what: `scene ${i + 1}’s screen` }))]
+            .sort((a, b) => a.i - b.i).map((x) => x.what);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
         // 3. The post — one row per platform, one cross-post group.
@@ -998,7 +1056,16 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             for (const r of rows) if (r.durationS && r.durationS > 0) clipS.set(r.id, r.durationS);
         }
         const clips = sceneClips(storyboard.scenes, done, durations, { fileS, ownSound, ownGain: levels.ownSound || 1, clipS });
-        const edit: VideoEdit = { clips, targetRatio: shape };
+        // Walkthrough screens on the timeline, and the presenter's clips split at their edges (scene-cover.ts).
+        const coverAssetIds = storyboard.scenes.map((sc) => (sc.cover ? done[`${sc.id}~cover`] : 0)).filter((x): x is number => !!x);
+        const coverFileS = new Map<number, number>();
+        if (coverAssetIds.length) {
+            const rows = await db.select({ id: contentAssets.id, durationS: contentAssets.durationS }).from(contentAssets)
+                .where(and(inArray(contentAssets.id, coverAssetIds), eq(contentAssets.organisationId, orgId)));
+            for (const r of rows) if (r.durationS && r.durationS > 0) coverFileS.set(r.id, r.durationS);
+        }
+        const covers = timelineCovers(storyboard.scenes, done, timesOf(storyboard.scenes, durations), (id) => fileS.get(id) ?? coverFileS.get(id));
+        const edit: VideoEdit = { clips: applyCovers(clips, covers), targetRatio: shape };
         const voiceGain = levels.voice || 1;
         const audio: AudioOverlay[] = voiceTrackId
             ? [{ id: `vp_vo_${voiceTrackId}`, assetId: voiceTrackId, label: 'Voiceover', volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
@@ -1046,7 +1113,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             look: lookStyle(brief.look, [kit.primaryColor]),
             mix: { ...levels, musicTitle: music?.title ?? null, ...(musicNote ? { musicNote } : {}) },
             // Kept with the version: every file it was made from (the Videos tab lists them).
-            sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
+            sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...covers.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
+            ...(covers.length ? { covers } : {}),
         };
         // Chapter names the owner gave — kept for the scenes this version still has (videoChapters drops the rest).
         const chapterTitles = await keptChapterTitles(db, p).catch(() => undefined);
@@ -1105,6 +1173,11 @@ export function assetsForShape(storyboard: Storyboard, sceneAssets: unknown): Re
     const made = (sceneAssets && typeof sceneAssets === 'object' ? sceneAssets : {}) as Record<string, number>;
     const out: Record<string, number> = {};
     for (const sc of storyboard.scenes) if (made[sc.id] && !RESHOOT_FOR_SHAPE.has(sc.source)) out[sc.id] = made[sc.id];
+    // A walkthrough screen from their own video or library is kept; a stock one is found again for the shape.
+    for (const sc of storyboard.scenes) {
+        const key = `${sc.id}~cover`;
+        if (made[key] && (sc.cover?.source === 'own_video' || sc.cover?.source === 'product_photo')) out[key] = made[key];
+    }
     return out;
 }
 
@@ -1400,7 +1473,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         // Its scenes: a storyboard to check, AND a finished video (issue #51: a READY video listed no scenes, so the
         // chat couldn't tell what "scene 1" or "the words on screen" were and sent the customer to the tab).
         const lines = sb && ['planned', 'failed', 'ready', 'render_failed', 'rendering'].includes(r.status)
-            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}${s.source === 'own_video' && s.assetId ? ` — their video ${s.assetId}${s.inS != null ? ` ${mmss(Number(s.inS))}–${mmss(Number(s.outS))}` : ''}` : ''}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
+            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}${s.source === 'own_video' && s.assetId ? ` — their video ${s.assetId}${s.inS != null ? ` ${mmss(Number(s.inS))}–${mmss(Number(s.outS))}` : ''}` : ''}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.cover ? `; layout ${s.cover.layout} (screen: ${s.cover.source === 'own_video' ? `their video ${s.cover.assetId}${s.cover.inS ? ` from ${mmss(s.cover.inS)}` : ''}` : s.cover.source === 'product_photo' ? 'their picture' : `${s.cover.source}${s.cover.keywords ? ` "${s.cover.keywords}"` : ''}`}${s.cover.layout !== 'cover' ? `, ${cornerOf(s.cover)}` : ''})` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
             : '';
         const fr = r.footageReview as FootageReview | null;
         const own = brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '';

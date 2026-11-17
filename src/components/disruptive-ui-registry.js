@@ -5339,6 +5339,16 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     textStyle: ['How they look', { dark: 'Dark box', plain: 'Plain (light backing)', brand: 'Brand-colour box' }],
     textAnim: ['How they appear', { none: 'Cut', fade: 'Fade', rise: 'Rise', pop: 'Pop' }],
   };
+  // Walkthrough layouts (src/lib/scene-cover.ts labels).
+  const VIDEO_COVER_LAYOUTS = { bubble: 'Screen + bubble', cover: 'Screen only', window: 'Presenter + window' };
+  const VIDEO_CORNERS = { br: 'bottom right', bl: 'bottom left', tr: 'top right', tl: 'top left' };
+  function videoCoverText(c) {
+    if (!c) return 'Presenter, full frame';
+    const what = c.source === 'own_video' ? `your video ${c.assetId}${c.inS ? ` from ${Math.floor(c.inS / 60)}:${String(Math.floor(c.inS % 60)).padStart(2, '0')}` : ''}`
+      : c.source === 'product_photo' ? 'your picture' : `${c.source === 'stock_photo' ? 'a stock photo' : 'stock footage'}${c.keywords ? ` of “${c.keywords}”` : ''}`;
+    const corner = c.layout === 'cover' ? '' : `, ${VIDEO_CORNERS[c.corner || (c.layout === 'window' ? 'bl' : 'br')]}`;
+    return `${VIDEO_COVER_LAYOUTS[c.layout] || c.layout}: ${what}${corner}${c.size === 'small' ? ', small bubble' : ''}`;
+  }
   function renderVideoSceneEditCard(ui, esc) {
     const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
     if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
@@ -5359,6 +5369,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
       ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       ${typeof patch.cutPhrase === 'string' && patch.cutPhrase ? change('Cut from your clip', patch.cutPhrase, '(cut)') : ''}
+      ${'cover' in patch ? change('Layout', '', videoCoverText(patch.cover)) : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>

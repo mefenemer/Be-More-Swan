@@ -16,7 +16,7 @@
 // turns a dead one into render_failed after 20 minutes. Never charges: the build already settled.
 
 import { isRealisticStyle } from '../lib/ai-clip';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, videoProjects } from '../../db/schema';
 import { presignR2Get } from './social-publish';
@@ -28,6 +28,31 @@ import { logRenderCost } from './ai-usage';
 import type { ProjectTimeline } from './video-producer';
 import { SOURCE_POST_NOTES, attachVideoToSourcePost, placeVideoOnCampaignPost } from './video-post-media';
 import type { Storyboard } from '../lib/storyboard';
+import type { TimelineCover } from '../lib/scene-cover';
+
+/**
+ * The timeline's walkthrough covers with a fetchable src each (scene-cover.ts). A cover whose file is gone, or
+ * isn't what it says it is, is left out: the presenter then shows full frame there, never a failed render.
+ */
+export async function resolveCovers(db: Db, covers: TimelineCover[] | undefined, orgId: number, presign: (key: string, ttl: number) => Promise<string>) {
+    const list = (covers ?? []).filter((c) => c && c.endS > c.startS && Number.isInteger(c.assetId));
+    if (!list.length) return [];
+    const rows = await db.select({ id: contentAssets.id, assetType: contentAssets.assetType, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
+        .from(contentAssets).where(and(inArray(contentAssets.id, [...new Set(list.map((c) => c.assetId))]), eq(contentAssets.organisationId, orgId)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out = [];
+    for (const c of list) {
+        const a = byId.get(c.assetId);
+        if (!a || (a.assetType ?? '').toLowerCase() !== c.kind) continue;
+        let src: string | null = null;
+        if (a.storageKey) { try { src = await presign(a.storageKey, 3600); } catch { src = null; } }
+        src = src ?? a.externalUrl ?? null;
+        if (!src) continue;
+        out.push({ id: c.id, src, kind: c.kind, startS: c.startS, endS: c.endS, ...(c.inS ? { inS: c.inS } : {}), layout: c.layout,
+            ...(c.corner ? { corner: c.corner } : {}), fit: c.fit, ...(c.motion ? { motion: c.motion } : {}) });
+    }
+    return out;
+}
 
 type Db = ReturnType<typeof getDb>;
 
@@ -92,6 +117,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         const timeline = await resolveEditClips(db, { videoEdit: tl.videoEdit, orgId, base, hasTimelineAudio: audio.length > 0 }, presignR2Get);
         if (!timeline.length) return await fail('The scenes couldn’t be read. Make the video again.');
         const fps = RENDER_FPS;
+        const covers = await resolveCovers(db, tl.covers, orgId, presignR2Get);
         const props = {
             videoSrc: timeline[0].kind !== 'image' ? timeline[0].src : '',
             clips: timeline,
@@ -101,6 +127,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             ...(captions ? { captions } : {}),
             // The colour look (src/lib/video-look.ts); an older bundle ignores it and renders ungraded.
             ...(tl.look ? { look: tl.look } : {}),
+            ...(covers.length ? { covers } : {}),
             width: tl.width || 1080,
             height: tl.height || 1920,
             fps,

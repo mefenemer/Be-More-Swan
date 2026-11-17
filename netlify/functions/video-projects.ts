@@ -579,9 +579,16 @@ export default withLambda(async (event) => {
             if (v) (scene as unknown as Record<string, unknown>)[k] = v; else delete scene[k];
         }
         if ('nameCaption' in patch) { const nc = readNameCaption(patch.nameCaption); if (nc) scene.nameCaption = nc; else delete scene.nameCaption; }
+        // A walkthrough layout (scene-cover.ts): { layout, source, assetId?, inS?, keywords?, fromS?, toS?, corner?, size? },
+        // or null for the presenter full frame. Checked by enforceStoryboard below (own videos and pictures only).
+        const coverBefore = JSON.stringify(scene.cover ? { s: scene.cover.source, a: scene.cover.assetId ?? null, k: scene.cover.keywords ?? null } : null);
+        if ('cover' in patch) {
+            if (patch.cover && typeof patch.cover === 'object') scene.cover = patch.cover as Storyboard['scenes'][number]['cover'];
+            else delete scene.cover;
+        }
         // Changed words need approving again (script first).
         if (voiceChanged) sb.scriptApprovedAt = null;
-        const text = [scene.voiceover, scene.onScreenText, scene.prompt, scene.keywords].filter(Boolean).join('\n');
+        const text = [scene.voiceover, scene.onScreenText, scene.prompt, scene.keywords, scene.cover?.keywords].filter(Boolean).join('\n');
         if (text) {
             const blocked = await enforcePromptModeration({ text, userId, organisationId: orgId, source: 'video-projects' });
             if (blocked) return blocked;
@@ -604,6 +611,9 @@ export default withLambda(async (event) => {
         const assets = { ...(row.sceneAssets as Record<string, number>) };
         const after = storyboard.scenes.find((s) => s.id === scene.id);
         if (!after || looks(after) !== before) delete assets[scene.id];   // re-sourced on the next build
+        // A different screen (or none) is found again; a new layout, corner or time over the same screen keeps it.
+        const coverAfter = JSON.stringify(after?.cover ? { s: after.cover.source, a: after.cover.assetId ?? null, k: after.cover.keywords ?? null } : null);
+        if (coverAfter !== coverBefore || !after?.cover) delete assets[`${scene.id}~cover`];
         await db.update(videoProjects).set({
             storyboard, changes, sceneAssets: assets, status: 'planned', editCount: row.editCount + 1,
             // The voiceover is one track for the whole script — any line changing re-records it.

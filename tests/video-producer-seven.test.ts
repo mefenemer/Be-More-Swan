@@ -371,7 +371,8 @@ check('a chat scene card can set or clear a name caption', () => {
 
 check('each version lists the files it was made from', () => {
     const vp = read('src/utils/video-producer.ts');
-    assert.ok(vp.includes('sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...audio.map((a) => a.assetId)])]'));
+    // Walkthrough screens (scene-cover.ts) are files it was made from too, since 2026-11-17.
+    assert.ok(vp.includes('sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...covers.map((c) => c.assetId), ...audio.map((a) => a.assetId)])]'));
     assert.ok(vp.includes('export async function sourceFilesOf('));
     assert.ok(read('src/utils/video-render.ts').includes('sourceAssetIds: tl.sourceAssetIds ?? []'));
     assert.ok(read('src/components/assistant-videos.js').includes('Source files for this version'));
