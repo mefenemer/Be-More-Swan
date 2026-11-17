@@ -116,6 +116,11 @@
     e.textContent = msg;
   }
 
+  // What an edit to a LIVE article does: the blog copy is rebuilt on save, then CDN/browser caches
+  // (widget-api / blog-page: max-age=120, s-maxage=300) can show the old one for up to ~5 minutes.
+  var LIVE_DELAY = 'Readers see it within about 5 minutes.';
+  var LIVE_SAVED = 'Saved \u2014 updating your live blog';
+
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
     'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go',
     'bs-decide-approve', 'bs-decide-time', 'bs-decide-reject'];
@@ -1047,7 +1052,7 @@
     var live = state.postStatus === 'published';
     flushDraft().then(function (res) {
       d.respond(res && res.ok
-        ? { ok: true, message: live ? 'Done — it\u2019s changed, and live on your blog now.' : undefined }
+        ? { ok: true, message: live ? 'Done — it\u2019s changed on your live blog. ' + LIVE_DELAY : undefined }
         : { ok: false, error: 'It\u2019s changed on screen, but couldn\u2019t be saved just now — check your connection.' });
     });
   });
@@ -1157,7 +1162,9 @@
         state.contentChanged = true;
         refreshReadout(nextMd);
         setStatus('bs-save-status', 'Saving…');
-        setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
+        // A live article's saves now rebuild its blog copy (save-blog-draft → refreshLiveSnapshot), so say
+        // so: "Saved" alone left authors guessing whether readers see the change (kudzucollab.com).
+        setTimeout(function () { setStatus('bs-save-status', state.postStatus === 'published' ? LIVE_SAVED : 'Saved'); }, 1400);
       },
       onDropMedia: onEditorDropMedia,
     });
@@ -1979,7 +1986,12 @@
   // The picker deliberately STAYS open after a placement. A post takes several images, and closing
   // the grid on each one turned the second image into a fresh search.
   function featureAttached(res) {
-    if (res.ok) { renderFeature(res.body.feature); setStatus('bs-media-status', 'Set as the feature image.'); }
+    if (res.ok) {
+      renderFeature(res.body.feature);
+      setStatus('bs-media-status', res.body.live ? 'Set as the feature image. ' + LIVE_DELAY
+        : state.postStatus === 'published' ? 'Set as the feature image, but your live blog could not be updated just now. Click Publish now to update it.'
+        : 'Set as the feature image.');
+    }
     else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
   }
   function attachFeature(assetId) {
