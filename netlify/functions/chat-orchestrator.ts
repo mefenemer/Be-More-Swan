@@ -475,6 +475,11 @@ const defaultRoute: AssistantRoute = {
 /** Ends the Business Mentor's system prompt (see `system` below): its reply format, where it can't be lost. */
 const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. uiElement is ONE card object, never a list: when several changes are worth making, send the most important one as the card, and say you will send the next when they have dealt with it. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
 
+/** Shown when the model sent a card and no words: the card says the rest. */
+const CARD_ONLY_REPLY = 'Here it is — nothing changes until you confirm it on the card.';
+/** Shown when the model sent nothing at all (an empty reply, staging 2026-11-17). Never an empty bubble. */
+const EMPTY_REPLY_FALLBACK = 'Sorry — no reply came through that time. Could you send that again?';
+
 const STRUCTURED_REPLY_FALLBACK =
     "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
 
@@ -506,6 +511,12 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // does the same thing with a string-aware brace balancer, so a `}` inside a reply no longer
     // truncates the object — see src/utils/model-json.ts.
     const parsed = parseModelJson<Record<string, unknown> & { reply?: unknown; uiElement?: unknown }>(raw);
+    // The card ON ITS OWN, no envelope and no words (Minute Taker run B, staging 2026-11-17: an add-email card sent
+    // bare was read as a broken reply and the user got STRUCTURED_REPLY_FALLBACK). Kept as the card; the words
+    // are filled in by the handler (CARD_ONLY_REPLY).
+    if (parsed && typeof parsed.reply !== 'string' && typeof parsed.type === 'string' && !('uiElement' in parsed)) {
+        return { content: '', uiElement: parsed };
+    }
     if (parsed && typeof parsed.reply === 'string') {
         const { card, extra } = firstCard(parsed);
         const content = parsed.reply.trim();
@@ -3981,6 +3992,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (t === 'action_item_assignment' || t === 'ActionItemAssignmentCard') uiElement = normaliseMinutesCard(uiElement);
         }
         let content = parsed.content;
+        // Nothing came back at all: say so rather than store an empty bubble, and keep why (stop reason) below.
+        const emptyReply = !raw.trim();
+        if (emptyReply) {
+            content = EMPTY_REPLY_FALLBACK;
+            console.warn('[chat-orchestrator] the model sent an empty reply', { role: assistantRow.roleKey, model: chatModel, stopReason: response.stop_reason, outputTokens: response.usage.output_tokens, blocks: (response.content ?? []).map((b: { type: string }) => b.type) });
+        }
         // An existing meeting (src/utils/chat-meeting-action.ts): rebuilt from its row, so a made-up id or a
         // meeting of another assistant's draws nothing. The click is the Inbox's own PATCH.
         const meetingActionReq = route === ROUTES.meeting_note_taker ? meetingActionFromUiElement(uiElement) : null;
@@ -4753,6 +4770,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: null, raw });
                 droppedCard.content = `${droppedCard.content} (reply could not be read)`;
             }
+            if (!droppedCard && emptyReply) {
+                droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: null, raw: `[empty reply; stop_reason=${String(response.stop_reason)}; output_tokens=${response.usage.output_tokens}; blocks=${(response.content ?? []).map((b: { type: string }) => b.type).join(',') || 'none'}]` });
+                droppedCard.content = `${droppedCard.content} (empty reply, stop_reason ${String(response.stop_reason)})`;
+            }
+            // A card with no words: a line that points at it, never an empty bubble above it.
+            if (uiElement && !content.trim()) content = CARD_ONLY_REPLY;
         }
 
         // Written before the reply so a meeting card can carry its record's id: its Approve button
