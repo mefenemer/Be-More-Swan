@@ -225,7 +225,7 @@ interface HopResult {
 function requestOnce(
     url: URL,
     addresses: Array<{ address: string; family: number }>,
-    opts: { maxBytes: number; deadline: number; userAgent: string; accept: string; binary: boolean },
+    opts: { maxBytes: number; deadline: number; userAgent: string; accept: string; binary: boolean; truncate?: boolean },
 ): Promise<HopResult> {
     return new Promise((resolve, reject) => {
         const lookup: LookupFunction = (_hostname, _options, callback) => {
@@ -290,7 +290,7 @@ function requestOnce(
                 // Trust-but-verify the advertised length; the streaming cap below is the real
                 // enforcement since Content-Length can lie or be absent.
                 const declared = Number(res.headers['content-length'] || 0);
-                if (declared && declared > opts.maxBytes) {
+                if (declared && declared > opts.maxBytes && !opts.truncate) {
                     res.destroy();
                     reject(new SafeFetchError('That page is too large to read.', 'too_large'));
                     return;
@@ -298,9 +298,21 @@ function requestOnce(
 
                 const chunks: Buffer[] = [];
                 let total = 0;
+                let cut = false;
                 res.on('data', (chunk: Buffer) => {
+                    if (cut) return;
                     total += chunk.length;
                     if (total > opts.maxBytes) {
+                        if (opts.truncate && !opts.binary) {
+                            // Keep exactly the first maxBytes and stop reading: the caller asked for the
+                            // beginning of the page (a home page's tags), not the whole of it.
+                            chunks.push(chunk.subarray(0, chunk.length - (total - opts.maxBytes)));
+                            cut = true;
+                            res.destroy();
+                            const bytes = Buffer.concat(chunks);
+                            resolve({ status, contentType, body: bytes.toString('utf-8'), bytes: EMPTY });
+                            return;
+                        }
                         res.destroy();
                         reject(new SafeFetchError('That page is too large to read.', 'too_large'));
                         return;
@@ -308,6 +320,7 @@ function requestOnce(
                     chunks.push(chunk);
                 });
                 res.on('end', () => {
+                    if (cut) return;
                     // Produce exactly the one the caller asked for. `chunks` is dropped either way.
                     const bytes = Buffer.concat(chunks);
                     resolve(opts.binary
@@ -394,7 +407,7 @@ async function followRedirects(
     rawUrl: string,
     opts: {
         maxBytes: number; timeoutMs?: number; maxRedirects: number;
-        userAgent: string; accept: string; binary: boolean;
+        userAgent: string; accept: string; binary: boolean; truncate?: boolean;
     },
 ): Promise<{ finalUrl: string; hop: HopResult }> {
     // Wall-clock across the whole chain, not per hop — a redirect chain cannot buy more time.
@@ -411,6 +424,7 @@ async function followRedirects(
             userAgent: opts.userAgent,
             accept: opts.accept,
             binary: opts.binary,
+            truncate: opts.truncate,
         });
 
         if (res.location) {
@@ -447,6 +461,12 @@ interface SafeFetchOptions {
      * a name that describes someone else's job.
      */
     userAgent?: string;
+    /**
+     * Text only: a body longer than maxBytes is cut to its first maxBytes instead of refused. For
+     * readers that only need the start of a page (the Watch list reads a home page's tags); the cap
+     * still bounds memory. Off by default.
+     */
+    truncate?: boolean;
 }
 
 /**
@@ -464,6 +484,7 @@ export async function safeFetchText(
         userAgent: opts.userAgent ?? USER_AGENTS.inspo,
         accept: ACCEPT.text,
         binary: false,
+        truncate: opts.truncate === true,
     });
     return { finalUrl, contentType: hop.contentType, body: hop.body };
 }
