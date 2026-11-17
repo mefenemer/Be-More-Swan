@@ -26,6 +26,10 @@ export const DEFAULT_TASK_WEIGHTS = {
     site_words: 1,
     ai_image: 1,
     ai_video: 20,
+    // An AI presenter speaking (docs/video-producer-screen-walkthrough-plan.md §11.5, decision D-A3, 2026-11-17):
+    // tasks PER SECOND the presenter is on screen (Kling AI Avatar v2 Standard costs us $0.056 a second).
+    // ⚠️ A new charge: the Terms 30-day notice runs before the ai_presenter flag is switched on for customers.
+    ai_presenter: 2,
     ai_music: 20,
     // A track the user marks as shareable keeps today's 3:5 discount against a private one.
     ai_music_shared: 12,
@@ -108,7 +112,7 @@ export function aiVideoPriceText(costs: TaskCosts): string {
 }
 
 /** Kinds that are AI-generated media — the per-assistant autonomous media cap counts these. */
-export const MEDIA_KINDS: readonly WorkKind[] = ['ai_image', 'ai_video', 'ai_music', 'ai_music_shared', 'ai_voiceover'];
+export const MEDIA_KINDS: readonly WorkKind[] = ['ai_image', 'ai_video', 'ai_presenter', 'ai_music', 'ai_music_shared', 'ai_voiceover'];
 
 /** Customer-facing label for a usage breakdown row. */
 export const WORK_KIND_LABELS: Record<WorkKind, string> = {
@@ -123,6 +127,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     site_words: 'Website copy',
     ai_image: 'AI images',
     ai_video: 'AI videos',
+    ai_presenter: 'AI presenter (per second)',
     ai_music: 'AI music',
     ai_music_shared: 'AI music (shared)',
     ai_voiceover: 'AI voiceovers',
@@ -184,7 +189,7 @@ export function formatCost(key: CostKey, value: number): string {
     if (key === 'chat_messages_per_task') return `every ${value} message${value === 1 ? '' : 's'}`;
     if (value === 0) return 'no tasks';
     const tasks = `${value} task${value === 1 ? '' : 's'}`;
-    return key === 'ai_video_per_second' ? `${tasks} a second` : tasks;
+    return key === 'ai_video_per_second' || key === 'ai_presenter' ? `${tasks} a second` : tasks;
 }
 
 /**

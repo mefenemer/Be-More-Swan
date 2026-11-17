@@ -60,6 +60,7 @@ import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { AI_PRESENTER_FLAG } from '../../src/lib/presenters';
 import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -196,6 +197,9 @@ export default withLambda(async (event) => {
             clipSound: Object.fromEntries(CLIP_STYLES.map((st) => [st, clipSoundAvailable(i2vModel(new Date(), st))])),
             // The languages captions can be translated into (youtube-extras.ts), for the Translate picker.
             captionLanguages: CAPTION_LANGUAGES,
+            // Whether this workspace may choose an AI presenter (feature flag; off for customers until the
+            // Terms notice for its per-second price has run — docs/video-producer-screen-walkthrough-plan.md §11.5).
+            aiPresenter: await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false),
         });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -245,7 +249,12 @@ export default withLambda(async (event) => {
         if (!a) return json(404, { error: 'Assistant not found.' });
         // What the brief leaves out comes from the assistant's setup (assistant-onboarding-schemas.js
         // video_producer) — a chat card that names no voice gets the voice the owner chose at hire.
-        const parsed = readBrief(withSetupDefaults(body.brief, a.onboardingContext));
+        // An AI presenter only where the ai_presenter flag is on: otherwise the brief is read without one
+        // (and so with the voice chosen, not the presenter's) — never a priced feature by the back door.
+        const rawBrief = body.brief && typeof body.brief === 'object' ? { ...(body.brief as Record<string, unknown>) } : body.brief;
+        if (rawBrief && typeof rawBrief === 'object' && (rawBrief as Record<string, unknown>).presenter
+            && !await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) delete (rawBrief as Record<string, unknown>).presenter;
+        const parsed = readBrief(withSetupDefaults(rawBrief, a.onboardingContext));
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;

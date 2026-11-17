@@ -36,9 +36,10 @@ import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
 import { aiVideoTasks, formatCost, type TaskCosts } from '../config/task-weights';
 import { getTaskCosts } from './task-costs';
+import { isFeatureEnabled } from './feature-flags';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel, clipSoundAvailable } from '../lib/fal-gateway';
+import { submit as falSubmit, submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel, clipSoundAvailable } from '../lib/fal-gateway';
 import { clipTasksWithSound, CLIP_SOUND_PROMPT } from '../lib/ai-clip';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
@@ -54,6 +55,7 @@ import {
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import { applyCovers, cornerOf, coverWindow, type TimelineCover } from '../lib/scene-cover';
+import { AI_PRESENTER_FLAG, PRESENTERS, PRESENTER_MODEL, presenterAudioWindow, presenterById, presenterFaceKey, presenterTasks, presenterVoice, readBriefPresenter } from '../lib/presenters';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
@@ -62,8 +64,8 @@ import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
 import { isMusicLevel, musicLevelGain, MUSIC_LEVEL_LABELS, readMusicChoice, moodFor, speechWindows, musicTrack, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
 import { footageLufs, mixLevels, musicLufs, voiceLufs, TARGET_LUFS } from '../lib/loudness';
-import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
-import { levelledVoiceover, measureAsset } from './audio-levelling';
+import { LIMIT_CEILING_DB, wavBytes } from '../lib/loudness-measure';
+import { decodeAudio, levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
@@ -141,14 +143,19 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
     const platforms = (Array.isArray(b.platforms) ? b.platforms : ['instagram'])
         .map((p) => String(p).toLowerCase()).filter((p) => p in VIDEO_DESTINATIONS);
     const footage = readFootageIds(b.footageAssetIds);
+    // An AI presenter (A2): a catalogue presenter, never with own footage. They speak the voiceover in their own
+    // voice for the video's language (presenterVoice), so the voiceover is on and the voice is theirs.
+    const presenter = footage.length ? null : readBriefPresenter(b.presenter);
+    const language = languageLabel(b.language) ? String(b.language) : null;
+    const presenterVoiceId = presenter ? presenterVoice(presenterById(presenter.id)!, language ?? 'en') : null;
     return {
         brief: {
             purpose: String(b.purpose ?? 'promo').slice(0, 60),
             lengthS,
             message: message.slice(0, 1200),
             cta: typeof b.cta === 'string' && b.cta.trim() ? b.cta.trim().slice(0, 200) : null,
-            voiceover: b.voiceover !== false,
-            voice: isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE,
+            voiceover: presenter ? true : b.voiceover !== false,
+            voice: presenterVoiceId && isVoiceId(presenterVoiceId) ? presenterVoiceId : isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE,
             allowAi,
             // 'auto' | a mood | 'none' (No music) | 'mine' (a track from My Content). Old free-text moods
             // map onto the four (video-music.ts). 'mine' without a track id is 'auto'.
@@ -158,9 +165,10 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             look: isVideoLook(b.look) ? b.look : 'natural',
             lowerThird: isLowerThirdStyle(b.lowerThird) ? b.lowerThird : 'bar',
             ...(isMusicLevel(b.musicLevel) && b.musicLevel !== 'normal' ? { musicLevel: b.musicLevel } : {}),
-            ...(b.voiceover !== false && b.ownVoice === true ? { ownVoice: true } : {}),
+            ...(b.voiceover !== false && b.ownVoice === true && !presenter ? { ownVoice: true } : {}),
+            ...(presenter ? { presenter } : {}),
             ...(Number.isInteger(Number(b.shapeOf)) && Number(b.shapeOf) > 0 ? { shapeOf: Number(b.shapeOf) } : {}),
-            language: languageLabel(b.language) ? String(b.language) : null,
+            language,
             captions: b.captions !== false,
             captionStyle: b.captionStyle && typeof b.captionStyle === 'object' ? normalizeCaptionStyle(b.captionStyle) : null,
             platforms: platforms.length ? [...new Set(platforms)] : ['instagram'],
@@ -454,6 +462,8 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: Tas
     let n = musicToMake(storyboard, brief) ? costs.weights.ai_music : 0;
     for (const s of todo.scenes) {
         if (s.source === 'ai_image') n += costs.weights.ai_image;
+        // An AI presenter: by the seconds on screen (D-A3). The plan's scene length; settled on the real one.
+        if (s.source === 'ai_presenter') n += presenterTasks(s.targetS, costs.weights.ai_presenter);
         if (s.source === 'ai_video') {
             // An AI clip on its own may have its style's own model, and sound (1.5×) where that model can make it.
             const model = i2vModel(new Date(), brief.clip?.style);
@@ -553,6 +563,13 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         }
         t += d;
     });
+    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top left, 3 s.
+    const firstAt = scenes.findIndex((s) => s.source === 'ai_presenter');
+    if (firstAt >= 0) {
+        const at = durations.slice(0, firstAt).reduce((a, d) => a + d, 0);
+        out.push({ id: `vp_aip_${scenes[firstAt].id}`, text: 'AI presenter', x: 0.14, y: 0.06, fontFamily: 'Arial', fontSizePct: 0.028,
+            color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.45, startS: at, endS: at + Math.min(3, durations[firstAt] ?? 3), anim: 'fade' });
+    }
     return out;
 }
 
@@ -807,6 +824,55 @@ async function sourceScene(db: Db, args: {
     return null;
 }
 
+/** How long one presenter clip may take at the model before it is cancelled (Kling AI Avatar took 4–6 min for 10 s). */
+export const PRESENTER_ATTEMPT_MS = 11 * 60 * 1000;
+
+/**
+ * An AI presenter speaking one scene's line (docs/video-producer-screen-walkthrough-plan.md §11.1, A2). The scene's
+ * stretch of the voiceover (plus a short tail, so the clip always covers the scene) is cut out as a WAV, and the
+ * presenter's face for the video's shape (in storage, uploaded once by scripts/make-presenters.mjs) is lip-synced to
+ * it by the catalogue's avatar model. The clip plays muted on the timeline: the voiceover track already carries the
+ * sound, so the lips line up with it. Throws on any failure — the caller refunds and reports the scene.
+ */
+async function makePresenterClip(db: Db, args: {
+    orgId: number; userId: number; assistantId: number | null; presenterId: string; shape: VideoShape;
+    voiceover: { storageKey: string | null; mimeType: string | null }; startS: number; endS: number; label: string;
+}): Promise<{ assetId: number; seconds: number }> {
+    if (!falConfigured()) throw new Error('AI presenters are not set up in this environment.');
+    const p = presenterById(args.presenterId);
+    if (!p) throw new Error('That presenter is no longer offered.');
+    if (!args.voiceover.storageKey) throw new Error('The voiceover could not be read for the presenter.');
+    const res = await fetch(await presignR2Get(args.voiceover.storageKey, 600));
+    const pcm = res.ok ? await decodeAudio(new Uint8Array(await res.arrayBuffer()), args.voiceover.mimeType) : null;
+    if (!pcm || !pcm.channels[0]?.length) throw new Error('The voiceover could not be read for the presenter.');
+    const rate = pcm.sampleRate;
+    const w = presenterAudioWindow(args.startS, args.endS, pcm.channels[0].length / rate);
+    if (w.endS - w.startS < 0.5) throw new Error('The presenter has too little to say in this scene.');
+    const slice = pcm.channels[0].slice(Math.floor(w.startS * rate), Math.ceil(w.endS * rate));
+    const audio = await persistBufferToR2({ orgId: args.orgId, bytes: Buffer.from(wavBytes({ channels: [slice], sampleRate: rate })), contentType: 'audio/wav', folder: 'video-producer' });
+    const [audioUrl, imageUrl] = await Promise.all([presignR2Get(audio.storageKey, 3600), presignR2Get(presenterFaceKey(p.id, args.shape), 3600)]);
+    const job = await falSubmit(PRESENTER_MODEL, { image_url: imageUrl, audio_url: audioUrl });
+    const deadline = Date.now() + PRESENTER_ATTEMPT_MS;
+    let done = false;
+    while (Date.now() < deadline) {
+        if ((await falStatus(job.statusUrl)) === 'COMPLETED') { done = true; break; }
+        await sleep(AI_CLIP_POLL_MS);
+    }
+    if (!done) { await falCancel(job.statusUrl); throw new Error('The presenter clip took too long and was abandoned.'); }
+    const v = extractVideo(await falResult(job.responseUrl));
+    const seconds = Math.round((w.endS - w.startS) * 100) / 100;
+    await logMediaCost(PRESENTER_MODEL, { durationSeconds: seconds }, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId, sessionId: 'fal-presenter' });
+    const stored = await persistRemoteMediaToR2({ orgId: args.orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI presenter' });
+    const [asset] = await db.insert(contentAssets).values({
+        userId: args.userId, organisationId: args.orgId, name: `AI presenter — ${p.name} · ${args.label}`.slice(0, 120),
+        assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
+        durationS: seconds, provider: 'fal', aspectRatio: args.shape, status: 'pending',
+        // A realistic made-up person: the "Made with AI" line and YouTube's synthetic flag apply (ai-disclosure.ts).
+        renderParams: { kind: 'ai_presenter', presenterId: p.id, aiStyle: 'realistic' },
+    }).returning({ id: contentAssets.id });
+    return { assetId: asset.id, seconds };
+}
+
 /**
  * A caption-only track: a silent WAV with the spoken words on it as a voiceover's word timings
  * (render_params.kind 'voiceover'), which is where the render reads captions from (post-render.ts).
@@ -924,8 +990,32 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // scenes share `exclude`, so the same clip isn't picked twice.
         const exclude: string[] = [];
         const failed = new Set<number>();
+        // The AI presenter's scenes (A2): each lip-syncs its own stretch of the voiceover, all at once.
+        const presenterBrief = readBriefPresenter(brief.presenter);
+        const voiceFile = presenterBrief && voiceoverAssetId
+            ? (await db.select({ storageKey: contentAssets.storageKey, mimeType: contentAssets.mimeType }).from(contentAssets)
+                .where(and(eq(contentAssets.id, voiceoverAssetId), eq(contentAssets.organisationId, orgId))).limit(1))[0] ?? null
+            : null;
+        const presenterPerSecond = presenterBrief ? (await getTaskCosts()).weights.ai_presenter : 0;
+        const makePresenterScene = async (i: number) => {
+            const scene = storyboard.scenes[i];
+            const startS = durations.slice(0, i).reduce((a, d) => a + d, 0);
+            let clip: { assetId: number; seconds: number } | null = null;
+            try {
+                if (!presenterBrief || !voiceFile) throw new Error('This video has no presenter or no voiceover to speak.');
+                clip = await makePresenterClip(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id, shape: brief.shape ?? '9:16',
+                    voiceover: voiceFile, startS, endS: startS + durations[i], label: `scene ${i + 1}` });
+            } catch (err) {
+                console.error(`[video-producer] build ${projectId} presenter scene ${scene.id} failed:`, err);
+            }
+            // Charged by the seconds the presenter is on screen (D-A3), only when the clip was made.
+            await settle('presenter', VIDEO_CREDIT_COST, !!clip, presenterTasks(durations[i], presenterPerSecond));
+            if (clip) done[scene.id] = clip.assetId; else failed.add(i);
+            await save({});
+        };
         const makeScene = async (i: number) => {
             const scene = storyboard.scenes[i];
+            if (scene.source === 'ai_presenter') return makePresenterScene(i);
             let made: Awaited<ReturnType<typeof sourceScene>> = null;
             const paid = scene.source === 'ai_image' ? IMAGE_CREDIT_COST : scene.source === 'ai_video' ? VIDEO_CREDIT_COST : 0;
             try {
@@ -946,8 +1036,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const todo = storyboard.scenes.map((_, i) => i).filter((i) => !done[storyboard.scenes[i].id]);
         // The other scenes are made in order meanwhile (stock took ~5 minutes on its own in the same
         // staging build), so a retried AI clip still fits the worker's ceiling.
-        const others = (async () => { for (const i of todo) if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i); })();
-        await Promise.all([...todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene), others]);
+        const slow = (i: number) => storyboard.scenes[i].source === 'ai_video' || storyboard.scenes[i].source === 'ai_presenter';
+        const others = (async () => { for (const i of todo) if (!slow(i)) await makeScene(i); })();
+        await Promise.all([...todo.filter(slow).map(makeScene), others]);
         // The parallel saves can land out of order; this one writes every scene made.
         await save({});
         // 2b. Walkthrough screens (src/lib/scene-cover.ts): each sourced like a scene as long as its stretch,
@@ -1430,6 +1521,16 @@ export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProj
 }
 
 /**
+ * The AI presenters the chat may set on a new video's brief — listed only where the ai_presenter flag is on, so the
+ * chat never offers a feature the workspace can't use (A2). Empty otherwise.
+ */
+async function presentersSnapshot(orgId: number): Promise<string> {
+    if (!await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) return '';
+    const perSecond = (await getTaskCosts()).weights.ai_presenter;
+    return `AI PRESENTERS (made-up people who speak a script to camera; ${perSecond} task${perSecond === 1 ? '' : 's'} a second on screen; set "presenter" on a video_brief_proposal): ${PRESENTERS.map((x) => `${x.id} — ${x.name}, ${x.gender === 'female' ? 'woman' : 'man'}, ${x.age}: ${x.look}`).join('; ')}`;
+}
+
+/**
  * What the chat may know about this assistant's videos, per turn — ids it may name in a card, and
  * nothing it could mistake for a promise (no thumbnails, no URLs). Newest first, at most 10.
  */
@@ -1447,6 +1548,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         : 'ARCHIVED VIDEOS: none.';
     const footage = [archivedTxt,
         await ownFootageSnapshot(db, orgId).catch(() => 'THEIR OWN VIDEOS: could not be read this turn — do not name any by id.'),
+        await presentersSnapshot(orgId).catch(() => ''),
         await ownMusicSnapshot(db, orgId).catch(() => 'THEIR OWN MUSIC TRACKS: could not be read this turn — do not name any by id.'),
     ].join('\n\n');
     if (!rows.length) return `YOUR VIDEOS: none yet.\n\n${footage}`;

@@ -55,3 +55,48 @@ export function presenterVoice(p: Presenter, lang: string, voices: CatalogueVoic
 export function presenterLanguages(p: Presenter, voices: CatalogueVoice[] = offered()): string[] {
     return [...new Set(voices.filter((v) => v.gender === p.gender || v.id === p.voices[v.lang]).map((v) => v.lang))];
 }
+
+// ── A2: presenter scenes (§11.1–11.6) ────────────────────────────────────────────────────────────
+
+/**
+ * The feature flag (feature_flags.key). Off everywhere until the Terms 30-day notice for the per-second price
+ * has run (D-A3); a workspace on the flag's allowed list sees it early (staging tests).
+ */
+export const AI_PRESENTER_FLAG = 'ai_presenter';
+
+/** Without "Show me throughout", the presenter is in at most this many scenes: the opening, the call to action and one key moment (D-A7). */
+export const PRESENTER_KEY_SCENES = 3;
+
+/** A video's presenter, as the brief carries it. */
+export interface BriefPresenter { id: string; throughout?: boolean }
+
+/** A brief's presenter made safe: a catalogue presenter, else null. Pure. */
+export function readBriefPresenter(raw: unknown): BriefPresenter | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const o = raw as Record<string, unknown>;
+    const p = presenterById(o.id);
+    if (!p) return null;
+    return { id: p.id, ...(o.throughout === true ? { throughout: true } : {}) };
+}
+
+/** Tasks for a presenter on screen for `seconds` (D-A3: per second, rounded up). Pure. */
+export function presenterTasks(seconds: number, perSecond: number): number {
+    return Math.max(1, Math.ceil(Math.max(0, seconds))) * Math.max(0, perSecond);
+}
+
+/** The face picture for a video's shape, as kept in storage (uploaded once by scripts/make-presenters.mjs). Pure. */
+export function presenterFaceKey(id: string, shape: string | null | undefined): string {
+    const s = shape === '9:16' ? '9x16' : shape === '1:1' ? '1x1' : '16x9';
+    return `presenters/${encodeURIComponent(id)}-${s}.jpg`;
+}
+
+/**
+ * The stretch of the voiceover a presenter scene lip-syncs: the scene's window plus a short tail (clamped to the
+ * voice), so the clip the model returns always covers the scene and is trimmed to it. Pure.
+ */
+export const PRESENTER_AUDIO_TAIL_S = 0.3;
+export function presenterAudioWindow(startS: number, endS: number, voiceS: number): { startS: number; endS: number } {
+    const a = Math.max(0, Math.min(startS, voiceS));
+    const b = Math.max(a, Math.min(endS + PRESENTER_AUDIO_TAIL_S, voiceS));
+    return { startS: Math.round(a * 1000) / 1000, endS: Math.round(b * 1000) / 1000 };
+}

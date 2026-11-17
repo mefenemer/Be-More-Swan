@@ -26,7 +26,9 @@ export function taskCostText(key, figures, seconds) {
     }
     const n = figures.weights && figures.weights[key];
     if (typeof n !== 'number') return null;
-    return n === 0 ? 'no tasks' : plural(n);
+    if (n === 0) return 'no tasks';
+    // An AI presenter is priced per second on screen (formatCost: 'ai_presenter').
+    return key === 'ai_presenter' ? `${plural(n)} a second` : plural(n);
 }
 
 const SPAN = /(<span\b[^>]*\bdata-task-cost="([a-z_]+)"[^>]*>)([^<]*)(<\/span>)/g;

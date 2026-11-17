@@ -89,6 +89,7 @@ INSERT INTO task_cost_change_items (change_id, cost_key, new_units) VALUES
     (1, 'footage_review', 2),
     (1, 'caption_translation', 1),   -- added 2026-11-11 (translated caption files); a re-run adds just this row
     (1, 'carousel', 1),              -- added 2026-11-16 (Top lists "Make it a carousel"); a re-run adds just this row
+    (1, 'ai_presenter', 2),          -- added 2026-11-17 (AI presenter, tasks per second, D-A3); a re-run adds just this row
     (1, 'chat_messages', 1),
     (1, 'editing_helper', 1),
     (1, 'design_round', 1),

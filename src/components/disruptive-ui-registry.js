@@ -1833,6 +1833,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ...(VIDEO_LOWER_THIRDS[ui.lowerThird] ? { lowerThird: ui.lowerThird } : {}),
       // Top lists Phase 3: a countdown video (the server checks the hook's count against the scenes).
       ...(ui.countdown === true ? { countdown: true } : {}),
+      // An AI presenter (A2): the server keeps it only where the workspace has the ai_presenter flag.
+      ...(typeof ui.presenter === 'string' && /^[a-z]{2,20}$/.test(ui.presenter) ? { presenter: { id: ui.presenter, ...(ui.presenterThroughout === true ? { throughout: true } : {}) }, voiceover: true } : {}),
     };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
@@ -1845,6 +1847,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${row('Kind', brief.purpose)}
       ${brief.countdown ? row('Shape of the story', 'Countdown — one scene per item, down to number 1') : ''}
       ${row('Ends with', brief.cta)}
+      ${brief.presenter ? row('AI presenter', `${window.PresenterPicker?.describe(brief.presenter.id) || brief.presenter.id}${brief.presenter.throughout ? ' — throughout' : ' — at the key moments'} (made by AI; uses tasks per second on screen, shown before anything is made)`) : ''}
       ${row('Voiceover', brief.voiceover ? (brief.voice ? (window.VoicePicker?.describe(brief.voice) || brief.voice) : 'Yes, in your set-up voice') : 'No — on-screen text only')}
       ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
@@ -5334,7 +5337,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // { type: 'video_scene_edit', projectId, scene, sceneId, summary, patch, now } (src/utils/chat-video-scene.ts)
   // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
   // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
-  const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip', ai_presenter: 'AI presenter' };
   // The words' place, timing, look and entrance (src/lib/scene-text.ts labels).
   const VIDEO_TEXT_LABELS = {
     textPos: ['Where the words sit', { top: 'Top', middle: 'Middle', bottom: 'Bottom' }],

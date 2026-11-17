@@ -23,9 +23,10 @@ import { readNameCaption, type LowerThirdStyle, type NameCaption } from './lower
 import type { VideoLook } from './video-look';
 import { readSceneText, type TextAnim, type TextPos, type TextStyle, type TextWhen } from './scene-text';
 import { readSceneCover, type SceneCover } from './scene-cover';
+import { PRESENTER_KEY_SCENES, presenterById, readBriefPresenter, type BriefPresenter } from './presenters';
 import { COUNTDOWN_MAX_ITEMS, COUNTDOWN_MIN_ITEMS, COUNTDOWN_VIDEO_BRIEF, countdownNumber, fixListCount } from '../utils/top-lists';
 
-export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
+export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video', 'ai_presenter'] as const;
 export type SceneSource = typeof SCENE_SOURCES[number];
 export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
 
@@ -119,6 +120,12 @@ export interface VideoBrief {
     lowerThird?: LowerThirdStyle | null;
     /** This video is another shape of video N (one click "Make it in the other shapes"). */
     shapeOf?: number | null;
+    /**
+     * An AI presenter speaks the voiceover to camera in some scenes (docs/video-producer-screen-walkthrough-plan.md
+     * §11, A2): one of src/public/presenter-catalogue.json, in their voice for the video's language. Only when the
+     * workspace has the ai_presenter flag (video-projects create strips it otherwise). Never with own footage.
+     */
+    presenter?: BriefPresenter | null;
     /** "Another track": the library track the next build must not pick again. */
     avoidTrackId?: number | null;
     /**
@@ -255,7 +262,7 @@ export function isStillSource(source: SceneSource): boolean {
 
 /** What a disallowed AI source falls back to. Pure. */
 function stockFor(source: SceneSource): SceneSource {
-    if (source === 'ai_video') return 'stock_video';
+    if (source === 'ai_video' || source === 'ai_presenter') return 'stock_video';
     if (source === 'ai_image') return 'stock_photo';
     return source;
 }
@@ -340,6 +347,24 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
                 s.source = stockFor(s.source);
                 if (!s.keywords) s.keywords = clip(s.prompt, 60).split(' ').slice(0, 4).join(' ');
             }
+        }
+    }
+    // The AI presenter (A2): only with a presenter in the brief, only on a scene with words to say, and — unless the
+    // owner chose "Show me throughout" — in at most PRESENTER_KEY_SCENES scenes, the earliest kept (D-A7).
+    const presenter = readBriefPresenter(brief.presenter);
+    let presenterScenes = 0;
+    for (const s of scenes) {
+        if (s.source !== 'ai_presenter') continue;
+        const i = scenes.indexOf(s) + 1;
+        if (!presenter) { s.source = 'stock_video'; if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' '); changes.push(`Scene ${i}: this video has no presenter, so stock footage is used.`); continue; }
+        if (!s.voiceover.trim()) { s.source = 'stock_video'; if (!s.keywords) s.keywords = 'business'; changes.push(`Scene ${i}: the presenter needs words to say, so stock footage is used.`); continue; }
+        presenterScenes++;
+        // The call to action (the last scene) always keeps them, so the others share the remaining places.
+        const isLast = s === scenes[scenes.length - 1];
+        if (!presenter.throughout && !isLast && presenterScenes > PRESENTER_KEY_SCENES - 1) {
+            s.source = 'stock_video';
+            if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' ');
+            changes.push(`The presenter appears in at most ${PRESENTER_KEY_SCENES} scenes — scene ${i} uses stock footage.`);
         }
     }
     let aiClips = 0;
@@ -505,7 +530,7 @@ export function estimateCredits(storyboard: Storyboard, brief: VideoBrief, costs
     let n = 0;
     for (const s of storyboard.scenes) {
         if (s.source === 'ai_image') n += costs.image;
-        if (s.source === 'ai_video') n += costs.video;
+        if (s.source === 'ai_video' || s.source === 'ai_presenter') n += costs.video;
     }
     if (brief.voiceover && scriptOf(storyboard)) n += costs.voiceover;
     return n;
@@ -522,6 +547,7 @@ Rules:
 - On-screen text is optional and short (under 8 words). The voiceover is captioned automatically, so do not repeat it on screen.
 - Where on-screen text goes (optional; leave all four out and it sits clear of the captions for the whole scene): "textPos" top | middle | bottom — never where the captions are (the brief says where); "textWhen" scene | first | last | words (the whole scene, its first or last 3 seconds, or only while that scene's line is spoken — good for a key phrase or the call to action); "textStyle" dark | plain | brand (a brand-colour box suits the call to action); "textAnim" rise | fade | pop | none. Use them sparingly: most scenes need none.
 - Visual sources, in order of preference: stock_video, stock_photo, product_photo (ONLY with an id from the library list), brand_card (a branded text card — good for the call to action), ai_image, ai_video.
+- ai_presenter ONLY when the brief names a PRESENTER: that person speaks the scene's voiceover line to camera (so the scene must have one). No keywords or prompt needed.
 - AI prompts describe a scene with NO words, letters, logos or signs in it. Never use AI to picture the business's own product — use product_photo or stock.
 - Stock keywords are 2–4 plain words a stock library would match.
 - Use only facts from the business information given. Never invent prices, offers, awards or claims.
@@ -569,6 +595,7 @@ export function storyboardUserPrompt(args: {
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',
         brief.goal ? `WHAT THEY SHOULD DO AFTER WATCHING: ${clip(brief.goal, 200)} — build towards it, and end on it.` : '',
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
+        presenterBlock(brief),
         // Where the captions sit, so the words placed on screen keep clear of them (scene-text.ts).
         brief.captions === false ? 'CAPTIONS: off — on-screen text may sit anywhere.' : `CAPTIONS: at the ${brief.captionStyle?.position ?? 'bottom'} of the frame — never put textPos there.`,
         keepsOwnSound(brief)
@@ -614,4 +641,14 @@ export function parseStoryboardJson(text: string): unknown | null {
     const end = text.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
     try { return JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+}
+
+/** The planner's instruction for a video with an AI presenter (A2, D-A7). Empty without one. Pure. */
+export function presenterBlock(brief: Pick<VideoBrief, 'presenter' | 'footageAssetIds'>): string {
+    const bp = readBriefPresenter(brief.presenter);
+    const p = bp ? presenterById(bp.id) : null;
+    if (!bp || !p || brief.footageAssetIds?.length) return '';
+    return bp.throughout
+        ? `PRESENTER: ${p.name}, an AI presenter, speaks to camera. Use source "ai_presenter" for every scene where a person speaking suits the line (most of them); show the product or place with stock or the business's own pictures where that says more.`
+        : `PRESENTER: ${p.name}, an AI presenter, speaks to camera at the key moments only: use source "ai_presenter" for the opening scene, the call to action, and at most one other scene that matters most. Every other scene uses stock, the business's own pictures or a branded card.`;
 }

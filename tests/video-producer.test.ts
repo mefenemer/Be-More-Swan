@@ -228,10 +228,12 @@ check('an AI clip covers the scene\'s spoken length, with the stock margin, in l
 check('a build makes its AI clips at the same time, with the other scenes alongside', () => {
     const src = read('src/utils/video-producer.ts');
     const build = src.slice(src.indexOf('export async function buildProject('), src.indexOf('export const STUCK_AFTER_MS'));
-    assert.match(build, /const others = \(async \(\) => \{ for \(const i of todo\) if \(storyboard\.scenes\[i\]\.source !== 'ai_video'\) await makeScene\(i\); \}\)\(\);/,
+    // AI clips and AI presenter scenes (A2) are the slow ones, made at once; the rest one by one alongside.
+    assert.ok(build.includes("const slow = (i: number) => storyboard.scenes[i].source === 'ai_video' || storyboard.scenes[i].source === 'ai_presenter';"));
+    assert.match(build, /const others = \(async \(\) => \{ for \(const i of todo\) if \(!slow\(i\)\) await makeScene\(i\); \}\)\(\);/,
         'the other scenes one by one (they share exclude)');
-    assert.match(build, /await Promise\.all\(\[\.\.\.todo\.filter\(\(i\) => storyboard\.scenes\[i\]\.source === 'ai_video'\)\.map\(makeScene\), others\]\);/);
-    const after = build.slice(build.indexOf('map(makeScene), others]);'));
+    assert.match(build, /await Promise\.all\(\[\.\.\.todo\.filter\(slow\)\.map\(makeScene\), others\]\);/);
+    const after = build.slice(build.indexOf('filter(slow).map(makeScene), others]);'));
     assert.ok(after.indexOf('await save({});') < after.indexOf('const missing'), 'one save after the parallel batch');
 });
 
