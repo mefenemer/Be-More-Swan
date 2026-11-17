@@ -11,7 +11,7 @@
 // MEASURED length, a quote must really be in the transcript, and a suggestion may only point at a
 // video the owner chose. PURE: no database, no network. Tested in tests/footage.test.ts.
 
-import { keepsOwnSound, type Scene, type Storyboard, type VideoBrief } from './storyboard';
+import { keepsOwnSound, isVideoShape, SHAPE_LABELS, type Scene, type Storyboard, type VideoBrief } from './storyboard';
 import { MAX_CLIPS } from './video-edit';
 
 // ── Limits (owner decision D-F5, 2026-11-09) ────────────────────────────────────────────────────
@@ -218,11 +218,11 @@ Say briefly what you saw in each video, then suggest the edits that would make t
 - trim: shorten a shot's start or end
 - reorder: change what comes first ("Open on the latte art")
 - fill: a gap their footage can't fill — a branded card, stock footage or an AI clip ("Add a branded card with the booking link at the end")
-- text: words on screen, or captions
+- text: words on screen (where they sit, their style, how they appear), captions, or a name caption for someone who says their name
 - sound: keep their sound, or put a voiceover over it
 Point at a video by its id and at a stretch by inS/outS in seconds ONLY when the edit is about that stretch (a cut, a trim, a moment to move). Use only stretches from the shot lists. Write times as minutes:seconds, e.g. 0:08 or 1:15 — never 8:00 for eight seconds. Never name or guess who a person is. At most ${MAX_SUGGESTIONS} suggestions, the most important first.
 
-Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen; captions; keep their sound or put a voiceover over it. It can NOT add background music, animations, lower-thirds, transitions, effects, colour grading, logos over footage, or crop and reframe a clip — never suggest those. Scenes play one AFTER another: stock or a card can go between sentences, never over someone speaking, so never suggest cutaways while someone talks. Do not suggest what happens anyway: every video is made vertical (9:16) and the call to action goes at the end.
+Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen, placed top, middle or bottom, plain, on a dark box or on a brand-colour box, appearing with a gentle rise, fade or pop; captions; a name caption (a person's name and role) where someone on screen says who they are; keep their sound or put a voiceover over it. It can NOT add transitions, effects, logos over footage, or crop and reframe a clip — never suggest those. Music, the colour look and the video's shape are the owner's choices in the video's options, made separately: never suggest them. Scenes play one AFTER another: stock or a card can go between sentences, never over someone speaking, so never suggest cutaways while someone talks. Do not suggest what happens anyway: the video is made in the shape the owner chose and the call to action goes at the end.
 
 Return STRICT JSON only:
 {"seen": [{"assetId": 1, "summary": "...", "problems": ["..."]}], "suggestions": [{"kind": "cut|trim|reorder|fill|text|sound|frame|other", "text": "...", "reason": "...", "assetId": 1, "inS": 0, "outS": 3}]}`;
@@ -240,7 +240,7 @@ export function reviewUserPrompt(args: { brief: VideoBrief; businessName: string
     const b = args.brief;
     return [
         `BUSINESS: ${clip(args.businessName, 120)}`,
-        `THE VIDEO THEY WANT: a ${b.lengthS}-second vertical ${clip(b.purpose, 60) || 'promo'} video. ${clip(b.message, 800)}`,
+        `THE VIDEO THEY WANT: a ${b.lengthS}-second ${SHAPE_LABELS[b.shape && isVideoShape(b.shape) ? b.shape : '9:16']} ${clip(b.purpose, 60) || 'promo'} video. ${clip(b.message, 800)}`,
         b.cta ? `CALL TO ACTION: ${clip(b.cta, 200)}` : '',
         b.voiceover ? 'It will have a voiceover over the footage (their footage\'s own sound is turned down).' : 'No voiceover: the video keeps the footage\'s own sound.',
         `THEIR FOOTAGE:\n${args.videos.map(shotListText).join('\n\n')}`,
