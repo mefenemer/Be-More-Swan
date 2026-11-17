@@ -50,7 +50,10 @@ export function withoutCardPlaceholder(content: string): string {
  * can't hold this either, so the server says so plainly beside the reply.
  */
 const POINTS_AT_CARD = new RegExp([
-    /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b/.source,
+    // "prepared/created/made/set up/queued" too (staging 2026-11-17, Minute Taker run B: "I've prepared a card to add …
+    // Nothing changes until you confirm it on the card" over no card).
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put|prepared|created|made|set up|queued)\b[^.\n]{0,40}\bcard\b/.source,
+    /\b(?:confirm|approve|accept|save|check)\b[^.\n]{0,24}\bon the card\b/.source,
     /\bcard\s+(?:below|above|here)\b/.source,
     // "The card is below this time", "this time the card really is below" (prod 2026-11-07, org 40).
     /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
