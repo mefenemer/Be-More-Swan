@@ -143,12 +143,18 @@ export async function approveAndMergePr(opts: { prNumber: number; token: string;
         if (merge.status === 401 || merge.status === 403) return { ok: false, status: 502, error: 'GitHub refused to merge with this token: GITHUB_PR_APPROVE_TOKEN needs Contents and Pull requests read/write on this repo.' };
         if (merge.status === 409) return { ok: false, status: 409, error: `PR #${pr.number} has a merge conflict or its branch moved. Ask Claude to update it.` };
 
+        // A reviewed PR merges only right now, never via auto-merge: GitHub checks expectedHeadOid only when
+        // auto-merge is switched ON, so a later push (Auto-fix, Claude — all as the owner's account) would merge
+        // unreviewed (second-opinion review of #682). The owner clicks again once the checks pass.
+        if (expected) {
+            let why = '';
+            try { why = String((await merge.json())?.message || ''); } catch { /* none */ }
+            return { ok: false, status: 409, error: `PR #${pr.number} can't merge yet${why ? ` (${why})` : ''}: its checks are still running or failing. It merges only the reviewed commit ${expected.slice(0, 7)}, so click Approve again once the checks pass.` };
+        }
         // 405 = not mergeable yet (checks running, or the branch is behind): let GitHub merge it when ready.
         const gql = await f('https://api.github.com/graphql', {
             method: 'POST', headers: h,
-            body: JSON.stringify(expected
-                ? { query: 'mutation($id: ID!, $oid: GitObjectID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE, expectedHeadOid: $oid }) { pullRequest { number } } }', variables: { id: pr.nodeId, oid: expected } }
-                : { query: 'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE }) { pullRequest { number } } }', variables: { id: pr.nodeId } }),
+            body: JSON.stringify({ query: 'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE }) { pullRequest { number } } }', variables: { id: pr.nodeId } }),
         });
         const g = gql.ok ? await gql.json() : null;
         if (g && !g.errors) return { ok: true, pr, merged: false, autoMerge: true, reviewed };

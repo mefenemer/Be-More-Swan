@@ -119,16 +119,24 @@ await check('Approve click: refuses when the PR moved past the reviewed commit, 
     assert.ok(!calls.some((c) => c.url.endsWith('/merge')));
 });
 
-await check('Approve click: pins the merge (and auto-merge) to the reviewed commit', async () => {
+await check('Approve click: merges exactly the reviewed commit; never turns on auto-merge for it', async () => {
     const direct = fakeGh(A);
     const r = await approveAndMergePr({ prNumber: 5, token: 't', repo: 'o/r', fetchImpl: direct.f, expectedHeadSha: A });
     assert.strictEqual(r.ok, true);
     assert.strictEqual(direct.calls.find((c) => c.url.endsWith('/merge'))!.body.sha, A);
+    // Checks still running (405): auto-merge would let a later push merge unreviewed, so refuse and ask again.
     const later = fakeGh(A, 405);
-    await approveAndMergePr({ prNumber: 5, token: 't', repo: 'o/r', fetchImpl: later.f, expectedHeadSha: A });
-    const gql = later.calls.find((c) => c.url.endsWith('/graphql'))!;
-    assert.match(gql.body.query, /expectedHeadOid/);
-    assert.strictEqual(gql.body.variables.oid, A);
+    const r2 = await approveAndMergePr({ prNumber: 5, token: 't', repo: 'o/r', fetchImpl: later.f, expectedHeadSha: A });
+    assert.strictEqual(r2.ok, false);
+    assert.match((r2 as any).error, /click Approve again once the checks pass/);
+    assert.ok(!later.calls.some((c) => c.url.endsWith('/graphql')), 'no auto-merge for a reviewed PR');
+});
+
+await check('Approve click without a reviewed commit still falls back to auto-merge (releases, older requests)', async () => {
+    const later = fakeGh(A, 405);
+    const r = await approveAndMergePr({ prNumber: 5, token: 't', repo: 'o/r', fetchImpl: later.f });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual((r as any).autoMerge, true);
 });
 
 await check('Approve click without a reviewed commit (older requests) behaves as before', async () => {

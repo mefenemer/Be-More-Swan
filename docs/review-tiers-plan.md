@@ -75,7 +75,11 @@ Two rules hold at every stage:
   the approval note: tier · verdict · "reviewed commit <sha>" · link. `pr-tier.ts check` and
   `pr-tier.ts review-status` show the same.
 - **Approve click** (src/utils/pr-approval.ts): when the note names a reviewed commit, the merge is pinned to it
-  (`sha` on the merge, `expectedHeadOid` on auto-merge) and refused if the PR changed after the review.
+  (`sha` on the merge) and refused if the PR changed after the review. Such a PR is **never** set to auto-merge
+  (GitHub checks `expectedHeadOid` only when auto-merge is turned on, so a later push would slip through): if
+  its checks are still running, the owner clicks Approve again once they pass. Releases and older requests
+  without a reviewed commit keep the auto-merge fallback.
+- The scripts and endpoints that call the gate / the Approve click are high tier too.
 - Approve card (admin.html `_approvalNoteHtml`): verdict line bold, "merges only commit abc1234", link to the
   review.
 

@@ -51,6 +51,10 @@ check('owner high-tier areas are high', () => {
         'src/utils/pr-review.ts': 'platform',
         'scripts/pr-review-gate.ts': 'platform',
         '.claude/agents/code-reviewer.md': 'platform',
+        'scripts/fix-tickets.ts': 'platform',
+        'scripts/feature-requests.ts': 'platform',
+        'netlify/functions/admin-issue-reports.ts': 'platform',
+        'netlify/functions/admin-feature-requests.ts': 'platform',
     };
     for (const [p, key] of Object.entries(high)) {
         const t = tierForFile(p);

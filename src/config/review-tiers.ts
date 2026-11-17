@@ -70,7 +70,9 @@ export const TIER_RULES: TierRule[] = [
         tier: 'high', key: 'platform', label: 'RLS, redirects/headers, workflows, migrations runner, secrets, these review rules',
         // The review rules themselves are high: otherwise a PR could lower its own tier.
         match: [/^db\/rls\//, /^netlify\.toml$/, /^\.github\//, /^scripts\/migrate/, /^db\/schema\.ts$/, /^db\/client\.ts$/, /^\.env/,
-            /^src\/config\/review-tiers\.ts$/, /^src\/utils\/(?:pr-evidence|pr-review|pr-approval|issue-sql)\.ts$/, /^scripts\/pr-(?:tier|review-gate)\.ts$/, /^\.claude\/agents\//],
+            /^src\/config\/review-tiers\.ts$/, /^src\/utils\/(?:pr-evidence|pr-review|pr-approval|issue-sql)\.ts$/, /^scripts\/pr-(?:tier|review-gate)\.ts$/, /^\.claude\/agents\//,
+            // …and the places that CALL the gate / the Approve click, so removing a call is high too.
+            /^scripts\/(?:fix-tickets|feature-requests)\.ts$/, /^netlify\/functions\/admin-(?:issue-reports|feature-requests)\.ts$/],
     },
     // ── LOW (explicit only) ─────────────────────────────────────────────────────────────────────
     {
