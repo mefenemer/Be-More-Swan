@@ -30,6 +30,10 @@
 
 import assert from 'node:assert';
 import { publishX, isDriverRetryable } from '../src/utils/social-publish';
+import { useVirtualTime } from './virtual-time';
+
+// Polls, back-off and timeouts run on a virtual clock: same order, same Date.now() deltas, no waiting.
+useVirtualTime();
 
 let passed = 0;
 async function check(name: string, fn: () => Promise<void> | void) {

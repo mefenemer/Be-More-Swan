@@ -22,6 +22,10 @@ import {
     publishYouTube, publishYouTubeResumable, youtubeMetaFromCaption, resolvePostVideo,
     YOUTUBE_DEFAULT_PRIVACY,
 } from '../src/utils/social-publish';
+import { useVirtualTime } from './virtual-time';
+
+// Polls, back-off and timeouts run on a virtual clock: same order, same Date.now() deltas, no waiting.
+useVirtualTime();
 
 let passed = 0;
 let failures = 0;

@@ -20,6 +20,7 @@
 import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { closeDbPools } from '../db/client';
 import { endRound, sweepStuckRounds } from '../src/utils/visual-briefs';
 import { judgeVisualOrder } from '../src/utils/campaign-visual-order';
 import { attachApprovedToPost } from '../src/utils/brief-post-media';
@@ -198,6 +199,8 @@ async function main() {
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();
+        // The code under test also opened db/client's shared pool; left open it holds the process 20 s.
+        await closeDbPools();
     }
     console.log(`\n${passed} checks passed.`);
 }
