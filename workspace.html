@@ -5631,13 +5631,13 @@ function formatCurrency(amount, currency) {
   const ONBOARDING_ROLE_META = {
     social_media: { label: 'Social Media Assistant', icon: '📣', wizard: 'onboarding-social-media.html' },
     // Labels and icons kept so an existing in-progress card still reads correctly, but these three
-    // point at onboarding.html on purpose: their own wizards end at a placeholder alert and persist
+    // point at the hire catalogue on purpose: their own wizards end at a placeholder alert and persist
     // nothing, so "Continue this step" into one could never finish the draft it claims to resume.
     // Defensive — nothing currently creates a draft on those paths. Point each back at its own
     // wizard once that wizard POSTs to onboarding.ts.
-    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'onboarding.html' },
-    data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'onboarding.html' },
-    custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'onboarding.html' },
+    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'workspace.html?view=catalog' },
+    data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'workspace.html?view=catalog' },
+    custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'workspace.html?view=catalog' },
   };
   window.ONBOARDING_ROLE_META = ONBOARDING_ROLE_META;
 
@@ -5885,7 +5885,7 @@ function formatCurrency(amount, currency) {
 
     const isDraft   = item.kind === 'draft';
     const path      = isDraft ? item.onboardingPath : null;
-    const meta      = (path && ONBOARDING_ROLE_META[path]) || { label: item.role || 'Assistant', icon: '🤖', wizard: 'onboarding.html' };
+    const meta      = (path && ONBOARDING_ROLE_META[path]) || { label: item.role || 'Assistant', icon: '🤖', wizard: 'workspace.html?view=catalog' };
     const roleLabel = isDraft ? meta.label : (item.role || 'Assistant');
     const name      = (isDraft ? item.displayName : item.name) || `Unnamed ${roleLabel}`;
     const cs        = isDraft ? (item.currentStep || 1) : 99;
@@ -5930,7 +5930,7 @@ function formatCurrency(amount, currency) {
       if (state === 'completed') detail = `<p class="text-xs text-emerald-600 mt-0.5">Completed</p>`;
       else if (state === 'action') {
         detail = `<p class="text-xs text-amber-600 font-semibold mt-0.5">Action required</p>
-          <a href="${meta.wizard}?draftId=${item.draftId}&step=${s.step}" class="btn-primary inline-flex items-center gap-1 mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition">Continue this step →</a>`;
+          <a href="${meta.wizard}${meta.wizard.includes('?') ? '&' : '?'}draftId=${item.draftId}&step=${s.step}" class="btn-primary inline-flex items-center gap-1 mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition">Continue this step →</a>`;
       }
       else if (state === 'processing') {
         // AC2.3: active loading state + reassurance copy.

@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- This old role picker never shows a step: #step-1 starts hidden and the wizard counts from 2,
+         so everyone who landed here saw a blank card (new sign-up from the welcome email, 2026-11-17).
+         Choosing an assistant now happens in the workspace catalogue, so forward there before anything
+         else runs. Kept as a file so links in emails already sent keep working. -->
+    <script>window.location.replace('/workspace.html?view=catalog');</script>
     <script src="./auth-check.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">

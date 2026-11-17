@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Roles without a dedicated schema use the generic onboarding flow instead.
   const schema = (window.AssistantOnboardingSchemas || {})[roleKey];
   if (!schema) {
-    window.location.replace('onboarding.html');
+    window.location.replace('workspace.html?view=catalog');
     return;
   }
 

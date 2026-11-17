@@ -147,7 +147,8 @@ export default withLambda(async (event) => {
             // US-GAP-6.1.1 SC1/SC2: Welcome email — sent exactly once (SC3: gated by isFirstLogin)
             // SC4: arrives before the 24h onboarding reminder (onboarding-reminder.ts fires at 24h)
             const emailBaseUrl  = resolveBaseUrl(event.headers) || 'https://bemoreswan.com';
-            const onboardingUrl = `${emailBaseUrl}/onboarding.html`;
+            // Choosing an assistant happens in the workspace catalogue (onboarding.html was a blank page).
+            const onboardingUrl = `${emailBaseUrl}/workspace.html?view=catalog`;
             const helpUrl       = `${emailBaseUrl}/help.html`;
             const [verifyProfile] = await getDb().select({ language: userProfiles.language })
                 .from(userProfiles).where(eq(userProfiles.userId, user.id)).limit(1);
@@ -196,7 +197,7 @@ export default withLambda(async (event) => {
         const VALID_TIERS = ['saver', 'buster'];
 
         // Onboarding path → HTML page map (mirrors onboarding-reminder.ts)
-        // custom / inventory / performance deliberately fall through (|| 'onboarding.html' below)
+        // custom / inventory / performance deliberately fall through (|| 'workspace.html' below)
         // rather than resolving to their own wizards: those three end at a placeholder alert and
         // persist nothing, so resuming a draft into one cannot complete it. Reaching this needs an
         // onboarding_drafts row with one of those paths, which nothing currently creates — this is
@@ -292,7 +293,7 @@ export default withLambda(async (event) => {
                         .limit(1);
 
                     if (draft) {
-                        const page = ONBOARDING_PAGE[draft.onboardingPath] || 'onboarding.html';
+                        const page = ONBOARDING_PAGE[draft.onboardingPath] || 'workspace.html';
                         return {
                             statusCode: 200,
                             headers: getHeaders(sessionCookie),

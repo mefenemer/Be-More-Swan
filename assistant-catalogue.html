@@ -482,19 +482,19 @@
     }
 
     // Otherwise go to the legacy role-specific onboarding wizard (skips the
-    // onboarding.html role-picker step). roleKey matches the master-assistant roleKey
-    // from the DB. Falls back to onboarding.html for any role without a dedicated wizard.
+    // old role-picker step). roleKey matches the master-assistant roleKey from the DB. A role
+    // without a dedicated wizard stays on the catalogue (onboarding.html was a blank page).
     // (Previously this called loadView('onboarding'), but there is no 'onboarding'
     // workspace route, so the click silently did nothing.)
     // paid_ads / data_entry / custom removed deliberately — their wizards end at a placeholder alert
-    // and persist nothing, so they fall through to onboarding.html (which shows them as Coming Soon).
+    // and persist nothing, so they fall through to the catalogue.
     // Those roleKeys have no row in db/seed-catalog.ts, so no card renders for them today; this is
     // defensive. Restore when those wizards POST to onboarding.ts.
     const ROLE_ONBOARDING_PAGE = {
       social_media_manager: 'onboarding-social-media.html',
     };
     sessionStorage.setItem('intended_role_key', roleKey);
-    window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'onboarding.html';
+    window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'workspace.html?view=catalog';
   };
 
   // ── US-AUD-2.3.1: Notify Me toggle (milestone progress bar cards) ──────────
