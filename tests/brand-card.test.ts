@@ -26,7 +26,7 @@ import {
     estimateWrappedLines,
 } from '../src/lib/brand-card';
 import { overlaysFingerprint, isBakedFor } from '../src/lib/post-render';
-import { pickFaceUrl } from '../src/lib/brand-card-webfont';
+import { pickFaceUrl, loadWebFont, _clearWebFontCache } from '../src/lib/brand-card-webfont';
 import { resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
 import { landmark } from './landmark';
@@ -34,18 +34,18 @@ import { readFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
 // ── Google Fonts, served from tests/fixtures ──────────────────────────────────────────────────
-// The default kit's family (Plus Jakarta Sans) goes through the real web-font path in
-// brand-card-webfont.ts, but its three responses (stylesheet + two faces) come from saved copies:
-// the test must not depend on Google being up or fast. Any OTHER Google URL is recorded and fails the
-// run at the end — loadWebFont swallows fetch errors and falls back silently, so a throw alone would
-// go unnoticed.
+// The bundled family (Plus Jakarta Sans — Be More Swan's own kit uses it) is never downloaded. The download path
+// is exercised with a made-up site font, "Fixture Sans": its stylesheet and two faces are saved
+// Google responses (tests/fixtures/google-fonts), so the test does not depend on Google being up or
+// fast. Any OTHER Google URL is recorded and fails the run at the end — loadWebFont swallows fetch
+// errors and falls back silently, so a throw alone would go unnoticed.
 const FONT_FIXTURES = join(__dirname, 'fixtures', 'google-fonts');
 const unexpectedFontUrls: string[] = [];
 let fontFixturesServed = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
-    if (url.startsWith('https://fonts.googleapis.com/css2?family=Plus%20Jakarta%20Sans:')) {
+    if (url.startsWith('https://fonts.googleapis.com/css2?family=Fixture%20Sans:')) {
         fontFixturesServed++;
         return new Response(readFileSync(join(FONT_FIXTURES, 'plus-jakarta-sans.css')), {
             headers: { 'content-type': 'text/css; charset=utf-8' },
@@ -848,13 +848,37 @@ test('the default layout reproduces the original top-left/bottom-left card', asy
     );
 });
 
+// ── Web fonts ─────────────────────────────────────────────────────────────────────────────────
+
+test('the bundled family is never downloaded: a kit set in Plus Jakarta Sans makes no Google request', async () => {
+    _clearWebFontCache();
+    const before = fontFixturesServed + unexpectedFontUrls.length;
+    assert.equal(await loadWebFont('Plus Jakarta Sans'), null);
+    assert.equal(await loadWebFont('  plus jakarta sans '), null, 'case and spacing do not matter');
+    const card = await renderBrandCard({ headline: 'Drawn in the bundled ExtraBold', kit: BE_MORE_SWAN_BRAND_KIT });
+    assert.ok(card.png.length > 1000, 'the card still renders');
+    assert.equal(fontFixturesServed + unexpectedFontUrls.length, before, 'no Google request for the bundled family');
+});
+
+test('a site font is downloaded and registered at 400 and 800, and the card renders with it', async () => {
+    _clearWebFontCache();
+    const before = fontFixturesServed;
+    const fonts = await loadWebFont('Fixture Sans');
+    assert.ok(fonts, 'the site font should load from the (saved) Google responses');
+    assert.deepEqual(fonts!.map((f) => [f.name, f.weight]), [['Fixture Sans', 400], ['Fixture Sans', 800]]);
+    assert.equal(fontFixturesServed - before, 3, 'stylesheet + two faces');
+    const card = await renderBrandCard({ headline: 'Drawn in the site font', kit: { ...DEFAULT_BRAND_KIT, fontFamily: 'Fixture Sans' } });
+    assert.ok(card.png.length > 1000, 'the card renders with the downloaded font');
+    assert.equal(fontFixturesServed - before, 3, 'the second use comes from the cache');
+});
+
 // Sequential, and wrapped in a main(): tsx transpiles these to CJS, where top-level await is a
 // build error rather than a runtime one.
 async function main(): Promise<void> {
     for (const t of tests) await t();
-    await check('Google Fonts came from tests/fixtures, and only for the saved family', () => {
+    await check('Google Fonts came only from tests/fixtures, and never for the bundled family', () => {
         assert.deepEqual(unexpectedFontUrls, [], 'a Google URL with no fixture — save it, or the card silently used the bundled font');
-        assert.ok(fontFixturesServed >= 3, `the web-font path should have run (stylesheet + 2 faces), served ${fontFixturesServed}`);
+        assert.ok(fontFixturesServed >= 3, `the web-font path should have run for Fixture Sans (stylesheet + 2 faces), served ${fontFixturesServed}`);
     });
     console.log(`\n${passed}/${tests.length + 1} passed`);
 }

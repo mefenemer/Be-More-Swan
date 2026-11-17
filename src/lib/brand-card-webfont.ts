@@ -13,6 +13,7 @@
 // wrong-but-good font is a non-event; a card that failed to render is not.
 
 import { cleanFontFamily } from '../utils/brand-kit';
+import { BRAND_CARD_FONT_FAMILY } from './render-libs';
 
 /** What satori's `fonts` option takes. Declared rather than derived from brandCardFonts: that
  *  array's buffers come from base64 (Buffer<ArrayBuffer>) while these come off the wire
@@ -101,6 +102,11 @@ async function fetchBinary(url: string): Promise<Buffer | null> {
 export async function loadWebFont(family: string | null | undefined): Promise<SatoriFont[] | null> {
     const name = cleanFontFamily(family);
     if (!name) return null;
+    // The bundled family needs no download: every caller falls back to it under this same name, with
+    // its true Regular and ExtraBold. Fetching it from Google cost three requests (each with its own
+    // timeout) on every cold start for any kit set in it, Be More Swan's own included, and drew
+    // headlines in Google's 700 registered as 800 rather than the bundled ExtraBold.
+    if (name.toLowerCase() === BRAND_CARD_FONT_FAMILY.toLowerCase()) return null;
     if (cache.has(name)) return cache.get(name)!;
 
     let result: SatoriFont[] | null = null;
