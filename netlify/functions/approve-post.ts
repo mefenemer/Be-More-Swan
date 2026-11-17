@@ -11,13 +11,13 @@
 
 import { triggerPublishNow } from '../../src/utils/trigger-publish-now';
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestions, scheduledPosts, scheduledPostAssets, systemConnections } from '../../db/schema';
 import { isBakedFor, renderableOverlays } from '../../src/lib/post-render';
 import { recordPostedAssets } from '../../src/utils/pexels';
-import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo, isPdfSlideMime } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor, resolveHorizonDays, DEFAULT_POSTING_TIMEZONE } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
@@ -390,6 +390,28 @@ export default withLambda(async (event) => {
     //
     // Silent on unknown durations — a legacy asset must never be refused for failing a check that
     // could not be run. Best-effort: a failure to read the metrics leaves the post approvable.
+    // A LinkedIn Document carousel is built into a PDF at publish, and a PDF holds PNG/JPEG only. A webp
+    // or gif dropped onto a LinkedIn post would pass here and fail at publish — refuse it now, naming the
+    // slide (#712 review). Unknown types are let through (legacy assets): the publisher still checks bytes.
+    if ((post as any).formatKey === 'li_document' && Array.isArray(post.contentAssetIds) && post.contentAssetIds.length) {
+        const ids = (post.contentAssetIds as unknown[]).map(Number).filter(Number.isFinite);
+        const rows = ids.length
+            ? await db.select({ id: contentAssets.id, mimeType: contentAssets.mimeType }).from(contentAssets).where(inArray(contentAssets.id, ids)).catch(() => [])
+            : [];
+        const mimeById = new Map(rows.map((r) => [r.id, r.mimeType]));
+        const bad = ids.findIndex((id) => { const m = mimeById.get(id); return !!m && !isPdfSlideMime(m); });
+        if (bad >= 0) {
+            return {
+                statusCode: 422,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: `Slide ${bad + 1} is a ${String(mimeById.get(ids[bad])).replace('image/', '').toUpperCase()} picture. A LinkedIn document carousel needs PNG or JPEG pictures — replace that slide, then approve.`,
+                    code: 'LI_DOCUMENT_SLIDE_TYPE',
+                    formatKey: 'li_document',
+                }),
+            };
+        }
+    }
     const routableAssets = await loadAssetMetrics(db, post.contentAssetIds).catch(() => []);
     const tooLong = validateAgainstFormat((post as any).formatKey, routableAssets);
     if (tooLong) {

@@ -13,6 +13,7 @@ import { postFormatSpec } from '../src/config/post-formats';
 import { carouselFormatFor, linkedInDocumentTitle, CAROUSEL_MAX_SLIDES } from '../src/utils/top-lists';
 import {
     littleText, slideImageKind, slidesPdf, isLinkedInDocument, publishLinkedInDocument, LINKEDIN_REST_VERSION,
+    isPdfSlideMime, LI_DOCUMENT_POLL_MS, LI_DOCUMENT_MAX_POLLS,
 } from '../src/utils/social-publish';
 
 let passed = 0;
@@ -66,6 +67,37 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
         assert.equal(littleText('a_b *c* [d] <e> {f} | ~ @g \\'), 'a\\_b \\*c\\* \\[d\\] \\<e\\> \\{f\\} \\| \\~ \\@g \\\\');
         assert.equal(littleText('#AI_tools'), '{hashtag|\\#|AI\\_tools}');
         assert.equal(littleText('C# &#39;'), 'C\\# &\\#39;');
+    });
+
+    await check('a link stays one link: its # is escaped, never turned into a hashtag (#712 review)', () => {
+        assert.equal(littleText('See https://example.com/#pricing #growth'), 'See https://example.com/\\#pricing {hashtag|\\#|growth}');
+        assert.equal(littleText('https://x.co/a_b(c)'), 'https://x.co/a\\_b\\(c\\)');
+    });
+
+    await check('the publisher follows the editor label: no stored format + 2+ PNG/JPEG = document (#712 review)', () => {
+        const png = { url: 'u', mimeType: 'image/png' }, jpg = { url: 'u', mimeType: 'image/jpeg' }, webp = { url: 'u', mimeType: 'image/webp' };
+        assert.equal(isLinkedInDocument(null, [png, jpg]), true);
+        assert.equal(isLinkedInDocument(null, [png, webp]), false, 'legacy webp keeps the multi-image post');
+        assert.equal(isLinkedInDocument(null, [png]), false);
+        assert.equal(isLinkedInDocument('li_feed', [png, jpg]), false, 'a stored format always wins');
+        assert.equal(isLinkedInDocument('li_document', [png]), true);
+        assert.equal(isPdfSlideMime('image/JPG'), true);
+        assert.equal(isPdfSlideMime('image/gif'), false);
+    });
+
+    await check('the document wait stays short inside the scheduled run (#712 review)', () => {
+        assert.ok(LI_DOCUMENT_POLL_MS * LI_DOCUMENT_MAX_POLLS <= 8000);
+    });
+
+    await check('approval refuses a non-PNG/JPEG slide on a Document carousel, naming it (#712 review)', () => {
+        const src = readFileSync('netlify/functions/approve-post.ts', 'utf8');
+        const i = src.indexOf("if ((post as any).formatKey === 'li_document' && Array.isArray(post.contentAssetIds)");
+        assert.ok(i > 0);
+        const block = src.slice(i, i + 1600);
+        assert.ok(block.includes('!isPdfSlideMime(m)'));
+        assert.ok(block.includes("code: 'LI_DOCUMENT_SLIDE_TYPE'"));
+        assert.ok(block.includes('Slide ${bad + 1}'));
+        assert.ok(i < src.indexOf('const routableAssets = await loadAssetMetrics('), 'checked before the format validation');
     });
 
     await check('the document title is the cover line, else the first line', () => {
@@ -165,7 +197,7 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
     await check('the publish job sends li_document rows through the document publisher, others unchanged', () => {
         const src = readFileSync('netlify/functions/publish-social-posts.ts', 'utf8');
         assert.ok(src.includes('link_url, cta_text, format_key`'), 'format_key is read with the claimed row');
-        assert.ok(src.includes('result = isLinkedInDocument(post.format_key)'));
+        assert.ok(src.includes('result = isLinkedInDocument(post.format_key, image)'));
         assert.ok(src.includes('? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))'));
         assert.ok(src.includes(': await publishLinkedIn(text, token, creds.externalUserId, image);'));
     });

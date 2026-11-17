@@ -754,6 +754,14 @@ const LITTLE_RESERVED = /[\\|{}@[\]()<>#*_~]/g;
  */
 export function littleText(text: string): string {
     const esc = (t: string) => t.replace(LITTLE_RESERVED, (c) => `\\${c}`);
+    // A link is escaped like everything else but never cut into a hashtag: the post's link is appended
+    // to the caption, and "https://site.com/#pricing" must stay one link (#712 review).
+    return String(text ?? '').split(/(https?:\/\/\S+)/i)
+        .map((part, i) => (i % 2 ? esc(part) : withHashtags(part, esc)))
+        .join('');
+}
+
+function withHashtags(text: string, esc: (t: string) => string): string {
     let out = '';
     let last = 0;
     // A hashtag starts at the beginning or after a non-word character, like LinkedIn's own composer, and
@@ -795,18 +803,36 @@ export async function slidesPdf(slides: readonly Uint8Array[]): Promise<Uint8Arr
     return doc.save();
 }
 
-/** True when a LinkedIn row goes out as a document: its format says so. Pure. */
-export function isLinkedInDocument(formatKey: string | null | undefined): boolean {
-    return formatKey === 'li_document';
+/** PNG or JPEG by declared type — the slides a LinkedIn document can carry. Pure. */
+export function isPdfSlideMime(mimeType: string | null | undefined): boolean {
+    return /^image\/(png|jpe?g)$/i.test(String(mimeType ?? '').trim());
+}
+
+/**
+ * True when a LinkedIn row goes out as a document carousel. Its format says so — or it has no stored
+ * format and 2+ PNG/JPEG pictures, which the editor's format router now labels "Document carousel"
+ * (format-router deriveFormat), so the post goes out as what the editor showed (#712 review). A legacy
+ * multi-picture row with any other kind of picture keeps the old multi-image post. Pure.
+ */
+export function isLinkedInDocument(formatKey: string | null | undefined, media?: PostImage | PostImage[] | null): boolean {
+    if (formatKey === 'li_document') return true;
+    if (formatKey) return false;
+    const items = mediaItems(media ?? null);
+    return items.length >= LI_DOCUMENT_MIN_SLIDES && items.every((it) => isPdfSlideMime(it.mimeType));
 }
 
 const liRestHeaders = (token: string, extra: Record<string, string> = {}) => ({
     Authorization: `Bearer ${token}`, 'Linkedin-Version': LINKEDIN_REST_VERSION, 'X-Restli-Protocol-Version': '2.0.0', ...extra,
 });
 
-/** How long to wait for LinkedIn to process an uploaded document before posting it. */
-export const LI_DOCUMENT_POLL_MS = 2000;
-export const LI_DOCUMENT_MAX_POLLS = 10;
+/**
+ * How long to wait for LinkedIn to process an uploaded document before posting it: at most ~7.5 s.
+ * The publish run is a scheduled function; a long wait risks it being killed mid-post and the row being
+ * reclaimed without counting the attempt (#712 review). Phase 0's document was ready on the first check,
+ * and the post call after the loop is the real test either way.
+ */
+export const LI_DOCUMENT_POLL_MS = 1500;
+export const LI_DOCUMENT_MAX_POLLS = 5;
 
 /**
  * Post the slides as a LinkedIn document carousel. `title` shows above the document (the cover line).
