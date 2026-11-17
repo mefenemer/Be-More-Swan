@@ -36,7 +36,7 @@ export const MERGE_STUCK_MINS = 30;
 export const MERGE_BULK_MAX = 10;
 
 /** Start the workflow. Returns an error string for the admin, or null on success. */
-export async function dispatchCloudMerge(opts: { issueId: number; pr: number; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
+export async function dispatchCloudMerge(opts: { issueId: number; pr: number; headSha?: string | null; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
     const token = opts.token ?? writeToken();
     if (!token) return 'GITHUB_AI_FIX_TOKEN (or GITHUB_HOTFIX_TOKEN) is not set in Netlify, so the merge workflow cannot be started.';
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
@@ -44,7 +44,8 @@ export async function dispatchCloudMerge(opts: { issueId: number; pr: number; to
         const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${MERGE_WORKFLOW}/dispatches`, {
             method: 'POST',
             headers: { ...ghHeaders(token), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ref: 'staging', inputs: { issue_id: String(opts.issueId), pr: String(opts.pr) } }),
+            // head_sha: the commit the review gate passed — the workflow merges only that (pr-review-remote.ts).
+            body: JSON.stringify({ ref: 'staging', inputs: { issue_id: String(opts.issueId), pr: String(opts.pr), ...(opts.headSha ? { head_sha: opts.headSha } : {}) } }),
         });
         if (res.status === 204 || res.ok) return null;
         if (res.status === 404) return 'GitHub could not find the merge workflow (.github/workflows/merge-to-staging.yml must be on main and staging), or the token cannot see it.';

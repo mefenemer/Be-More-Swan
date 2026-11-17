@@ -7830,6 +7830,7 @@ function loadSystemStatus() {
 // was approved. A medium/high PR into staging merged with no passing review for that commit gets ⚠️.
 const _APPROVAL_FLAG = {
   'ok': ['✅', 'Reviewed', 'text-emerald-700'],
+  'pending': ['⏳', 'Filled in on the next check', 'text-gray-500'],
   'no-review': ['⚠️', 'Merged with no review', 'text-red-700 font-bold'],
   'stale-review': ['⚠️', 'Changed after its review', 'text-red-700 font-bold'],
   'changes-needed': ['⚠️', 'Review said Changes needed', 'text-amber-700 font-bold'],

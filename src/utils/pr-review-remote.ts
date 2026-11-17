@@ -76,15 +76,21 @@ export async function loadRemotePr(prNumber: number, opts: { token: string; repo
 
 export async function remoteReviewGate(prNumber: number, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<(GateResult & { pr: RemotePr }) | { error: string }> {
     const token = opts.token ?? readToken();
-    if (!token) return { error: 'The second-opinion review could not be checked: GITHUB_FIX_CHECK_TOKEN is not set in Netlify.' };
+    if (!token) return { error: 'The second-opinion review could not be checked: no GitHub token is set in Netlify (GITHUB_AI_FIX_TOKEN, GITHUB_HOTFIX_TOKEN or GITHUB_FIX_CHECK_TOKEN).' };
     const pr = await loadRemotePr(prNumber, { token, repo: opts.repo, fetchImpl: opts.fetchImpl });
     if ('error' in pr) return { error: `The second-opinion review could not be checked. ${pr.error}` };
     return { ...reviewGate({ tier: pr.tier.tier, base: pr.base, headSha: pr.headSha, reviews: pr.reviews }), pr };
 }
 
-/** null = the Merge to staging button may go ahead. Otherwise the reason it may not (shown on the ticket). */
-export async function cloudMergeReviewBlocker(prNumber: number, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<string | null> {
+/** The Merge to staging check: `blocked` = why it may not merge (shown on the ticket), else null and `headSha` =
+ *  the commit that passed, which the workflow then merges and nothing else (`--match-head-commit`). */
+export async function cloudMergeCheck(prNumber: number, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<{ blocked: string | null; headSha: string | null }> {
     const g = await remoteReviewGate(prNumber, opts);
-    if ('error' in g) return g.error;
-    return g.ok ? null : `Not merged: ${g.reason}`;
+    if ('error' in g) return { blocked: g.error, headSha: null };
+    return g.ok ? { blocked: null, headSha: g.pinSha } : { blocked: `Not merged: ${g.reason}`, headSha: null };
+}
+
+/** null = the Merge to staging button may go ahead. Otherwise the reason it may not. */
+export async function cloudMergeReviewBlocker(prNumber: number, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<string | null> {
+    return (await cloudMergeCheck(prNumber, opts)).blocked;
 }

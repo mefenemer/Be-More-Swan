@@ -6,7 +6,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { formatReviewComment, pinnedShaFromNote, reviewGate } from '../src/utils/pr-review';
-import { addedLinesFromPatch, cloudMergeReviewBlocker, loadRemotePr } from '../src/utils/pr-review-remote';
+import { addedLinesFromPatch, cloudMergeCheck, cloudMergeReviewBlocker, loadRemotePr } from '../src/utils/pr-review-remote';
+import { dispatchCloudMerge } from '../src/utils/issue-cloud-merge';
 import { approvalFlag, approvalFromRemote, resetPrApprovalsCache, sweepMergedPrs, REVIEWS_BEGAN_AT } from '../src/utils/pr-approvals';
 
 const dialect = new PgDialect();
@@ -89,6 +90,21 @@ function fakeGitHub(o: { files?: any[]; comments?: any[]; head?: string; base?: 
         assert.match(String(await cloudMergeReviewBlocker(9, { token: 't', repo: 'o/r', fetchImpl: fakeGitHub({ filesStatus: 403 }).f })), /could not be checked.*files/);
     });
 
+    await check('Merge to staging passes the gated commit to the workflow, which merges only that commit', async () => {
+        const ok = await cloudMergeCheck(9, { token: 't', repo: 'o/r', fetchImpl: fakeGitHub({ comments: [review(A, 'pass')] }).f });
+        assert.deepStrictEqual(ok, { blocked: null, headSha: A });
+        const no = await cloudMergeCheck(9, { token: 't', repo: 'o/r', fetchImpl: fakeGitHub().f });
+        assert.strictEqual(no.headSha, null);
+        let body: any = null;
+        assert.strictEqual(await dispatchCloudMerge({ issueId: 4, pr: 9, headSha: A, token: 't', fetchImpl: async (_u, init) => { body = JSON.parse(String(init?.body)); return res(204); } }), null);
+        assert.deepStrictEqual(body.inputs, { issue_id: '4', pr: '9', head_sha: A });
+        const wf = readFileSync('.github/workflows/merge-to-staging.yml', 'utf8');
+        assert.ok(/head_sha:\n\s+description: .*\n\s+required: false/.test(wf), 'optional input, so older dispatches still work');
+        assert.ok(wf.includes('HEAD_SHA: ${{ inputs.head_sha }}'), 'input via env, never ${{ }} inside the script');
+        assert.ok(wf.includes('! "$HEAD_SHA" =~ ^[0-9a-f]{40}$'), 'validated');
+        assert.ok(wf.includes('match=(--match-head-commit "$HEAD_SHA")') && wf.includes('--delete-branch ${match[@]+"${match[@]}"}'));
+    });
+
     await check('approval flag: only medium/high into staging after reviews began can be flagged', () => {
         const base = { base: 'staging', tier: 'medium' as const, headSha: A, reviewerVerdict: 'pass' as const, reviewerSha: A, mergedAt: '2026-11-18T09:00:00.000Z' };
         assert.strictEqual(approvalFlag(base), 'ok');
@@ -100,6 +116,7 @@ function fakeGitHub(o: { files?: any[]; comments?: any[]; head?: string; base?: 
         assert.ok('2026-11-10T09:00:00.000Z' < REVIEWS_BEGAN_AT);
         assert.strictEqual(approvalFlag({ ...base, tier: 'low', reviewerVerdict: null }), 'not-needed');
         assert.strictEqual(approvalFlag({ ...base, base: 'main', reviewerVerdict: null }), 'not-needed');
+        assert.strictEqual(approvalFlag({ ...base, tier: null, reviewerVerdict: null }), 'pending', 'a button row before the sweep is not "no review"');
     });
 
     await check('a merged PR\'s row shows the verdict for its head, else the latest (read as stale)', async () => {
@@ -139,7 +156,10 @@ function fakeGitHub(o: { files?: any[]; comments?: any[]; head?: string; base?: 
 
     await check('wiring: both Merge-to-staging paths gate, the tick sweeps, the button records, Systems lists', () => {
         const api = readFileSync('netlify/functions/admin-issue-reports.ts', 'utf8');
-        assert.strictEqual(api.split('(await cloudMergeReviewBlocker(prNum)) || await dispatchCloudMerge(').length - 1, 2, 'single + Merge all');
+        assert.ok(api.includes('const err = gate.blocked || await dispatchCloudMerge({ issueId: id, pr: prNum, headSha: gate.headSha });'), 'single merge: gate, then dispatch pinned');
+        assert.ok(api.includes('await Promise.all(claimed.map(async (c) =>') && api.includes('n ? await cloudMergeCheck(n) : null'), 'Merge all: gates in parallel');
+        assert.ok(api.includes(': await dispatchCloudMerge({ issueId: c.id, pr: prNum, headSha: gate?.headSha });'), 'Merge all: dispatch pinned');
+        assert.ok(api.includes('return json(gate.blocked ? 409 : 502, { error: err });'), 'a review refusal is 409, not a GitHub outage');
         const tick = readFileSync('netlify/functions/check-fixes-live.ts', 'utf8');
         assert.ok(tick.includes('await sweepMergedPrs(db)'));
         const approve = readFileSync('src/utils/pr-approval.ts', 'utf8');

@@ -59,11 +59,13 @@ export function approvalFromRemote(pr: RemotePr): Omit<ApprovalRow, 'approvedVia
     };
 }
 
-export type ApprovalFlag = 'ok' | 'no-review' | 'stale-review' | 'changes-needed' | 'before-reviews' | 'not-needed';
+export type ApprovalFlag = 'ok' | 'pending' | 'no-review' | 'stale-review' | 'changes-needed' | 'before-reviews' | 'not-needed';
 
 /** Should the owner look at this merge? Only medium/high PRs into staging need a review; main gets its
  *  reviews through the staging PRs. */
 export function approvalFlag(r: Pick<ApprovalRow, 'base' | 'tier' | 'headSha' | 'reviewerVerdict' | 'reviewerSha' | 'mergedAt'>): ApprovalFlag {
+    // The Approve click writes its row before the sweep has read the tier and verdict: wait for it, don't cry wolf.
+    if (!r.tier) return 'pending';
     if (r.base !== 'staging' || r.tier === 'low') return 'not-needed';
     if (r.mergedAt && r.mergedAt < REVIEWS_BEGAN_AT) return 'before-reviews';
     if (!r.reviewerVerdict) return 'no-review';

@@ -105,7 +105,9 @@ must pass before asking the owner.
     auto-merge; if checks are still running the owner clicks Approve again once they pass.
   - The note on PRs into main no longer claims every staging PR was reviewed; it points at the Approvals list.
   - **"Merge to staging" / "Merge all"** (`admin-issue-reports.ts`) run the same gate via
-    `src/utils/pr-review-remote.ts` (GitHub REST, no `gh`), failing CLOSED if GitHub can't be read.
+    `src/utils/pr-review-remote.ts` (GitHub REST, no `gh`), failing CLOSED if GitHub can't be read. The commit
+    that passed goes to merge-to-staging.yml as `head_sha`, which merges with `--match-head-commit`, so a push
+    between the click and the workflow can't merge unreviewed. Merge all runs its gates in parallel.
 
 ## 1. Risk tiers
 
