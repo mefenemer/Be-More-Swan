@@ -13474,9 +13474,11 @@ async function _pceCanvasAttachFiles(fileList) {
     }
 
     if (!fmt || fmt.max < files.length) {
-        // The narrowest live format that fits: on Instagram that is the Carousel.
+        // The narrowest live format that fits: on Instagram that is the Carousel. Never a format that is
+        // only used when the post says so (ap: false — LinkedIn's Document carousel goes out as a PDF;
+        // "Make it a carousel" or picking it sets that, a photo drop doesn't).
         const target = _pceFormatsFor(post.platform)
-            .filter(f => f.a === 'live' && f.max >= files.length)
+            .filter(f => f.a === 'live' && f.ap !== false && f.max >= files.length)
             .sort((a, b) => a.max - b.max)[0];
         if (!target) {
             window.showToast?.(`${fmt ? fmt.n : 'This format'} takes one item — attaching the first of your ${files.length}.`);
@@ -15697,7 +15699,7 @@ function _pceFormatAccepts(fmt, kind) {
  */
 function _pceBestFormatForMedia(platform, kind, count = 1) {
     return _pceFormatsFor(platform)
-        .filter(f => f.a === 'live' && _pceFormatAccepts(f, kind) && (f.min || 0) <= count && (f.max || 1) >= count)
+        .filter(f => f.a === 'live' && f.ap !== false && _pceFormatAccepts(f, kind) && (f.min || 0) <= count && (f.max || 1) >= count)
         .sort((a, b) => (a.max || 1) - (b.max || 1))[0] || null;
 }
 

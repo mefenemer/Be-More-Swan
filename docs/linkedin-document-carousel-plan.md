@@ -109,18 +109,18 @@ document preview it doesn't have. Cost and tasks are unchanged (one `carousel` t
   with the cover line as the document title. The caption is escaped to LinkedIn's "little text" (`littleText`): its
   15 reserved characters are escaped and `#word` becomes `{hashtag|\#|word}` (`#1` stays a rank, not a hashtag).
 - An upload failure is a media failure (never a text-only post); LinkedIn's status drives the usual retry rules.
-- **Only a row whose stored format is `li_document` goes out as a document.** It's set by "Make it a carousel", by
-  picking the format, or by the editor visibly switching to it ("Switched to Document carousel") when several photos
-  are dropped on a LinkedIn post. The router never picks it from the media alone (`autoPick: false`), so a LinkedIn
-  post with several pictures and no stored format — including ones approved before this shipped — keeps the old
-  multi-image post, and the editor doesn't label it a document.
+- **Only a row whose stored format is `li_document` goes out as a document**, and only "Make it a carousel" or a
+  person choosing the format sets it. Neither the server's format router nor the editor ever picks it from the media
+  alone (`autoPick: false`, sent to the browser as `ap: false`): dropping several photos on a LinkedIn post attaches the
+  first one, as before. A LinkedIn post with several pictures and no stored format — including posts approved before
+  this shipped — keeps the old multi-image post, and the editor doesn't label it a document.
 - Approval refuses a Document carousel with a slide that isn't PNG/JPEG (`LI_DOCUMENT_SLIDE_TYPE`).
 - Links in a caption stay whole: escaped, but a `#` inside a link is never turned into a hashtag.
 - A document still processing after the wait (~7.5 s) is a retryable failure (503 → the normal back-off), never an
   unready post.
 - **A Document carousel left stuck in "publishing" is not retried on its own.** It may already be on LinkedIn (the run
   can be cut off after LinkedIn accepted it), and we can't read posts back to check. It goes to Needs attention saying
-  to check LinkedIn first; "Try again" re-queues it.
+  to check LinkedIn first, and the owner gets the usual "post failed" notification; "Try again" re-queues it.
 - Every other LinkedIn post stays on ugcPosts (§7).
 - `/connections` and the Help Centre say nothing yet — only once one has posted for real on prod.
 

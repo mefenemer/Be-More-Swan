@@ -117,6 +117,24 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
         assert.match(src, /may already be on LinkedIn\. Check your LinkedIn profile first/);
     });
 
+    await check('the editor never switches to Document carousel by itself either (#712 review 4)', () => {
+        const gen = readFileSync('src/generated/platform-constants.js', 'utf8');
+        const row = gen.split('\n').find((l) => l.includes('"k":"li_document"'))!;
+        assert.ok(row.includes('"ap":false'), 'the flag reaches the browser');
+        assert.ok(!gen.split('\n').find((l) => l.includes('"k":"ig_carousel"'))!.includes('"ap"'), 'only li_document carries it');
+        const ws = readFileSync('workspace.html', 'utf8');
+        assert.ok(ws.includes(".filter(f => f.a === 'live' && f.ap !== false && f.max >= files.length)"), 'photo drop');
+        assert.ok(ws.includes(".filter(f => f.a === 'live' && f.ap !== false && _pceFormatAccepts(f, kind)"), 'best format for media');
+    });
+
+    await check('a stranded carousel tells its owner, like any failed post (#712 review 4)', () => {
+        const src = readFileSync('netlify/functions/publish-social-posts.ts', 'utf8');
+        const a = src.indexOf("WHERE status = 'publishing' AND platform = 'linkedin' AND format_key = 'li_document'");
+        const block = src.slice(a, a + 1400);
+        assert.ok(block.includes('RETURNING id, user_id, assistant_id'));
+        assert.ok(block.includes("await createNotification(db, 'post_publish_failed', {"));
+    });
+
     await check('the document title is the cover line, else the first line', () => {
         // The cover's count is fixed to the items really there (fixListCount), exactly as the cover card shows it.
         assert.equal(linkedInDocumentTitle('5 tools we use every day\n\n1. Notion\n2. Figma'), '2 tools we use every day');

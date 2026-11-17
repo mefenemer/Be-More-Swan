@@ -74,13 +74,23 @@ export default withLambda(async () => {
     // the batch, so it is the one most likely to be cut off. Silently re-queueing it could post the same
     // carousel publicly again every 10 minutes (#712 review 3). It goes to Needs attention instead, saying
     // to check LinkedIn first; "Try again" there re-queues it as usual.
-    await db.execute(
+    const stranded = await db.execute(
         `UPDATE scheduled_posts
             SET status = 'failed', retry_at = NULL, updated_at = now(),
                 failure_reason = '${LI_DOCUMENT_STRANDED_REASON}'::jsonb
           WHERE status = 'publishing' AND platform = 'linkedin' AND format_key = 'li_document'
-            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
-    );
+            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'
+          RETURNING id, user_id, assistant_id`
+    ) as unknown as Array<{ id: number; user_id: number; assistant_id: number | null }>;
+    // Told like any failed post (handleFailure), so the customer knows to check LinkedIn (#712 review 4).
+    for (const row of stranded ?? []) {
+        const reason = JSON.parse(LI_DOCUMENT_STRANDED_REASON.replace(/''/g, "'"));
+        await createNotification(db, 'post_publish_failed', {
+            userId: row.user_id,
+            context: { platform: { label: LABEL.linkedin }, failure: { reason: reason.errorMessage } },
+            metadata: { postId: row.id, platform: 'linkedin', reason, assistantId: row.assistant_id },
+        }).catch((err: unknown) => console.warn(`[publish-social-posts] stranded-carousel notice failed for post ${row.id}:`, (err as Error)?.message || err));
+    }
 
     // Self-heal: reclaim posts stranded in 'publishing' by an earlier timed-out tick so they
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').
