@@ -71,40 +71,7 @@
       // workspace-wide integrations.html (found connecting Slack/Notion/Jira, 2026-11-16).
       return '<a href="' + connectHref(s.providerKey) + '" class="' + ROW_BTN + ' btn-primary border-transparent">Connect ' + esc(s.providerName) + '</a>';
     }
-    return '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-primary border-transparent">Enable</button>';
-  }
-
-  function card(s) {
-    const connected = s.active || s.connection || s.connectionOptional || s.tier === 2;
-    const stateText = s.active
-      ? (s.active.isEnabled ? 'Enabled' : 'Paused')
-      : connected ? 'Not enabled' : 'Connect ' + esc(s.providerName) + ' first';
-    const manage = s.active
-      ? '<div class="flex items-center gap-2 flex-wrap">' +
-          '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-secondary">Configure</button>' +
-          '<button type="button" data-remove="' + s.active.id + '" class="' + ROW_BTN + ' btn-destructive">Remove</button>' +
-        '</div>' +
-        '<p class="text-xs text-gray-500 mt-2">' + esc(s.description) + '</p>'
-      : '';
-    const kebab = manage
-      ? '<button type="button" aria-label="Manage ' + esc(s.title) + '" aria-expanded="false"' +
-          ' onclick="var p=this.closest(\'[data-conn-row]\').querySelector(\'[data-conn-manage]\');var o=p.classList.toggle(\'hidden\');this.setAttribute(\'aria-expanded\',String(!o))"' +
-          ' class="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">' +
-          '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>' +
-        '</button>'
-      : '<span class="shrink-0 w-8"></span>';
-    return '<div data-conn-row="recipe-' + esc(s.id) + '" class="px-4 py-3">' +
-      '<div class="flex items-center gap-3">' +
-        '<div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center text-base shrink-0">⚡</div>' +
-        '<div class="flex-1 min-w-0">' +
-          '<p class="text-sm font-bold text-gray-900 truncate" title="' + esc(s.description) + '">' + esc(s.title) + '</p>' +
-          '<p class="text-xs ' + (connected ? 'text-gray-500' : 'text-amber-700') + ' truncate">' + esc(s.providerName) + ' ' + dirLabel(s) + ' · ' + stateText + '</p>' +
-        '</div>' +
-        controlFor(s) +
-        kebab +
-      '</div>' +
-      (manage ? '<div data-conn-manage class="hidden mt-2 pl-11">' + manage + '</div>' : '') +
-    '</div>';
+    return '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-primary border-transparent">' + (Array.isArray(s.settings) && s.settings.length ? 'Set up' : 'Switch on') + '</button>';
   }
 
   // Category of each recipe provider, so the connector grid can suppress a "coming soon"
@@ -121,17 +88,95 @@
     else if (typeof window._intLoadConnections === 'function') window._intLoadConnections();
   }
 
+  // ── Tool → its actions (owner, 2026-11-17: "connect to a tool, then you can do certain things with it") ──
+  // Each tool is one row (connected, or a Connect button), and what this assistant does with it — its
+  // ACTIONS, the old "recipes" — sit underneath, each with its switch. A tool that needs no connection
+  // (email: Gmail/Outlook rows already sit in the section, or Be More Swan's address) shows only its actions.
+  const PROVIDER_ICON = { slack: '💬', notion: '📝', jira: '🗂️', asana: '✅', email: '✉️', hubspot: '🧲', salesforce: '☁️', pipedrive: '📈', zoho: '📇', custom_webhook: '🔗' };
+
+  function actionRow(s, connected) {
+    const on = !!(s.active && s.active.isEnabled);
+    const stateText = s.active ? (on ? 'On' : 'Off') : connected ? 'Off' : 'Connect ' + esc(s.providerName) + ' first';
+    const control = connected ? controlFor(s) : '<span class="shrink-0 text-xs font-semibold text-gray-400">Not connected</span>';
+    const manage = s.active
+      ? '<div class="flex items-center gap-2 flex-wrap">' +
+          (Array.isArray(s.settings) && s.settings.length || (Array.isArray(s.fieldSchema) && s.fieldSchema.length) || s.tier === 2
+            ? '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-secondary">Settings</button>' : '') +
+          '<button type="button" data-remove="' + s.active.id + '" class="' + ROW_BTN + ' btn-destructive">Remove</button>' +
+        '</div>'
+      : '';
+    const kebab = manage
+      ? '<button type="button" aria-label="Manage ' + esc(s.title) + '" aria-expanded="false"' +
+          ' onclick="var p=this.closest(\'[data-action-row]\').querySelector(\'[data-conn-manage]\');var o=p.classList.toggle(\'hidden\');this.setAttribute(\'aria-expanded\',String(!o))"' +
+          ' class="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">' +
+          '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>' +
+        '</button>'
+      : '<span class="shrink-0 w-8"></span>';
+    return '<div data-action-row="' + esc(s.id) + '" class="py-2.5 pl-11 pr-4">' +
+      '<div class="flex items-center gap-3">' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-semibold text-gray-900">' + esc(s.title) + '</p>' +
+          '<p class="text-xs text-gray-500">' + esc(s.description || '') + '</p>' +
+          '<p class="text-[11px] font-bold mt-0.5 ' + (on ? 'text-emerald-700' : 'text-gray-400') + '">' + stateText + '</p>' +
+        '</div>' + control + kebab +
+      '</div>' +
+      (manage ? '<div data-conn-manage class="hidden mt-2">' + manage + '</div>' : '') +
+    '</div>';
+  }
+
+  function toolBlock(list) {
+    const s0 = list[0];
+    const optional = !!s0.connectionOptional || s0.tier === 2;
+    const connected = optional || !!s0.connection;
+    const icon = PROVIDER_ICON[s0.providerKey] || '🔌';
+    const head = optional ? '' :
+      '<div class="px-4 pt-3 pb-1 flex items-center gap-3">' +
+        '<div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center text-base shrink-0" aria-hidden="true">' + icon + '</div>' +
+        '<div class="flex-1 min-w-0"><p class="text-sm font-bold text-gray-900">' + esc(s0.providerName) + '</p>' +
+          '<p class="text-xs ' + (connected ? 'text-emerald-700' : 'text-gray-500') + '">' + (connected ? '✓ Connected' : 'Not connected') + '</p></div>' +
+        (connected ? '' : '<a href="' + connectHref(s0.providerKey) + '" class="' + ROW_BTN + ' btn-primary border-transparent">Connect ' + esc(s0.providerName) + '</a>') +
+        '<span class="shrink-0 w-8"></span>' +
+      '</div>';
+    return '<div data-tool-block="' + esc(s0.providerKey) + '" data-ai-actions class="py-1">' + head +
+      '<p class="pl-11 pr-4 text-[11px] font-bold uppercase tracking-wide text-gray-400 ' + (optional ? 'mt-2' : 'mt-1') + '">Actions</p>' +
+      list.map((s) => actionRow(s, connected)).join('') +
+    '</div>';
+  }
+
+  /** { category: { html, on, connected } } — what integrations.js draws inside each section. */
+  function buildGroups(list) {
+    const byCat = {};
+    for (const s of list) {
+      const cat = PROVIDER_CATEGORY[s.providerKey] || s.providerCategory || 'other';
+      (byCat[cat] = byCat[cat] || {})[s.providerKey] = (byCat[cat][s.providerKey] || []).concat(s);
+    }
+    const out = {};
+    for (const [cat, tools] of Object.entries(byCat)) {
+      const all = [].concat(...Object.values(tools));
+      out[cat] = {
+        html: Object.values(tools).map(toolBlock).join(''),
+        on: all.filter((s) => s.active && s.active.isEnabled).length,
+        connected: Object.values(tools).filter((t) => t[0].connection).length,
+      };
+    }
+    return out;
+  }
+
   function render() {
     const h = host();
     if (!h) return;
     const list = relevantScenarios();
+    // Drawn INSIDE the Connections sections by integrations.js (one tool, then its actions), so the
+    // separate list above the connectors is gone. The host stays as the fallback for a page without them.
+    window._syncedActionGroups = buildGroups(list);
     publishCoveredCategories(list);
+    if (typeof window._intRenderConnections === 'function' || typeof window._intLoadConnections === 'function') {
+      h.innerHTML = ''; h.classList.add('hidden'); return;
+    }
     if (!list.length) { h.innerHTML = ''; h.classList.add('hidden'); return; }
     h.classList.remove('hidden');
-    // No heading here — the unified "Synced actions" heading lives in assistant-detail.html
-    // above this host, so these enable-able recipe cards read as part of that one section.
-    h.innerHTML =
-      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">' + list.map(card).join('') + '</div>';
+    h.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">' +
+      Object.values(window._syncedActionGroups).map((g) => g.html).join('') + '</div>';
   }
 
   async function load() {
@@ -148,7 +193,7 @@
       openPendingSetup();
     } catch (e) {
       // Degrade quietly — the platform grid + Revoke All above stay usable.
-      h.innerHTML = '<p class="text-sm text-gray-400">Couldn’t load synced actions.</p>';
+      h.innerHTML = '<p class="text-sm text-gray-400">Couldn’t load this assistant’s actions.</p>';
       h.classList.remove('hidden');
     }
   }
@@ -213,8 +258,8 @@
             '<span class="text-gray-300">→</span>' +
             '<input data-ai-map="' + esc(f.bmsField) + '" value="' + esc(val) + '" placeholder="external field" class="w-1/2 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"></div>';
         }).join('')
-      : '<p class="text-sm text-gray-500">This recipe has no fields to map — it runs automatically once enabled.</p>';
-    m.querySelector('[data-ai-save]').textContent = s.active ? 'Save changes' : 'Enable recipe';
+      : '<p class="text-sm text-gray-500">Nothing to set up — once it’s on, it runs by itself.</p>';
+    m.querySelector('[data-ai-save]').textContent = s.active ? 'Save changes' : 'Switch on';
     m.classList.remove('hidden');
     m.classList.add('flex');
   }
@@ -268,12 +313,12 @@
     try {
       const res = await fetch(API + '/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Could not enable this recipe.');
+      if (!res.ok) throw new Error(data.error || 'Couldn’t switch this on.');
       closeModal();
-      window.showToast && window.showToast(switchedOffNote(editing, data.switchedOff) || 'Recipe enabled.');
+      window.showToast && window.showToast(switchedOffNote(editing, data.switchedOff) || 'Switched on.');
       load();
     } catch (e) {
-      errEl.textContent = String(e.message || 'Could not enable this recipe.'); errEl.classList.remove('hidden');
+      errEl.textContent = String(e.message || 'Couldn’t switch this on.'); errEl.classList.remove('hidden');
     } finally { btn.disabled = false; btn.textContent = label; }
   }
 
@@ -282,8 +327,8 @@
     if (_wired) return;
     _wired = true;
     document.addEventListener('click', async (e) => {
-      const h = host();
-      if (!h || !h.contains(e.target)) return;
+      // Actions are drawn inside the Connections sections (integrations.js) or, as a fallback, the host.
+      if (!e.target.closest('[data-ai-actions]') && !(host() && host().contains(e.target))) return;
 
       const cfg = e.target.closest('[data-config]');
       if (cfg) { const s = state.scenarios.find((x) => String(x.id) === cfg.getAttribute('data-config')); if (s) openModal(s); return; }
@@ -308,7 +353,7 @@
 
       const rm = e.target.closest('[data-remove]');
       if (rm) {
-        if (!(await window.confirmModal('It will stop firing for this assistant.', { title: 'Remove this recipe?', confirmLabel: 'Remove' }))) return;
+        if (!(await window.confirmModal('This assistant stops doing it. You can add it again any time.', { title: 'Remove this action?', confirmLabel: 'Remove' }))) return;
         try {
           const res = await fetch(API + '/deactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: Number(rm.getAttribute('data-remove')) }) });
           if (res.ok) load();

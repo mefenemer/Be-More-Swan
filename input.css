@@ -240,3 +240,6 @@ summary {
   .page-wide { width: 100%; max-width: 1360px; margin-left: auto; margin-right: auto; padding-left: 1rem; padding-right: 1rem; }
   @media (min-width: 640px) { .page-wide { padding-left: 1.5rem; padding-right: 1.5rem; } }
 }
+
+/* Connections sections (integrations.js _connSections): the chevron is drawn by us, so hide Safari's marker. */
+details[data-conn-section] > summary::-webkit-details-marker { display: none; }

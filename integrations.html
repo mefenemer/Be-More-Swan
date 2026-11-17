@@ -107,8 +107,8 @@
   <section id="scenario-library" class="mt-14 hidden">
     <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
       <div>
-        <h2 class="text-2xl font-extrabold text-gray-900">Integration Scenarios</h2>
-        <p class="text-gray-500 mt-1">Turn on prebuilt recipes that move data between Be More Swan and your tools — per assistant.</p>
+        <h2 class="text-2xl font-extrabold text-gray-900">Actions</h2>
+        <p class="text-gray-500 mt-1">Connect a tool, then choose what each assistant does with it — post a summary to Slack, turn action items into Jira tasks, and more.</p>
       </div>
       <div id="scenario-assistant-bar" class="hidden shrink-0">
         <label for="scenario-assistant-select" class="block text-xs font-bold text-gray-600 mb-1">Assistant</label>
@@ -117,14 +117,14 @@
     </div>
 
     <div id="scenarios-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-gray-500 col-span-full" id="scenarios-loading">Loading scenarios…</div>
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-gray-500 col-span-full" id="scenarios-loading">Loading actions…</div>
     </div>
 
     <!-- Execution logs -->
     <div class="mt-10">
       <h3 class="text-lg font-bold text-gray-900 mb-3">Execution log</h3>
       <div id="scenario-logs" class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100 text-sm">
-        <div class="p-5 text-gray-400" id="scenario-logs-empty">No runs yet — logs appear here once a scenario fires.</div>
+        <div class="p-5 text-gray-400" id="scenario-logs-empty">No runs yet — they appear here once an action runs.</div>
       </div>
     </div>
   </section>
@@ -134,7 +134,7 @@
     <div class="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-y-auto">
       <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 sticky top-0 bg-white">
         <div>
-          <h3 id="scenario-modal-title" class="font-bold text-gray-900">Configure scenario</h3>
+          <h3 id="scenario-modal-title" class="font-bold text-gray-900">Set up this action</h3>
           <p id="scenario-modal-desc" class="text-sm text-gray-500 mt-0.5"></p>
         </div>
         <button type="button" id="scenario-modal-close" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0">&times;</button>
@@ -149,7 +149,7 @@
       </div>
       <div class="p-5 border-t border-gray-100 flex justify-end gap-2 sticky bottom-0 bg-white">
         <button type="button" id="scenario-modal-cancel" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg">Cancel</button>
-        <button type="button" id="scenario-modal-save" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Enable scenario</button>
+        <button type="button" id="scenario-modal-save" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Switch on</button>
       </div>
     </div>
   </div>
@@ -556,7 +556,7 @@
       const res = await fetch('/.netlify/functions/get-assistants');
       if (res.ok) list = ((await res.json()).assistants || []).filter(a => a.isActive !== false);
     } catch (e) {}
-    if (!list.length) { section.classList.remove('hidden'); grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">Create an assistant first — scenarios are configured per assistant.</div>'; return; }
+    if (!list.length) { section.classList.remove('hidden'); grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">Create an assistant first — actions are set up per assistant.</div>'; return; }
     select.innerHTML = list.map(a => '<option value="' + a.id + '">' + esc(a.name) + (a.role ? ' — ' + esc(a.role) : '') + '</option>').join('');
     assistantId = String(list[0].id);
     select.value = assistantId;
@@ -591,7 +591,7 @@
   }
 
   function render() {
-    if (!scenarios.length) { grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">No scenarios available yet.</div>'; return; }
+    if (!scenarios.length) { grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">No actions available yet.</div>'; return; }
     grid.innerHTML = scenarios.map(function (s) {
       const dir = s.direction === 'inbound' ? '← in' : s.direction === 'two_way' ? '⇄ 2-way' : '→ out';
       const grey = (s.tier === 3 || s.status !== 'available') ? ' opacity-70' : '';
@@ -608,14 +608,14 @@
   }
 
   async function loadScenarios() {
-    grid.innerHTML = '<div class="col-span-full text-gray-400 p-6 text-center">Loading scenarios…</div>';
+    grid.innerHTML = '<div class="col-span-full text-gray-400 p-6 text-center">Loading actions…</div>';
     try {
       const res = await fetch(API + '/scenarios?assistantId=' + encodeURIComponent(assistantId));
       if (!res.ok) throw new Error('status ' + res.status);
       scenarios = (await res.json()).scenarios || [];
       render();
     } catch (e) {
-      grid.innerHTML = '<div class="col-span-full text-red-600 p-6 text-center">Couldn’t load scenarios.</div>';
+      grid.innerHTML = '<div class="col-span-full text-red-600 p-6 text-center">Couldn’t load actions.</div>';
     }
   }
 
@@ -624,7 +624,7 @@
       const res = await fetch(API + '/logs?assistantId=' + encodeURIComponent(assistantId));
       if (!res.ok) return;
       const logs = (await res.json()).logs || [];
-      if (!logs.length) { logsEl.innerHTML = '<div class="p-5 text-gray-400">No runs yet — logs appear here once a scenario fires.</div>'; return; }
+      if (!logs.length) { logsEl.innerHTML = '<div class="p-5 text-gray-400">No runs yet — they appear here once an action runs.</div>'; return; }
       logsEl.innerHTML = logs.map(function (l) {
         const ok = (l.httpStatus || 0) < 400;
         const badge = '<span class="text-xs font-bold px-2 py-0.5 rounded-full ' + (ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700') + '">' + (l.httpStatus || '—') + '</span>';
@@ -661,8 +661,8 @@
             '<span class="text-gray-300">→</span>' +
             '<input data-map="' + esc(f.bmsField) + '" value="' + esc(val) + '" placeholder="external field" class="w-1/2 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"></div>';
         }).join('')
-      : '<p class="text-sm text-gray-500">This scenario has no fields to map — it runs automatically once enabled.</p>';
-    document.getElementById('scenario-modal-save').textContent = s.active ? 'Save changes' : 'Enable scenario';
+      : '<p class="text-sm text-gray-500">Nothing to set up — once it’s on, it runs by itself.</p>';
+    document.getElementById('scenario-modal-save').textContent = s.active ? 'Save changes' : 'Switch on';
     modal.classList.remove('hidden');
   }
   function closeModal() { modal.classList.add('hidden'); editing = null; }
@@ -691,14 +691,14 @@
     try {
       const res = await fetch(API + '/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json().catch(function () { return {}; });
-      if (!res.ok) throw new Error(data.error || 'Could not enable scenario.');
+      if (!res.ok) throw new Error(data.error || 'Couldn’t switch this on.');
       closeModal();
       if (Array.isArray(data.switchedOff) && data.switchedOff.length && window.showToast) {
         window.showToast('Tasks now go to ' + editing.providerName + '. ' + data.switchedOff.join(' and ') + ' is switched off — one task tool at a time.');
       }
       loadScenarios();
     } catch (e) {
-      errEl.textContent = String(e.message || 'Could not enable scenario.'); errEl.classList.remove('hidden');
+      errEl.textContent = String(e.message || 'Couldn’t switch this on.'); errEl.classList.remove('hidden');
     } finally { btn.disabled = false; }
   }
 
@@ -733,7 +733,7 @@
 
     const rm = e.target.closest('[data-remove]');
     if (rm) {
-      if (!(await window.confirmModal('It will stop firing for this assistant.', { title: 'Remove this scenario?', confirmLabel: 'Remove' }))) return;
+      if (!(await window.confirmModal('This assistant stops doing it. You can add it again any time.', { title: 'Remove this action?', confirmLabel: 'Remove' }))) return;
       try {
         const res = await fetch(API + '/deactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: Number(rm.getAttribute('data-remove')) }) });
         if (res.ok) loadScenarios();
