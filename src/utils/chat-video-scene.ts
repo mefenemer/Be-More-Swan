@@ -13,6 +13,7 @@
 import type { Scene, Storyboard } from '../lib/storyboard';
 import { readNameCaption, type NameCaption } from '../lib/lower-third';
 import { readSceneText, type SceneTextFields } from '../lib/scene-text';
+import { isBubbleSize, isCorner, isCoverLayout, type BubbleSize, type Corner, type CoverLayout, type SceneCover } from '../lib/scene-cover';
 
 export const VIDEO_SCENE_EDIT_TYPE = 'video_scene_edit';
 
@@ -29,11 +30,16 @@ export interface VideoSceneRequest {
     text?: SceneTextFields;
     /** Words to cut from one of the owner's own clips, exactly as said ("Edit the words"); matched on the server. */
     cutPhrase?: string;
+    /** Walkthrough layout on an own-footage scene (scene-cover.ts): 'presenter' takes the screen off. */
+    layout?: CoverLayout | 'presenter';
+    /** What's on the screen: one of the video's own videos (by id) from a second, or stock found by words. */
+    screenVideo?: number; screenStartS?: number; screenSearch?: string;
+    corner?: Corner; bubbleSize?: BubbleSize;
 }
 export interface VideoSceneCard {
     type: typeof VIDEO_SCENE_EDIT_TYPE; projectId: number; scene: number; sceneId: string; summary: string | null;
     /** What edit_scene is sent. */
-    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string; nameCaption?: NameCaption | null; cutPhrase?: string } & SceneTextFields;
+    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string; nameCaption?: NameCaption | null; cutPhrase?: string; cover?: SceneCover | null } & SceneTextFields;
     now: { voiceover: string; onScreenText: string };
 }
 
@@ -60,11 +66,21 @@ export function videoSceneRequestFromUiElement(uiElement: unknown): VideoSceneRe
     if (Object.keys(text).length) req.text = text;
     const cutPhrase = str(ui.cutPhrase, 200);
     if (cutPhrase) req.cutPhrase = cutPhrase;
-    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null || req.nameCaption !== undefined || req.text || req.cutPhrase ? req : null;
+    if (ui.layout === 'presenter' || isCoverLayout(ui.layout)) req.layout = ui.layout as VideoSceneRequest['layout'];
+    const sv = Number(ui.screenVideo);
+    if (Number.isInteger(sv) && sv > 0) req.screenVideo = sv;
+    const st = Number(ui.screenStartS);
+    if (Number.isFinite(st) && st >= 0 && ui.screenStartS != null) req.screenStartS = Math.round(st * 10) / 10;
+    const ss = str(ui.screenSearch, 80);
+    if (ss) req.screenSearch = ss;
+    if (isCorner(ui.corner)) req.corner = ui.corner;
+    if (isBubbleSize(ui.bubbleSize)) req.bubbleSize = ui.bubbleSize;
+    const layoutAsked = req.layout != null || req.screenVideo != null || req.screenStartS != null || req.screenSearch != null || req.corner != null || req.bubbleSize != null;
+    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null || req.nameCaption !== undefined || req.text || req.cutPhrase || layoutAsked ? req : null;
 }
 
 /** The card for this scene of this storyboard. Null when there is no such scene, or nothing would change. */
-export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | null | undefined): VideoSceneCard | null {
+export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | null | undefined, opts: { ownVideoIds?: number[] } = {}): VideoSceneCard | null {
     const scene: Scene | undefined = storyboard?.scenes?.[req.scene - 1];
     if (!scene) return null;
     const patch: VideoSceneCard['patch'] = {};
@@ -78,6 +94,14 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
     }
     if (req.nameCaption !== undefined && JSON.stringify(req.nameCaption) !== JSON.stringify(scene.nameCaption ?? null)) patch.nameCaption = req.nameCaption;
     if (req.cutPhrase && scene.source === 'own_video') patch.cutPhrase = req.cutPhrase;
+    // A layout only on their own footage (edit_scene re-checks the screen is one of the video's own videos).
+    if (scene.source === 'own_video') {
+        // Only one of THIS video's own videos can be the screen: edit_scene would drop any other and leave the
+        // presenter full frame, so the card never offers it.
+        const ownOk = req.screenVideo == null || (opts.ownVideoIds ?? []).includes(req.screenVideo);
+        const cover = ownOk ? coverFromRequest(req, scene.cover) : undefined;
+        if (cover !== undefined && JSON.stringify(cover) !== JSON.stringify(scene.cover ?? null)) patch.cover = cover;
+    }
     // Text placement only means something on words over a picture (a branded card draws its own).
     if (req.text && scene.source !== 'brand_card' && (req.onScreenText ?? scene.onScreenText)) {
         for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {
@@ -90,4 +114,26 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
         type: VIDEO_SCENE_EDIT_TYPE, projectId: req.projectId, scene: req.scene, sceneId: scene.id, summary: req.summary, patch,
         now: { voiceover: scene.voiceover || '', onScreenText: scene.onScreenText || '' },
     };
+}
+
+/**
+ * The cover a card asks for, from the scene's current one: undefined = no layout change asked, null = the
+ * presenter full frame. A new screen needs a source: their video, or search words (stock footage). Pure.
+ */
+export function coverFromRequest(req: VideoSceneRequest, current: SceneCover | undefined): SceneCover | null | undefined {
+    const asked = req.layout != null || req.screenVideo != null || req.screenStartS != null || req.screenSearch != null || req.corner != null || req.bubbleSize != null;
+    if (!asked) return undefined;
+    if (req.layout === 'presenter') return null;
+    const layout = (req.layout ?? current?.layout) as CoverLayout | undefined;
+    if (!layout) return undefined;
+    const next: SceneCover = current ? { ...current, layout } : { layout, source: 'stock_video' };
+    if (req.screenVideo != null) { next.source = 'own_video'; next.assetId = req.screenVideo; delete next.keywords; delete next.inS; }
+    else if (req.screenSearch) { next.source = 'stock_video'; next.keywords = req.screenSearch; delete next.assetId; delete next.inS; }
+    if (req.screenStartS != null && next.source === 'own_video') next.inS = req.screenStartS;
+    if (!current && req.screenVideo == null && !req.screenSearch) return undefined;   // a new layout with nothing to show
+    if (req.corner) next.corner = req.corner;
+    if (layout === 'cover') delete next.corner;
+    if (req.bubbleSize) { if (req.bubbleSize === 'small' && layout === 'bubble') next.size = 'small'; else delete next.size; }
+    if (layout !== 'bubble') delete next.size;
+    return next;
 }
