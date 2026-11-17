@@ -32,6 +32,10 @@ export const LINKEDIN_PAGE_PICK_TTL_MS = 10 * 60 * 1000;
 export type PendingPagePick = {
     organisationId: number;
     assistantId: number | null;
+    /** The page to send the person back to, when it differs from the binding (Blog Writer → pool). */
+    returnAssistantId?: number | null;
+    /** Started from the Blog Writer's LinkedIn card: switch the blog destination on once bound. */
+    enableBlogDestination?: boolean;
     pages: LinkedInPage[];
     tokenExpiresAt: string | null;
     expiresAt: number;
@@ -58,7 +62,7 @@ export async function bindLinkedInPage(db: Db, opts: {
         return { ok: false, collisionAttemptId: attemptId ?? null };
     }
 
-    const [existing] = await db.select({ id: systemConnections.id, metadata: systemConnections.metadata })
+    const [existing] = await db.select({ id: systemConnections.id, metadata: systemConnections.metadata, assistantId: systemConnections.assistantId })
         .from(systemConnections)
         .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'linkedin')))
         .limit(1);
@@ -78,7 +82,8 @@ export async function bindLinkedInPage(db: Db, opts: {
     // Same order as the member branch: un-pause what the old connection's failure halted, only
     // AFTER the status='active' write (the assistant-resume guard reads current statuses).
     if (existing) {
-        await restoreConnectionDependents(db, { connectionId: existing.id, organisationId, assistantId, serviceName: 'linkedin', userId });
+        // Whoever the row is bound to after the update — see the member branch in social-oauth-callback.ts.
+        await restoreConnectionDependents(db, { connectionId: existing.id, organisationId, assistantId: assistantId ?? existing.assistantId, serviceName: 'linkedin', userId });
     } else {
         await resolveActionNotifications(db, userId, CONNECTION_RESTORED_TYPES);
     }

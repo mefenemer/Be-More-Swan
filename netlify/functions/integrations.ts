@@ -6,7 +6,7 @@ import { systemConnections, scheduledPosts, users, auditLogs, workspaceIntegrati
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
+import { isServiceAllowedForAssistant, isConnectAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -294,7 +294,7 @@ export default withLambda(async (event) => {
             if (assistantId !== undefined && assistantId !== null) {
                 const assistant = await resolveAssistantRole(db, currentOrgId, parseInt(String(assistantId), 10));
                 if (!assistant) return { statusCode: 400, body: JSON.stringify({ error: 'Unknown assistant.' }) };
-                if (!isServiceAllowedForAssistant(serviceName, assistant)) {
+                if (!isConnectAllowedForAssistant(serviceName, assistant)) {
                     console.warn(`[integrations] Sandbox violation blocked: ${serviceName} not allowed for assistant ${assistantId} (${assistant.roleKey ?? assistant.role})`);
                     return { statusCode: 403, body: JSON.stringify({ error: `${serviceName} is not a relevant connection for this assistant.`, code: 'CONNECTION_NOT_RELEVANT' }) };
                 }

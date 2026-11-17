@@ -37,9 +37,10 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads, users } from '../../db/schema';
+import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads } from '../../db/schema';
 import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
 import { keepServerOwnedMeetingKeys } from '../../src/utils/meeting-handoff-once';
+import { NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -192,7 +193,7 @@ async function enqueueHandoffOnApproval(
     db: Db,
     orgId: number,
     record: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown },
-    approverUserId: number | null = null,
+    onlyActions?: string[],
 ): Promise<void> {
     const triggerStatus = record.recordType === 'lead' ? 'QUALIFIED'
         : record.recordType === 'meeting' ? 'MEETING_BOOKED'
@@ -207,23 +208,14 @@ async function enqueueHandoffOnApproval(
         // CRM record-update recipes (mapped to properties), Slack/Notion summary recipes, or the
         // email_meeting_followup recipe (attendees + the reviewed draft email).
         const summary = data.summary ?? data.meetingSummary ?? data.notes;
-        // Assistant display name — used by the follow-up email's AI disclosure footer + From line.
-        // Best-effort: the footer falls back to a generic label if the lookup fails.
+        // Assistant display name — carried in the hand-off fields (webhooks and CRM recipes can map it).
         let assistantName: string | undefined;
         try {
             const [a] = await db.select({ name: aiAssistants.name }).from(aiAssistants)
                 .where(and(eq(aiAssistants.id, record.aiAssistantId), eq(aiAssistants.organisationId, orgId)))
                 .limit(1);
             assistantName = a?.name;
-        } catch { /* name is best-effort — the email footer degrades to a generic label */ }
-        // Who approved it: Reply-To on a follow-up sent from Be More Swan's address (finish plan step 7).
-        let approverEmail: string | undefined;
-        if (approverUserId) {
-            try {
-                const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, approverUserId)).limit(1);
-                approverEmail = u?.email ?? undefined;
-            } catch { /* best-effort — the follow-up then goes with no Reply-To */ }
-        }
+        } catch { /* name is best-effort */ }
         fields = {
             company: data.company ?? record.title ?? undefined,
             contactName: data.contactName ?? data.attendee ?? data.with,
@@ -239,7 +231,6 @@ async function enqueueHandoffOnApproval(
             attendees: data.attendees, // [{name,email}] — emails filled in on the inbox card
             followupEmail: data.followupEmail, // { subject, body } — the reviewed draft
             assistantName,
-            approverEmail,
             attribution: 'Be More Swan',
         };
     } else {
@@ -249,7 +240,10 @@ async function enqueueHandoffOnApproval(
         return;
     }
 
-    const subject: TriggerSubject = { recordType: record.recordType, recordId: record.id, newStatus: triggerStatus, fields };
+    const subject: TriggerSubject = {
+        recordType: record.recordType, recordId: record.id, newStatus: triggerStatus, fields,
+        ...(onlyActions?.length ? { onlyActions } : {}),
+    };
     await enqueueScenarioTrigger(db, {
         organisationId: orgId,
         assistantId: record.aiAssistantId,
@@ -737,7 +731,7 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown; dataMerge?: unknown };
+            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown; dataMerge?: unknown; sendFollowup?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
             // ── Bulk REJECT ─────────────────────────────────────────────────────────────
@@ -859,6 +853,28 @@ export default withLambda(async (event) => {
                 .limit(1);
             if (mirrorCheck && MIRROR_RECORD_TYPES.has(mirrorCheck.recordType)) {
                 return json(409, { error: 'Campaign decisions and orders are settled on the Campaign Assistant, not edited here.' });
+            }
+
+            // ── "Send the follow-up now" (Inbox) ─────────────────────────────────────────────
+            // A meeting approved while no Gmail or Outlook was connected kept its follow-up unsent
+            // (data.followupNotSent, stamped by sync-action.ts). Approving again cannot resend it — only a
+            // FIRST transition into live fires hand-offs — so this queues the follow-up alone, through the
+            // same runner and the same once-per-meeting claim. Refused until a mailbox is connected.
+            if (body.sendFollowup === true) {
+                const [m] = await db.select({
+                    id: assistantRecords.id, recordType: assistantRecords.recordType, aiAssistantId: assistantRecords.aiAssistantId,
+                    title: assistantRecords.title, status: assistantRecords.status, data: assistantRecords.data,
+                    approvalStatus: assistantRecords.approvalStatus,
+                }).from(assistantRecords)
+                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                    .limit(1);
+                if (!m || m.recordType !== 'meeting') return json(404, { error: 'Meeting not found.' });
+                if (!LIVE_APPROVAL.has(m.approvalStatus ?? '')) return json(409, { error: 'Approve the meeting first — approving sends the follow-up.' });
+                const md = (m.data && typeof m.data === 'object') ? m.data as Record<string, unknown> : {};
+                if (md.followupSentAt) return json(409, { error: 'This follow-up has already been sent.' });
+                if (!(await connectedMailbox(db, orgId))) return json(409, { error: NO_MAILBOX_MESSAGE, code: 'no_mailbox' });
+                await enqueueHandoffOnApproval(db, orgId, m, ['email_meeting_followup']);
+                return json(200, { queued: true });
             }
 
             const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -1041,7 +1057,7 @@ export default withLambda(async (event) => {
                 // Phase 3: normalise the meeting's action items BEFORE the handoff enqueues, so the
                 // create_tasks recipes have the per-task ledger rows to sync.
                 await materialiseActionItems(db, orgId, liveRecord);
-                await enqueueHandoffOnApproval(db, orgId, liveRecord, userId);
+                await enqueueHandoffOnApproval(db, orgId, liveRecord);
             }
 
             // After the reject has committed: a rule for a rejection that did not happen would teach

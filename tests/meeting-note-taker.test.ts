@@ -36,13 +36,13 @@ async function main() {
     assert.deepEqual(hubRecordsFromUiElement(null), []);
     assert.deepEqual(hubRecordsFromUiElement({ type: 'something_else' }), []);
 
-    // ── 2. Follow-up email payload: only real addresses, the reviewed draft, the footer name ──
+    // ── 2. Follow-up email payload: only real addresses, the reviewed draft (no From name: it goes from the user's own inbox) ──
     const subject = { recordType: 'meeting', recordId: 77, newStatus: 'MEETING_BOOKED', fields: { ...card, assistantName: 'Minute Taker' } };
     const email = buildEmailPayload(subject, {});
     assert.deepEqual(email.to, ['sarah@example.com'], 'an attendee with no address is left out, not guessed');
     assert.equal(email.subject, 'Thanks all');
     assert.equal(email.body, 'Recap…');
-    assert.equal(email.assistantName, 'Minute Taker');
+    assert.ok(!('assistantName' in email), 'no From name — the follow-up only goes from the user’s own Gmail or Outlook');
 
     const bad = buildEmailPayload({ ...subject, fields: { attendees: [{ name: 'X', email: 'not-an-address' }], meetingTitle: 'Ops sync', meetingSummary: 'Sum' } }, {});
     assert.deepEqual(bad.to, []);

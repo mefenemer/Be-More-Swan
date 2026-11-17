@@ -66,6 +66,12 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
     // One task tool per assistant (src/config/recipe-settings.ts). The page now switches the other off, but
     // an assistant set up before that may still have Jira AND Asana on — and both would split one meeting's
     // action items between them. Run only the one switched on (or saved) most recently.
+    // A retry of one hand-off ("Send the follow-up now") runs only that action, never the meeting's others.
+    if (Array.isArray(subject.onlyActions) && subject.onlyActions.length) {
+        for (let i = matches.length - 1; i >= 0; i--) {
+            if (!subject.onlyActions.includes(matches[i].scenario.actionType ?? '')) matches.splice(i, 1);
+        }
+    }
     const taskTools = matches.filter((m) => TASK_TOOL_RECIPES.includes(m.scenario.scenarioKey));
     if (taskTools.length > 1) {
         const keep = taskTools.reduce((a, b) => (new Date(b.active.updatedAt ?? 0).getTime() > new Date(a.active.updatedAt ?? 0).getTime() ? b : a));

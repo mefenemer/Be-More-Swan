@@ -203,11 +203,13 @@ jobs:
           echo "playwright: ${{ needs.e2e.result }}"
           [ "${{ needs.e2e.result }}" = success ]
 
-  # Staging only: a Playwright failure opens (or comments on) one GitHub issue labelled
-  # `playwright-ci`, naming the failed tests; the next passing run closes it. SwanJira never hears
-  # about CI runs — it lives on the owner's Mac. scripts/ci-e2e-issue.mjs has the rules.
+  # Staging only: the Playwright result goes to the admin portal's Fix pipeline (prod admin → Issues):
+  # a failure opens ONE automatic ticket naming the failed tests, the next passing run closes it
+  # (src/utils/ci-test-incident.ts via netlify/functions/report-ci-test-result.ts). If that can't be
+  # reached or isn't set up, a GitHub issue labelled `playwright-ci` is the fallback. SwanJira never
+  # hears about CI runs — it lives on the owner's Mac. scripts/ci-e2e-report.mjs has the rules.
   e2e-report:
-    name: Playwright failures → GitHub issue
+    name: Playwright result → Fix pipeline
     needs: e2e
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/staging' }}
     runs-on: ubuntu-latest
@@ -217,7 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: scripts/ci-e2e-issue.mjs
+          sparse-checkout: scripts/ci-e2e-report.mjs
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         continue-on-error: true
@@ -227,9 +229,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      - run: node scripts/ci-e2e-issue.mjs
+      - run: node scripts/ci-e2e-report.mjs
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_REPORT_URL: https://bemoreswan.com/.netlify/functions/report-ci-test-result
+          CI_REPORT_SECRET: ${{ secrets.CI_REPORT_SECRET }}
           RESULT: ${{ needs.e2e.result }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -317,3 +321,7 @@ jobs:
       # commission ledger stays (tax law); applicant-only rows deleted; declined ones purged after 12 months.
       - name: Partner erasure
         run: npx tsx tests/partner-erasure-db.test.ts
+      # The Fix pipeline's ticket for Playwright failing on staging (src/utils/ci-test-incident.ts):
+      # raw SQL on db/z-platform-incidents.sql's columns and its partial unique index.
+      - name: CI test failure ticket
+        run: npx tsx tests/ci-test-incident-db.test.ts

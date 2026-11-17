@@ -41,6 +41,8 @@ export const INCIDENT_KINDS = {
     site_import: 'Website import',
     site_audit: 'Website check',
     email_draft: 'Email drafting',
+    // Not a customer job: Playwright failing in CI on staging (src/utils/ci-test-incident.ts).
+    automated_test: 'Automated tests (Playwright on staging)',
 } as const;
 
 export type IncidentKind = keyof typeof INCIDENT_KINDS;

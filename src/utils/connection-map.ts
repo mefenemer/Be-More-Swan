@@ -169,8 +169,8 @@ export type MailboxProvider = (typeof MAILBOX_PROVIDERS)[number];
 // halves are independent: the Gmail/Outlook grants are workspace-wide and real for everybody, but
 // only these roles have code that actually sends through them (lead_qualifier → lead-generation.ts
 // `send_outreach`; newsletter_editor → newsletter-send.ts, the small-list route when no sending
-// domain is verified; meeting_note_taker → sync-action.ts email_meeting_followup, Gmail then Outlook,
-// src/utils/meeting-followup-send.ts). Marking `email` live for a role with nothing to render would make the category
+// domain is verified; meeting_note_taker → sync-action.ts email_meeting_followup, Gmail then Outlook and nothing
+// else, src/utils/meeting-followup-send.ts). Marking `email` live for a role with nothing to render would make the category
 // VANISH from the Connections grid — no connector card, and no "coming soon" card either — which is
 // the failure mode this module's header warns about. So a role joins this set at the same time as
 // the code that uses the mailbox, never before.
@@ -241,6 +241,31 @@ export function isServiceAllowedForAssistant(serviceName: string, a: AssistantRo
     const cat = CONNECTOR_CATEGORY[(serviceName || '').toLowerCase()];
     if (!cat) return false; // scoped role + uncategorised connector → deny
     return cats.has(cat);
+}
+
+// Connections a role may MAKE without the connector's whole category joining its grid.
+// The Blog Writer shares each published article to LinkedIn as a blog destination
+// (src/utils/blog-destinations/linkedin.ts). Its "Connect LinkedIn" card starts the OAuth with the
+// Blog Writer's id, and before 2026-11-17 the callback refused it: blog_writer has no 'social', and
+// adding 'social' would hand it Instagram, TikTok, YouTube… (docs/[[blog-writer-desocialised]]).
+// So this list is read ONLY where a connection is created (the OAuth callback and the integrations
+// POST), never by the grid helpers above — the Blog Writer's Connections tab is unchanged.
+// A connection made this way is NOT bound to the assistant: it joins the workspace pool, where the
+// Social Media Manager can use it too. See connectViaBlogDestination().
+export const ROLE_CONNECT_ONLY_SERVICES: Record<string, readonly string[]> = {
+    blog_writer: ['linkedin'],
+};
+
+/** True when `serviceName` is allowed for this assistant ONLY through ROLE_CONNECT_ONLY_SERVICES. */
+export function connectViaBlogDestination(serviceName: string, a: AssistantRole | null | undefined): boolean {
+    if (isServiceAllowedForAssistant(serviceName, a)) return false;
+    const extra = a?.roleKey ? ROLE_CONNECT_ONLY_SERVICES[a.roleKey] : undefined;
+    return !!extra?.includes((serviceName || '').toLowerCase());
+}
+
+/** May this assistant start a connection to `serviceName`? The grid rule plus connect-only services. */
+export function isConnectAllowedForAssistant(serviceName: string, a: AssistantRole | null | undefined): boolean {
+    return isServiceAllowedForAssistant(serviceName, a) || connectViaBlogDestination(serviceName, a);
 }
 
 // Filter a list of service names down to those allowed for the assistant.

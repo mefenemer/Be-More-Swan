@@ -10,6 +10,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { getSecret, deleteSecret } from '../../src/utils/vault';
+import { optInLinkedInBlogDestination } from '../../src/utils/blog-linkedin-optin';
 import { bindLinkedInPage, linkedInPagePickKey, type PendingPagePick } from '../../src/utils/linkedin-page-bind';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -33,7 +34,7 @@ export default withLambda(async (event) => {
     }
 
     if (event.httpMethod === 'GET') {
-        return json(200, { pages: pending.pages, assistantId: pending.assistantId });
+        return json(200, { pages: pending.pages, assistantId: pending.returnAssistantId ?? pending.assistantId });
     }
 
     let urn = '';
@@ -47,5 +48,6 @@ export default withLambda(async (event) => {
     });
     await deleteSecret(db, key).catch(() => {});
     if (!bound.ok) return json(409, { error: 'tenant_collision', collision: bound.collisionAttemptId });
-    return json(200, { ok: true, page: page.name, assistantId: pending.assistantId });
+    if (pending.enableBlogDestination) await optInLinkedInBlogDestination(db, organisationId);
+    return json(200, { ok: true, page: page.name, assistantId: pending.returnAssistantId ?? pending.assistantId });
 });

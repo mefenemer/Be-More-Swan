@@ -129,6 +129,7 @@ test('every incident kind is labelled, and every call site is deterministic', ()
         ['src/utils/site-import-store.ts', "kind: 'site_import'"],
         ['src/utils/site-audit.ts', "kind: 'site_audit'"],
         ['netlify/functions/draft-newsletter-issues.ts', "kind: 'email_draft'"],
+        ['src/utils/ci-test-incident.ts', "kind: 'automated_test'"],
     ];
     for (const [file, marker] of sites) assert.ok(read(file).includes(marker), `${file} records ${marker}`);
     for (const k of Object.keys(INCIDENT_KINDS)) assert.ok(sites.some(([, m]) => m === `kind: '${k}'`), `${k} has a call site`);

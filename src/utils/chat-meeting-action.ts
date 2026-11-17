@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { assistantRecords } from '../../db/schema';
+import { followupBlockedByNoMailbox } from './mailbox-connected';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -91,12 +92,16 @@ export async function buildMeetingsSnapshot(db: Db, organisationId: number, aiAs
             id: assistantRecords.id, title: assistantRecords.title, approvalStatus: assistantRecords.approvalStatus,
             data: assistantRecords.data, updatedAt: assistantRecords.updatedAt,
         }).from(assistantRecords).where(where).orderBy(desc(assistantRecords.updatedAt)).limit(MEETINGS_SNAPSHOT_MAX);
-        return formatMeetingsSnapshot(counts?.total ?? 0, counts?.waiting ?? 0, rows);
+        const text = formatMeetingsSnapshot(counts?.total ?? 0, counts?.waiting ?? 0, rows);
+        return (await followupBlockedByNoMailbox(db, organisationId, aiAssistantId)) ? `${text}\n${NO_MAILBOX_SNAPSHOT_LINE}` : text;
     } catch (err) {
         console.error('[chat-meeting-action] meetings snapshot failed (non-fatal)', err);
         return null;
     }
 }
+
+/** Said to the model when the follow-up action is on but no Gmail or Outlook is connected. */
+export const NO_MAILBOX_SNAPSHOT_LINE = 'FOLLOW-UP EMAILS ARE NOT SENDING: the follow-up action is switched on, but no Gmail or Outlook is connected. Follow-ups only ever go from the user’s own inbox — never from Be More Swan’s address — so approving a meeting now will NOT email the attendees. Say so whenever approval or the follow-up comes up, and tell them to connect Gmail or Outlook on the Connections tab first. A meeting already approved without one shows "Send the follow-up now" in the Inbox once it is connected.';
 
 /** Pure: the snapshot text from the rows. */
 export function formatMeetingsSnapshot(
@@ -181,6 +186,8 @@ export interface MeetingActionCard {
     dataHash: string;
     /** approve: who gets the follow-up, who does not, how many tasks. */
     to?: string[];
+    /** approve: the follow-up action is on but no Gmail or Outlook is connected — it won't be sent. */
+    noMailbox?: boolean;
     missing?: string[];
     tasks?: number;
     /** add_email: the attendee, and the full attendees list the click writes back. */
@@ -245,7 +252,9 @@ export async function resolveMeetingActionProposal(
     try {
         const rec = await loadMeeting(db, organisationId, aiAssistantId, req.recordId);
         if (!rec) return null;
-        return buildMeetingActionCard(rec, aiAssistantId, req);
+        const card = buildMeetingActionCard(rec, aiAssistantId, req);
+        if (card.action === 'approve' && !card.blocked) card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);
+        return card;
     } catch (err) {
         console.error('[chat-meeting-action] could not resolve the proposal (non-fatal)', err);
         return null;
@@ -317,7 +326,10 @@ export async function refreshMeetingActionCards<M extends { uiElement: unknown }
         try {
             const rec = await loadMeeting(db, organisationId, aiAssistantId, Number(ui.recordId));
             const why = settledReason(ui, rec);
-            return why ? { ...m, uiElement: { ...ui, approvalStatus: rec?.approvalStatus ?? ui.approvalStatus, settled: true, blocked: why } } : m;
+            if (why) return { ...m, uiElement: { ...ui, approvalStatus: rec?.approvalStatus ?? ui.approvalStatus, settled: true, blocked: why } };
+            // An approve card made before a mailbox was connected (or after one went away) says the truth now.
+            if (ui.action === 'approve') return { ...m, uiElement: { ...ui, noMailbox: await followupBlockedByNoMailbox(db, organisationId, aiAssistantId) } };
+            return m;
         } catch (err) {
             console.error('[chat-meeting-action] could not refresh a stored card (non-fatal)', err);
             return m;

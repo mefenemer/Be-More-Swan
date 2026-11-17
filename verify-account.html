@@ -100,7 +100,7 @@
           if (!data.alreadyLoggedIn) {
             try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
           }
-          window.location.href = data.redirect || '/onboarding.html';
+          window.location.href = data.redirect || '/workspace.html';
         }
       } catch (error) {
         // Nothing has been spent if the check on load failed, so the button can still work.

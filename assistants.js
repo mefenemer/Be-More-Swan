@@ -2351,8 +2351,8 @@ const _RQ_DRAFT = {
         read: (d) => d.followupEmail,
         write: (d, subject, body) => ({ ...d, followupEmail: { ...(d.followupEmail || {}), subject, body } }),
         heading: 'Drafted follow-up email — read before approving',
-        // Which inbox: Gmail, then Outlook, then Be More Swan's address (sync-action.ts, finish plan step 7).
-        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on — from your Gmail or Outlook if one is connected, otherwise from Be More Swan’s address with replies coming to you.',
+        // Which inbox: Gmail, then Outlook, and nothing else (sync-action.ts; owner, 2026-11-17).
+        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up action is switched on — from your own Gmail or Outlook. With neither connected, it isn’t sent.',
     },
     ticket: {
         // A plain string on the record, not a { subject, body } object — normalise both ways.
@@ -2444,7 +2444,7 @@ function _rqOutreachPreview(r, statusKey) {
     const subjectEdit = cfg.noSubject ? '' : `<label class="block text-[11px] text-gray-500">Subject
             <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
           </label>`;
-    return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
+    return `${_rqMeetingFollowupNotSent(r)}<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
       <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(heading)}</summary>
       <div class="px-3 pb-3 pt-1 border-t border-gray-200">
         ${sendsLine}
@@ -2473,8 +2473,22 @@ function _rqMeetingFollowupSent(d) {
     const via = d && d.followupSentVia;
     if (via === 'gmail') return 'This went to the attendees from your Gmail.';
     if (via === 'outlook') return 'This went to the attendees from your Outlook.';
-    if (via === 'resend') return 'This went to the attendees from Be More Swan’s address because no inbox is connected — replies come to you. Connect Gmail or Outlook to send from your own.';
     return '';
+}
+
+/**
+ * A follow-up that was NOT sent because no Gmail or Outlook was connected when the meeting was approved
+ * (data.followupNotSent, stamped by sync-action.ts) — with the button that sends it once one is. '' otherwise.
+ * Re-approving cannot resend it (only the first approval fires hand-offs), so this is the way back.
+ */
+function _rqMeetingFollowupNotSent(r) {
+    const d = r.data || {};
+    if (r.recordType !== 'meeting' || d.followupSentVia || !d.followupNotSent) return '';
+    return `<div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+        <p class="text-xs font-bold text-amber-900">Follow-up not sent</p>
+        <p class="text-[11px] text-amber-900 mt-0.5">No Gmail or Outlook was connected when this was approved, so the attendees haven’t had it. Follow-ups only go from your own inbox. Connect one on the Connections tab, then send it.</p>
+        <button type="button" onclick="_detailRqRecordAct(this,'sendFollowup')" class="btn-primary mt-2 px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer">Send the follow-up now</button>
+      </div>`;
 }
 
 /**
@@ -4255,6 +4269,28 @@ window._detailRqRecordAct = async function (btn, action) {
     // the connect offer, went and connected an inbox, and came back. No lifecycle change of its
     // own: a successful send moves the record to its chase reminder server-side, exactly as
     // approving with an inbox connected would have done.
+    // "Send the follow-up now" on a meeting whose follow-up was not sent (no mailbox at approval). The
+    // server refuses until Gmail or Outlook is connected and queues the follow-up alone.
+    if (action === 'sendFollowup') {
+        const id = Number(card.getAttribute('data-rq-record'));
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch('/.netlify/functions/assistant-records', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, sendFollowup: true }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'The follow-up couldn’t be sent. Please try again.');
+            window.showToast?.('Sending — the follow-up goes from your inbox within a few minutes. This card will say which inbox it went from.');
+        } catch (err) {
+            showErr(err.message);
+            btns.forEach((b) => { b.disabled = false; });
+            return;
+        }
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+        return;
+    }
+
     if (action === 'sendNow') {
         const id = Number(card.getAttribute('data-rq-record'));
         const btns = card.querySelectorAll('button');

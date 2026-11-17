@@ -63,9 +63,13 @@
         '<span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>' +
       '</label>';
     }
-    // Tier-1 recipes need the provider connected first; tier-2 (webhook) and connection-optional
-    // (e.g. email) providers enable directly.
-    if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
+    // Tier-1 recipes need the provider connected first — the email recipes need Gmail or Outlook (owner,
+    // 2026-11-17: no mailbox, no email; nothing is sent from Be More Swan's address); tier-2 (webhook) enables directly.
+    if (s.tier !== 2 && !s.connection && s.needsMailbox) {
+      return '<span class="flex gap-1.5 shrink-0"><a href="' + connectHref('gmail') + '" class="' + ROW_BTN + ' btn-secondary">Connect Gmail</a>' +
+        '<a href="' + connectHref('outlook') + '" class="' + ROW_BTN + ' btn-secondary">Connect Outlook</a></span>';
+    }
+    if (s.tier !== 2 && !s.connection) {
       // ?assistantId= brings the user back to THIS assistant's Connections tab after sign-in (or with the
       // error, if it failed) — without it oauth-integrations.ts had nowhere to return them but the
       // workspace-wide integrations.html (found connecting Slack/Notion/Jira, 2026-11-16).
@@ -91,13 +95,18 @@
   // ── Tool → its actions (owner, 2026-11-17: "connect to a tool, then you can do certain things with it") ──
   // Each tool is one row (connected, or a Connect button), and what this assistant does with it — its
   // ACTIONS, the old "recipes" — sit underneath, each with its switch. A tool that needs no connection
-  // (email: Gmail/Outlook rows already sit in the section, or Be More Swan's address) shows only its actions.
+  // (email: the Gmail/Outlook rows already sit in the section above) shows only its actions.
   const PROVIDER_ICON = { slack: '💬', notion: '📝', jira: '🗂️', asana: '✅', email: '✉️', hubspot: '🧲', salesforce: '☁️', pipedrive: '📈', zoho: '📇', custom_webhook: '🔗' };
 
   function actionRow(s, connected) {
     const on = !!(s.active && s.active.isEnabled);
-    const stateText = s.active ? (on ? 'On' : 'Off') : connected ? 'Off' : 'Connect ' + esc(s.providerName) + ' first';
-    const control = connected ? controlFor(s) : '<span class="shrink-0 text-xs font-semibold text-gray-400">Not connected</span>';
+    // A follow-up switched on before the mailbox went away still shows its state — and that it won't send.
+    const noMailbox = s.needsMailbox && !s.connection;
+    const stateText = noMailbox
+      ? (on ? 'On, but not sending — connect Gmail or Outlook above' : 'Connect Gmail or Outlook above first — follow-ups only go from your own inbox')
+      : s.active ? (on ? 'On' : 'Off') : connected ? 'Off' : 'Connect ' + esc(s.providerName) + ' first';
+    const control = noMailbox && !s.active ? '<span class="shrink-0 text-xs font-semibold text-gray-400">No inbox connected</span>'
+      : connected || noMailbox ? controlFor(s) : '<span class="shrink-0 text-xs font-semibold text-gray-400">Not connected</span>';
     const manage = s.active
       ? '<div class="flex items-center gap-2 flex-wrap">' +
           (Array.isArray(s.settings) && s.settings.length || (Array.isArray(s.fieldSchema) && s.fieldSchema.length) || s.tier === 2
@@ -117,7 +126,7 @@
         '<div class="flex-1 min-w-0">' +
           '<p class="text-sm font-semibold text-gray-900">' + esc(s.title) + '</p>' +
           '<p class="text-xs text-gray-500">' + esc(s.description || '') + '</p>' +
-          '<p class="text-[11px] font-bold mt-0.5 ' + (on ? 'text-emerald-700' : 'text-gray-400') + '">' + stateText + '</p>' +
+          '<p class="text-[11px] font-bold mt-0.5 ' + (noMailbox ? 'text-amber-700' : on ? 'text-emerald-700' : 'text-gray-400') + '">' + stateText + '</p>' +
         '</div>' + control + kebab +
       '</div>' +
       (manage ? '<div data-conn-manage class="hidden mt-2">' + manage + '</div>' : '') +
@@ -126,8 +135,9 @@
 
   function toolBlock(list) {
     const s0 = list[0];
-    const optional = !!s0.connectionOptional || s0.tier === 2;
-    const connected = optional || !!s0.connection;
+    // No tool row of its own: the webhook, and email (its Gmail/Outlook rows sit in the section above).
+    const optional = !!s0.needsMailbox || s0.tier === 2;
+    const connected = s0.tier === 2 || !!s0.connection;
     const icon = PROVIDER_ICON[s0.providerKey] || '🔌';
     const head = optional ? '' :
       '<div class="px-4 pt-3 pb-1 flex items-center gap-3">' +
@@ -345,6 +355,12 @@
             const s = state.scenarios.find((x) => x.active && x.active.id === id);
             const note = switchedOffNote(s, data.switchedOff);
             if (note && window.showToast) window.showToast(note);
+            load();
+          } else {
+            // Refused (e.g. the follow-up with no Gmail or Outlook connected): say why, and redraw so the
+            // switch the click already flipped goes back.
+            const err = await res.json().catch(() => ({}));
+            if (window.showToast) window.showToast(err.error || 'That couldn’t be changed. Please try again.', { tone: 'error' });
             load();
           }
         } catch (err) { /* leave the card as-is on failure */ } finally { tog.disabled = false; }

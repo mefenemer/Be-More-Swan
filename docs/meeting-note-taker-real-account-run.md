@@ -7,7 +7,7 @@ Staging: https://staging--bemoreswan.netlify.app (steps 2–7 deployed at `bc761
 
 **Status (2026-11-17):** runs A and A2 done in Marmalade Productions (org 58), Minute Taker "Orbit Scribe"
 (assistant 66), meetings 918 and 919. Gmail, Slack, Notion and Jira pass; Asana, Outlook and the chat
-cards wait on run B; the Resend fallback waits on run C and a decision (§6). Eleven bugs found and fixed
+cards wait on run B; run C now checks that nothing is sent without a mailbox (owner, 2026-11-17: no Be More Swan sender). Eleven bugs found and fixed
 on the way (§6).
 
 ## 0. Before you start
@@ -69,7 +69,7 @@ In run B, also try the chat review cards before approving:
 |---|---|
 | Follow-up email (A: Gmail) | Arrives at both addresses **from your Gmail**, and is in Gmail's Sent. No AI notice at the foot (owner 2026-11-16: approved = sent as yours). Inbox card says "This went to the attendees from your Gmail." |
 | Follow-up email (B: Outlook) | Arrives **from your Outlook**, all three attendees on one email (Cara added in chat), in Outlook's Sent Items. Inbox says "…from your Outlook." |
-| Follow-up email (C: Resend) | From **your business name** at `assistant@outbound.bemoreswan.com`; **Reply-To is you** (reply to it and check it reaches you). Inbox says "…because no inbox is connected — replies come to you. Connect Gmail or Outlook…" |
+| Follow-up email (C: no inbox) | The follow-up action can't be switched on (Connect Gmail / Connect Outlook in its place; a switch left on says "On, but not sending"). The chat's approve card says the follow-up won't be sent. After approving, **nothing arrives**; the Inbox shows "Follow-up not sent". Connect Gmail, press **Send the follow-up now**: it arrives from your Gmail, once. |
 | Slack (A) | One summary post in the channel listing every action item and its owner. No task messages (decision 10). |
 | Notion (A) | One page with the summary, decisions, risks and action items. |
 | Jira (A) | 4 issues, one per action item, owner and due date in the text. Re-approving does not make 4 more. |
@@ -114,7 +114,7 @@ ORDER BY meeting_record_id, id;
 | Asana tickets | A2 / B | ⏳ | 1 task (1220597676877372) from the split | a full four-task run is part of run B |
 | Outlook follow-up | B | ⏳ | | |
 | Chat review cards | B | ⏳ | | add Cara's address, shorten the follow-up, approve |
-| Resend fallback (name + Reply-To) | C | ⛔ | | blocked: `outbound.bemoreswan.com` is not verified in Resend (prod too) — see §6 |
+| No inbox = no email | C | ⏳ | | the Resend fallback was removed (owner, 2026-11-17) — see §6 |
 | Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
 | Long transcript (60 min file, step 4) | any | ⏳ | | the 26 s limit, unproven so far |
 
@@ -142,9 +142,10 @@ Notion's connection only allowed `/api/auth/callback` (staging callback added); 
 "Lux" (past its deletion date — the purge job never runs on staging) blocked hiring one (deleted).
 
 **Still open:**
-- **Resend fallback (run C):** verify `outbound.bemoreswan.com` in Resend (recommended — keeps
-  follow-ups away from login-email reputation) or set `OUTBOUND_EMAIL_DOMAIN=bemoreswan.com` in Netlify.
-  Until then the no-inbox fallback fails everywhere, prod included.
+- ~~Resend fallback (run C)~~ — **decided 2026-11-17: removed.** The owner does not want customers'
+  email sent from a Be More Swan address: with no Gmail or Outlook connected, follow-ups are not sent.
+  The action can't be switched on without a mailbox, and a meeting approved without one gets
+  "Send the follow-up now" in the Inbox. Nothing to verify in Resend.
 - **Before go-live (step 9):** production's Slack/Notion/Jira/Asana apps need the prod redirect URIs,
   public distribution (Atlassian "Sharing", Asana "Any workspace", Slack public distribution) and a
   privacy-policy link on each consent screen.
