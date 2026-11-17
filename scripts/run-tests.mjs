@@ -19,22 +19,22 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const testDir = join(root, 'tests');
 const EXCLUDE = new Set(['rls-enforcement.test.ts']);
-// Resolve tsx by walking up from the repo root. A git worktree has no node_modules of its own —
-// dependencies live in the main checkout — so a hardcoded `<root>/node_modules/.bin/tsx` silently
-// misses there. That mattered: spawnSync on a missing binary returns a non-zero status with NO
-// output, so every test file was reported as FAILED with nothing to explain why. A broken
-// environment must not be indistinguishable from broken code.
-function resolveTsx() {
-    for (let dir = root; ; dir = dirname(dir)) {
-        const candidate = join(dir, 'node_modules', '.bin', 'tsx');
-        if (existsSync(candidate)) return candidate;
-        if (dirname(dir) === dir) return null;
-    }
+// Each test file runs as `node --import <tsx loader> tests/x.test.ts`: ONE Node process per file.
+// The `tsx` CLI starts a wrapper process that then starts the real one — about 60 ms extra per
+// file, ~47 core-seconds over the suite (a CI runner's shard went 29 s → 23 s with the same checks).
+//
+// The loader is found with Node's own resolution from this script, which walks up through parent
+// directories — so it also works in a git worktree, which has no node_modules of its own. A missing
+// loader must say so: a spawn that cannot start reports every file as FAILED with nothing to explain
+// why, and a broken environment must not be indistinguishable from broken code.
+let tsxLoader = null;
+try {
+    tsxLoader = import.meta.resolve('tsx');
+} catch {
+    tsxLoader = null;
 }
-
-const tsxBin = resolveTsx();
-if (!tsxBin) {
-    console.error('Could not find the `tsx` binary in node_modules/.bin (searched this directory and its parents).');
+if (!tsxLoader || !existsSync(fileURLToPath(tsxLoader))) {
+    console.error('Could not resolve the `tsx` package from scripts/ (searched this directory and its parents).');
     console.error('Run `npm install` — in a git worktree, install in the main checkout.');
     process.exit(1);
 }
@@ -81,7 +81,7 @@ function runOne(f) {
         const chunks = [];
         let child;
         try {
-            child = spawn(tsxBin, [join('tests', f)], { cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+            child = spawn(process.execPath, ['--import', tsxLoader, join('tests', f)], { cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
         } catch (err) {
             resolve({ f, fault: err.message });
             return;
@@ -115,7 +115,7 @@ await Promise.all(Array.from({ length: Math.min(concurrency, selected.length) },
 
 if (envFault) {
     console.error(`\n✗ Could not run ${envFault.f}: ${envFault.fault}`);
-    console.error('This is an environment problem, not a failing test. Check the tsx install.');
+    console.error('This is an environment problem, not a failing test. Check the Node and tsx install.');
     process.exit(1);
 }
 

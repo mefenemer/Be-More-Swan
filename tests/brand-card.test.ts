@@ -30,6 +30,40 @@ import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
 import { landmark } from './landmark';
+import { readFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
+
+// ── Google Fonts, served from tests/fixtures ──────────────────────────────────────────────────
+// The default kit's family (Plus Jakarta Sans) goes through the real web-font path in
+// brand-card-webfont.ts, but its three responses (stylesheet + two faces) come from saved copies:
+// the test must not depend on Google being up or fast. Any OTHER Google URL is recorded and fails the
+// run at the end — loadWebFont swallows fetch errors and falls back silently, so a throw alone would
+// go unnoticed.
+const FONT_FIXTURES = join(__dirname, 'fixtures', 'google-fonts');
+const unexpectedFontUrls: string[] = [];
+let fontFixturesServed = 0;
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith('https://fonts.googleapis.com/css2?family=Plus%20Jakarta%20Sans:')) {
+        fontFixturesServed++;
+        return new Response(readFileSync(join(FONT_FIXTURES, 'plus-jakarta-sans.css')), {
+            headers: { 'content-type': 'text/css; charset=utf-8' },
+        });
+    }
+    if (url.startsWith('https://fonts.gstatic.com/s/plusjakartasans/')) {
+        try {
+            const body = readFileSync(join(FONT_FIXTURES, basename(new URL(url).pathname)));
+            fontFixturesServed++;
+            return new Response(body, { headers: { 'content-type': 'font/woff' } });
+        } catch { /* not saved — falls through to the check below */ }
+    }
+    if (/^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(url)) {
+        unexpectedFontUrls.push(url);
+        throw new Error(`no fixture for ${url} (tests/fixtures/google-fonts)`);
+    }
+    return realFetch(input, init);
+}) as typeof fetch;
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -818,7 +852,11 @@ test('the default layout reproduces the original top-left/bottom-left card', asy
 // build error rather than a runtime one.
 async function main(): Promise<void> {
     for (const t of tests) await t();
-    console.log(`\n${passed}/${tests.length} passed`);
+    await check('Google Fonts came from tests/fixtures, and only for the saved family', () => {
+        assert.deepEqual(unexpectedFontUrls, [], 'a Google URL with no fixture — save it, or the card silently used the bundled font');
+        assert.ok(fontFixturesServed >= 3, `the web-font path should have run (stylesheet + 2 faces), served ${fontFixturesServed}`);
+    });
+    console.log(`\n${passed}/${tests.length + 1} passed`);
 }
 
 void main();
