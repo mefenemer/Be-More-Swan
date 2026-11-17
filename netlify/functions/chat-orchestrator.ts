@@ -4489,10 +4489,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let sceneEdit: VideoSceneCard | null = null;
         if (route === ROUTES.video_producer && (uiElement as { type?: unknown } | null)?.type === VIDEO_SCENE_EDIT_TYPE) {
             const req = videoSceneRequestFromUiElement(uiElement);
-            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard }).from(videoProjects)
+            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard, brief: videoProjects.brief }).from(videoProjects)
                 .where(and(eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId))).limit(1) : [];
             // A ready video too: approving the card makes a new version first (video-projects edit_scene).
-            sceneEdit = req && project && ['planned', 'failed', 'ready'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
+            sceneEdit = req && project && ['planned', 'failed', 'ready'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null, { ownVideoIds: (project.brief as { footageAssetIds?: number[] } | null)?.footageAssetIds ?? [] }) : null;
             uiElement = sceneEdit;
             if (!sceneEdit) content = 'I couldn’t set that up on the scene, so nothing has changed. Which video and scene do you mean? You can also press “Change” on the scene, on the "Videos" tab.';
         }

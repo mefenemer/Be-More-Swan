@@ -21,7 +21,7 @@ import type { LookStyle } from '../src/lib/video-look';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
 import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
-import { bubbleBox, captionLiftPct, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
+import { bubbleBox, captionLiftPct, seriesClock, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
 
 /**
  * One clip of the timeline.
@@ -326,6 +326,18 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
     const coverTracks = (covers || []).filter((c) => c && c.src && c.endS > c.startS);
     const behind = coverTracks.filter((c) => c.layout !== 'window');
     const windows = coverTracks.filter((c) => c.layout === 'window');
+    // Covers are timed on the Series' own clock (scene-cover.ts seriesClock), never from absolute seconds:
+    // every clip is rounded up to whole frames, and a screen timed in seconds ended before its pieces did.
+    const clock = seriesClock(timeline.map((c) => {
+        const frames = c.durationInFrames ?? evenShare;
+        const secs = c.kind === 'image' ? c.holdS : (c.outS != null ? c.outS - (c.inS ?? 0) : undefined);
+        return { seconds: secs != null && secs > 0 ? secs : frames / fps, frames };
+    }), fps);
+    const coverRange = (c: CoverTrack) => {
+        const from = Math.min(Math.max(0, clock(c.startS)), Math.max(0, durationInFrames - 1));
+        const to = Math.min(durationInFrames, clock(c.endS));
+        return { from, durationInFrames: Math.max(1, to - from) };
+    };
     // Where bottom captions step up: under a bottom bubble (from the clips' places in the Series) or a bottom window.
     const lift: Array<{ from: number; to: number; pct: number }> = [];
     {
@@ -340,7 +352,8 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
         }
         for (const w of windows) {
             const pctUp = captionLiftPct(width, height, { kind: 'window', corner: w.corner ?? 'bl' });
-            if (pctUp > 0) lift.push({ from: Math.round(w.startS * fps), to: Math.round(w.endS * fps), pct: pctUp });
+            const r = coverRange(w);
+            if (pctUp > 0) lift.push({ from: r.from, to: r.from + r.durationInFrames, pct: pctUp });
         }
     }
     const coverMedia = (c: CoverTrack, frames: number) => (c.kind === 'image'
@@ -369,7 +382,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                 own shape would put black bars in the middle of a reel. */}
             <AbsoluteFill style={look && look.filter ? { filter: look.filter } : undefined}>
             {behind.map((c) => {
-                const { from, durationInFrames: frames } = overlayFrameRange({ startS: c.startS, endS: c.endS }, fps, durationInFrames);
+                const { from, durationInFrames: frames } = coverRange(c);
                 return <Sequence key={c.id} from={from} durationInFrames={frames}>{coverMedia(c, frames)}</Sequence>;
             })}
             {timeline.length
@@ -412,7 +425,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                         : <Img src={imageSrc} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />)
                     : null}
             {windows.map((c) => {
-                const { from, durationInFrames: frames } = overlayFrameRange({ startS: c.startS, endS: c.endS }, fps, durationInFrames);
+                const { from, durationInFrames: frames } = coverRange(c);
                 const w = windowBox(width, height, c.corner ?? 'bl');
                 return (
                     <Sequence key={c.id} from={from} durationInFrames={frames} layout="none">

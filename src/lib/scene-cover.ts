@@ -177,6 +177,27 @@ export function applyCovers(clips: VideoClip[], covers: Array<Pick<TimelineCover
     return out;
 }
 
+/**
+ * Seconds on the build's timeline → the frame the composition's <Series> actually reaches there. The build
+ * times covers in seconds; the Series gives every clip a whole number of frames (rounded up), so clips drift
+ * later than their seconds — half a frame each, more once applyCovers has split them. A screen timed from
+ * absolute seconds then ended while its hidden presenter piece still played: black frames (review of #705).
+ * Mapping through each clip's own start frame keeps a cover exactly on the pieces it covers. Pure.
+ */
+export function seriesClock(clips: Array<{ seconds: number; frames: number }>, fps: number): (t: number) => number {
+    const at: Array<{ s: number; f: number; len: number; frames: number }> = [];
+    let s = 0, f = 0;
+    for (const c of clips) { at.push({ s, f, len: Math.max(0, c.seconds), frames: c.frames }); s += Math.max(0, c.seconds); f += c.frames; }
+    return (t: number) => {
+        for (let i = 0; i < at.length; i++) {
+            const c = at[i];
+            if (t <= c.s + 1e-6) return c.f;
+            if (t < c.s + c.len - 1e-6) return c.f + Math.min(c.frames, Math.round((t - c.s) * fps));
+        }
+        return f;
+    };
+}
+
 // ── Geometry (the composition and the Change form's preview share these numbers) ─────────────────
 
 /** A bubble's place and size in pixels: a circle in the corner, 4 % of the short side from the edges (D-W4). */

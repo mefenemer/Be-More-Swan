@@ -971,9 +971,17 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             }
             if (made) done[key] = made.assetId; else coverFailed.push(i);
         }
-        await save({});
-        const missing = [...[...failed].map((i) => ({ i, what: `scene ${i + 1}` })), ...coverFailed.map((i) => ({ i, what: `scene ${i + 1}’s screen` }))]
-            .sort((a, b) => a.i - b.i).map((x) => x.what);
+        // A screen that can't be found (their video deleted since, no stock match) never stops the video: that
+        // scene shows the presenter full frame, and the note says so.
+        for (const i of coverFailed) {
+            const { cover: _gone, ...rest } = storyboard.scenes[i];
+            storyboard.scenes[i] = rest;
+        }
+        const coverNote = coverFailed.length
+            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} you full frame. Choose another screen on the scene to put one back.`
+            : null;
+        await save(coverFailed.length ? { storyboard } : {});
+        const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
         // 3. The post — one row per platform, one cross-post group.
@@ -1122,7 +1130,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
 
         // Anything still held (a scene that turned out free, say) goes back.
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }); held = 0; }
-        await save({ status: 'rendering', timeline, outputAssetId: null, renderId: null, note: null });
+        await save({ status: 'rendering', timeline, outputAssetId: null, renderId: null, note: coverNote });
         // The finished file, rendered now (render-video-project-background). A wake that never arrives
         // leaves the project 'rendering' until the stuck sweep marks it render_failed — never silent.
         await wakeRenderWorker(projectId);

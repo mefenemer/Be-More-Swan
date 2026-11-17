@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverWindow, readSceneCover, windowBox, type TimelineCover,
+    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverWindow, readSceneCover, seriesClock, windowBox, type TimelineCover,
 } from '../src/lib/scene-cover';
 import { enforceStoryboard, type Scene, type VideoBrief } from '../src/lib/storyboard';
 import { assetsForShape, timelineCovers, timesOf } from '../src/utils/video-producer';
@@ -118,14 +118,41 @@ check('the chat card sets, moves and removes a layout on their own footage only'
     ];
     const sb = { title: 't', caption: 'c', scenes } as unknown as Parameters<typeof videoSceneCard>[1];
     const req = (o: Record<string, unknown>) => videoSceneRequestFromUiElement({ type: 'video_scene_edit', projectId: 7, ...o })!;
-    const set = videoSceneCard(req({ scene: 1, layout: 'bubble', screenVideo: 12, screenStartS: 30, corner: 'tl' }), sb)!;
+    const mine = { ownVideoIds: [11, 12] };
+    const set = videoSceneCard(req({ scene: 1, layout: 'bubble', screenVideo: 12, screenStartS: 30, corner: 'tl' }), sb, mine)!;
+    // A video that isn't one of THIS video's own is never offered (edit_scene would drop it).
+    assert.strictEqual(videoSceneCard(req({ scene: 1, layout: 'bubble', screenVideo: 99 }), sb, mine), null);
+    assert.strictEqual(videoSceneCard(req({ scene: 1, layout: 'bubble', screenVideo: 12 }), sb), null, 'no list, no own screen');
     assert.deepStrictEqual(set.patch.cover, { layout: 'bubble', source: 'own_video', assetId: 12, inS: 30, corner: 'tl' });
-    assert.strictEqual(videoSceneCard(req({ scene: 2, layout: 'bubble', screenVideo: 12 }), sb), null, 'not on stock');
+    assert.strictEqual(videoSceneCard(req({ scene: 2, layout: 'bubble', screenVideo: 12 }), sb, mine), null, 'not on stock');
     assert.strictEqual(videoSceneCard(req({ scene: 1, layout: 'bubble' }), sb), null, 'a new layout needs something on the screen');
     assert.deepStrictEqual(videoSceneCard(req({ scene: 3, layout: 'cover' }), sb)!.patch.cover, { layout: 'cover', source: 'own_video', assetId: 12, inS: 4 });
     assert.strictEqual(videoSceneCard(req({ scene: 3, layout: 'presenter' }), sb)!.patch.cover, null);
     assert.deepStrictEqual(coverFromRequest({ projectId: 7, scene: 3, summary: null, screenSearch: 'laptop' }, scenes[2].cover as never),
         { layout: 'bubble', source: 'stock_video', keywords: 'laptop' });
+});
+
+check('covers follow the Series clock, not absolute seconds (no black frames at a screen\'s end — review of #705)', () => {
+    // Three pieces of 1.01 s at 30 fps: each is rounded UP to 31 frames, so piece 3 starts at frame 62, not 61.
+    const pieces = [{ seconds: 1.01, frames: 31 }, { seconds: 1.01, frames: 31 }, { seconds: 1.01, frames: 31 }];
+    const clock = seriesClock(pieces, 30);
+    assert.strictEqual(clock(0), 0);
+    assert.strictEqual(clock(2.02), 62, 'a cover starting at piece 3 starts exactly where piece 3 does');
+    assert.strictEqual(Math.round(2.02 * 30), 61, '(absolute seconds would have been a frame early)');
+    assert.strictEqual(clock(3.03), 93, 'and ends with the last piece');
+    assert.strictEqual(clock(1.5), 31 + 15, 'inside a piece: its start frame plus the seconds into it');
+    assert.strictEqual(clock(99), 93);
+    // Tightened own-sound footage: 40 short pieces drift far more — still exact at every piece edge.
+    const many = Array.from({ length: 40 }, () => ({ seconds: 0.51, frames: 16 }));
+    assert.strictEqual(seriesClock(many, 30)(0.51 * 30), 16 * 30);
+    const src = read('remotion/PostOverlay.tsx');
+    assert.ok(src.includes('const { from, durationInFrames: frames } = coverRange(c);') && !/behind\.map[\s\S]{0,120}overlayFrameRange/.test(src));
+});
+
+check('a screen that can\'t be found leaves the presenter full frame and says so, never fails the build', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.ok(vp.includes('note: coverNote }') && vp.includes('couldn’t be found, so'));
+    assert.ok(!vp.includes('’s screen` }))'), 'no longer added to the build\'s missing-scene error');
 });
 
 check('geometry: the bubble and window sit in their corner, and bottom captions step above them', () => {

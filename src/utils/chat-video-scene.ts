@@ -80,7 +80,7 @@ export function videoSceneRequestFromUiElement(uiElement: unknown): VideoSceneRe
 }
 
 /** The card for this scene of this storyboard. Null when there is no such scene, or nothing would change. */
-export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | null | undefined): VideoSceneCard | null {
+export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | null | undefined, opts: { ownVideoIds?: number[] } = {}): VideoSceneCard | null {
     const scene: Scene | undefined = storyboard?.scenes?.[req.scene - 1];
     if (!scene) return null;
     const patch: VideoSceneCard['patch'] = {};
@@ -96,7 +96,10 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
     if (req.cutPhrase && scene.source === 'own_video') patch.cutPhrase = req.cutPhrase;
     // A layout only on their own footage (edit_scene re-checks the screen is one of the video's own videos).
     if (scene.source === 'own_video') {
-        const cover = coverFromRequest(req, scene.cover);
+        // Only one of THIS video's own videos can be the screen: edit_scene would drop any other and leave the
+        // presenter full frame, so the card never offers it.
+        const ownOk = req.screenVideo == null || (opts.ownVideoIds ?? []).includes(req.screenVideo);
+        const cover = ownOk ? coverFromRequest(req, scene.cover) : undefined;
         if (cover !== undefined && JSON.stringify(cover) !== JSON.stringify(scene.cover ?? null)) patch.cover = cover;
     }
     // Text placement only means something on words over a picture (a branded card draws its own).
