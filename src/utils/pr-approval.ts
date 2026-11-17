@@ -26,6 +26,7 @@ import { parsePrNumber } from './issue-fix-live';
 import { loadProofRow } from './issue-fix-proof';
 import { sqlHash } from './issue-sql';
 import { featureMergeBlocker, featureProofColumnsReady } from './feature-proof';
+import { reviewedShaFromNote } from './pr-review';
 
 type Db = ReturnType<typeof getDb>;
 type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<any> }>;
@@ -115,7 +116,7 @@ export type ApproveOutcome =
  * Approve (where GitHub allows) and merge one PR. A PR whose checks are still running gets auto-merge
  * instead, so it merges itself when they pass. Already merged = success.
  */
-export async function approveAndMergePr(opts: { prNumber: number; token: string; repo?: string; fetchImpl?: FetchLike }): Promise<ApproveOutcome> {
+export async function approveAndMergePr(opts: { prNumber: number; token: string; repo?: string; fetchImpl?: FetchLike; expectedHeadSha?: string | null }): Promise<ApproveOutcome> {
     const repo = repoOf(opts.repo);
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
     const h = ghHeaders(opts.token);
@@ -128,16 +129,28 @@ export async function approveAndMergePr(opts: { prNumber: number; token: string;
         const pr: GhPr = { number: Number(p.number), url: String(p.html_url), state: p.state === 'open' ? 'open' : 'closed', merged: !!p.merged_at, base: String(p.base?.ref || ''), nodeId: String(p.node_id || ''), title: String(p.title || '') };
         if (pr.merged) return { ok: true, pr, merged: true, autoMerge: false, reviewed: false };
         if (pr.state === 'closed') return { ok: false, status: 409, error: `PR #${pr.number} was closed without merging. Ask Claude for a new one.` };
+        // Second-opinion review (docs/review-tiers-plan.md): merge only the commit the reviewer read.
+        const expected = opts.expectedHeadSha || null;
+        const head = String(p.head?.sha || '');
+        if (expected && head && head !== expected) return { ok: false, status: 409, error: `PR #${pr.number} changed after its second-opinion review (reviewed ${expected.slice(0, 7)}, now ${head.slice(0, 7)}). Ask Claude to review it again.` };
 
         // The review: refused (422) for the token owner's own PR, which is normal here; never blocks the merge.
         const review = await f(`${base}/reviews`, { method: 'POST', headers: h, body: JSON.stringify({ event: 'APPROVE', body: 'Approved in the Be More Swan admin.' }) });
         const reviewed = review.ok;
 
-        const merge = await f(`${base}/merge`, { method: 'PUT', headers: h, body: JSON.stringify({ merge_method: 'merge' }) });
+        const merge = await f(`${base}/merge`, { method: 'PUT', headers: h, body: JSON.stringify(expected ? { merge_method: 'merge', sha: expected } : { merge_method: 'merge' }) });
         if (merge.ok) return { ok: true, pr, merged: true, autoMerge: false, reviewed };
         if (merge.status === 401 || merge.status === 403) return { ok: false, status: 502, error: 'GitHub refused to merge with this token: GITHUB_PR_APPROVE_TOKEN needs Contents and Pull requests read/write on this repo.' };
         if (merge.status === 409) return { ok: false, status: 409, error: `PR #${pr.number} has a merge conflict or its branch moved. Ask Claude to update it.` };
 
+        // A reviewed PR merges only right now, never via auto-merge: GitHub checks expectedHeadOid only when
+        // auto-merge is switched ON, so a later push (Auto-fix, Claude — all as the owner's account) would merge
+        // unreviewed (second-opinion review of #682). The owner clicks again once the checks pass.
+        if (expected) {
+            let why = '';
+            try { why = String((await merge.json())?.message || ''); } catch { /* none */ }
+            return { ok: false, status: 409, error: `PR #${pr.number} can't merge yet${why ? ` (${why})` : ''}: its checks are still running or failing. It merges only the reviewed commit ${expected.slice(0, 7)}, so click Approve again once the checks pass.` };
+        }
         // 405 = not mergeable yet (checks running, or the branch is behind): let GitHub merge it when ready.
         const gql = await f('https://api.github.com/graphql', {
             method: 'POST', headers: h,
@@ -223,7 +236,7 @@ async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts:
         if (blocker) { await restore(); return { ok: false, status: 409, error: blocker }; }
     }
 
-    const res = await approveAndMergePr({ prNumber, token, repo: opts.repo, fetchImpl: opts.fetchImpl });
+    const res = await approveAndMergePr({ prNumber, token, repo: opts.repo, fetchImpl: opts.fetchImpl, expectedHeadSha: reviewedShaFromNote(row.approval_note) });
     if (!res.ok) { await restore(); return res; }
 
     const { pr, merged, autoMerge } = res;

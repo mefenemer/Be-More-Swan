@@ -30,7 +30,8 @@
 //   npx tsx scripts/feature-requests.ts --env prod status <id> <planned|brief_ready|in_progress|on_hold|released|declined|duplicate|open> --file <why.md>
 //   npx tsx scripts/feature-requests.ts --env prod release <id>                  (clear the pill)
 //   npx tsx scripts/feature-requests.ts --env prod prod-pr <id> --pr <url>       (record the PR into main: "Prod PR" pill)
-//   npx tsx scripts/feature-requests.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
+//   npx tsx scripts/feature-requests.ts --env prod ask-approval <id> --pr <url> [--file <why.md>] [--override-review "<why>"]
+//                                         (medium/high PRs into staging need the code-reviewer agent's verdict for their head commit first)
 //                                         (shows the owner an "Approve PR #N" button; their click merges it; into main → Released, no one notified)
 //   npx tsx scripts/feature-requests.ts --env prod withdraw-approval <id>
 
@@ -40,6 +41,8 @@ import { execFileSync } from 'node:child_process';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { dbUrlFor, RUNNER_ID } from './fix-tickets';
+import { prGate } from './pr-review-gate';
+import { approvalNoteWithReview } from '../src/utils/pr-review';
 import { classifySql, sqlHash } from '../src/utils/issue-sql';
 import { stagingCiState, fetchStagingCommit } from '../src/utils/issue-fix-proof';
 import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
@@ -248,7 +251,13 @@ async function main() {
             const base = execFileSync('gh', ['pr', 'view', m[1], '--json', 'baseRefName', '-q', '.baseRefName'], { encoding: 'utf8' }).trim();
             if (cmd === 'prod-pr' && base !== 'main') throw new Error(`PR #${m[1]} goes into "${base}", not main.`);
             const ask = cmd === 'ask-approval';
-            const why = ask && arg(rest, '--file') ? readFile('note') : null;
+            let why = ask && arg(rest, '--file') ? readFile('note') : null;
+            if (ask) {
+                // Second-opinion review gate (docs/review-tiers-plan.md, Phase 2): medium/high PRs need a verdict for their head commit.
+                const gate = prGate(m[1], arg(rest, '--override-review'));
+                if (!gate.ok) throw new Error(gate.reason || 'Review gate refused.');
+                why = approvalNoteWithReview(gate, why);
+            }
             const r = await sql`
                 UPDATE feature_requests SET
                        prod_pr_url = CASE WHEN ${base}::text = 'main' THEN ${pr}::text ELSE prod_pr_url END,

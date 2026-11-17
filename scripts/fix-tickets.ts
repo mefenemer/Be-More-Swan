@@ -25,7 +25,8 @@
 //   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
 //   npx tsx scripts/fix-tickets.ts --env prod restore <id> <status> --file <why.md>   (undo a bookkeeping mistake)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-pr <id> --pr <url>     (record the PR into main: "Prod PR" pill)
-//   npx tsx scripts/fix-tickets.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
+//   npx tsx scripts/fix-tickets.ts --env prod ask-approval <id> --pr <url> [--file <why.md>] [--override-review "<why>"]
+//                                         (medium/high PRs into staging need the code-reviewer agent's verdict for their head commit first)
 //                                         (shows the owner an "Approve PR #N" button; their click merges it and moves the ticket on)
 //   npx tsx scripts/fix-tickets.ts --env prod withdraw-approval <id>      (hide that button again)
 //   npx tsx scripts/fix-tickets.ts --env prod inspect --file <query.sql>   (READ-ONLY: one SELECT, to investigate)
@@ -41,6 +42,8 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import { classifySql, sqlHash, runAdditiveSql } from '../src/utils/issue-sql';
+import { prGate } from './pr-review-gate';
+import { approvalNoteWithReview } from '../src/utils/pr-review';
 import { ensureStagingSql, loadProofRow, productionChecklist, syncStagingProof, resetProofColumnsCache, type RootCauseStatus } from '../src/utils/issue-fix-proof';
 
 export const RUNNER_ID = 'Claude (interactive)';
@@ -290,7 +293,13 @@ async function main() {
             if (!m) throw new Error('--pr must be a GitHub pull request URL.');
             const base = prBase(m[1]);
             if (cmd === 'prod-pr' && base !== 'main') throw new Error(`PR #${m[1]} goes into "${base}", not main.`);
-            const why = cmd === 'ask-approval' && arg(rest, '--file') ? readText(arg(rest, '--file'), 'note') : null;
+            let why = cmd === 'ask-approval' && arg(rest, '--file') ? readText(arg(rest, '--file'), 'note') : null;
+            if (cmd === 'ask-approval') {
+                // Second-opinion review gate (docs/review-tiers-plan.md, Phase 2): medium/high PRs need a verdict for their head commit.
+                const gate = prGate(m[1], arg(rest, '--override-review'));
+                if (!gate.ok) throw new Error(gate.reason || 'Review gate refused.');
+                why = approvalNoteWithReview(gate, why);
+            }
             await db.execute(sql`
                 UPDATE issue_reports SET
                        prod_pr_url = CASE WHEN ${base}::text = 'main' THEN ${prUrl}::text ELSE prod_pr_url END,
