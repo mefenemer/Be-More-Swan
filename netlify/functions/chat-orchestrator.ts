@@ -126,7 +126,7 @@ import { buildSearchTrendsBlock, SEARCH_TREND_ROLES } from '../../src/utils/chat
 import { resolveSearchTermsCard, SEARCH_TERMS_CARD_TYPE } from '../../src/utils/chat-search-terms-card';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, loneCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -514,9 +514,10 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // The card ON ITS OWN, no envelope and no words (Minute Taker run B, staging 2026-11-17: an add-email card sent
     // bare was read as a broken reply and the user got STRUCTURED_REPLY_FALLBACK). Kept as the card; the words
     // are filled in by the handler (CARD_ONLY_REPLY).
-    if (parsed && typeof parsed.reply !== 'string' && typeof parsed.type === 'string' && !('uiElement' in parsed)) {
-        return { content: '', uiElement: parsed };
-    }
+    // Only when the whole reply IS the card (loneCard): prose followed by a card must reach splitProseAndCard
+    // below, or the prose is lost (#703 review).
+    const lone = loneCard(stripped, parsed);
+    if (lone) return { content: '', uiElement: lone };
     if (parsed && typeof parsed.reply === 'string') {
         const { card, extra } = firstCard(parsed);
         const content = parsed.reply.trim();
@@ -4776,6 +4777,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
             // A card with no words: a line that points at it, never an empty bubble above it.
             if (uiElement && !content.trim()) content = CARD_ONLY_REPLY;
+            // A card sent on its own that a later check refused (a gate, normaliseMinutesCard, no plan…): no card
+            // AND no words. Never an empty bubble — say the usual retry line and keep what came back (#703 review).
+            if (!uiElement && !content.trim()) {
+                content = STRUCTURED_REPLY_FALLBACK;
+                if (!droppedCard) {
+                    droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
+                    droppedCard.content = `${droppedCard.content} (a card sent on its own was refused)`;
+                }
+            }
         }
 
         // Written before the reply so a meeting card can carry its record's id: its Approve button

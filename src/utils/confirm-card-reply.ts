@@ -16,6 +16,8 @@
 // set / make / remove / delete joined the I'll and I will lists.
 const CLAIMS = /\b(updated|changed|saved|switched|stopped|started|added|removed|approved|declined|turned (on|off)|set up|all set|done)\b|\bI(?:'|’)?ll (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft|set|make|remove|delete)\b|\bI will (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft|set|make|remove|delete)\b|\bI(?:'|’)?ve (stopped|started|written|switched|turned|added|changed|updated|saved|set)\b/i;
 
+import { escapeControlCharsInStrings } from './model-json';
+
 export function replyClaimsChange(content: string): boolean {
     return CLAIMS.test(content);
 }
@@ -234,11 +236,45 @@ export function firstCard(parsed: Record<string, unknown>): { card: unknown | nu
         }
     }
     // The card under some other key ("card", "proposal", the card's own type name…) — but only an object that
-    // IS a card (a string `type`), and only when exactly one is there (Minute Taker run B, staging 2026-11-17:
-    // "I've prepared a card" over a reply whose card never reached the page).
+    // IS a card (a card-like `type`), and only when exactly one is there (Minute Taker run B, staging 2026-11-17:
+    // "I've prepared a card" over a reply whose card never reached the page). Never when the model said
+    // `uiElement: null` itself: that is an explicit "no card", not a card to go looking for (#703 review).
+    if ('uiElement' in parsed) return { card: null, extra: 0 };
     const typed = Object.entries(parsed)
-        .filter(([k, v]) => k !== 'reply' && isCard(v) && typeof (v as { type?: unknown }).type === 'string')
+        .filter(([k, v]) => k !== 'reply' && isCard(v) && hasCardType(v as Record<string, unknown>))
         .map(([, v]) => v);
     if (typed.length === 1) return { card: typed[0], extra: 0 };
     return { card: null, extra: 0 };
+}
+
+/**
+ * `type` values that name a JSON shape, not a card the page can draw. An object like {"type":"text",…}
+ * must not be shown as "Here it is" over a card that never renders (#703 review, 2026-11-17).
+ */
+const NOT_CARD_TYPES = new Set(['text', 'message', 'reply', 'response', 'string', 'object', 'json', 'markdown']);
+
+/** True when `v` looks like a card: a non-empty `type` that is not a generic JSON shape, plus at least one other field. Pure. */
+export function hasCardType(v: Record<string, unknown>): boolean {
+    const t = v.type;
+    return typeof t === 'string' && !!t.trim() && !NOT_CARD_TYPES.has(t.trim().toLowerCase()) && Object.keys(v).length >= 2;
+}
+
+/**
+ * The card sent ON ITS OWN — no envelope, no words — or null. Only when the WHOLE (de-fenced) reply is
+ * that one object. parseModelJson falls back to the first {…} anywhere in a reply, so prose followed by a
+ * card also parses to the card; taking that as a lone card threw the prose away (#703 review: the prod
+ * 2026-11-08 shape, org 40, Website Assistant). Prose + card goes on to splitProseAndCard, which keeps both.
+ * Pure.
+ */
+export function loneCard(stripped: string, parsed: Record<string, unknown> | null): Record<string, unknown> | null {
+    if (!parsed || typeof parsed.reply === 'string' || 'uiElement' in parsed || !hasCardType(parsed)) return null;
+    const whole = String(stripped ?? '').trim();
+    if (!whole.startsWith('{') || !whole.endsWith('}')) return null;
+    for (const text of [whole, escapeControlCharsInStrings(whole)]) {
+        try {
+            const own = JSON.parse(text);
+            return own && typeof own === 'object' && !Array.isArray(own) ? parsed : null;
+        } catch { /* try the control-char-escaped copy, then give up */ }
+    }
+    return null; // not ONE object — the older paths (split, then the retry line) decide
 }
