@@ -106,6 +106,11 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        if: needs.dedupe.outputs.push_run != ''
+        with:
+          sparse-checkout: scripts/ci-mirror-push-job.sh
+          sparse-checkout-cone-mode: false
       - name: Same result as staging's push run
         if: needs.dedupe.outputs.push_run != ''
         env:
@@ -113,22 +118,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN: ${{ needs.dedupe.outputs.push_run }}
           NAME: Typecheck + tests
-        run: |
-          url="https://github.com/$REPO/actions/runs/$RUN"
-          echo "This commit's checks run on staging's push: $url"
-          for i in $(seq 1 120); do   # up to 30 minutes
-            line=$(gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[] | select(.name == env.NAME) | "\(.status) \(.conclusion // "")"' | head -1)
-            if [ "${line%% *}" = completed ]; then
-              conclusion="${line#* }"
-              echo "\"$NAME\" on the push run: $conclusion"
-              [ "$conclusion" = success ] && exit 0
-              echo "::error::\"$NAME\" did not pass on staging's push run ($conclusion): $url. Fix it on staging, or re-run that job and then this one."
-              exit 1
-            fi
-            sleep 15
-          done
-          echo "::error::Timed out after 30 minutes waiting for \"$NAME\" on $url"
-          exit 1
+        run: bash scripts/ci-mirror-push-job.sh
       - name: Typecheck and every test runner passed
         if: needs.dedupe.outputs.push_run == ''
         run: |
@@ -167,6 +157,15 @@ jobs:
         run: npx playwright install-deps chromium
       # Static pages in a real browser, every function stubbed (e2e/fixtures.ts) — no DB or secrets.
       - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
+      # Read by e2e-report below to name the failed tests in the staging issue. Uploaded on success too,
+      # so a missing file means the runner failed before Playwright reported anything.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-json-${{ matrix.shard }}
+          path: playwright-json/
+          retention-days: 7
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -175,6 +174,68 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # One name for main's ruleset to require: passes only when all three Playwright runners passed
+  # (a skipped, cancelled or failed one fails it). On a promote PR reusing staging's push run, it
+  # reports that run's "Browser smoke tests" instead — same pattern as "Typecheck + tests".
+  e2e-gate:
+    name: Browser smoke tests
+    needs: [dedupe, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.dedupe.outputs.push_run != ''
+        with:
+          sparse-checkout: scripts/ci-mirror-push-job.sh
+          sparse-checkout-cone-mode: false
+      - name: Same result as staging's push run
+        if: needs.dedupe.outputs.push_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ needs.dedupe.outputs.push_run }}
+          NAME: Browser smoke tests
+        run: bash scripts/ci-mirror-push-job.sh
+      - name: Every Playwright runner passed
+        if: needs.dedupe.outputs.push_run == ''
+        run: |
+          echo "playwright: ${{ needs.e2e.result }}"
+          [ "${{ needs.e2e.result }}" = success ]
+
+  # Staging only: a Playwright failure opens (or comments on) one GitHub issue labelled
+  # `playwright-ci`, naming the failed tests; the next passing run closes it. SwanJira never hears
+  # about CI runs — it lives on the owner's Mac. scripts/ci-e2e-issue.mjs has the rules.
+  e2e-report:
+    name: Playwright failures → GitHub issue
+    needs: e2e
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/staging' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-e2e-issue.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: playwright-json-*
+          path: playwright-json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: node scripts/ci-e2e-issue.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.e2e.result }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          SHARDS: '3'
+          JSON_DIR: playwright-json
 
   rls:
     name: RLS tenant-isolation (Postgres)
