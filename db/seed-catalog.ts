@@ -546,7 +546,7 @@ const SCENARIOS = [
         scenarioKey: 'email_meeting_followup', providerKey: 'email', tier: 1,
         direction: 'outbound', scenarioType: 'meeting_handoff',
         title: 'Email a Follow-Up to Attendees',
-        description: 'When you approve a meeting, email the reviewed summary and action items to every attendee — from your connected Gmail, or from Be More Swan when no inbox is connected.',
+        description: 'When you approve a meeting, email the reviewed summary and action items to every attendee — from your own connected Gmail or Outlook, never from anyone else’s address.',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
         actionType: 'email_meeting_followup', fieldSchema: [], status: 'available', sortOrder: 43,
     },
