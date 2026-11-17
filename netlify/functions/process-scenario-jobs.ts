@@ -165,8 +165,8 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
                 // until a mailbox is connected. sync-action.ts has already stamped followupNotSent on the
                 // meeting (the Inbox shows "Follow-up not sent" + "Send the follow-up now"), and the claim
                 // was released above so that button can send it later. Counting it as an error re-queued
-                // the WHOLE job — and the custom webhook, which has no once-per-meeting guard, POSTed again
-                // on every attempt (PR #695 review, 2026-11-17).
+                // the WHOLE job for nothing (PR #695 review, 2026-11-17). The custom webhook no longer re-POSTs
+                // on a retry either way (webhook-handoff-once.ts).
                 if (isNoMailboxResult(result.statusCode, body)) {
                     console.log(`[process-scenario-jobs] ${scenario.scenarioKey}: no mailbox connected for meeting ${subject.recordId}; not sent, not retried`);
                     continue;
