@@ -211,7 +211,8 @@ export function routeAsset(platform: string, assets: AssetMetrics[], declaredKey
 }
 
 function deriveFormat(platform: string, assets: AssetMetrics[]): RouteResult {
-    const live = formatsForPlatform(platform).filter(f => f.availability === 'live');
+    // A format that is only used when the post says so (autoPick: false — li_document) is never derived.
+    const live = formatsForPlatform(platform).filter(f => f.availability === 'live' && f.autoPick !== false);
     const none = (reason: string): RouteResult =>
         ({ state: 'none', format: null, reason, verified: true, alternatives: [] });
 

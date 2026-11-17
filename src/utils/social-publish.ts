@@ -809,16 +809,13 @@ export function isPdfSlideMime(mimeType: string | null | undefined): boolean {
 }
 
 /**
- * True when a LinkedIn row goes out as a document carousel. Its format says so — or it has no stored
- * format and 2+ PNG/JPEG pictures, which the editor's format router now labels "Document carousel"
- * (format-router deriveFormat), so the post goes out as what the editor showed (#712 review). A legacy
- * multi-picture row with any other kind of picture keeps the old multi-image post. Pure.
+ * True when a LinkedIn row goes out as a document carousel: ONLY when its stored format says so. A row
+ * with no stored format (most posts, including ones approved before this shipped) keeps the old
+ * multi-image post however many pictures it has — and the router never labels such a row "Document
+ * carousel" either (li_document is autoPick: false), so what the editor shows is what goes out. Pure.
  */
-export function isLinkedInDocument(formatKey: string | null | undefined, media?: PostImage | PostImage[] | null): boolean {
-    if (formatKey === 'li_document') return true;
-    if (formatKey) return false;
-    const items = mediaItems(media ?? null);
-    return items.length >= LI_DOCUMENT_MIN_SLIDES && items.every((it) => isPdfSlideMime(it.mimeType));
+export function isLinkedInDocument(formatKey: string | null | undefined): boolean {
+    return formatKey === 'li_document';
 }
 
 const liRestHeaders = (token: string, extra: Record<string, string> = {}) => ({

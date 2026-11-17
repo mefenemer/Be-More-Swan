@@ -248,7 +248,7 @@ export default withLambda(async () => {
             } else if (post.platform === 'linkedin') {
                 // A Document carousel (li_document) goes out as one PDF of its slides through LinkedIn's
                 // Posts API; every other LinkedIn post stays on ugcPosts (docs/linkedin-document-carousel-plan.md).
-                result = isLinkedInDocument(post.format_key, image)
+                result = isLinkedInDocument(post.format_key)
                     ? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))
                     : await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {

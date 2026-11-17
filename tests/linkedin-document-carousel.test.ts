@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PDFDocument } from 'pdf-lib';
 import { postFormatSpec } from '../src/config/post-formats';
+import { routeAsset } from '../src/utils/format-router';
 import { carouselFormatFor, linkedInDocumentTitle, CAROUSEL_MAX_SLIDES } from '../src/utils/top-lists';
 import {
     littleText, slideImageKind, slidesPdf, isLinkedInDocument, publishLinkedInDocument, LINKEDIN_REST_VERSION,
@@ -74,15 +75,20 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
         assert.equal(littleText('https://x.co/a_b(c)'), 'https://x.co/a\\_b\\(c\\)');
     });
 
-    await check('the publisher follows the editor label: no stored format + 2+ PNG/JPEG = document (#712 review)', () => {
-        const png = { url: 'u', mimeType: 'image/png' }, jpg = { url: 'u', mimeType: 'image/jpeg' }, webp = { url: 'u', mimeType: 'image/webp' };
-        assert.equal(isLinkedInDocument(null, [png, jpg]), true);
-        assert.equal(isLinkedInDocument(null, [png, webp]), false, 'legacy webp keeps the multi-image post');
-        assert.equal(isLinkedInDocument(null, [png]), false);
-        assert.equal(isLinkedInDocument('li_feed', [png, jpg]), false, 'a stored format always wins');
-        assert.equal(isLinkedInDocument('li_document', [png]), true);
+    await check('only a stored li_document goes out as a document; no stored format never does (#712 review)', () => {
+        assert.equal(isLinkedInDocument('li_document'), true);
+        assert.equal(isLinkedInDocument(null), false);
+        assert.equal(isLinkedInDocument('li_feed'), false);
         assert.equal(isPdfSlideMime('image/JPG'), true);
         assert.equal(isPdfSlideMime('image/gif'), false);
+    });
+
+    await check('the router never picks Document carousel from the media alone (autoPick: false)', () => {
+        assert.equal(postFormatSpec('li_document')!.autoPick, false);
+        const four = Array.from({ length: 4 }, () => ({ kind: 'image' as const, width: 1080, height: 1350 }));
+        assert.notEqual(routeAsset('linkedin', four).format?.key, 'li_document', 'no stored format: not a document');
+        assert.equal(routeAsset('linkedin', four, 'li_document').format?.key, 'li_document', 'a stored li_document is checked and kept');
+        assert.equal(routeAsset('instagram', four).format?.key, 'ig_carousel', 'Instagram still derives its carousel');
     });
 
     await check('the document wait stays short inside the scheduled run (#712 review)', () => {
@@ -96,7 +102,7 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
         const block = src.slice(i, i + 1600);
         assert.ok(block.includes('!isPdfSlideMime(m)'));
         assert.ok(block.includes("code: 'LI_DOCUMENT_SLIDE_TYPE'"));
-        assert.ok(block.includes('Slide ${bad + 1}'));
+        assert.ok(block.includes('One of the slides is a'));
         assert.ok(i < src.indexOf('const routableAssets = await loadAssetMetrics('), 'checked before the format validation');
     });
 
@@ -197,7 +203,7 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
     await check('the publish job sends li_document rows through the document publisher, others unchanged', () => {
         const src = readFileSync('netlify/functions/publish-social-posts.ts', 'utf8');
         assert.ok(src.includes('link_url, cta_text, format_key`'), 'format_key is read with the claimed row');
-        assert.ok(src.includes('result = isLinkedInDocument(post.format_key, image)'));
+        assert.ok(src.includes('result = isLinkedInDocument(post.format_key)'));
         assert.ok(src.includes('? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))'));
         assert.ok(src.includes(': await publishLinkedIn(text, token, creds.externalUserId, image);'));
     });

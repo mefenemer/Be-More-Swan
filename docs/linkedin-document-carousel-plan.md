@@ -109,10 +109,12 @@ document preview it doesn't have. Cost and tasks are unchanged (one `carousel` t
   with the cover line as the document title. The caption is escaped to LinkedIn's "little text" (`littleText`): its
   15 reserved characters are escaped and `#word` becomes `{hashtag|\#|word}` (`#1` stays a rank, not a hashtag).
 - An upload failure is a media failure (never a text-only post); LinkedIn's status drives the usual retry rules.
-- Also a document: a LinkedIn row with **no stored format and 2+ PNG/JPEG pictures**. With `li_document` live, the
-  editor labels that "Document carousel" and saves it when 2+ photos are dropped on, so the publisher follows the label.
-  A legacy row with a webp/gif among them keeps the old multi-image post.
-- Approval refuses a Document carousel slide that isn't PNG/JPEG, naming the slide (`LI_DOCUMENT_SLIDE_TYPE`).
+- **Only a row whose stored format is `li_document` goes out as a document.** It's set by "Make it a carousel", by
+  picking the format, or by the editor visibly switching to it ("Switched to Document carousel") when several photos
+  are dropped on a LinkedIn post. The router never picks it from the media alone (`autoPick: false`), so a LinkedIn
+  post with several pictures and no stored format — including ones approved before this shipped — keeps the old
+  multi-image post, and the editor doesn't label it a document.
+- Approval refuses a Document carousel with a slide that isn't PNG/JPEG (`LI_DOCUMENT_SLIDE_TYPE`).
 - Links in a caption stay whole: escaped, but a `#` inside a link is never turned into a hashtag.
 - Every other LinkedIn post stays on ugcPosts (§7).
 - `/connections` and the Help Centre say nothing yet — only once one has posted for real on prod.

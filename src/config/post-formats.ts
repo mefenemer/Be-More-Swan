@@ -63,6 +63,13 @@ export interface PostFormatSpec {
     maxDurationS?: number;
     /** Disappears on its own (Stories) — worth saying, since scheduling one is a different promise. */
     ephemeral?: boolean;
+    /**
+     * false = only ever used when the post SAYS so (its stored format_key, set by a person or by "Make it a
+     * carousel"), never picked by the router from the media alone. For a format that changes what the
+     * publisher sends: a LinkedIn post with several pictures and no stored format must not be labelled — or
+     * sent as — a PDF document just because li_document became live (#712 review).
+     */
+    autoPick?: boolean;
     availability: FormatAvailability;
     /** Required unless availability is 'live'. Shown to the user, so write it for them. */
     unavailableReason?: string;
@@ -134,7 +141,7 @@ export const POST_FORMATS: PostFormatSpec[] = [
     // docs/linkedin-document-carousel-plan.md (Phase 0 proved it 2026-11-17 with w_member_social).
     { key: 'li_document', platform: 'linkedin', label: 'Document carousel', blurb: 'A PDF that reads as swipeable slides — LinkedIn’s strongest format.',
       media: 'image', mediaMandatory: true, minItems: 2, maxItems: 20, aspectRatios: ['4:5', '1:1'], charLimit: 3000,
-      availability: 'live' },
+      availability: 'live', autoPick: false },
     { key: 'li_article', platform: 'linkedin', label: 'Article / newsletter', blurb: 'Long-form writing with subscribers.',
       media: 'none', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: [], charLimit: 110000,
       availability: 'not_schedulable', unavailableReason: 'Long-form belongs to the Blog Writer, not the social post editor — draft it there and publish to LinkedIn from its destinations.' },

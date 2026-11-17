@@ -405,7 +405,7 @@ export default withLambda(async (event) => {
                 statusCode: 422,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    error: `Slide ${bad + 1} is a ${String(mimeById.get(ids[bad])).replace('image/', '').toUpperCase()} picture. A LinkedIn document carousel needs PNG or JPEG pictures — replace that slide, then approve.`,
+                    error: `One of the slides is a ${String(mimeById.get(ids[bad])).replace('image/', '').toUpperCase()} picture. A LinkedIn document carousel needs PNG or JPEG pictures — replace it, then approve.`,
                     code: 'LI_DOCUMENT_SLIDE_TYPE',
                     formatKey: 'li_document',
                 }),
