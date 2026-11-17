@@ -45,7 +45,7 @@ import { prGate } from './pr-review-gate';
 import { approvalNoteWithReview } from '../src/utils/pr-review';
 import { classifySql, sqlHash } from '../src/utils/issue-sql';
 import { stagingCiState, fetchStagingCommit } from '../src/utils/issue-fix-proof';
-import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
+import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureForNewPr, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
 
 const arg = (a: string[], n: string) => { const i = a.indexOf(n); return i !== -1 ? a[i + 1] : undefined; };
 const STATUSES = ['open', 'planned', 'brief_ready', 'in_progress', 'on_hold', 'released', 'declined', 'duplicate'];
@@ -128,25 +128,8 @@ async function main() {
             const proofReady = !!(await loadFeatureProof(db, id));
             if (sqlText && !proofReady) throw new Error('This feature has SQL: run db/z-feature-pipeline-proof.sql on this DB first, so the SQL can be tracked and gated.');
             await sql`UPDATE feature_requests SET dev_pr_url = ${pr} WHERE id = ${id}`;
-            let reopened = false;
-            if (proofReady) {
-                // A new PR starts its checks again: its SQL, staging merge, CI and deploys are re-proved.
-                // ⚠️ A RELEASED request getting another PR (its next phase) goes back to In progress. live_at is
-                // cleared below, and the live check (runFeatureLiveCheck) only looks at requests that are NOT
-                // Released — so left Released, its "Live on production" line would say "Not in main yet" for
-                // ever (FR#43 Phase 2, 2026-11-16). Reopened, the live check returns it to Released once the
-                // production deploy contains this PR. Declined / duplicate are never reopened.
-                const was = await sql`SELECT status FROM feature_requests WHERE id = ${id}`;
-                reopened = was[0]?.status === 'released';
-                await sql`
-                    UPDATE feature_requests SET dev_sql = ${sqlText}, dev_sql_safety = ${safety}, dev_sql_hash = ${sqlText ? sqlHash(sqlText) : null},
-                           dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
-                           dev_merged_at = NULL, dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
-                           dev_prod_sql_status = NULL, dev_prod_sql_result = NULL, dev_prod_sql_ran_at = NULL, dev_prod_merged_at = NULL, live_at = NULL,
-                           status = CASE WHEN status = 'released' THEN 'in_progress' ELSE status END,
-                           updated_at = now()
-                     WHERE id = ${id}`;
-            }
+            // A new PR starts its checks again; a Released request is reopened (resetFeatureForNewPr says why).
+            const reopened = proofReady ? (await resetFeatureForNewPr(db, id, { sqlText, safety })).reopened : false;
             if (reopened) {
                 await note('Reopened: it was Released, and this PR ships more of it. Back to In progress until the production deploy contains this PR, then the live check moves it to Released again. No one was notified.');
                 console.log(`#${id}: was Released → In progress (the live check releases it again once this PR is live).`);
