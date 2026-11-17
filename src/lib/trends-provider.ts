@@ -135,6 +135,39 @@ export function dataForSeoProvider(env: NodeJS.ProcessEnv = process.env, fetchIm
     };
 }
 
+// ── Is the login accepted? (Admin ▸ Search trends) ──────────────────────────────────────────────
+// Prod 2026-11-16: the Provider tile said "Connected" for hours while DataForSEO refused every call
+// (401 40100), because it only checked that the env vars were set. This asks the provider for real,
+// with the FREE tasks_ready call.
+
+export type ProviderStatus = 'ok' | 'refused' | 'unverified' | 'unreachable' | 'error' | 'not_set';
+export interface ProviderCheck { status: ProviderStatus; detail: string | null }
+
+export const PROVIDER_CHECK_TIMEOUT_MS = 5_000;
+
+/** Pure: what a failed call's error says about the login. */
+export function classifyProviderError(error: string): ProviderCheck {
+    const e = error.trim();
+    if (/^HTTP 401\b|\b4010[0-9]\b/.test(e)) {
+        // 40104 = the account has not verified its email yet; 40100 = wrong login / API password.
+        return { status: /\b40104\b/.test(e) ? 'unverified' : 'refused', detail: e.slice(0, 200) };
+    }
+    if (/abort|timed? ?out|ENOTFOUND|ECONNRE|fetch failed|network/i.test(e)) return { status: 'unreachable', detail: e.slice(0, 200) };
+    return { status: 'error', detail: e.slice(0, 200) };
+}
+
+/** Ask the provider whether it accepts our login. Never throws; bounded by PROVIDER_CHECK_TIMEOUT_MS. */
+export async function checkProvider(provider: TrendsProvider | null, timeoutMs = PROVIDER_CHECK_TIMEOUT_MS): Promise<ProviderCheck> {
+    if (!provider) return { status: 'not_set', detail: null };
+    const timeout = new Promise<{ ok: false; error: string }>((resolve) => setTimeout(() => resolve({ ok: false, error: 'timed out' }), timeoutMs));
+    try {
+        const r = await Promise.race([provider.ready(), timeout]);
+        return r.ok ? { status: 'ok', detail: null } : classifyProviderError(r.error);
+    } catch (err) {
+        return classifyProviderError(err instanceof Error ? err.message : String(err));
+    }
+}
+
 /**
  * Google Trends location codes (Google Ads geo targets) for the countries a workspace can be in.
  * Country is the default region (plan §10 condition 1); a nation or state is added per term only

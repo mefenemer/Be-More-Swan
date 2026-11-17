@@ -3,7 +3,8 @@
 // how many workspaces track it, whether its weekly refresh is healthy, and what DataForSEO has cost.
 // Shared data only — never which workspace tracks what (src/utils/search-trends-admin.ts).
 //
-//   GET                                 → { setUp, providerConfigured, totals, spend, terms }
+//   GET                                 → { setUp, providerConfigured, providerCheck, totals, spend, terms }
+//                                         providerCheck = a FREE DataForSEO call: is the login actually accepted?
 //   POST { action: 'run_now' }          → wakes search-trends-background now (collect + post what is due)
 //   POST { action: 'retry', termId }    → clears a term's error/backoff and marks it due
 //
@@ -18,7 +19,7 @@ import { users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { dataForSeoProvider } from '../../src/lib/trends-provider';
+import { checkProvider, dataForSeoProvider } from '../../src/lib/trends-provider';
 import { dispatchSearchTrends } from '../../src/utils/search-trends';
 import { loadAdminTrends, retryTrendTerm } from '../../src/utils/search-trends-admin';
 
@@ -48,7 +49,11 @@ export default withLambda(async (event) => {
     if (!admin) return json(403, { error: 'You need the platform_config permission for this page.' });
     const db = getDb();
     try {
-        if (event.httpMethod === 'GET') return json(200, await loadAdminTrends(db, !!dataForSeoProvider()));
+        if (event.httpMethod === 'GET') {
+            const provider = dataForSeoProvider();
+            const [view, providerCheck] = await Promise.all([loadAdminTrends(db, !!provider), checkProvider(provider)]);
+            return json(200, { ...view, providerCheck });
+        }
         if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
         if (admin.impersonating) return json(403, { error: 'Action blocked during impersonation session.' });
         let body: Record<string, unknown> = {};
