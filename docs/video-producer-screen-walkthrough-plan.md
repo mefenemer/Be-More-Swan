@@ -8,10 +8,15 @@ tightening, own-sound captions, all live) and
 [video-producer-manual-controls-plan.md](./video-producer-manual-controls-plan.md) (Record a video
 with teleprompter, own voice, scene text).
 
-Status: **plan only, nothing built.** Decisions D-W1 to D-W6 in §8 are open.
+Status: **nothing built. All decisions taken 2026-11-17:** the owner said "go with your recommendations" for
+D-W1–W6 (§8) and D-A2–A7 (§11.9). D-A1 (Kling AI Avatar v2 Standard) was the owner's own pick the same day. What follows from them:
+- **Terms notice:** D-A3 (2 tasks per presenter-second) is a new charge, so the 30-day notice under clause 20.2
+  must go out before the AI presenter is sold. D-W3 may add a second charge after Phase 4 measures render costs.
+- **Welsh is in** at launch (D-A5): the bake-off showed `eleven_v3` speaks it, so Welsh lines use `eleven_v3`.
+- **First build step:** Phase 0 (fix the stale footage-review prompt), then Phases 1–2 (layouts) and A1 (roster) can start.
 
 **Added later on 2026-11-15:** the owner wants **the presenter to be an AI-made human avatar**, chosen
-from **male and female presenters**, with a **choice of language**. See §11 (decisions D-A1 to D-A7; D-A1 decided).
+from **male and female presenters**, with a **choice of language**. See §11 (decisions D-A1 to D-A7, all taken).
 This replaces D-V3 in the manual-controls plan ("AI presenter: separate plan later").
 
 **Phase A0 bake-off done 2026-11-15** ([ai-avatar-bakeoff-2026-11-15.md](./ai-avatar-bakeoff-2026-11-15.md), $21.43): all 5 services worked; **D-A1 DECIDED 2026-11-17: the owner chose Kling AI Avatar v2 Standard** after watching the clips. **Welsh works only with `eleven_v3`** (multilingual v2 refuses `cy`).
@@ -183,16 +188,16 @@ noticeably more than a 30-second one (measure in Phase 4). See D-W3.
 
 ---
 
-## 8. Decisions for the owner
+## 8. Decisions (all taken 2026-11-17: the owner chose the recommendations)
 
 | # | Question | Recommendation |
 |---|---|---|
-| D-W1 | Call it something? | A **"Screen walkthrough"** start option next to "Use my own footage". It opens the recorder with "Record my screen too" ticked and 16:9 chosen. Same studio underneath. |
-| D-W2 | Longest walkthrough | **10 minutes** (the render ceiling). Footage clips up to 10 min for screen + camera pairs. |
-| D-W3 | Charge for long renders? | **Free up to 1 minute as now; above that, measure first** (Phase 4), then decide tasks per minute. Any new charge needs the Terms 30-day notice (like per-second AI video). |
-| D-W4 | Bubble look | **Circle, bottom right, medium, thin white ring.** Corner and Small/Medium choosable. No square option at first. |
-| D-W5 | Phones | Screen recording is **desktop only** (phone browsers can't share the screen). Phones can still upload a screen recording. |
-| D-W6 | The screen's own sound | **Off by default** (it double-plays notifications and the presenter's voice). A tick box "Keep the screen's sound" for demos with sound. |
+| D-W1 | Call it something? | ✅ A **"Screen walkthrough"** start option next to "Use my own footage". It opens the recorder with "Record my screen too" ticked and 16:9 chosen. Same studio underneath. |
+| D-W2 | Longest walkthrough | ✅ **10 minutes** (the render ceiling). Footage clips up to 10 min for screen + camera pairs. |
+| D-W3 | Charge for long renders? | ✅ **Free up to 1 minute as now; above that, measure first** (Phase 4), then decide tasks per minute. Any new charge needs the Terms 30-day notice (like per-second AI video). |
+| D-W4 | Bubble look | ✅ **Circle, bottom right, medium, thin white ring.** Corner and Small/Medium choosable. No square option at first. |
+| D-W5 | Phones | ✅ Screen recording is **desktop only** (phone browsers can't share the screen). Phones can still upload a screen recording. |
+| D-W6 | The screen's own sound | ✅ **Off by default** (it double-plays notifications and the presenter's voice). A tick box "Keep the screen's sound" for demos with sound. |
 
 ---
 
@@ -369,14 +374,14 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 A1 and A2 work for **any** video, not only walkthroughs: "an AI presenter introduces your offer" for
 30-second social videos is likely the most-used version.
 
-### 11.9 Decisions for the owner
+### 11.9 Decisions (all taken 2026-11-17)
 
 | # | Question | Recommendation |
 |---|---|---|
 | D-A1 | Which model? | ✅ **Decided 2026-11-17: Kling AI Avatar v2 Standard** (`fal-ai/kling-video/ai-avatar/v2/standard`, $0.0562/s), picked by env `FAL_AVATAR_MODEL`. Pro stays a possible "High quality" option later. |
-| D-A2 | How many presenters to start? | **12 (6 female, 6 male),** mixed ages and ethnicities, all fictional. Add more when customers ask. |
-| D-A3 | Price | **Tasks per presenter-second** (about 2 for Standard, 4 for High quality), shown before making. Needs the Terms 30-day notice. |
-| D-A4 | Background | **Plain studio background**, cropped in the bubble. Real background removal only if the bake-off shows edges look wrong full frame. |
-| D-A5 | Languages at launch | **The 11 in the voice list**, after the bake-off checks lip-sync. Welsh only if ElevenLabs speaks it well. |
-| D-A6 | Customers' own face as a presenter | **Not at launch.** A later phase with recorded consent and a DPA note. |
-| D-A7 | Presenter on screen the whole video, or only key moments? | **Key moments by default** (opening, call to action, marked moments), "Show me throughout" as a choice. It keeps the cost about 4× lower on long videos. |
+| D-A2 | How many presenters to start? | ✅ **12 (6 female, 6 male),** mixed ages and ethnicities, all fictional. Add more when customers ask. |
+| D-A3 | Price | ✅ **Tasks per presenter-second: 2 per second** (Kling Standard, D-A1; 4 if a High quality option is added later), shown and held before making. Needs the Terms 30-day notice before launch. |
+| D-A4 | Background | ✅ **Plain studio background**, cropped in the bubble. Real background removal only if the bake-off shows edges look wrong full frame. |
+| D-A5 | Languages at launch | ✅ **The 11 in the voice list, plus Welsh** (the bake-off showed `eleven_v3` speaks it; Welsh lines use `eleven_v3`, and a Welsh voice entry is added to the catalogue). |
+| D-A6 | Customers' own face as a presenter | ✅ **Not at launch.** A later phase with recorded consent and a DPA note. |
+| D-A7 | Presenter on screen the whole video, or only key moments? | ✅ **Key moments by default** (opening, call to action, marked moments), "Show me throughout" as a choice. It keeps the cost about 4× lower on long videos. |
