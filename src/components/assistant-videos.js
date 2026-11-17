@@ -259,7 +259,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Name captions</span>
             <select name="lowerThird" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(LOWER_THIRDS, d.lowerThird)}</select>
             <span class="block text-[11px] text-gray-500 mt-0.5">How a name and job title look when someone is on screen.</span></label>
-        </div>`;
+        </div>
+        <label class="flex items-start gap-2 mt-3 text-sm text-gray-700">
+          <input type="checkbox" name="countdown" ${v.countdown ? 'checked' : ''} class="mt-0.5">
+          <span><span class="font-bold">Countdown</span> <span class="text-xs text-gray-500">— a “Top 3” video: it says how many are coming, then one scene each, counting down to number 1. Not used with your own videos.</span></span>
+        </label>`;
   }
   /** The extras from a submitted brief form. */
   function briefExtras(fd) {
@@ -268,6 +272,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       musicMood: String(fd.get('musicMood') || 'auto'),
       ...(fd.get('musicMood') === 'mine' && Number(fd.get('musicAssetId')) > 0 ? { musicAssetId: Number(fd.get('musicAssetId')) } : {}),
       look: String(fd.get('look') || 'natural'), lowerThird: String(fd.get('lowerThird') || 'bar'),
+      ...(fd.get('countdown') ? { countdown: true } : {}),
     };
   }
   const sel = (on) => (on ? ' selected' : '');

@@ -60,6 +60,17 @@ async function loadMedia(db: Db, orgId: number, blogPostId: number, featureAsset
     return { feature, inline };
 }
 
+// A new or removed feature picture on a LIVE article reaches the blog (blog-publish.ts refreshLiveSnapshot);
+// no-op for anything not published. Inline media need no refresh here: they reach the body — and so the
+// live copy — when the editor saves the block that shows them. Never fails the attach itself.
+async function refreshLive(db: Db, orgId: number, blogPostId: number): Promise<boolean> {
+    try { return await (await import('../../src/utils/blog-publish')).refreshLiveSnapshot(db, orgId, blogPostId); }
+    catch (err) {
+        console.warn(`[blog-media] live copy not refreshed for post ${blogPostId}:`, err instanceof Error ? err.message : err);
+        return false;
+    }
+}
+
 export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
@@ -108,7 +119,8 @@ export default withLambda(async (event: HandlerEvent) => {
             await db.delete(blogPostAssets)
                 .where(and(eq(blogPostAssets.blogPostId, blogPostId), eq(blogPostAssets.contentAssetId, assetId)));
         }
-        return { statusCode: 200, body: JSON.stringify(await loadMedia(db, orgId, blogPostId, role === 'feature' ? null : post.featureAssetId)) };
+        const live = role === 'feature' ? await refreshLive(db, orgId, blogPostId) : false;
+        return { statusCode: 200, body: JSON.stringify({ ...await loadMedia(db, orgId, blogPostId, role === 'feature' ? null : post.featureAssetId), live }) };
     }
 
     // action === 'attach'. Either an existing library asset (assetId) or a Pexels candidate to mint.
@@ -161,5 +173,6 @@ export default withLambda(async (event: HandlerEvent) => {
             .onConflictDoNothing();
     }
 
-    return { statusCode: 200, body: JSON.stringify(await loadMedia(db, orgId, blogPostId, nextFeature)) };
+    const live = role === 'feature' ? await refreshLive(db, orgId, blogPostId) : false;
+    return { statusCode: 200, body: JSON.stringify({ ...await loadMedia(db, orgId, blogPostId, nextFeature), live }) };
 });

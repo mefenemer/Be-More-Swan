@@ -158,6 +158,7 @@
 
 <script src="./mobileMenu.js"></script>
 <script src="/src/public/role-labels.js"></script>
+<script src="/src/components/recipe-settings-form.js"></script>
 <script>
 (function () {
   'use strict';
@@ -645,6 +646,13 @@
     else webhookWrap.classList.add('hidden');
 
     const map = (s.active && s.active.fieldMappings) || {};
+    // Recipes with real settings: the same pickers as an assistant's Connections tab (recipe-settings-form.js).
+    if (Array.isArray(s.settings) && s.settings.length && window.RecipeSettingsForm) {
+      window.RecipeSettingsForm.render(document.getElementById('scenario-modal-fields'), s, map);
+      document.getElementById('scenario-modal-save').textContent = s.active ? 'Save changes' : 'Switch on';
+      modal.classList.remove('hidden');
+      return;
+    }
     const fields = Array.isArray(s.fieldSchema) ? s.fieldSchema : [];
     document.getElementById('scenario-modal-fields').innerHTML = fields.length
       ? '<p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Field mapping</p>' + fields.map(function (f) {
@@ -662,8 +670,14 @@
   async function saveModal() {
     if (!editing) return;
     const errEl = document.getElementById('scenario-modal-error');
-    const fieldMappings = {};
-    modal.querySelectorAll('[data-map]').forEach(function (i) { if (i.value.trim()) fieldMappings[i.getAttribute('data-map')] = i.value.trim(); });
+    let fieldMappings = {};
+    if (Array.isArray(editing.settings) && editing.settings.length && window.RecipeSettingsForm) {
+      const got = window.RecipeSettingsForm.collect(document.getElementById('scenario-modal-fields'), editing);
+      if (got.error) { errEl.textContent = got.error; errEl.classList.remove('hidden'); return; }
+      fieldMappings = got.fieldMappings;
+    } else {
+      modal.querySelectorAll('[data-map]').forEach(function (i) { if (i.value.trim()) fieldMappings[i.getAttribute('data-map')] = i.value.trim(); });
+    }
     const payload = { scenarioId: editing.id, assistantId: Number(assistantId), fieldMappings };
     if (editing.tier === 2) {
       const url = document.getElementById('scenario-webhook-url').value.trim();
@@ -679,6 +693,9 @@
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok) throw new Error(data.error || 'Could not enable scenario.');
       closeModal();
+      if (Array.isArray(data.switchedOff) && data.switchedOff.length && window.showToast) {
+        window.showToast('Tasks now go to ' + editing.providerName + '. ' + data.switchedOff.join(' and ') + ' is switched off — one task tool at a time.');
+      }
       loadScenarios();
     } catch (e) {
       errEl.textContent = String(e.message || 'Could not enable scenario.'); errEl.classList.remove('hidden');

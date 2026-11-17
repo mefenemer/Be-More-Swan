@@ -47,8 +47,9 @@ import {
 } from '../config/newsletter-merge-vars';
 import { loadCustomFieldDefs } from './audience-custom-fields';
 import { purposeOrDefault, purposePromptBlock } from '../config/newsletter-purposes';
+import { TOP_LIST_EMAIL_BRIEF, TOP_LIST_EMAIL_PURPOSES, TOP_LIST_TEMPLATE, countHeadingItems, fixListCount } from './top-lists';
 import {
-    designToMarkdown, normaliseDesign,
+    designToMarkdown, normaliseDesign, DEFAULT_THEME,
     type DesignBlock, type DesignTheme, type NewsletterDesign,
 } from './newsletter-design';
 import { loadBrandNewsletterTheme, themedButtonColours } from './brand-theme';
@@ -106,6 +107,22 @@ export interface GenerateIssueOptions {
      * for, it is added.
      */
     sourceLink?: { url: string; title: string } | null;
+    /**
+     * 'list' = draft it as a "Top 5" (Top lists Phase 3). An issue started from the Top 5 template
+     * is drafted as one without this; either way only a plain newsletter can be a list (see
+     * isTopListIssue), never an incident or a terms notice.
+     */
+    shape?: 'list';
+}
+
+/**
+ * Whether this draft is a "Top 5": asked for, or started from the Top 5 layout — and only ever for a
+ * newsletter purpose. Pure.
+ */
+export function isTopListIssue(purpose: unknown, design: unknown, shape?: unknown): boolean {
+    if (!TOP_LIST_EMAIL_PURPOSES.includes(purposeOrDefault(purpose))) return false;
+    if (shape === 'list') return true;
+    return !!design && typeof design === 'object' && (design as { template?: unknown }).template === TOP_LIST_TEMPLATE;
 }
 
 export interface GenerateIssueResult {
@@ -299,6 +316,14 @@ function withSourceLinkBlock(
     }];
 }
 
+/** A model's layout flattened to Markdown prose, '' when there is none. For issues that keep their own design. */
+function layoutAsProse(raw: unknown): string {
+    const ir = normaliseLayoutIr(raw);
+    if (!ir) return '';
+    const flat = normaliseDesign({ version: 1, template: 'assistant', theme: { ...DEFAULT_THEME }, blocks: irToDesignBlocks(ir, { ...DEFAULT_THEME }) });
+    return flat ? str(designToMarkdown(flat), 20000) : '';
+}
+
 export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Promise<GenerateIssueResult> {
     const { issueId, organisationId, userId } = opts;
     const topic = str(opts.topic, 300);
@@ -378,6 +403,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     ].join(', ');
 
     const purposeBlock = purposePromptBlock(opts.purpose ?? issue.purpose);
+    const topList = isTopListIssue(opts.purpose ?? issue.purpose, issue.design, opts.shape);
 
     // How it opens — subject line and first line — rotated by how many issues this assistant (or,
     // with none, this organisation) wrote before this one, so consecutive emails never start the same
@@ -448,6 +474,8 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             // the tenant's own constraints, which outrank both.
             `\n\n${layoutIrPromptBlock()}` +
             (purposeBlock ? `\n\n${purposeBlock}` : '') +
+            // A "Top 5": the layout's shape and the list rules, after the purpose (which allowed it).
+            (topList ? `\n\n${TOP_LIST_EMAIL_BRIEF}` : '') +
             (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
             (inspoBlock ? `\n\n${inspoBlock}` : ''),
         messages: [{ role: 'user', content: brief }],
@@ -513,7 +541,12 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     // the design IS the copy, and body_markdown is derived from it below.
     const bodyRaw = design
         ? ''
-        : str(parsed?.bodyMarkdown, 20000) || str(salvageStringField(raw, 'bodyMarkdown'), 20000);
+        : str(parsed?.bodyMarkdown, 20000) || str(salvageStringField(raw, 'bodyMarkdown'), 20000)
+            // ⚠️ An issue with a design of its own (any template — the "Top 5" always) ignores the
+            // model's layout above, so a reply that sent ONLY a layout read as unreadable and the
+            // draft failed. Its words still count: flatten them to prose, which the handler then
+            // pours into the author's layout (applyProseToDesign).
+            || (issue.design ? layoutAsProse(parsed?.layout) : '');
     if (!design && !bodyRaw) throw new Error('The draft came back in a form we could not read. Try again.');
 
     // ⚠️ The fallback prose gets grounded too. A designed issue's links went through groundLinks
@@ -529,7 +562,11 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         ? designToMarkdown(design)
         // After the scrub, so the URL is never mistaken for a malformed merge tag and stripped.
         : appendSourceLink(body.text, opts.sourceLink);
-    const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter', customKeys);
+    const subjectRaw = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter', customKeys);
+    // ⚠️ A "Top 5"'s subject carries a count, and the model routinely keeps "5" over four items. The
+    // number is computed from the items actually written (Top lists plan §5.1), never trusted.
+    const listCount = topList ? countHeadingItems(bodyText) : 0;
+    const subject = listCount ? { ...subjectRaw, text: fixListCount(subjectRaw.text, listCount) } : subjectRaw;
     const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS), customKeys);
 
     const warnings = [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings, ...designWarnings,

@@ -15,6 +15,7 @@
 import type { NewsletterDesign, DesignBlock, DesignTheme } from '../utils/newsletter-design';
 import { DEFAULT_THEME } from '../utils/newsletter-design';
 import { applyThemeToNewBlocks } from '../utils/brand-theme';
+import { TOP_LIST_TEMPLATE, TOP_LIST_EMAIL_PURPOSES } from '../utils/top-lists';
 
 export interface NewsletterTemplate {
     key: string;
@@ -23,6 +24,12 @@ export interface NewsletterTemplate {
     description: string;
     /** A tiny schematic for the picker — block types top to bottom, drawn as bars. */
     build: () => DesignBlock[];
+    /**
+     * The purposes it may be used for. Absent = every purpose. The "Top 5" list is a newsletter
+     * shape only (Top lists plan §3): a numbered list in a terms notice or an outage email reads
+     * as marketing, which is the one thing those emails must not.
+     */
+    purposes?: readonly string[];
 }
 
 let seq = 0;
@@ -139,6 +146,29 @@ export const NEWSLETTER_TEMPLATES: NewsletterTemplate[] = [
         ],
     },
     {
+        // Top lists Phase 3 (FR#34). The numbered headings are what the drafter counts to fix the
+        // subject's number (newsletter-generate.ts), so they stay headings, not bold text.
+        key: TOP_LIST_TEMPLATE,
+        label: 'Top 5',
+        description: 'A short intro and five numbered picks, each with a link. For newsletters people save.',
+        purposes: TOP_LIST_EMAIL_PURPOSES,
+        build: () => [
+            text('Hi {{contact.first_name | "there"}},'),
+            text('One line: the five things below, and why they are worth a minute.'),
+            heading('1. The first pick', 3),
+            text('Why it is worth their time, in a sentence or two — and a link to it.'),
+            heading('2. The second pick', 3),
+            text('Same again.'),
+            heading('3. The third pick', 3),
+            text('Same again.'),
+            heading('4. The fourth pick', 3),
+            text('Same again.'),
+            heading('5. The fifth pick', 3),
+            text('Same again. Fewer than five real picks? Delete the spare ones and fix the number.'),
+            text('Replace this with how you sign off.'),
+        ],
+    },
+    {
         key: 'blank',
         label: 'Blank',
         description: 'Nothing at all. Build it up block by block.',
@@ -147,6 +177,12 @@ export const NEWSLETTER_TEMPLATES: NewsletterTemplate[] = [
 ];
 
 export const TEMPLATE_KEYS = NEWSLETTER_TEMPLATES.map((t) => t.key);
+
+/** Whether a template may start an email with this purpose (absent purposes = any). Pure. */
+export function templateAllowsPurpose(key: unknown, purpose: string): boolean {
+    const t = NEWSLETTER_TEMPLATES.find((x) => x.key === key);
+    return !t || !t.purposes || t.purposes.includes(purpose);
+}
 
 export function findTemplate(key: unknown): NewsletterTemplate {
     const k = typeof key === 'string' ? key : '';

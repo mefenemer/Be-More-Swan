@@ -12,6 +12,7 @@
 //     an issue anyone can send.
 
 import { scrubMergeTags, MAX_SUBJECT_CHARS, MAX_PREHEADER_CHARS } from './newsletter-generate';
+import { countHeadingItems, fixListCount } from './top-lists';
 
 export const NEWSLETTER_ISSUE_DRAFT_TYPE = 'newsletter_issue_draft';
 
@@ -84,6 +85,11 @@ export function newsletterDraftFromUiElement(uiElement: unknown): NewsletterChat
     const preheader = scrubMergeTags(
         typeof ui.preheader === 'string' ? ui.preheader.trim().slice(0, MAX_PREHEADER_CHARS) : '',
     );
+
+    // A "Top 5" written in chat (Top lists Phase 3): the subject's count is made to match the numbered
+    // headings actually written. A non-list email has fewer than 2, and fixListCount leaves it alone.
+    const items = countHeadingItems(body.text);
+    if (items >= 2) subject.text = fixListCount(subject.text, items);
 
     return {
         subject: subject.text || 'Untitled email',

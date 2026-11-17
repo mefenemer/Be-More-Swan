@@ -9,9 +9,15 @@
 //   POST /api/integrations/toggle                  → enable/disable an active scenario
 //   POST /api/integrations/deactivate              → remove an active scenario
 //   POST /api/integrations/upvote                  → Tier-3 roadmap upvote (feature_request_votes)
+//   GET  /api/integrations/options?picker=         → choices for a recipe setting (Jira/Asana projects,
+//                                                    Slack channels) from the workspace's connection
+//
+// Recipes listed in src/config/recipe-settings.ts carry their real settings (pickers) and plain-words
+// description instead of the catalogue's field-mapping form, and only ONE task tool (Jira or Asana) can
+// be switched on per assistant: switching one on switches the other off.
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import {
@@ -19,6 +25,12 @@ import {
     workspaceIntegrations, integrationApiCalls, featureRequests, featureRequestVotes,
 } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import {
+    PICKER_PROVIDER, RECIPE_DESCRIPTIONS, RECIPE_SETTINGS, TASK_TOOL_RECIPES, cleanRecipeSettings, type RecipePicker,
+} from '../../src/config/recipe-settings';
+import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
+import { listAsanaProjects, listJiraProjects } from '../../src/utils/pm-tickets';
+import { listSlackChannels } from '../../src/utils/slack-channels';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -34,6 +46,25 @@ function resourceOf(event: { rawUrl?: string; path?: string }): string {
     const raw = event.rawUrl || event.path || '';
     const pathOnly = raw.split('?')[0].replace(/\/$/, '');
     return pathOnly.split('/').pop() || '';
+}
+
+/**
+ * One task tool per assistant: switch off the OTHER task-tool recipes it has on. Returns the titles
+ * switched off, so the page can say so ("Tasks now go to Asana; Jira is off").
+ */
+async function switchOffOtherTaskTools(db: ReturnType<typeof getDb>, organisationId: number, assistantId: number, keepScenarioId: number): Promise<string[]> {
+    const others = await db.select({ id: integrationScenarios.id, title: integrationScenarios.title, key: integrationScenarios.scenarioKey })
+        .from(integrationScenarios).where(inArray(integrationScenarios.scenarioKey, [...TASK_TOOL_RECIPES]));
+    const ids = others.filter((o) => o.id !== keepScenarioId).map((o) => o.id);
+    if (!ids.length) return [];
+    const off = await db.update(activeScenarios).set({ isEnabled: false, updatedAt: new Date() })
+        .where(and(
+            eq(activeScenarios.organisationId, organisationId),
+            eq(activeScenarios.assistantId, assistantId),
+            inArray(activeScenarios.scenarioId, ids),
+            eq(activeScenarios.isEnabled, true),
+        )).returning({ scenarioId: activeScenarios.scenarioId });
+    return off.map((o) => others.find((x) => x.id === o.scenarioId)?.title ?? 'the other task tool');
 }
 
 export default withLambda(async (event) => {
@@ -73,6 +104,10 @@ export default withLambda(async (event) => {
             return json(200, {
                 scenarios: scenarios.map(({ scenario, provider, roadmapVotes }) => ({
                     ...scenario,
+                    // Code-defined settings (pickers) and wording for the recipes the code reads them from.
+                    description: RECIPE_DESCRIPTIONS[scenario.scenarioKey] ?? scenario.description,
+                    settings: RECIPE_SETTINGS[scenario.scenarioKey] ?? null,
+                    taskTool: TASK_TOOL_RECIPES.includes(scenario.scenarioKey),
                     providerName: provider?.displayName ?? scenario.providerKey,
                     providerCategory: provider?.category ?? null,
                     roadmapVotes: roadmapVotes ?? null,
@@ -106,6 +141,30 @@ export default withLambda(async (event) => {
             return json(200, { logs: rows });
         }
 
+        // ── GET options: the choices for a recipe setting, read from the workspace's own connection ──
+        if (event.httpMethod === 'GET' && resource === 'options') {
+            const picker = String(params.picker || '') as RecipePicker;
+            const provider = PICKER_PROVIDER[picker];
+            if (!provider) return json(400, { error: 'Unknown picker.' });
+            try {
+                const token = await getFreshAccessToken(db, organisationId, provider);
+                if (picker === 'jira_projects') {
+                    const projects = await listJiraProjects(token.accessToken, token.tenantId ?? null);
+                    return json(200, { options: projects.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` })) });
+                }
+                if (picker === 'asana_projects') {
+                    const projects = await listAsanaProjects(token.accessToken);
+                    return json(200, { options: projects.map((p) => ({ value: p.id, label: p.name })) });
+                }
+                const channels = await listSlackChannels(token.accessToken);
+                return json(200, { options: channels.map((c) => ({ value: c.value, label: c.main ? `${c.label} (main channel)` : c.label, main: c.main })) });
+            } catch (err) {
+                if (err instanceof IntegrationError) return json(409, { error: `Connect ${provider === 'jira' ? 'Jira' : provider === 'asana' ? 'Asana' : 'Slack'} first.`, code: 'not_connected' });
+                console.error('[integration-scenarios] options failed', picker, err);
+                return json(502, { error: 'Couldn’t read the list from that tool just now. Try again in a moment.' });
+            }
+        }
+
         // ── POST activate: turn a recipe on (or update its mapping) for an assistant ──
         if (event.httpMethod === 'POST' && resource === 'activate') {
             const scenarioId = Number(body.scenarioId);
@@ -118,7 +177,13 @@ export default withLambda(async (event) => {
 
             const integrationId = body.integrationId != null ? Number(body.integrationId) : null;
             const webhookUrl = typeof body.webhookUrl === 'string' && body.webhookUrl.trim() ? body.webhookUrl.trim() : null;
-            const fieldMappings = (body.fieldMappings && typeof body.fieldMappings === 'object') ? body.fieldMappings as Record<string, unknown> : {};
+            let fieldMappings = (body.fieldMappings && typeof body.fieldMappings === 'object') ? body.fieldMappings as Record<string, unknown> : {};
+            // A recipe with code-defined settings saves only those (a Jira key upper-cased, required ones present).
+            if (RECIPE_SETTINGS[scenario.scenarioKey]) {
+                const cleaned = cleanRecipeSettings(scenario.scenarioKey, fieldMappings);
+                if (!cleaned.ok) return json(400, { error: cleaned.error });
+                fieldMappings = cleaned.mappings;
+            }
 
             // Tier-1 native recipes need a connected OAuth grant; Tier-2 needs a webhook URL.
             // Connection-optional providers (e.g. email) activate with neither — they resolve a
@@ -142,7 +207,10 @@ export default withLambda(async (event) => {
                 target: [activeScenarios.assistantId, activeScenarios.scenarioId],
                 set: { integrationId, webhookUrl, fieldMappings, isEnabled: true, updatedAt: new Date() },
             }).returning();
-            return json(200, { active: row });
+            const switchedOff = TASK_TOOL_RECIPES.includes(scenario.scenarioKey)
+                ? await switchOffOtherTaskTools(db, organisationId, assistantId, scenario.id)
+                : [];
+            return json(200, { active: row, switchedOff });
         }
 
         // ── POST toggle: enable/disable ──
@@ -153,7 +221,12 @@ export default withLambda(async (event) => {
             const [row] = await db.update(activeScenarios).set({ isEnabled, updatedAt: new Date() })
                 .where(and(eq(activeScenarios.id, id), eq(activeScenarios.organisationId, organisationId))).returning();
             if (!row) return json(404, { error: 'Active scenario not found.' });
-            return json(200, { active: row });
+            let switchedOff: string[] = [];
+            if (isEnabled) {
+                const [sc] = await db.select({ key: integrationScenarios.scenarioKey }).from(integrationScenarios).where(eq(integrationScenarios.id, row.scenarioId)).limit(1);
+                if (sc && TASK_TOOL_RECIPES.includes(sc.key)) switchedOff = await switchOffOtherTaskTools(db, organisationId, row.assistantId, row.scenarioId);
+            }
+            return json(200, { active: row, switchedOff });
         }
 
         // ── POST deactivate: remove ──

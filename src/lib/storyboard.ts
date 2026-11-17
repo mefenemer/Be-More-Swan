@@ -22,6 +22,7 @@ import { isStillMotion, type StillMotion } from './still-motion';
 import { readNameCaption, type LowerThirdStyle, type NameCaption } from './lower-third';
 import type { VideoLook } from './video-look';
 import { readSceneText, type TextAnim, type TextPos, type TextStyle, type TextWhen } from './scene-text';
+import { COUNTDOWN_MAX_ITEMS, COUNTDOWN_MIN_ITEMS, COUNTDOWN_VIDEO_BRIEF, countdownNumber, fixListCount } from '../utils/top-lists';
 
 export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
 export type SceneSource = typeof SCENE_SOURCES[number];
@@ -119,6 +120,11 @@ export interface VideoBrief {
     shapeOf?: number | null;
     /** "Another track": the library track the next build must not pick again. */
     avoidTrackId?: number | null;
+    /**
+     * A countdown ("Top 3…", Top lists Phase 3): the hook names the count, one scene per item counting
+     * down to 1, then the call to action. Made-up videos only — own footage has its own order.
+     */
+    countdown?: boolean;
 }
 
 export interface Scene {
@@ -352,13 +358,17 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         }
     }
 
+    if (brief.countdown) scenes = fixCountdown(scenes, changes);
+
     // A video in its own sound: a scene with no voiceover line is fine — the footage speaks.
     scenes = fitLength(scenes, brief.lengthS, changes, ownSound ? (s) => s.source === 'own_video' : undefined);
 
     const music = r.music && typeof r.music === 'object' ? r.music as Record<string, unknown> : null;
     return {
         storyboard: {
-            title: clip(r.title, 80) || clip(brief.message, 60) || 'New video',
+            title: brief.countdown && scenes.length >= 3
+                ? fixListCount(clip(r.title, 80) || clip(brief.message, 60) || 'New video', scenes.length - 2)
+                : clip(r.title, 80) || clip(brief.message, 60) || 'New video',
             caption: clip(r.caption, 600),
             scenes,
             // Kept through an edit (edit_scene re-checks the whole storyboard); never set by the model.
@@ -370,6 +380,40 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         },
         changes,
     };
+}
+
+/**
+ * A countdown's numbers, made true in code (Top lists plan §5.1: the count is computed, never trusted).
+ * The item scenes are the ones between the hook and the call to action. Each gets its place in the
+ * countdown on screen ("#3 …" down to "#1 …"), keeping any label the planner wrote, and the hook's
+ * count is rewritten to the number of items there really are. Too few items is said, not padded.
+ * Pure; returns new scenes.
+ */
+export function fixCountdown(scenes: Scene[], changes: string[] = []): Scene[] {
+    if (scenes.length < 3) return scenes;
+    const out = scenes.map((s) => ({ ...s }));
+    const items = out.slice(1, -1);
+    const n = items.length;
+    if (n < COUNTDOWN_MIN_ITEMS) changes.push(`A countdown needs at least ${COUNTDOWN_MIN_ITEMS} items; this plan has ${n}.`);
+    if (n > COUNTDOWN_MAX_ITEMS) changes.push(`A countdown works best with ${COUNTDOWN_MAX_ITEMS} items or fewer; this plan has ${n}.`);
+    let renumbered = false;
+    items.forEach((s, i) => {
+        const place = n - i;
+        const label = String(s.onScreenText ?? '').replace(/^\s*(?:#|no\.?\s*|number\s+)?\d{1,2}\b[.):\-–—]?\s*/i, '').trim();
+        const next = clip(`#${place}${label ? ` ${label}` : ''}`, 60);
+        if (countdownNumber(s.onScreenText) !== place) renumbered = true;
+        s.onScreenText = next;
+    });
+    if (renumbered) changes.push('The countdown numbers on screen now run down to #1.');
+    const hook = out[0];
+    const fixedVo = fixListCount(hook.voiceover, n);
+    const fixedText = hook.onScreenText ? fixListCount(hook.onScreenText, n) : hook.onScreenText;
+    if (fixedVo !== hook.voiceover || fixedText !== hook.onScreenText) {
+        hook.voiceover = fixedVo;
+        if (fixedText) hook.onScreenText = fixedText;
+        changes.push(`The hook now says ${n}, the number of items in the countdown.`);
+    }
+    return out;
 }
 
 /**
@@ -511,6 +555,7 @@ export function storyboardUserPrompt(args: {
             ? `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
             : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
+        brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',
         brief.goal ? `WHAT THEY SHOULD DO AFTER WATCHING: ${clip(brief.goal, 200)} — build towards it, and end on it.` : '',
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',

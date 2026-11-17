@@ -42,7 +42,7 @@ import {
     applyProseToDesign, blocksFromMarkdown, designToMarkdown, findingsHtmlHint,
     normaliseDesign, type NewsletterDesign,
 } from '../../src/utils/newsletter-design';
-import { designFromTemplate, NEWSLETTER_TEMPLATES } from '../../src/config/newsletter-templates';
+import { designFromTemplate, NEWSLETTER_TEMPLATES, templateAllowsPurpose } from '../../src/config/newsletter-templates';
 import { loadBrandNewsletterTheme } from '../../src/utils/brand-theme';
 import { NEWSLETTER_PURPOSES, purposeOrDefault } from '../../src/config/newsletter-purposes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
@@ -396,7 +396,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 key: p.key, label: p.label, description: p.description, chipClass: p.chipClass,
                 defaultTemplate: p.defaultTemplate,
             })),
-            templates: NEWSLETTER_TEMPLATES.map((t) => ({ key: t.key, label: t.label, description: t.description })),
+            templates: NEWSLETTER_TEMPLATES.map((t) => ({ key: t.key, label: t.label, description: t.description, ...(t.purposes ? { purposes: t.purposes } : {}) })),
             // The campaign builder's starting shapes — the same list the chat prompt is built from
             // (src/config/email-campaign-cadences.ts), so the two never suggest different days.
             campaignCadences: CAMPAIGN_CADENCES.map((c) => ({
@@ -455,6 +455,11 @@ export default withLambda(async (event: HandlerEvent) => {
         // A template is opted INTO. An issue created with no template is a plain Markdown issue —
         // which is what the chat card creates, what the blog hand-off creates, and what the
         // autopilot creates, and none of those should acquire a layout they did not ask for.
+        // A template limited to some purposes (the "Top 5" list: newsletters only) is refused for
+        // the others rather than quietly swapped — the dialog never offers it, so this is a stale tab.
+        if (body.template && !templateAllowsPurpose(body.template, purpose)) {
+            return json(400, { error: 'That layout is only for newsletters. Pick another layout, or make this a newsletter.' });
+        }
         const seeded = body.template
             ? designFromTemplate(body.template, await loadBrandNewsletterTheme(db, orgId))
             : null;
@@ -874,6 +879,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 notes: body.notes,
                 tone: body.tone,
                 purpose: body.purpose,
+                // "Top 5" (Top lists Phase 3): asked for here, or implied by the Top 5 layout.
+                shape: body.shape === 'list' ? 'list' : undefined,
             });
             await recordCompletedWork(db, orgId, 'email_issue', { ref: id, assistantId: issue.assistantId });
 
@@ -962,6 +969,9 @@ export default withLambda(async (event: HandlerEvent) => {
         // The organisation's own colours, resolved once for whichever branch runs. An org that has
         // never set a brand gets DEFAULT_THEME back, so this changes nothing for them.
         const theme = await loadBrandNewsletterTheme(db, orgId);
+        if (body.mode !== 'convert' && body.template && !templateAllowsPurpose(body.template, purposeOrDefault(issue.purpose))) {
+            return json(400, { error: 'That layout is only for newsletters. Change what kind of email this is first.' });
+        }
 
         const design = body.mode === 'convert'
             // ⚠️ Converting keeps the author's words and only adds structure — the alternative

@@ -116,6 +116,11 @@
     e.textContent = msg;
   }
 
+  // What an edit to a LIVE article does: the blog copy is rebuilt on save, then CDN/browser caches
+  // (widget-api / blog-page: max-age=120, s-maxage=300) can show the old one for up to ~5 minutes.
+  var LIVE_DELAY = 'Readers see it within about 5 minutes.';
+  var LIVE_SAVED = 'Saved \u2014 updating your live blog';
+
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
     'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go',
     'bs-decide-approve', 'bs-decide-time', 'bs-decide-reject'];
@@ -1047,7 +1052,7 @@
     var live = state.postStatus === 'published';
     flushDraft().then(function (res) {
       d.respond(res && res.ok
-        ? { ok: true, message: live ? 'Done — it\u2019s changed, and live on your blog now.' : undefined }
+        ? { ok: true, message: live ? 'Done — it\u2019s changed on your live blog. ' + LIVE_DELAY : undefined }
         : { ok: false, error: 'It\u2019s changed on screen, but couldn\u2019t be saved just now — check your connection.' });
     });
   });
@@ -1157,7 +1162,9 @@
         state.contentChanged = true;
         refreshReadout(nextMd);
         setStatus('bs-save-status', 'Saving…');
-        setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
+        // A live article's saves now rebuild its blog copy (save-blog-draft → refreshLiveSnapshot), so say
+        // so: "Saved" alone left authors guessing whether readers see the change (kudzucollab.com).
+        setTimeout(function () { setStatus('bs-save-status', state.postStatus === 'published' ? LIVE_SAVED : 'Saved'); }, 1400);
       },
       onDropMedia: onEditorDropMedia,
     });
@@ -1208,7 +1215,16 @@
       var editor = openWorkspace(made, title, video && video.words ? String(video.words) : '');
       // A video handed over by the Video Producer goes into the body straight away.
       if (video) attachInline({ assetId: Number(video.assetId) });
-      if (editor && editor.focus) editor.focus();   // drop straight into typing
+      var preset = state.presetArticleType;
+      state.presetArticleType = null;
+      if (preset && el('bs-ai-draft-form') && el('bs-ai-type')) {
+        // Opened to write a particular kind of article: the draft form is open with it chosen, and
+        // the cursor waits in the topic box. Nothing is drafted until they press the button.
+        el('bs-ai-type').value = preset;
+        el('bs-ai-draft-form').classList.remove('bs-hidden');
+        setStatus('bs-ai-draft-status', '');
+        el('bs-ai-topic').focus();
+      } else if (editor && editor.focus) editor.focus();   // drop straight into typing
     }).catch(function () {
       // The draft row may already exist; Try again reopens it rather than creating a second one.
       openFailed('Could not start a new draft: please try again.', made ? function () { loadExistingPost(made); } : startBlankPost);
@@ -1979,7 +1995,12 @@
   // The picker deliberately STAYS open after a placement. A post takes several images, and closing
   // the grid on each one turned the second image into a fresh search.
   function featureAttached(res) {
-    if (res.ok) { renderFeature(res.body.feature); setStatus('bs-media-status', 'Set as the feature image.'); }
+    if (res.ok) {
+      renderFeature(res.body.feature);
+      setStatus('bs-media-status', res.body.live ? 'Set as the feature image. ' + LIVE_DELAY
+        : state.postStatus === 'published' ? 'Set as the feature image, but your live blog could not be updated just now. Click Publish now to update it.'
+        : 'Set as the feature image.');
+    }
     else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
   }
   function attachFeature(assetId) {
@@ -3457,6 +3478,11 @@
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
     state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;
+    // "Type of article" chosen on the way in — the Mentor's Take Me There for a Top list (Phase 3).
+    // Only a key the select actually offers; anything else opens as before.
+    state.presetArticleType = typeof opts.articleType === 'string'
+      && ((window.ContentShapes && window.ContentShapes.articleTypes) || []).some(function (t) { return t.key === opts.articleType; })
+      ? opts.articleType : null;
     state.nextPostId = null;
     el('bs-approved').classList.add('bs-hidden');
     var setup = opts.mode === 'setup';
