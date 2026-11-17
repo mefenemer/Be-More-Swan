@@ -127,9 +127,14 @@ export const POST_FORMATS: PostFormatSpec[] = [
     { key: 'li_video', platform: 'linkedin', label: 'Native video', blurb: 'Video uploaded straight to the feed.',
       media: 'video', mediaMandatory: true, minItems: 1, maxItems: 1, aspectRatios: ['16:9', '9:16', '1:1'], charLimit: 3000,
       availability: 'live' },
+    // The row carries the SLIDE IMAGES (like ig_carousel), and the publisher turns them into one PDF at send
+    // time (publishLinkedInDocument, social-publish.ts) — so the editor shows real slides and a reorder or a
+    // removed slide is always what gets posted. PNG/JPEG only: the PDF embeds them as they are. 20 is our
+    // carousel cap (top-lists.ts CAROUSEL_MAX_SLIDES); LinkedIn itself takes up to 300 pages.
+    // docs/linkedin-document-carousel-plan.md (Phase 0 proved it 2026-11-17 with w_member_social).
     { key: 'li_document', platform: 'linkedin', label: 'Document carousel', blurb: 'A PDF that reads as swipeable slides — LinkedIn’s strongest format.',
-      media: 'document', mediaMandatory: true, minItems: 1, maxItems: 1, aspectRatios: [], charLimit: 3000,
-      availability: 'planned', unavailableReason: 'Needs PDF upload and LinkedIn’s document endpoint; the content library doesn’t accept documents yet.' },
+      media: 'image', mediaMandatory: true, minItems: 2, maxItems: 20, aspectRatios: ['4:5', '1:1'], charLimit: 3000,
+      availability: 'live' },
     { key: 'li_article', platform: 'linkedin', label: 'Article / newsletter', blurb: 'Long-form writing with subscribers.',
       media: 'none', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: [], charLimit: 110000,
       availability: 'not_schedulable', unavailableReason: 'Long-form belongs to the Blog Writer, not the social post editor — draft it there and publish to LinkedIn from its destinations.' },

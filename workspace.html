@@ -14953,12 +14953,12 @@ function _pceSyncCarouselBtn(post, editable) {
     const btn = _pceEl('pce-carousel-go');
     if (!btn) return;
     const platforms = [...new Set([post?.platform, ..._rqReviewGroupIds.map(id => _rqPostCache[id]?.platform)].filter(Boolean))];
-    const onCarouselPlatform = platforms.some(p => p === 'instagram' || p === 'threads');
+    const onCarouselPlatform = platforms.some(p => p === 'instagram' || p === 'threads' || p === 'linkedin');
     const show = !!editable && onCarouselPlatform && _pceListItemCount(post?.caption) >= 2;
     btn.classList.toggle('hidden', !show);
     btn.classList.toggle('flex', show);
     const cost = window.taskCost ? window.taskCost('carousel') : '';
-    btn.title = `A cover slide plus one branded slide per numbered item, on Instagram and Threads.${cost ? ` Uses ${cost}.` : ''}`;
+    btn.title = `A cover slide plus one branded slide per numbered item, on Instagram, Threads and LinkedIn.${cost ? ` Uses ${cost}.` : ''}`;
 }
 
 async function _pceMakeCarousel() {

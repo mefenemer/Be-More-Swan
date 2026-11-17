@@ -16,7 +16,8 @@ import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishLinkedInDocument, isLinkedInDocument, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { linkedInDocumentTitle } from '../../src/utils/top-lists';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { markPostMediaPosted } from '../../src/utils/release-post-media';
@@ -48,6 +49,7 @@ type PostRow = {
     hashtags: string | null; connection_id: number | null; attempt_count: number;
     publish_date: string; platform: string; content_asset_ids: unknown;
     assistant_id: number | null; link_url: string | null; cta_text: string | null;
+    format_key: string | null;
 };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
@@ -125,7 +127,7 @@ export default withLambda(async () => {
            FOR UPDATE SKIP LOCKED)
          RETURNING id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id,
-                link_url, cta_text`
+                link_url, cta_text, format_key`
     );
 
     if (!posts.length) {
@@ -244,7 +246,11 @@ export default withLambda(async () => {
                     return;
                 }
             } else if (post.platform === 'linkedin') {
-                result = await publishLinkedIn(text, token, creds.externalUserId, image);
+                // A Document carousel (li_document) goes out as one PDF of its slides through LinkedIn's
+                // Posts API; every other LinkedIn post stays on ugcPosts (docs/linkedin-document-carousel-plan.md).
+                result = isLinkedInDocument(post.format_key)
+                    ? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))
+                    : await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {
                 result = await publishThreads(text, token, creds.externalUserId, image);
             } else {

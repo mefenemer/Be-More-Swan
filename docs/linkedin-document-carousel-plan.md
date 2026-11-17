@@ -1,6 +1,6 @@
 # LinkedIn document carousels — PLAN (Top lists follow-on, FR#34)
 
-2026-11-17. **Nothing built. All four decisions in §6 agreed by the owner (2026-11-17). Next: Phase 0.**
+2026-11-17. **All four decisions in §6 agreed. Phase 0: GO for personal profiles (§4a). Phase 1 built on `feat/linkedin-document-carousel` (§4b); not yet live on prod.**
 
 The ask: "Make it a carousel" (Top lists Phase 2, live on prod) works on Instagram and Threads and leaves LinkedIn alone.
 LinkedIn's swipeable carousel is a different kind of post — a **PDF document**, where each page shows as one slide —
@@ -74,6 +74,43 @@ document is the right format for a list (§6, decision 1).
   has posted for real on prod** (see the memory rule on public claims).
 - Tests: the PDF has one page per slide in order; a LinkedIn row gets a document and `li_document`; the publisher picks
   the document path only for `li_document`; one task per press, still.
+
+## 4a. Phase 0 result (2026-11-17, staging, owner's OK)
+
+Run with Marmalade's staging LinkedIn connection — the ordinary "Share on LinkedIn" token (`openid profile email
+w_member_social`), `Linkedin-Version: 202608`, from a one-off script that was then deleted:
+
+| Step | Result |
+| --- | --- |
+| `POST /rest/documents?action=initializeUpload` (owner `urn:li:person:…`) | ✅ 200, upload URL + `urn:li:document:…` |
+| `PUT` a 2-page PDF to the upload URL | ✅ 201 |
+| `GET /rest/documents/{urn}` | ✅ `AVAILABLE` |
+| `POST /rest/posts` (visibility `CONNECTIONS`, `content.media.id` = the document) | ✅ 201 |
+| `GET /rest/posts/{urn}` | ❌ 403 — reading posts needs `r_member_social`, which we don't have |
+| `DELETE /rest/posts/{urn}` | ✅ 204, within a minute |
+
+**Go for personal profiles. No new LinkedIn product and no re-connect needed** (decision 2 is not triggered for
+profiles). Nothing may depend on reading a post back. **Company pages: not tested** — Page posting is switched off
+(`LINKEDIN_PAGE_POSTING` unset) and no page was connected. The owner now has Community Management developer access, so
+the page test is: check the Community app's Auth tab lists the page scopes, set `LINKEDIN_PAGE_POSTING=on` on staging,
+connect the Be More Swan page, post one document carousel, delete it.
+
+## 4b. Phase 1 as built (one change from §4)
+
+**The LinkedIn row keeps the slide images, not a stored PDF.** §4 said to save a PDF to My Content and attach it.
+Built instead: the row gets the same brand-card slides as Instagram and Threads, with `formatKey: 'li_document'`, and
+`publishLinkedInDocument` (`src/utils/social-publish.ts`) turns them into one PDF when it posts. Why: the editor already
+shows and reorders slides, so a stored PDF would go stale the moment a slide moved, and the editor would need a
+document preview it doesn't have. Cost and tasks are unchanged (one `carousel` task per press, decision 4).
+
+- `li_document` is `live`: image slides, 2–20, 4:5 or 1:1. PNG/JPEG only (pdf-lib embeds them; brand cards are PNG).
+- `carouselFormatFor('linkedin')` → `li_document`, so "Make it a carousel" and the chat's `carousel` action include LinkedIn.
+- Publish: `initializeUpload` → `PUT` → poll the document (up to ~20 s; a 403 on the poll is not fatal) → `/rest/posts`
+  with the cover line as the document title. The caption is escaped to LinkedIn's "little text" (`littleText`): its
+  15 reserved characters are escaped and `#word` becomes `{hashtag|\#|word}` (`#1` stays a rank, not a hashtag).
+- An upload failure is a media failure (never a text-only post); LinkedIn's status drives the usual retry rules.
+- Every other LinkedIn post stays on ugcPosts (§7).
+- `/connections` and the Help Centre say nothing yet — only once one has posted for real on prod.
 
 ## 5. Costs
 
