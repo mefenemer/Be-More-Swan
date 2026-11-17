@@ -82,8 +82,8 @@ export async function bindLinkedInPage(db: Db, opts: {
     // Same order as the member branch: un-pause what the old connection's failure halted, only
     // AFTER the status='active' write (the assistant-resume guard reads current statuses).
     if (existing) {
-        // The connection's own assistant first — see the member branch in social-oauth-callback.ts.
-        await restoreConnectionDependents(db, { connectionId: existing.id, organisationId, assistantId: existing.assistantId ?? assistantId, serviceName: 'linkedin', userId });
+        // Whoever the row is bound to after the update — see the member branch in social-oauth-callback.ts.
+        await restoreConnectionDependents(db, { connectionId: existing.id, organisationId, assistantId: assistantId ?? existing.assistantId, serviceName: 'linkedin', userId });
     } else {
         await resolveActionNotifications(db, userId, CONNECTION_RESTORED_TYPES);
     }

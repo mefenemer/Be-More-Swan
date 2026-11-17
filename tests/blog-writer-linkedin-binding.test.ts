@@ -87,5 +87,14 @@ const SMM = 5;
         assert.equal(conn!.arg.assistantId, SMM);
     });
 
+    await check('a second SMM reconnecting from its own tab is the one resumed', async () => {
+        const A = 5, B = 8;
+        const { db, log } = fakeDb([{ id: 9, metadata: null, assistantId: A }]);
+        await bindLinkedInPage(db, { organisationId: 1, userId: 2, assistantId: B, page, tokenExpiresAt: null });
+        const wheres = log.filter(l => l.prop === 'where');
+        assert.ok(wheres.some(l => hasParam(l.arg, B)), 'resume did not run for the reconnecting SMM');
+        assert.ok(!wheres.some(l => hasParam(l.arg, A)), 'resume ran for the previous owner');
+    });
+
     console.log(`\n${passed} passed`);
 })();

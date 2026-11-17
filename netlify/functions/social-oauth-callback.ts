@@ -157,9 +157,9 @@ export default withLambda(async (event) => {
             await restoreConnectionDependents(db, {
                 connectionId: existing.id,
                 organisationId,
-                // The connection's own assistant first: a reconnect from the Blog Writer (pool,
-                // assistantId null) must still resume the Social Media Manager it belongs to.
-                assistantId: existing.assistantId ?? assistantId,
+                // Whoever the row is bound to after the update above: the reconnecting assistant when
+                // there is one, else (a Blog Writer reconnect into the pool) the row's existing owner.
+                assistantId: assistantId ?? existing.assistantId,
                 serviceName: 'linkedin',
                 userId,
             });

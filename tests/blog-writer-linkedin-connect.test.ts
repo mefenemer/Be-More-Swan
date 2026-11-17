@@ -82,8 +82,8 @@ check('integrations POST uses the connect rule too', () => {
     assert.ok(src('netlify/functions/integrations.ts').includes('!isConnectAllowedForAssistant(serviceName, assistant)'));
 });
 
-check('Member reconnect clean-up uses the connection\'s own assistant first', () => {
-    assert.ok(callback.includes('assistantId: existing.assistantId ?? assistantId,'));
+check('Member reconnect clean-up uses the assistant the row is bound to', () => {
+    assert.ok(callback.includes('assistantId: assistantId ?? existing.assistantId,'));
     assert.ok(callback.includes('const [existing] = await db.select({ id: systemConnections.id, assistantId: systemConnections.assistantId })'));
 });
 
