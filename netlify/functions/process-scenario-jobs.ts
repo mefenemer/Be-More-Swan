@@ -25,8 +25,10 @@ import {
 import { logApiCall } from '../../src/utils/vault';
 import { claimMeetingHandoff, finishMeetingHandoff, runsOncePerMeeting } from '../../src/utils/meeting-handoff-once';
 import { sendWebhookOnce, webhookLedger } from '../../src/utils/webhook-handoff-once';
+import { isNoMailboxResult } from '../../src/utils/meeting-followup-send';
 import { TASK_TOOL_RECIPES } from '../../src/config/recipe-settings';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
 
 const BATCH = 25;
 const RETRY_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes between attempts
@@ -159,6 +161,16 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
             });
             if (result.statusCode >= 400) {
                 const body = (() => { try { return JSON.parse(result.body as string); } catch { return {}; } })();
+                // No Gmail or Outlook connected: the follow-up is NOT sent, and retrying cannot change that
+                // until a mailbox is connected. sync-action.ts has already stamped followupNotSent on the
+                // meeting (the Inbox shows "Follow-up not sent" + "Send the follow-up now"), and the claim
+                // was released above so that button can send it later. Counting it as an error re-queued
+                // the WHOLE job — and the custom webhook, which has no once-per-meeting guard, POSTed again
+                // on every attempt (PR #695 review, 2026-11-17).
+                if (isNoMailboxResult(result.statusCode, body)) {
+                    console.log(`[process-scenario-jobs] ${scenario.scenarioKey}: no mailbox connected for meeting ${subject.recordId}; not sent, not retried`);
+                    continue;
+                }
                 errors.push(`${scenario.scenarioKey}: ${body.error ?? result.statusCode}`);
             }
         } catch (err) {

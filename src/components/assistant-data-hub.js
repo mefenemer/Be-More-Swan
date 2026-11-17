@@ -3757,8 +3757,10 @@
            <span class="w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-600' : 'bg-gray-400'}"></span>${on ? 'On' : 'Off'}</button>`
       : (s.tier !== 2 && !s.connection && s.needsMailbox)
         // Follow-ups only go from the user's own inbox (owner, 2026-11-17) — never from Be More Swan's address.
-        ? `<a href="/api/oauth/gmail/connect${Number(state.assistantId) > 0 ? `?assistantId=${Number(state.assistantId)}` : ''}"
-             class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect Gmail or Outlook</a>`
+        // One link per provider: a single "Gmail or Outlook" link that only went to Gmail left Outlook
+        // users no way to connect from here (PR #695 review, 2026-11-17).
+        ? `<span class="inline-flex flex-wrap gap-1.5">${['gmail', 'outlook'].map((p) => `<a href="/api/oauth/${p}/connect${Number(state.assistantId) > 0 ? `?assistantId=${Number(state.assistantId)}` : ''}"
+             class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect ${p === 'gmail' ? 'Gmail' : 'Outlook'}</a>`).join('')}</span>`
       : (s.tier !== 2 && !s.connection)
         ? `<a href="/api/oauth/${esc(s.providerKey)}/connect${Number(state.assistantId) > 0 ? `?assistantId=${Number(state.assistantId)}` : ''}"
              class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect ${esc(s.providerName)}</a>`

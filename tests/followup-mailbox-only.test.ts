@@ -33,7 +33,9 @@ assert.ok(tab.includes("connectHref('gmail')") && tab.includes("connectHref('out
 assert.ok(tab.includes('On, but not sending — connect Gmail or Outlook above'), 'a follow-up left on after the mailbox went says it is not sending');
 assert.ok(tab.includes("window.showToast(err.error || 'That couldn’t be changed. Please try again.', { tone: 'error' });"));
 assert.ok(read('integrations.html').includes('Connect Gmail first') && read('integrations.html').includes('Connect Outlook first'));
-assert.ok(read('src/components/assistant-data-hub.js').includes('>Connect Gmail or Outlook</a>'));
+// The data hub offers BOTH providers (one link that only went to Gmail stranded Outlook users).
+assert.ok(read('src/components/assistant-data-hub.js').includes("${['gmail', 'outlook'].map((p) => `<a href=\"/api/oauth/${p}/connect"));
+assert.ok(read('src/components/assistant-data-hub.js').includes("Connect ${p === 'gmail' ? 'Gmail' : 'Outlook'}</a>"));
 
 // 4. The words: no Be More Swan address anywhere a customer reads.
 assert.doesNotMatch(RECIPE_DESCRIPTIONS.email_meeting_followup, /Be More Swan/);
