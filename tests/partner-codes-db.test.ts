@@ -14,6 +14,7 @@
 import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { closeDbPools } from '../db/client';
 import { claimLateReferral, resolveInviteCode, setPartnerCode } from '../src/utils/invite-codes';
 import { findReferralOffer } from '../src/utils/referral-offer';
 import { recordPartnerPayment } from '../src/utils/partner-ledger';
@@ -91,6 +92,8 @@ async function main() {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();
+        // The code under test also opened db/client's shared pool; left open it holds the process 20 s.
+        await closeDbPools();
     }
     console.log(`\n${passed} passed`);
 }

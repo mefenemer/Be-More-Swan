@@ -6,24 +6,69 @@ on:
   pull_request:
     branches: [main, staging]
 
+# A new push to a PR cancels that PR's run still in progress — its result no longer matters.
+# Pushes to main/staging are never cancelled: every commit there keeps its own result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  tests:
+    name: Tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    # Every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully), split across three
+    # runners: each takes every third file (scripts/run-tests.mjs TEST_SHARD) and runs one per core.
+    # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: node scripts/run-tests.mjs
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/3
+
+  # The "Protect main" ruleset requires a check named exactly "Typecheck + tests". This job carries
+  # that name and passes only when the typecheck AND all three test runners passed — a skipped,
+  # cancelled or failed one fails it. Same checks as `npm run test:all`, just spread out.
   checks:
     name: Typecheck + tests
+    needs: [typecheck, tests]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      # Typecheck + every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully).
-      # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
-      - run: npm run test:all
+      - name: Typecheck and every test runner passed
+        run: |
+          echo "typecheck: ${{ needs.typecheck.result }}  tests: ${{ needs.tests.result }}"
+          [ "${{ needs.typecheck.result }}" = success ] && [ "${{ needs.tests.result }}" = success ]
 
   e2e:
-    name: Browser smoke tests (Playwright)
+    name: Browser smoke tests (Playwright ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    # Two runners, each taking half the specs with Playwright's usual 2 workers: same tests, same
+    # retries, about half the wall time. Not a required check, so the name can carry the shard.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -31,13 +76,24 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # The browser download is cached per lockfile; the system libraries it needs are installed
+      # either way (they live outside the cache).
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       # Static pages in a real browser, every function stubbed (e2e/fixtures.ts) — no DB or secrets.
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/

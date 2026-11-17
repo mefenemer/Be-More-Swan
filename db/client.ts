@@ -115,6 +115,19 @@ export function getAppDb(): DrizzleDb {
 }
 
 /**
+ * Close every cached connection (owner + app, every environment). For scripts and tests that must
+ * exit promptly: an open idle connection keeps Node alive until idle_timeout (20 s) releases it,
+ * which is what made four CI database tests sit for 21 s each after passing. Functions never call
+ * this — their warm instance is meant to reuse the connection.
+ */
+export async function closeDbPools(): Promise<void> {
+    const pools = [...Object.values(ownerSql), ...Object.values(appSql)].filter(Boolean) as postgres.Sql[];
+    for (const k of Object.keys(ownerSql) as AppEnv[]) { delete ownerSql[k]; delete ownerDb[k]; }
+    for (const k of Object.keys(appSql) as AppEnv[]) { delete appSql[k]; delete appDb[k]; }
+    await Promise.all(pools.map((p) => p.end({ timeout: 5 })));
+}
+
+/**
  * US-DB-1.4.1: run tenant-scoped DB work under Row-Level Security.
  *
  * Executes `fn` on the app_user connection (getAppDb()) inside a transaction that
