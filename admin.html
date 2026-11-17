@@ -7625,6 +7625,7 @@ function _frResetEnhance() {
 }
 function _frResetReview() {
   _frReview = null;
+  _frReviewSeq++;
   document.getElementById('fr-review-panel').classList.add('hidden');
   document.getElementById('fr-review-list').innerHTML = '';
   document.getElementById('fr-review-summary').textContent = '';
@@ -7714,6 +7715,7 @@ function frRejectEnhance() { _frResetEnhance(); }
 // heading plus tick-box suggestions, all unticked to start. "Add selected" appends only the ticked ones to the
 // description or the brief, grouped by heading. The admin still presses Save.
 let _frReview = null;
+let _frReviewSeq = 0;
 async function frReviewRequest() {
   const title = document.getElementById('fr-form-title-input').value.trim();
   if (!title) { window.showToast?.('Add a title first.', { icon: '⚠️' }); return; }
@@ -7721,11 +7723,17 @@ async function frReviewRequest() {
   const brief = document.getElementById('fr-form-brief').value.trim();
   const btn = document.getElementById('fr-review-btn');
   const prev = btn.textContent; btn.textContent = '🔍 Reviewing… (up to 30 s)'; btn.disabled = true;
+  // The call takes up to ~26 s: drop the answer if the admin closed the form or opened another request meanwhile.
+  const seq = ++_frReviewSeq;
+  const askedFor = document.getElementById('fr-form-id').value;
+  const stale = () => seq !== _frReviewSeq || askedFor !== document.getElementById('fr-form-id').value
+    || document.getElementById('fr-form').classList.contains('hidden');
   try {
     const d = await api(`${FR_API}?action=review`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, description, brief }),
     });
+    if (stale()) return;
     const suggestions = Array.isArray(d.suggestions) ? d.suggestions : [];
     const areas = Array.isArray(d.areas) ? d.areas : [];
     _frReview = { suggestions, labels: Object.fromEntries(areas.map(a => [a.key, a.label])) };
@@ -7745,7 +7753,11 @@ async function frReviewRequest() {
     }).join('');
     document.getElementById('fr-review-apply').classList.toggle('hidden', !suggestions.length);
     document.getElementById('fr-review-panel').classList.remove('hidden');
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+  } catch (e) {
+    if (stale()) return;
+    const timedOut = /50[24]|gateway|timed? ?out/i.test(e.message || '');
+    window.showToast?.(timedOut ? 'The review took too long. Try again, or shorten the description first.' : e.message, { icon: '⚠️' });
+  }
   finally { btn.textContent = prev; btn.disabled = false; }
 }
 // Same text as appendSuggestions() in src/utils/feature-review.ts (the page can't import TS).

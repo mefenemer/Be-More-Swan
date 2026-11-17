@@ -85,6 +85,13 @@ check('page: Review button, unticked boxes, Add selected appends only ticked one
     assert.ok(!apply.includes('api(') && !apply.includes('submitRoadmapForm'), 'admin still presses Save');
 });
 
+check('page: a late review is dropped if the form closed or another request opened', () => {
+    const review = fnBody(html, 'async function frReviewRequest()');
+    assert.ok(review.includes('const seq = ++_frReviewSeq') && review.includes("askedFor !== document.getElementById('fr-form-id').value"));
+    assert.ok(review.includes('if (stale()) return;\n    const suggestions'), 'checked before rendering');
+    assert.ok(fnBody(html, 'function _frResetReview()').includes('_frReviewSeq++'), 'closing/reopening invalidates it');
+});
+
 check('page: the review panel resets when the form opens for add or edit', () => {
     for (const sig of ['function openRoadmapAdd()', 'function openRoadmapEdit(id)']) assert.ok(fnBody(html, sig).includes('_frResetReview();'), sig);
 });

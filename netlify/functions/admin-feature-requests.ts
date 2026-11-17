@@ -165,15 +165,15 @@ export default withLambda(async (event) => {
         let body: any;
         try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
         const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
-        const description = typeof body.description === 'string' ? body.description.slice(0, 8000) : '';
-        const brief = typeof body.brief === 'string' ? body.brief.slice(0, 8000) : '';
+        const description = typeof body.description === 'string' ? body.description.slice(0, 4000) : '';
+        const brief = typeof body.brief === 'string' ? body.brief.slice(0, 4000) : '';
         if (!title) return json(400, { error: 'Add a title before asking for a review.' });
 
         try {
             const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
             const response = await anthropic.messages.create(adaptForModel({
                 model: FEATURE_REVIEW_MODEL,
-                max_tokens: 6000,
+                max_tokens: 4000,
                 messages: [{ role: 'user', content: buildReviewPrompt({ title, description, brief }) }],
             }, FEATURE_REVIEW_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
