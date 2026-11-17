@@ -9,11 +9,12 @@ const int = read('integrations.js');
 
 // 1. The sections, in purpose order, with a short line and a "read more" paragraph each.
 const sectionsSrc = int.slice(int.indexOf('const CONN_SECTIONS = ['), int.indexOf('// Card for a supported tool category that has no live connector yet.'));
-for (const t of ['Social accounts', 'Send emails', 'Create tasks', 'Post to team chat', 'Save notes and documents', 'Update your CRM']) {
+for (const t of ['Social accounts', 'Send emails', 'Create tasks', 'Post to team chat', 'Save notes and documents', 'Update your CRM', 'Send to another app']) {
     assert.ok(sectionsSrc.includes(`title: '${t}'`), `section "${t}"`);
 }
 assert.ok(sectionsSrc.indexOf("cat: 'email'") < sectionsSrc.indexOf("cat: 'project_mgmt'") && sectionsSrc.indexOf("cat: 'project_mgmt'") < sectionsSrc.indexOf("cat: 'chat'"));
 assert.match(sectionsSrc, /Choose ONE task tool — Jira or Asana/);
+assert.match(sectionsSrc, /cat: 'generic', title: 'Send to another app'/, 'the webhook action has its own section, not "More tools"');
 
 // 2. Run _connSections as written.
 const ctx: Record<string, unknown> = {

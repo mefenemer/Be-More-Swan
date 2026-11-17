@@ -825,6 +825,9 @@ const CONN_SECTIONS = [
       long: 'Connect Google Search Console and this assistant can read which searches bring people to your site. It never changes anything there.' },
     { cat: 'design', title: 'Bring in designs', short: 'Use designs you made elsewhere.',
       long: 'Connect a design tool and you can pick designs from it to use in this assistant’s work.' },
+    // The universal webhook (custom_webhook, provider category 'generic'): it fell back to "More tools".
+    { cat: 'generic', title: 'Send to another app', short: 'Send each approved item to a web address.',
+      long: 'Give a web address (a webhook) and each approved meeting is sent there as data — for Zapier, Make, or your own system. Nothing is sent until you approve.' },
 ];
 
 function _connSections(rows, groups) {
