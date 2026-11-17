@@ -64,7 +64,7 @@ check('Callback checks with isConnectAllowedForAssistant, not the grid rule', ()
 });
 
 check('Callback binds a blog-destination connection to the pool (assistantId = null)', () => {
-    assert.ok(callback.includes('if (connectViaBlogDestination(service, assistant)) assistantId = null;'));
+    assert.ok(callback.includes('if (connectViaBlogDestination(service, assistant)) { assistantId = null; viaBlogDestination = true; }'));
 });
 
 check('Every callback redirect returns to the page the person started on', () => {
@@ -73,13 +73,27 @@ check('Every callback redirect returns to the page the person started on', () =>
 });
 
 check('Company Page pick carries the return page through', () => {
-    assert.ok(callback.includes('assistantId, returnAssistantId, pages,'));
+    assert.ok(callback.includes('assistantId, returnAssistantId, enableBlogDestination: viaBlogDestination, pages,'));
     const pick = src('netlify/functions/linkedin-page-pick.ts');
     assert.equal(pick.split('pending.returnAssistantId ?? pending.assistantId').length - 1, 2);
 });
 
 check('integrations POST uses the connect rule too', () => {
     assert.ok(src('netlify/functions/integrations.ts').includes('!isConnectAllowedForAssistant(serviceName, assistant)'));
+});
+
+check('Member reconnect clean-up uses the connection\'s own assistant first', () => {
+    assert.ok(callback.includes('assistantId: existing.assistantId ?? assistantId,'));
+    assert.ok(callback.includes('const [existing] = await db.select({ id: systemConnections.id, assistantId: systemConnections.assistantId })'));
+});
+
+check('Blog Writer sign-in switches the LinkedIn blog destination on (no second click)', () => {
+    assert.equal(callback.split('if (viaBlogDestination) await optInLinkedInBlogDestination(db, organisationId);').length - 1, 2);
+    assert.ok(callback.includes('enableBlogDestination: viaBlogDestination,'));
+    assert.ok(src('netlify/functions/linkedin-page-pick.ts').includes('if (pending.enableBlogDestination) await optInLinkedInBlogDestination(db, organisationId);'));
+    const optin = src('src/utils/blog-linkedin-optin.ts');
+    assert.ok(optin.includes("connectSocialBlogDestination(db as never, organisationId, 'linkedin')"));
+    assert.ok(optin.includes('catch (err)'), 'opt-in must never fail the sign-in');
 });
 
 console.log(`\n${passed} passed`);

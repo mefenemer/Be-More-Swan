@@ -18,6 +18,7 @@ import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../
 import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
 import { linkedinPageAccessEnabled } from '../../src/config/linkedin-capabilities';
 import { listAdministeredPages } from '../../src/utils/linkedin-page';
+import { optInLinkedInBlogDestination } from '../../src/utils/blog-linkedin-optin';
 import { bindLinkedInPage, linkedInPageVaultKey, linkedInPagePickKey, LINKEDIN_PAGE_PICK_TTL_MS, type PendingPagePick } from '../../src/utils/linkedin-page-bind';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -67,6 +68,8 @@ export default withLambda(async (event) => {
     // Who the connection is BOUND to. Usually the same assistant; null (the workspace pool) when it
     // was allowed only as a blog destination — see the check below.
     let assistantId = returnAssistantId;
+    // True when the Blog Writer's LinkedIn card started this: the blog destination is switched on too.
+    let viaBlogDestination = false;
 
     // Connection sandboxing: if connecting for a specific assistant, this platform
     // must be relevant to that assistant's role.
@@ -80,7 +83,7 @@ export default withLambda(async (event) => {
         // The Blog Writer's LinkedIn card: the connection joins the workspace pool rather than
         // being bound to the Blog Writer, so it never takes a reconnect away from the Social Media
         // Manager and the Blog Writer never counts as holding a social connection.
-        if (connectViaBlogDestination(service, assistant)) assistantId = null;
+        if (connectViaBlogDestination(service, assistant)) { assistantId = null; viaBlogDestination = true; }
     }
 
     // Must be byte-identical to the redirect_uri sent at authorize time, or the token exchange is
@@ -134,7 +137,7 @@ export default withLambda(async (event) => {
             ? new Date(Date.now() + tokenData.expires_in * 1000)
             : null;
 
-        const [existing] = await db.select({ id: systemConnections.id })
+        const [existing] = await db.select({ id: systemConnections.id, assistantId: systemConnections.assistantId })
             .from(systemConnections)
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'linkedin')))
             .limit(1);
@@ -154,7 +157,9 @@ export default withLambda(async (event) => {
             await restoreConnectionDependents(db, {
                 connectionId: existing.id,
                 organisationId,
-                assistantId,
+                // The connection's own assistant first: a reconnect from the Blog Writer (pool,
+                // assistantId null) must still resume the Social Media Manager it belongs to.
+                assistantId: existing.assistantId ?? assistantId,
                 serviceName: 'linkedin',
                 userId,
             });
@@ -170,6 +175,7 @@ export default withLambda(async (event) => {
             body: JSON.stringify({ organisationId, platform: 'linkedin' }),
         }).catch(() => {});
 
+        if (viaBlogDestination) await optInLinkedInBlogDestination(db, organisationId);
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
     }
 
@@ -207,7 +213,7 @@ export default withLambda(async (event) => {
 
         if (pages.length > 1) {
             // Several Pages: workspace.html opens a picker (linkedin-page-pick.ts) on ?linkedin_pick=1.
-            const pending: PendingPagePick = { organisationId, assistantId, returnAssistantId, pages, tokenExpiresAt: tokenExpiresAt?.toISOString() ?? null, expiresAt: Date.now() + LINKEDIN_PAGE_PICK_TTL_MS };
+            const pending: PendingPagePick = { organisationId, assistantId, returnAssistantId, enableBlogDestination: viaBlogDestination, pages, tokenExpiresAt: tokenExpiresAt?.toISOString() ?? null, expiresAt: Date.now() + LINKEDIN_PAGE_PICK_TTL_MS };
             await storeSecret(db, linkedInPagePickKey(userId), pending);
             return { statusCode: 302, headers: { Location: `/workspace.html?linkedin_pick=1${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
         }
@@ -216,6 +222,7 @@ export default withLambda(async (event) => {
         if (!bound.ok) {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=linkedin${collisionParam(bound.collisionAttemptId)}` }, body: '' };
         }
+        if (viaBlogDestination) await optInLinkedInBlogDestination(db, organisationId);
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
     }
 
