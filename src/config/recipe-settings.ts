@@ -44,6 +44,8 @@ export const RECIPE_DESCRIPTIONS: Record<string, string> = {
     jira_create_tasks: 'When you approve a meeting, each action item becomes a Jira task (issue type: Task) in the project you choose, with its owner and due date.',
     asana_create_tasks: 'When you approve a meeting, each action item becomes an Asana task in the project you choose, with its owner and due date.',
     slack_meeting_summary: 'When you approve a meeting, its summary and action items are posted to the Slack channel you choose.',
+    email_meeting_followup: 'When you approve a meeting, the follow-up email goes to every attendee — from your Gmail or Outlook, or from Be More Swan’s address (replies come to you) when neither is connected.',
+    notion_create_page: 'When you approve a meeting, its notes are saved as a page in Notion, under the page you shared when you connected.',
 };
 
 /**

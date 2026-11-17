@@ -745,6 +745,31 @@ function _renderConnectionsGrid() {
     const covered = window._syncedActionCategories || new Set();
     const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
 
+    // Assistant panel: collapsible SECTIONS by purpose (owner, 2026-11-17) — each holds its tools'
+    // rows and, under each tool, what this assistant does with it (its actions, drawn by
+    // assistant-integrations.js as window._syncedActionGroups). The standalone page keeps its tiles.
+    if (_assistantScoped) {
+        const groups = window._syncedActionGroups || {};
+        const rows = [];
+        for (const platform of platforms) {
+            const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
+            rows.push({ cat: 'social', html: _platformCard(platform, conn), on: !!conn });
+        }
+        for (const source of sources) {
+            const conn = _userConnections.find(c => String(c.serviceName).toLowerCase() === source.id);
+            rows.push({ cat: 'design', html: _sourceCard(source, conn), on: !!conn });
+        }
+        for (const d of _blogDestinations) rows.push({ cat: 'cms', html: _blogDestCard(d), on: !!d.connected });
+        for (const m of _mailboxProviders) rows.push({ cat: 'email', html: _mailboxCard(m), on: !!m.connected });
+        if (_searchConsole) rows.push({ cat: 'search_console', html: _searchConsoleCard(_searchConsole), on: !!_searchConsole.connected });
+        for (const t of comingSoon) rows.push({ cat: t.key, html: _comingSoonCard(t), on: false, soon: true, title: t.label });
+        const sectionsHtml = _connSections(rows, groups);
+        grid.innerHTML = sectionsHtml || '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">This assistant doesn&#39;t connect to any outside tools — everything it does happens inside Be More Swan. If that changes, the connections it can use will appear here.</div>';
+        grid.insertAdjacentHTML('beforeend', _swanBylineCard(_swanDest));
+        _queueConnectPermissionPrompts(platforms);
+        return;
+    }
+
     if (!platforms.length && !sources.length && !comingSoon.length && !_blogDestinations.length && !_mailboxProviders.length && !_searchConsole) {
         // Nothing to connect and nothing "coming soon" here — but the assistant may still
         // have enable-able recipes rendered by the Synced actions list below, so only show
@@ -776,6 +801,67 @@ function _renderConnectionsGrid() {
     if (_assistantScoped) grid.insertAdjacentHTML('beforeend', _swanBylineCard(_swanDest));
 
     _queueConnectPermissionPrompts(platforms);
+}
+
+// ── Connections sections (assistant panel) ─────────────────────────────────
+// One per PURPOSE, in this order. `short` sits under the title while closed; `long` is the "read more
+// before deciding" text inside. A section opens by itself when something in it is already set up.
+const CONN_SECTIONS = [
+    { cat: 'social', title: 'Social accounts', short: 'The accounts this assistant posts to.',
+      long: 'Connect the social accounts this assistant publishes to. Each one can be switched on or off for this assistant without disconnecting it.' },
+    { cat: 'email', title: 'Send emails', short: 'Emails go from your own inbox.',
+      long: 'Connect Gmail or Outlook and emails go from your own inbox — Gmail first, then Outlook. With neither connected, meeting follow-ups go from Be More Swan’s address and replies come to you.' },
+    { cat: 'project_mgmt', title: 'Create tasks', short: 'Action items become tasks in Jira or Asana.',
+      long: 'Choose ONE task tool — Jira or Asana. When you approve a meeting, each action item becomes a task there, with its owner and due date. Switching one on switches the other off.' },
+    { cat: 'chat', title: 'Post to team chat', short: 'Share summaries in Slack.',
+      long: 'Connect Slack and approved meeting summaries, with every action item and its owner, are posted to the channel you choose — your main channel unless you pick another.' },
+    { cat: 'knowledge', title: 'Save notes and documents', short: 'Keep notes as pages in Notion.',
+      long: 'Connect Notion and each approved meeting is saved as a page under the Notion page you share with Be More Swan when you connect.' },
+    { cat: 'crm', title: 'Update your CRM', short: 'Keep contacts and deals in step.',
+      long: 'Connect your CRM and approved records are pushed to it, so contacts and deals stay in step without copying anything across.' },
+    { cat: 'cms', title: 'Publish your blog', short: 'Where your articles go live.',
+      long: 'Connect the places your articles are published or shared. Each one publishes when you approve an article.' },
+    { cat: 'search_console', title: 'See how people find you', short: 'Searches that bring people to your site.',
+      long: 'Connect Google Search Console and this assistant can read which searches bring people to your site. It never changes anything there.' },
+    { cat: 'design', title: 'Bring in designs', short: 'Use designs you made elsewhere.',
+      long: 'Connect a design tool and you can pick designs from it to use in this assistant’s work.' },
+];
+
+function _connSections(rows, groups) {
+    const cats = [...new Set([...rows.map(r => r.cat), ...Object.keys(groups || {})])];
+    const known = CONN_SECTIONS.map(x => x.cat);
+    const ordered = [...CONN_SECTIONS.filter(x => cats.includes(x.cat)), ...cats.filter(c => !known.includes(c)).map(c => ({ cat: c }))];
+    const sections = ordered.map((sec) => {
+        const mine = rows.filter(r => r.cat === sec.cat);
+        const g = (groups || {})[sec.cat];
+        const soonOnly = !g && mine.length > 0 && mine.every(r => r.soon);
+        const onCount = mine.filter(r => r.on).length + (g ? g.on : 0);
+        const connected = mine.filter(r => r.on).length + (g ? g.connected : 0);
+        const title = sec.title || (mine.find(r => r.title) || {}).title || 'More tools';
+        const pill = soonOnly
+            ? _rowPill('Coming soon', 'none')
+            : onCount > 0 ? `<span class="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ ${onCount} on</span>`
+            : connected > 0 ? '<span class="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">Connected</span>'
+            : '<span class="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not set up</span>';
+        const body = mine.map(r => r.html).join('') + (g ? g.html : '');
+        return { soonOnly, html: `
+        <details data-conn-section="${_esc(sec.cat)}" class="col-span-full group bg-white rounded-2xl border border-gray-200 shadow-sm"${onCount > 0 || connected > 0 ? ' open' : ''}>
+            <summary class="list-none cursor-pointer select-none px-4 py-3.5 flex items-center gap-3 rounded-2xl hover:bg-gray-50">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-gray-900">${_esc(title)}</p>
+                    ${sec.short ? `<p class="text-xs text-gray-500">${_esc(sec.short)}</p>` : ''}
+                </div>
+                ${pill}
+                <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </summary>
+            <div class="border-t border-gray-100">
+                ${sec.long ? `<p class="px-4 pt-3 pb-1 text-sm text-gray-600">${_esc(sec.long)}</p>` : ''}
+                <div data-conn-list class="divide-y divide-gray-100">${body}</div>
+            </div>
+        </details>` };
+    });
+    // Sections with nothing to set up yet ("Coming soon" only) go last.
+    return [...sections.filter(x => !x.soonOnly), ...sections.filter(x => x.soonOnly)].map(x => x.html).join('');
 }
 
 // Card for a supported tool category that has no live connector yet. Mirrors the
