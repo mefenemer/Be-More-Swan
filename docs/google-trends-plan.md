@@ -1,6 +1,6 @@
 # Google Trends — PLAN (feature request #31)
 
-2026-11-15. **Nothing built.** Owner answered every §9 question on 2026-11-15 (§10): Phase 0 approved, DataForSEO chosen.
+2026-11-15 (plan) · **LIVE on prod 2026-11-17: Phases 0, 1b, 1, 2 and 3 plus the Admin page — see §11 at the end.** Owner answered every §9 question on 2026-11-15 (§10): Phase 0 approved, DataForSEO chosen.
 
 The ask: *"Look into whether we can connect to Google Trends to find out what people are searching about - this could
 be useful to some of the assistants".*
@@ -297,3 +297,63 @@ trial is left.
 - **Chat:** Social and Email now get the `<search_trends>` block and card as well.
 - **Help:** `db/z-search-trends-help-phase3-2026-11-16.sql` replaces the article body.
 - **Tests:** `tests/search-trends-phase3.test.ts`.
+
+## 11. Live on prod (2026-11-17)
+
+Everything in §5 is built and live. The PRs, in order:
+
+| What | PRs | On prod |
+| --- | --- | --- |
+| Phase 1b: Searches that found you | #621 → #633 | 2026-11-16 |
+| Phase 1: engine (tables, DataForSEO, hourly tick, worker) | #641 → #649 | 2026-11-16 |
+| Phase 2: Mentor and Blog (What People Search tab, Blog setup panel, chat card, weekly check) | #644 → #649 | 2026-11-16 |
+| Phase 3: Social and Email (timely angles and setting, calendar line, live look-up) | #646 → #649 | 2026-11-16 |
+| Admin ▸ System ▸ Search trends | #654 → #657, fix #661 → #662 | 2026-11-16 |
+| Admin Provider tile makes a real login check | #665 → #666 | 2026-11-17 |
+| DataForSEO on the Trust and Privacy sub-processor lists | #653 → #657 | 2026-11-16 |
+
+**SQL:** `z-search-trends.sql` plus both help articles are applied on staging and prod.
+
+**First live run (prod, 2026-11-16):**
+- One workspace approved 8 terms.
+- At 17:11 UTC, Run now posted 8 Standard tasks for **$0.0216** ($0.0027 each).
+- At 17:23 UTC, the hourly tick collected all 8: **5 OK** (series, peak months, filtered related searches) and
+  **3 too thin to chart** in the UK, shown as such and never guessed.
+- That matches Phase 0's read: country-level data mostly holds up, and broad terms beat narrow ones.
+
+### ⚠️ What to check when no term ever gets data
+
+**Symptom:** terms stay **Waiting** with 0 tasks out and $0 spent. The admin page loads, and Run now says "Started".
+
+**Cause on 2026-11-16:** `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` in Netlify were not the API login. DataForSEO
+answered every call with `HTTP 401 40100 You are not authorized`.
+- The local `.env` values worked; Netlify's were shorter (18 and 14 characters against 19 and 16).
+- The likeliest cause is the account password instead of the separate **API password** (app.dataforseo.com ▸ API
+  Access), plus a lost character in the login.
+
+**How it was found:**
+1. Read the worker's own log line, which reports `providerError`.
+2. Use the deploy's own URL. `--url https://bemoreswan.com` showed the previous deploy's logs.
+
+   ```bash
+   netlify logs --function search-trends-background --since 1h --url https://<deploy_id>--bemoreswan.netlify.app --json
+   ```
+
+**Fix:**
+1. Set both variables for **production and branch-deploy** from the working values. Never paste them into chat;
+   compare by length and fingerprint only.
+2. Then **redeploy**. Functions read environment variables when they are deployed, so a change does nothing until
+   the next deploy.
+
+**Now caught on the page:** since #665 the Provider tile makes DataForSEO's free `tasks_ready` call on every load. A
+bad login now reads **Login refused**, where it used to read "Connected".
+
+**Also hit on 2026-11-16:** the admin spend query failed on prod with `Failed query … params: Sat Oct 17 2026 …`.
+- **Cause:** a bare `Date` inside a raw `sql` fragment.
+- **Fix:** pass `${date.toISOString()}::timestamp` (#661). Keep it that way in any new raw SQL here.
+
+### Still open
+- **Google Trends API (official alpha):** applied 2026-11-15, waiting on Google. When approved, record the Cloud
+  project ID and add a provider beside `dataForSeoProvider` in `src/lib/trends-provider.ts`; callers don't change.
+- **What's New:** Trends goes out as one grouped item in the next email (owner, 2026-11-17).
+
