@@ -7,8 +7,8 @@
 //     reviewGate(): a medium/high PR into staging needs a verdict for its CURRENT head commit, and "Changes
 //     needed" blocks unless Claude gives an override reason (shown to the owner). Low tier needs none. PRs into
 //     main (releases, hotfixes) are reviewed as their staging PRs, so they pass with a note.
-//   • The approval note carries "reviewed commit <sha>": the Approve click (pr-approval.ts) makes GitHub refuse
-//     the merge if the PR changed after the review.
+//   • The approval note carries "reviewed commit <sha>" (or "approved commit <sha>" where no review is needed):
+//     the Approve click (pr-approval.ts) merges only that commit and refuses if the PR changed since.
 
 import type { ReviewTier } from '../config/review-tiers';
 
@@ -60,8 +60,11 @@ export interface GateResult {
     reason: string | null;
     /** One line for the approval note / PR check: tier + review state. */
     summary: string;
-    /** The commit the verdict is for, when there is one: the Approve click merges only that commit. */
+    /** The commit the verdict is for, when there is one. */
     reviewedSha: string | null;
+    /** The commit the owner is being asked to approve (= head). EVERY request is pinned to it, low tier and PRs
+     *  into main included (review round 4 on #682): a push after ask-approval must not merge unseen. */
+    pinSha: string;
     review: ReviewRecord | null;
 }
 
@@ -72,29 +75,34 @@ export function reviewGate(g: GateInput): GateResult {
     const tierText = `${TIER_ICON[g.tier]} ${g.tier[0].toUpperCase()}${g.tier.slice(1)} tier`;
     const latest = g.reviews.length ? g.reviews[g.reviews.length - 1] : null;
     const forHead = [...g.reviews].reverse().find((r) => r.sha === g.headSha) || null;
-    if (g.base === 'main') return { ok: true, reason: null, summary: `${tierText} · release/hotfix into main: each change was reviewed as its staging PR`, reviewedSha: null, review: forHead };
-    if (g.tier === 'low') return { ok: true, reason: null, summary: `${tierText} · second-opinion review not needed`, reviewedSha: forHead?.sha || null, review: forHead };
+    const pin = `approved commit ${g.headSha}`;
+    // Into main: reviews happen on the staging PRs. Not every path to staging was gated before Phase 3, so don't
+    // claim each was reviewed: point at the record that shows any that weren't.
+    if (g.base === 'main') return { ok: true, reason: null, summary: `${tierText} · into main: second-opinion reviews happen on each staging PR (Admin → Systems → Approvals flags any merged without one)\n${pin}`, reviewedSha: null, pinSha: g.headSha, review: forHead };
+    if (g.tier === 'low') return { ok: true, reason: null, summary: `${tierText} · second-opinion review not needed\n${pin}`, reviewedSha: forHead?.sha || null, pinSha: g.headSha, review: forHead };
     if (!forHead) {
         const reason = latest
             ? `The PR changed after its review (reviewed ${short(latest.sha)}, now ${short(g.headSha)}). Run the code-reviewer agent again on the new commit.`
             : `A ${g.tier} tier PR needs a second-opinion review first: run the code-reviewer agent on it (it records its verdict with scripts/pr-tier.ts record-review).`;
-        return { ok: false, reason, summary: `${tierText} · ⚠️ no review for commit ${short(g.headSha)}`, reviewedSha: null, review: null };
+        return { ok: false, reason, summary: `${tierText} · ⚠️ no review for commit ${short(g.headSha)}`, reviewedSha: null, pinSha: g.headSha, review: null };
     }
     const label = `🔎 Review: ${VERDICT_ICON[forHead.verdict]} ${VERDICT_LABEL[forHead.verdict]} (${REVIEW_MODEL})`;
     const tail = `reviewed commit ${forHead.sha}${forHead.url ? `\n${forHead.url}` : ''}`;
     if (forHead.verdict === 'changes') {
         const why = (g.override || '').replace(/\s+/g, ' ').trim();
-        if (why.length < 10) return { ok: false, reason: 'The review says Changes needed. Fix the findings and review again, or pass --override-review "<why it is safe anyway>" (the owner sees it).', summary: `${tierText} · ${label}`, reviewedSha: forHead.sha, review: forHead };
-        return { ok: true, reason: null, summary: `${tierText} · ${label} · ⚠️ Claude asks anyway: ${why}\n${tail}`, reviewedSha: forHead.sha, review: forHead };
+        if (why.length < 10) return { ok: false, reason: 'The review says Changes needed. Fix the findings and review again, or pass --override-review "<why it is safe anyway>" (the owner sees it).', summary: `${tierText} · ${label}`, reviewedSha: forHead.sha, pinSha: g.headSha, review: forHead };
+        return { ok: true, reason: null, summary: `${tierText} · ${label} · ⚠️ Claude asks anyway: ${why}\n${tail}`, reviewedSha: forHead.sha, pinSha: g.headSha, review: forHead };
     }
-    return { ok: true, reason: null, summary: `${tierText} · ${label}\n${tail}`, reviewedSha: forHead.sha, review: forHead };
+    return { ok: true, reason: null, summary: `${tierText} · ${label}\n${tail}`, reviewedSha: forHead.sha, pinSha: g.headSha, review: forHead };
 }
 
-/** The commit an approval note says was reviewed, so the Approve click merges only that commit. */
-export function reviewedShaFromNote(note: string | null | undefined): string | null {
-    const m = /reviewed commit ([0-9a-f]{40})\b/.exec(String(note || ''));
+/** The commit an approval note pins ("reviewed commit …" or "approved commit …"): the Approve click merges only that. */
+export function pinnedShaFromNote(note: string | null | undefined): string | null {
+    const m = /(?:reviewed|approved) commit ([0-9a-f]{40})\b/.exec(String(note || ''));
     return m ? m[1] : null;
 }
+/** @deprecated name kept for callers from Phase 2. */
+export const reviewedShaFromNote = pinnedShaFromNote;
 
 /** The approval note: the gate's summary first, then Claude's own note. */
 export function approvalNoteWithReview(gate: GateResult, why: string | null): string {

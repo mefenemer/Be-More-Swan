@@ -115,7 +115,7 @@ await check('Approve click: refuses when the PR moved past the reviewed commit, 
     const { f, calls } = fakeGh(B);
     const r = await approveAndMergePr({ prNumber: 5, token: 't', repo: 'o/r', fetchImpl: f, expectedHeadSha: A });
     assert.strictEqual(r.ok, false);
-    assert.match((r as any).error, /changed after its second-opinion review/);
+    assert.match((r as any).error, /changed after Claude asked you to approve it/);
     assert.ok(!calls.some((c) => c.url.endsWith('/merge')));
 });
 
@@ -156,7 +156,7 @@ await check('both ask-approval scripts run the gate; the Approve card shows it',
     const html = readFileSync('admin.html', 'utf8');
     assert.ok(html.includes('it.approvalNote ? _approvalNoteHtml(it.approvalNote)'));
     assert.ok(html.includes('data-review-gate'));
-    assert.ok(html.includes('Merges the reviewed commit now if its checks have passed'), 'the card must not promise auto-merge for a reviewed PR');
+    assert.ok(html.includes('Merges the commit you were shown now if its checks have passed'), 'the card must not promise auto-merge for a pinned PR');
     const agent = readFileSync('.claude/agents/code-reviewer.md', 'utf8');
     assert.match(agent, /^model: claude-opus-5-5$/m, 'owner D3: Opus 5.5 for every review');
     assert.match(agent, /record-review <pr> --sha/);

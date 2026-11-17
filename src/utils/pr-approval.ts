@@ -26,7 +26,8 @@ import { parsePrNumber } from './issue-fix-live';
 import { loadProofRow } from './issue-fix-proof';
 import { sqlHash } from './issue-sql';
 import { featureMergeBlocker, featureProofColumnsReady } from './feature-proof';
-import { reviewedShaFromNote } from './pr-review';
+import { pinnedShaFromNote } from './pr-review';
+import { recordButtonApproval } from './pr-approvals';
 
 type Db = ReturnType<typeof getDb>;
 type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<any> }>;
@@ -132,7 +133,7 @@ export async function approveAndMergePr(opts: { prNumber: number; token: string;
         // Second-opinion review (docs/review-tiers-plan.md): merge only the commit the reviewer read.
         const expected = opts.expectedHeadSha || null;
         const head = String(p.head?.sha || '');
-        if (expected && head && head !== expected) return { ok: false, status: 409, error: `PR #${pr.number} changed after its second-opinion review (reviewed ${expected.slice(0, 7)}, now ${head.slice(0, 7)}). Ask Claude to review it again.` };
+        if (expected && head && head !== expected) return { ok: false, status: 409, error: `PR #${pr.number} changed after Claude asked you to approve it (you were shown ${expected.slice(0, 7)}, it is now ${head.slice(0, 7)}). Ask Claude to review it again and re-ask.` };
 
         // The review: refused (422) for the token owner's own PR, which is normal here; never blocks the merge.
         const review = await f(`${base}/reviews`, { method: 'POST', headers: h, body: JSON.stringify({ event: 'APPROVE', body: 'Approved in the Be More Swan admin.' }) });
@@ -143,13 +144,13 @@ export async function approveAndMergePr(opts: { prNumber: number; token: string;
         if (merge.status === 401 || merge.status === 403) return { ok: false, status: 502, error: 'GitHub refused to merge with this token: GITHUB_PR_APPROVE_TOKEN needs Contents and Pull requests read/write on this repo.' };
         if (merge.status === 409) return { ok: false, status: 409, error: `PR #${pr.number} has a merge conflict or its branch moved. Ask Claude to update it.` };
 
-        // A reviewed PR merges only right now, never via auto-merge: GitHub checks expectedHeadOid only when
+        // A pinned PR (every request since Phase 3; older ones may have no pin) merges only right now, never via auto-merge: GitHub checks expectedHeadOid only when
         // auto-merge is switched ON, so a later push (Auto-fix, Claude — all as the owner's account) would merge
         // unreviewed (second-opinion review of #682). The owner clicks again once the checks pass.
         if (expected) {
             let why = '';
             try { why = String((await merge.json())?.message || ''); } catch { /* none */ }
-            return { ok: false, status: 409, error: `PR #${pr.number} can't merge yet${why ? ` (${why})` : ''}: its checks are still running or failing. It merges only the reviewed commit ${expected.slice(0, 7)}, so click Approve again once the checks pass.` };
+            return { ok: false, status: 409, error: `PR #${pr.number} can't merge yet${why ? ` (${why})` : ''}: its checks are still running or failing. It merges only the commit you were shown (${expected.slice(0, 7)}), so click Approve again once the checks pass.` };
         }
         // 405 = not mergeable yet (checks running, or the branch is behind): let GitHub merge it when ready.
         const gql = await f('https://api.github.com/graphql', {
@@ -236,10 +237,12 @@ async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts:
         if (blocker) { await restore(); return { ok: false, status: 409, error: blocker }; }
     }
 
-    const res = await approveAndMergePr({ prNumber, token, repo: opts.repo, fetchImpl: opts.fetchImpl, expectedHeadSha: reviewedShaFromNote(row.approval_note) });
+    const res = await approveAndMergePr({ prNumber, token, repo: opts.repo, fetchImpl: opts.fetchImpl, expectedHeadSha: pinnedShaFromNote(row.approval_note) });
     if (!res.ok) { await restore(); return res; }
 
     const { pr, merged, autoMerge } = res;
+    // The approval record (src/utils/pr-approvals.ts): who approved which commit. Never fails the click.
+    await recordButtonApproval(db, { prNumber: pr.number, base: pr.base, url: pr.url, title: pr.title, approvedBy: opts.adminName || null, approvedSha: pinnedShaFromNote(row.approval_note), merged, repo: opts.repo });
     const how = merged ? 'merged' : 'set to merge itself once its checks pass';
     const who = opts.adminName ? ` by ${opts.adminName}` : '';
     let message: string;

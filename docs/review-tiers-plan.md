@@ -1,7 +1,7 @@
 # Review tiers, a second-opinion reviewer and an approval record — PLAN (2026-11-17)
 
-> Status: **decisions taken 2026-11-17; Phases 1 + 2 BUILT** (PR #682, branch feat/review-tiers-phase1 → staging).
-> Phases 3–4 not started.
+> Status: **decisions taken 2026-11-17; Phases 1 + 2 merged to staging (PR #682); Phase 3 BUILT** (branch
+> feat/review-tiers-phase3 → staging). Phase 4 not started.
 
 ## Owner decisions (2026-11-17)
 
@@ -86,6 +86,28 @@ Two rules hold at every stage:
 **How Claude uses it:** open the PR → spawn the `code-reviewer` agent with the PR number only → fix any
 Changes needed, push, review again → `ask-approval`. For PRs outside the pipelines, `pr-tier.ts check <pr>`
 must pass before asking the owner.
+
+## Phase 3 as built
+
+- **Approval record:** `db/z-pr-approvals.sql` (additive; run on BOTH DBs) → table `pr_approvals`, one row per
+  merged PR. `src/utils/pr-approvals.ts`:
+  - the Approve click (`pr-approval.ts`) records who approved which commit;
+  - `sweepMergedPrs()` on the live-check tick (`check-fixes-live.ts`) fills tier + verdict for every PR merged
+    into staging/main, **including merges outside the button** (`gh pr merge` on the owner's word, "Merge to
+    staging"). Up to 10 PR loads per tick;
+  - `approvalFlag()`: ⚠️ for a medium/high PR into staging merged after reviews began (2026-11-17 12:00 UTC)
+    with no review, a review of an older commit, or Changes needed.
+- **Admin → Systems → Approvals** (`admin-system-status.ts?view=approvals`, `view_system_status` permission):
+  the last 40 merges with tier, verdict (linked), how approved, and the flag.
+- **From review round 4 on #682:**
+  - **Every approval request is pinned**, low tier and PRs into main too ("approved commit <sha>"), so a push
+    after `ask-approval` can't merge unseen. ⚠️ Behaviour change: release PRs no longer fall back to
+    auto-merge; if checks are still running the owner clicks Approve again once they pass.
+  - The note on PRs into main no longer claims every staging PR was reviewed; it points at the Approvals list.
+  - **"Merge to staging" / "Merge all"** (`admin-issue-reports.ts`) run the same gate via
+    `src/utils/pr-review-remote.ts` (GitHub REST, no `gh`), failing CLOSED if GitHub can't be read. The commit
+    that passed goes to merge-to-staging.yml as `head_sha`, which merges with `--match-head-commit`, so a push
+    between the click and the workflow can't merge unreviewed. Merge all runs its gates in parallel.
 
 ## 1. Risk tiers
 
