@@ -1,7 +1,7 @@
 # Review tiers, a second-opinion reviewer and an approval record — PLAN (2026-11-17)
 
-> Status: **decisions taken 2026-11-17; Phase 1 BUILT** (branch feat/review-tiers-phase1 → staging).
-> Phases 2–4 not started.
+> Status: **decisions taken 2026-11-17; Phases 1 + 2 BUILT** (PR #682, branch feat/review-tiers-phase1 → staging).
+> Phases 3–4 not started.
 
 ## Owner decisions (2026-11-17)
 
@@ -55,6 +55,30 @@ Two rules hold at every stage:
 | Evidence: confirmed/guessed root cause, repro test fails before and passes after, SQL safety, SQL on staging, staging CI, live on staging | `src/utils/issue-fix-proof.ts`, `src/utils/feature-proof.ts`, checklist cards in `admin.html` | Only covers Fix and Feature tickets. Ordinary session work and staging→main release PRs have none. No review verdict, no risk level. |
 | Unattended SQL limited to additive statements | `src/utils/issue-sql.ts` (`classifySql`) | Already a risk tier in all but name. |
 | Approval stored | `approval_pr_url`, `approval_note`, `approval_requested_at` | A merge done with `gh pr merge` on the owner's word skips it (see the `shipped` workaround in feature-pipeline-parity). |
+
+## Phase 2 as built
+
+- `.claude/agents/code-reviewer.md` — read-only reviewer, **model claude-opus-5-5** (D3), given ONLY a PR number.
+  House checklist: inverted/dead gates, un-awaited writes, `orgId` from the request, non-additive SQL,
+  double-firing customer actions, GUI ↔ chat parity, claims vs code. `.gitignore` now tracks this one file
+  under `.claude/` (the other agents stay local).
+- The reviewer records its verdict with `scripts/pr-tier.ts record-review <pr> --sha <commit> --verdict
+  pass|notes|changes --file <findings.md>`: a PR comment with a hidden `swan-review v1` marker naming the
+  commit. Refused if the PR has moved past that commit.
+- `src/utils/pr-review.ts` `reviewGate()` — a medium/high PR into staging needs a verdict for its **current
+  head commit**; Changes needed blocks unless `--override-review "<why>"` (shown to the owner); low tier and
+  PRs into main (releases, hotfixes) pass with a note.
+- `ask-approval` (scripts/fix-tickets.ts, scripts/feature-requests.ts) runs the gate and puts its line first in
+  the approval note: tier · verdict · "reviewed commit <sha>" · link. `pr-tier.ts check` and
+  `pr-tier.ts review-status` show the same.
+- **Approve click** (src/utils/pr-approval.ts): when the note names a reviewed commit, the merge is pinned to it
+  (`sha` on the merge, `expectedHeadOid` on auto-merge) and refused if the PR changed after the review.
+- Approve card (admin.html `_approvalNoteHtml`): verdict line bold, "merges only commit abc1234", link to the
+  review.
+
+**How Claude uses it:** open the PR → spawn the `code-reviewer` agent with the PR number only → fix any
+Changes needed, push, review again → `ask-approval`. For PRs outside the pipelines, `pr-tier.ts check <pr>`
+must pass before asking the owner.
 
 ## 1. Risk tiers
 

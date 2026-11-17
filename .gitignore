@@ -22,7 +22,11 @@ node_modules/
 # and this repo commits the whole working tree — so it would ship to GitHub on the next push.
 meta-vault-backfill-report.json
 # Local Claude Code state: launch configs, harness, worktrees, scratch SQL, settings.local.json.
-.claude/
+# Except the second-opinion reviewer agent, which is shared (docs/review-tiers-plan.md).
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/code-reviewer.md
 
 # Playwright smoke tests (e2e/)
 /test-results/

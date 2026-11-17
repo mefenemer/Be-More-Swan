@@ -6487,13 +6487,35 @@ function prPills(stagingUrl, prodUrl) {
   };
   return pill(stagingUrl, 'Staging', 'bg-violet-100 text-violet-700') + pill(prodUrl, 'Prod', 'bg-emerald-100 text-emerald-800');
 }
+// The approval note opens with the review gate's line (docs/review-tiers-plan.md): "<tier> · 🔎 Review: …",
+// then "reviewed commit <sha>" and the review comment's link. Shown bold, with the commit short and the link live.
+function _approvalNoteHtml(note) {
+  const lines = String(note || '').split('\n');
+  const isGate = / tier · /.test(lines[0] || '');
+  let head = '';
+  let rest = lines;
+  if (isGate) {
+    head = `<p data-review-gate class="text-xs font-bold text-gray-800">${_escH(lines[0])}</p>`;
+    rest = lines.slice(1);
+    const meta = [];
+    while (rest.length && (/^reviewed commit [0-9a-f]{40}$/.test(rest[0]) || /^https:\/\/github\.com\/\S+$/.test(rest[0]))) {
+      const l = rest.shift();
+      meta.push(/^https:/.test(l)
+        ? `<a href="${_escH(l)}" target="_blank" rel="noopener" class="underline">read the review ↗</a>`
+        : `merges only commit <code>${_escH(l.slice(16, 23))}</code>`);
+    }
+    if (meta.length) head += `<p class="text-[11px] text-gray-500">${meta.join(' · ')}</p>`;
+  }
+  const body = rest.join('\n').trim();
+  return head + (body ? `<p class="text-xs text-gray-600 whitespace-pre-wrap">${_escH(body)}</p>` : '');
+}
 function prApproveButton(kind, it, big) {
   const m = _PR_URL_RE.exec(it.approvalPrUrl || '');
   if (!m || !_can('deploy_code')) return '';
   const where = it.approvalPrUrl === it.prodPrUrl ? 'prod ' : it.approvalPrUrl === (it.devPrUrl || '') ? 'staging ' : '';
   return big
     ? `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">✅ Approve ${where}PR #${m[1]}</button>
-       ${it.approvalNote ? `<p class="text-xs text-gray-600 whitespace-pre-wrap">${_escH(it.approvalNote)}</p>` : ''}
+       ${it.approvalNote ? _approvalNoteHtml(it.approvalNote) : ''}
        <p class="text-[11px] text-gray-500">Approves it on GitHub, merges it (or sets it to merge itself once its checks pass) and moves this ticket on.</p>`
     : `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="mt-1.5 w-full text-xs font-bold px-2 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">✅ Approve ${where}PR #${m[1]}</button>`;
 }
