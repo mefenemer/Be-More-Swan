@@ -61,14 +61,14 @@ jobs:
           [ "${{ needs.typecheck.result }}" = success ] && [ "${{ needs.tests.result }}" = success ]
 
   e2e:
-    name: Browser smoke tests (Playwright ${{ matrix.shard }}/2)
+    name: Browser smoke tests (Playwright ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    # Two runners, each taking half the specs with Playwright's usual 2 workers: same tests, same
-    # retries, about half the wall time. Not a required check, so the name can carry the shard.
+    # Three runners, each taking a third of the specs with Playwright's usual 2 workers: same tests,
+    # same retries, about a third of the wall time. Not a required check, so the name can carry the shard.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -89,7 +89,7 @@ jobs:
       - if: steps.pw-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
       # Static pages in a real browser, every function stubbed (e2e/fixtures.ts) — no DB or secrets.
-      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
