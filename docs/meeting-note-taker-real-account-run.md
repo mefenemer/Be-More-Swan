@@ -7,7 +7,7 @@ Staging: https://staging--bemoreswan.netlify.app (steps 2–7 deployed at `bc761
 
 **Status (2026-11-17):** runs A and A2 done in Marmalade Productions (org 58), Minute Taker "Orbit Scribe"
 (assistant 66), meetings 918 and 919. Gmail, Slack, Notion and Jira pass. **Run B done (meeting 920):**
-Outlook, Asana and the chat cards pass on the server, but the chat lost its card on 3 of 6 deployed turns
+Outlook (owner marked passed: in Sent Items), Asana and the chat cards pass, but the chat lost its card on 3 of 6 deployed turns
 (§6). Run C now checks that nothing is sent without a mailbox (owner, 2026-11-17: no Be More Swan sender). Eleven bugs found and fixed
 on the way (§6).
 
@@ -113,7 +113,7 @@ ORDER BY meeting_record_id, id;
 | Notion page | A2 | ✅ | created 17 Nov 06:38 | needed the staging redirect URI added to the Notion connection |
 | Jira tickets | A2 | ✅ | SCRUM-5, SCRUM-6, SCRUM-7 | stopped after one ticket until #668; three of four because Asana was also on (split, fixed by #671) |
 | Asana tickets | B | ✅ | 4 tasks: 1220615169703322, …773693, …686301, 1220614692499888 | one per action item, all `synced`, in Mark's first project; Jira switched itself off |
-| Outlook follow-up | B | ✅ (server) | sent 17 Nov 14:37 via Outlook (mefenemer@hotmail.com) to +ana, +bo, +cara | once (`handoffs.email_meeting_followup.sentAt`); **check the inbox and Outlook's Sent Items by eye** |
+| Outlook follow-up | B | ✅ | sent 17 Nov 14:37 from mefenemer@hotmail.com to +ana, +bo, +cara; in Hotmail's Sent Items (owner checked) | sent once (`handoffs.email_meeting_followup.sentAt`). It did not reach the bmsreview.test Gmail inbox: delivery from a personal Hotmail to Gmail is down to the sending account and the recipient's spam filter, not the app. Owner marked it passed 2026-11-17 |
 | Chat review cards | B | ⚠️ | add-email ✅ (card from a local run of the same code), shorten ✅, approve ✅ | the deployed chat lost its card 3 times out of 6 — see §6 |
 | No inbox = no email | C | ✅ | meeting 921, 17 Nov | switch-on refused (409 no_mailbox); a switch left on reads "On, but not sending"; the chat's approve card warned; approved → nothing sent, `followupNotSent` stamped, job completed (no retries); Inbox showed "Follow-up not sent"; **Send the follow-up now** refused with no mailbox, then (Gmail reconnected) sent once via Gmail and refused a second press ("already sent") |
 | Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
