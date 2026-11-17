@@ -6,6 +6,8 @@
 //                                                       → admin adds a request (source='manual', status='pending_review' → To review)
 // POST   /admin-feature-requests?action=enhance { text }
 //                                                       → LLM-polished feature summary from raw text (US04)
+// POST   /admin-feature-requests?action=review { title, description?, brief? }
+//                                                       → Opus 5.5 suggestions; the admin picks which to add
 // POST   /admin-feature-requests?action=merge { sourceId, targetId }
 //                                                       → mark source a duplicate of target, combine votes (US04)
 // POST   /admin-feature-requests?action=reorder { order: number[] }
@@ -47,6 +49,7 @@ import {
 } from '../../src/utils/feature-requests';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { adaptForModel, replyText } from '../../src/config/model-options';
+import { FEATURE_REVIEW_MODEL, buildReviewPrompt, parseReview } from '../../src/utils/feature-review';
 
 const jwtSecret = process.env.JWT_SECRET;
 const MODEL = 'claude-haiku-5-5';
@@ -150,6 +153,42 @@ export default withLambda(async (event) => {
         } catch (err) {
             console.error('[admin-feature-requests] draft-brief failed:', err);
             return json(500, { error: 'Could not draft the brief right now.' });
+        }
+    }
+
+    // ── POST ?action=review: Opus 5.5 reviews the request and suggests improvements (owner 2026-11-17) ──
+    // Returns suggestions only; the admin ticks which to add and nothing is saved until they press Save.
+    if (event.httpMethod === 'POST' && action === 'review') {
+        if (await isGlobalAiDisabled()) {
+            return json(503, { error: 'AI services are temporarily unavailable. Please try again later.' });
+        }
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+        const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
+        const description = typeof body.description === 'string' ? body.description.slice(0, 4000) : '';
+        const brief = typeof body.brief === 'string' ? body.brief.slice(0, 4000) : '';
+        if (!title) return json(400, { error: 'Add a title before asking for a review.' });
+
+        try {
+            const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+            const response = await anthropic.messages.create(adaptForModel({
+                model: FEATURE_REVIEW_MODEL,
+                max_tokens: 4000,
+                messages: [{ role: 'user', content: buildReviewPrompt({ title, description, brief }) }],
+            }, FEATURE_REVIEW_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+
+            await logAiUsage({
+                userId: admin.id,
+                workspaceId: null,
+                model: FEATURE_REVIEW_MODEL,
+                inputTokens: response.usage?.input_tokens ?? 0,
+                outputTokens: response.usage?.output_tokens ?? 0,
+            });
+            const review = parseReview(replyText(response.content) || '');
+            return json(200, { model: FEATURE_REVIEW_MODEL, ...review });
+        } catch (err) {
+            console.error('[admin-feature-requests] review failed:', err);
+            return json(500, { error: 'Could not review the request right now.' });
         }
     }
 
