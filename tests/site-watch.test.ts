@@ -134,4 +134,23 @@ check('the help article covers the Watch list and its website news', () => {
     assert.doesNotMatch(body, /;/, 'no semicolons inside the body (the Neon editor splits on them)');
 });
 
+console.log('Reading the site (2026-11-17: 20 of 153 prod sites failed)');
+check('a big home page is read up to the cap, not refused (shops often pass 1 MB)', () => {
+    assert.match(read('src/lib/lead-watch-sources.ts'), /userAgent: USER_AGENTS\.leadWatch, truncate: true/);
+    const sf = read('src/utils/safe-fetch.ts');
+    assert.match(sf, /truncate\?: boolean/);
+    assert.match(sf, /if \(declared && declared > opts\.maxBytes && !opts\.truncate\)/);
+    assert.match(sf, /if \(opts\.truncate && !opts\.binary\)/);
+});
+check('a domain that does not answer is tried once at www.; a refusal or timeout is not', () => {
+    const src = read('src/lib/lead-watch-sources.ts');
+    assert.match(src, /first\.failed !== 'dns_failure' && first\.failed !== 'network_error'/);
+    assert.match(src, /fetchPage\(`https:\/\/www\.\$\{domain\}\$\{path\}`\)/);
+    assert.match(src, /\(err as \{ reason\?: string \}\)\?\.reason/);
+    assert.match(src, /domain = new URL\(home\.url\)\.host;/);
+});
+check('truncate is off unless asked for, so every other caller still refuses a huge page', () => {
+    assert.match(read('src/utils/safe-fetch.ts'), /truncate: opts\.truncate === true/);
+});
+
 console.log(`\n${passed}/${total} passed`);

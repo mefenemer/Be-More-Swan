@@ -112,14 +112,28 @@ export async function getFormDXml(cik: string, accession: string, primaryDocumen
 // ── The lead's own site ──────────────────────────────────────────────────────────────────────────
 
 /** Fetch one page of the lead's own site through the SSRF-guarded fetcher. Null on any failure. */
-async function readPage(domain: string, path: string): Promise<{ url: string; html: string } | null> {
-    const url = `https://${domain}${path}`;
+async function fetchPage(url: string): Promise<{ url: string; html: string } | { failed: string }> {
     try {
-        const { body } = await safeFetchText(url, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_PAGE_BYTES, userAgent: USER_AGENTS.leadWatch });
+        // truncate: a big home page (a shop's often passes 1 MB) is read up to the cap rather than refused.
+        // Every tag the watch looks for sits well inside the first megabyte.
+        const { body } = await safeFetchText(url, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_PAGE_BYTES, userAgent: USER_AGENTS.leadWatch, truncate: true });
         return { url, html: body };
-    } catch {
-        return null;
+    } catch (err) {
+        return { failed: String((err as { reason?: string })?.reason ?? 'error') };
     }
+}
+
+/**
+ * One page, or null. When the bare domain does not answer at all (no DNS, connection refused), try
+ * `www.` once: plenty of small-business sites only answer there (2026-11-17, 5 of 20 "unreachable"
+ * leads on prod). A refusal (403/429) or a timeout is not retried: the site answered, or is slow.
+ */
+async function readPage(domain: string, path: string): Promise<{ url: string; html: string } | null> {
+    const first = await fetchPage(`https://${domain}${path}`);
+    if (!('failed' in first)) return first;
+    if (domain.startsWith('www.') || (first.failed !== 'dns_failure' && first.failed !== 'network_error')) return null;
+    const again = await fetchPage(`https://www.${domain}${path}`);
+    return 'failed' in again ? null : again;
 }
 
 const NAME_RE = /^([A-Z][a-z'’]+(?:[- ][A-Z][a-z'’]+){1,2})$/;
@@ -257,6 +271,8 @@ export async function lookAtSite(domain: string, noCareers: string, usStatesInTe
     const home = await readPage(domain, '/');
     if (!home) return look;
     look.reached = true;
+    // Read the rest of the site from the host that answered (it may be www.).
+    domain = new URL(home.url).host;
     look.markers = home.html.length >= MIN_HOMEPAGE_CHARS ? detectSiteMarkers(home.html) : null;
     const $ = cheerio.load(home.html);
     $('script, style, noscript').remove();
