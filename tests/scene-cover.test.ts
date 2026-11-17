@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverWindow, readSceneCover, seriesClock, windowBox, type TimelineCover,
+    applyCovers, bubbleBox, captionLiftPct, cornerOf, coverFramesFromPieces, coverWindow, readSceneCover, seriesClock, windowBox, type TimelineCover,
 } from '../src/lib/scene-cover';
 import { enforceStoryboard, type Scene, type VideoBrief } from '../src/lib/storyboard';
 import { assetsForShape, timelineCovers, timesOf } from '../src/utils/video-producer';
@@ -149,10 +149,57 @@ check('covers follow the Series clock, not absolute seconds (no black frames at 
     assert.ok(src.includes('const { from, durationInFrames: frames } = coverRange(c);') && !/behind\.map[\s\S]{0,120}overlayFrameRange/.test(src));
 });
 
-check('a screen that can\'t be found leaves the presenter full frame and says so, never fails the build', () => {
+check('a screen that can\'t be found leaves the presenter full frame for this version, keeps the layout, and says so', () => {
     const vp = read('src/utils/video-producer.ts');
-    assert.ok(vp.includes('note: coverNote }') && vp.includes('couldn’t be found, so'));
-    assert.ok(!vp.includes('’s screen` }))'), 'no longer added to the build\'s missing-scene error');
+    assert.ok(vp.includes('...(coverNote ? { coverNote } : {}),') && vp.includes('couldn’t be found, so'), 'kept on the timeline: the render rewrites note');
+    assert.ok(!vp.includes('’s screen` }))'), 'never added to the build\'s missing-scene error');
+    assert.ok(!/const \{ cover: _gone/.test(vp), 'the scene keeps its layout, so the next version tries again');
+    assert.ok(vp.includes('screenNote: (row.timeline as ProjectTimeline | null)?.coverNote ?? null'));
+    assert.ok(read('src/components/assistant-videos.js').includes("${v.screenNote && ['ready', 'rendering', 'render_failed'].includes(v.status)"));
+});
+
+check('a screen behind the presenter lasts exactly as long as the pieces under it — with real, unrounded timings (review of #705)', () => {
+    // The build's real path: scene times from timesOf (rounded totals), pieces from rounded in/out points, then
+    // the composition rounding each piece UP to whole frames. Every frame of a hidden or bubble piece must have
+    // its screen behind it.
+    const fps = 30;
+    let uncovered = 0, checked = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+        let x = seed * 9301 + 49297;
+        const rnd = () => ((x = (x * 9301 + 49297) % 233280) / 233280);
+        const durs = Array.from({ length: 6 }, () => Math.round((1.3 + rnd() * 6) * 1000) / 1000);
+        const scenes = durs.map((d, i) => ({ id: `s${i + 1}`, beat: 'value', voiceover: '', source: 'own_video', assetId: 11, inS: 0, outS: 60, targetS: d,
+            ...(i % 2 ? { cover: { layout: i % 4 === 1 ? 'cover' : 'bubble', source: 'own_video', assetId: 12, ...(rnd() > 0.5 ? { fromS: Math.round(rnd() * 100) / 100 } : {}) } } : {}) })) as unknown as Scene[];
+        // Tightened pieces: each scene split into 2–4 back-to-back pieces with rounded in/out points.
+        const clips: VideoClip[] = [];
+        let src = 0;
+        scenes.forEach((s, i) => {
+            const n = 2 + (i % 3), len = durs[i] / n;
+            for (let k = 0; k < n; k++) { const a = Math.round(src * 100) / 100, b = Math.round((src + len) * 100) / 100; clips.push({ id: `vp_${s.id}_${k}`, assetId: 11, inS: a, outS: b }); src += len + 0.37; }
+        });
+        const played = scenes.map((s, i) => clips.filter((c) => c.id.startsWith(`vp_${s.id}_`)).reduce((acc, c) => acc + (c.outS! - c.inS!), 0));
+        const assets: Record<string, number> = {};
+        scenes.forEach((s) => { assets[s.id] = 11; if (s.cover) assets[`${s.id}~cover`] = 12; });
+        const covers = timelineCovers(scenes, assets, timesOf(scenes, played), () => 999);
+        const laid = applyCovers(clips, covers);
+        const frames = laid.map((c) => ({ coverId: c.coverId, frames: Math.max(1, Math.ceil((c.outS! - c.inS!) * fps)) }));
+        const ranges = coverFramesFromPieces(frames);
+        let f = 0;
+        for (const [k, c] of laid.entries()) {
+            const n = frames[k].frames;
+            if (c.layout) {
+                const r = c.coverId ? ranges.get(c.coverId) : undefined;
+                for (let q = f; q < f + n; q++) { checked++; if (!r || q < r.from || q >= r.to) uncovered++; }
+            }
+            f += n;
+        }
+    }
+    assert.ok(checked > 1000, `checked ${checked} frames`);
+    assert.strictEqual(uncovered, 0, `${uncovered} of ${checked} presenter-hidden frames had no screen behind them`);
+    // And the clock (used for windows) snaps to a clip edge within 0.05 s.
+    const clock = seriesClock([{ seconds: 2.68, frames: 81 }, { seconds: 1, frames: 30 }], 30);
+    assert.strictEqual(clock(2.67), 81);
+    assert.strictEqual(clock(2.69), 81);
 });
 
 check('geometry: the bubble and window sit in their corner, and bottom captions step above them', () => {

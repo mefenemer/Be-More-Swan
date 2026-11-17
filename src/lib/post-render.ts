@@ -311,6 +311,7 @@ export interface ResolvedClip {
     layout?: 'bubble' | 'hidden';
     corner?: 'br' | 'bl' | 'tr' | 'tl';
     size?: 'small' | 'medium';
+    coverId?: string;
 }
 
 /**
@@ -381,7 +382,7 @@ export async function resolveEditClips(
                 ...(trim?.inS ? { inS: trim.inS } : {}),
                 ...(trim?.outS != null ? { outS: trim.outS } : {}),
                 ...(gain != null ? { gain } : {}),
-                ...(clip.layout === 'bubble' || clip.layout === 'hidden' ? { layout: clip.layout, ...(clip.corner ? { corner: clip.corner } : {}), ...(clip.size ? { size: clip.size } : {}) } : {}),
+                ...(clip.layout === 'bubble' || clip.layout === 'hidden' ? { layout: clip.layout, ...(clip.corner ? { corner: clip.corner } : {}), ...(clip.size ? { size: clip.size } : {}), ...(clip.coverId ? { coverId: clip.coverId.slice(0, 64) } : {}) } : {}),
             });
         }
         if (out.length) return out;

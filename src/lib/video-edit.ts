@@ -62,6 +62,8 @@ export interface VideoClip {
     layout?: 'bubble' | 'hidden';
     corner?: 'br' | 'bl' | 'tr' | 'tl';
     size?: 'small' | 'medium';
+    /** The walkthrough cover this piece sits under (scene-cover.ts applyCovers): the composition times the cover from it. */
+    coverId?: string;
 }
 
 /** Longest a single still may be held — a scene, not a slideshow. */

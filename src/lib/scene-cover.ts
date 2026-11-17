@@ -144,7 +144,7 @@ export function clipSeconds(c: Pick<VideoClip, 'kind' | 'holdS' | 'inS' | 'outS'
  * A window cover needs nothing here — the presenter stays full frame and the window is drawn over it.
  * Only video clips are split (a still has no presenter). Clip times are seconds in each clip's source. Pure.
  */
-export function applyCovers(clips: VideoClip[], covers: Array<Pick<TimelineCover, 'startS' | 'endS' | 'layout' | 'corner' | 'size'>>): VideoClip[] {
+export function applyCovers(clips: VideoClip[], covers: Array<Pick<TimelineCover, 'startS' | 'endS' | 'layout' | 'corner' | 'size'> & { id?: string }>): VideoClip[] {
     const active = covers.filter((c) => c.layout !== 'window' && c.endS > c.startS);
     if (!active.length) return clips;
     const out: VideoClip[] = [];
@@ -169,6 +169,9 @@ export function applyCovers(clips: VideoClip[], covers: Array<Pick<TimelineCover
             };
             if (cover) {
                 piece.layout = cover.layout === 'bubble' ? 'bubble' : 'hidden';
+                // The composition times this cover from the frames of the pieces that carry its id, so the
+                // screen lasts exactly as long as the presenter it replaces (no black frames at its edges).
+                if (cover.id) piece.coverId = cover.id;
                 if (cover.layout === 'bubble') { piece.corner = cover.corner ?? 'br'; if (cover.size === 'small') piece.size = 'small'; }
             }
             out.push(piece);
@@ -191,11 +194,32 @@ export function seriesClock(clips: Array<{ seconds: number; frames: number }>, f
     return (t: number) => {
         for (let i = 0; i < at.length; i++) {
             const c = at[i];
-            if (t <= c.s + 1e-6) return c.f;
-            if (t < c.s + c.len - 1e-6) return c.f + Math.min(c.frames, Math.round((t - c.s) * fps));
+            // Within 0.05 s of a clip edge counts as the edge: cover times (timesOf) and clip lengths are rounded
+            // separately, and applyCovers makes no cut within 0.04 s of an edge.
+            if (t <= c.s + 0.05) return c.f;
+            if (t < c.s + c.len - 0.05) return c.f + Math.min(c.frames, Math.round((t - c.s) * fps));
+            if (t < c.s + c.len + 0.05 && i === at.length - 1) return f;
         }
         return f;
     };
+}
+
+/**
+ * Each behind-the-presenter cover's frame range, from the pieces that carry its id (applyCovers): from the first
+ * piece's first frame to the last piece's last. Covers no piece carries (a window, or none matched) are left to
+ * the clock. `clips` are in Series order with their frame lengths. Pure.
+ */
+export function coverFramesFromPieces(clips: Array<{ coverId?: string; frames: number }>): Map<string, { from: number; to: number }> {
+    const out = new Map<string, { from: number; to: number }>();
+    let f = 0;
+    for (const c of clips) {
+        if (c.coverId) {
+            const r = out.get(c.coverId);
+            if (r) r.to = f + c.frames; else out.set(c.coverId, { from: f, to: f + c.frames });
+        }
+        f += c.frames;
+    }
+    return out;
 }
 
 // ── Geometry (the composition and the Change form's preview share these numbers) ─────────────────

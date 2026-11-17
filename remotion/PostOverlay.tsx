@@ -21,7 +21,7 @@ import type { LookStyle } from '../src/lib/video-look';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
 import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
-import { bubbleBox, captionLiftPct, seriesClock, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
+import { bubbleBox, captionLiftPct, coverFramesFromPieces, seriesClock, windowBox, type BubbleSize, type Corner, type CoverLayout } from '../src/lib/scene-cover';
 
 /**
  * One clip of the timeline.
@@ -54,6 +54,8 @@ export type TimelineClip = {
     layout?: 'bubble' | 'hidden';
     corner?: Corner;
     size?: BubbleSize;
+    /** The cover this piece sits under (scene-cover.ts applyCovers); that cover is timed from these pieces. */
+    coverId?: string;
 };
 
 /**
@@ -333,9 +335,13 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
         const secs = c.kind === 'image' ? c.holdS : (c.outS != null ? c.outS - (c.inS ?? 0) : undefined);
         return { seconds: secs != null && secs > 0 ? secs : frames / fps, frames };
     }), fps);
+    // A screen behind the presenter lasts exactly as long as the pieces under it (their own frames); a window,
+    // which hides nothing, follows the clock.
+    const fromPieces = coverFramesFromPieces(timeline.map((c) => ({ coverId: c.coverId, frames: c.durationInFrames ?? evenShare })));
     const coverRange = (c: CoverTrack) => {
-        const from = Math.min(Math.max(0, clock(c.startS)), Math.max(0, durationInFrames - 1));
-        const to = Math.min(durationInFrames, clock(c.endS));
+        const own = fromPieces.get(c.id);
+        const from = Math.min(Math.max(0, own ? own.from : clock(c.startS)), Math.max(0, durationInFrames - 1));
+        const to = Math.min(durationInFrames, own ? own.to : clock(c.endS));
         return { from, durationInFrames: Math.max(1, to - from) };
     };
     // Where bottom captions step up: under a bottom bubble (from the clips' places in the Series) or a bottom window.

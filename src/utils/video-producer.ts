@@ -232,6 +232,8 @@ export interface ProjectTimeline {
     chapterTitles?: Record<string, string>;
     /** Walkthrough screens over or beside the presenter (src/lib/scene-cover.ts). Since 2026-11-17. */
     covers?: TimelineCover[];
+    /** Why a scene's screen is missing from THIS version (it showed the presenter full frame instead). Kept here: the render rewrites `note`. */
+    coverNote?: string;
 }
 
 /** Chapter names to keep on a rebuilt timeline: this row's own, else the version it came from. */
@@ -971,16 +973,13 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             }
             if (made) done[key] = made.assetId; else coverFailed.push(i);
         }
-        // A screen that can't be found (their video deleted since, no stock match) never stops the video: that
-        // scene shows the presenter full frame, and the note says so.
-        for (const i of coverFailed) {
-            const { cover: _gone, ...rest } = storyboard.scenes[i];
-            storyboard.scenes[i] = rest;
-        }
+        // A screen that can't be found (their video deleted since, a stock search outage) never stops the video:
+        // THIS build shows the presenter full frame there (timelineCovers skips a cover with no asset). The scene
+        // keeps its layout, so the next version tries again, and the finished video says what happened.
         const coverNote = coverFailed.length
-            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} you full frame. Choose another screen on the scene to put one back.`
+            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} you full frame. Change the video and make it again to try that screen again, or choose another on the scene.`
             : null;
-        await save(coverFailed.length ? { storyboard } : {});
+        await save({});
         const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
@@ -1123,6 +1122,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             // Kept with the version: every file it was made from (the Videos tab lists them).
             sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...covers.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
             ...(covers.length ? { covers } : {}),
+            ...(coverNote ? { coverNote } : {}),
         };
         // Chapter names the owner gave — kept for the scenes this version still has (videoChapters drops the rest).
         const chapterTitles = await keptChapterTitles(db, p).catch(() => undefined);
@@ -1130,7 +1130,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
 
         // Anything still held (a scene that turned out free, say) goes back.
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }); held = 0; }
-        await save({ status: 'rendering', timeline, outputAssetId: null, renderId: null, note: coverNote });
+        await save({ status: 'rendering', timeline, outputAssetId: null, renderId: null, note: null });
         // The finished file, rendered now (render-video-project-background). A wake that never arrives
         // leaves the project 'rendering' until the stuck sweep marks it render_failed — never silent.
         await wakeRenderWorker(projectId);
@@ -1326,6 +1326,7 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     }
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
+        screenNote: (row.timeline as ProjectTimeline | null)?.coverNote ?? null,
         scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
         // The voiceover made (or, in the owner's own voice, one recording of the whole script).
         voiceoverAssetId: row.voiceoverAssetId,
