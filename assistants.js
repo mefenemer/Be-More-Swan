@@ -11953,7 +11953,7 @@ async function _loadCampaignMetrics(assistantId) {
     }
 }
 
-// ── Records assistants' KPI cards (AR Clerk, Support, CRM Data, Minute Taker) ──
+// ── Records assistants' KPI cards (AR Clerk, Support, CRM Data, Note Taker) ──
 // Routed here by `metricsSource: 'records'`. Each card shows one count from assistant-records
 // ?metrics=1, in the order the registry's `metricKeys` names. All time. "Needs You" (awaiting) is
 // amber like every other role's — a number the user is meant to bring down.

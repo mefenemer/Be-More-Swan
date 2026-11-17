@@ -2,7 +2,7 @@
 // The date a Data Hub record belongs on, for the assistant Calendar tab.
 //
 // Most records assistants publish nothing and schedule nothing, so their calendar showed only
-// completed task runs — the AR Clerk's calendar never showed a single invoice, the Minute Taker's
+// completed task runs — the AR Clerk's calendar never showed a single invoice, the Note Taker's
 // never a single meeting, though both records carry a date that is the whole point of them. This
 // gives each such record ONE honest date, or none:
 //

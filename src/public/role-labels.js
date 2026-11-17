@@ -26,7 +26,7 @@
     lead_qualifier: 'Lead Generation Assistant',
     crm_enricher: 'CRM Data Assistant',
     tier1_support_agent: 'First-Line Support Assistant',
-    meeting_note_taker: 'Minute Taker',
+    meeting_note_taker: 'Note Taker',
     accounts_receivable_clerk: 'Accounts Receivable Clerk',
   };
   var current = Object.assign({}, FALLBACK);
