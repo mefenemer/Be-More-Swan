@@ -3,7 +3,8 @@
 // Confirms merged fixes are inside the commit this deploy was built from, tells each reporter once
 // their fix is live, and closes issues nobody replied to 7 days later. The same tick closes support
 // tickets left waiting on the customer for 7 days (src/utils/ticket-auto-close.ts), and moves merged feature
-// requests to Released once this deploy contains them (src/utils/feature-proof.ts). All the logic and its safety
+// requests to Released once this deploy contains them (src/utils/feature-proof.ts), and records every merged PR in
+// the approval record (src/utils/pr-approvals.ts). All the logic and its safety
 // notes are in src/utils/issue-fix-live.ts.
 //
 // ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
@@ -20,8 +21,9 @@ import { syncOpenCloudMerges } from '../../src/utils/issue-cloud-merge';
 import { autoCloseQuietTickets } from '../../src/utils/ticket-auto-close';
 import { runFeatureLiveCheck, type FeatureLiveResult } from '../../src/utils/feature-proof';
 import { BUILD_COMMIT } from '../../src/generated/build-commit';
+import { sweepMergedPrs, type SweepResult } from '../../src/utils/pr-approvals';
 
-export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynced?: number; ticketsAutoClosed: number; features: FeatureLiveResult }> {
+export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynced?: number; ticketsAutoClosed: number; features: FeatureLiveResult; approvals: SweepResult }> {
     const db = getDb();
     // Merges to staging running in GitHub Actions first, so one that just landed is checked below.
     const mergesSynced = await syncOpenCloudMerges(db);
@@ -33,7 +35,11 @@ export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynce
     // them (src/utils/feature-proof.ts). Silent: no submitter or voter is notified. Never throws.
     const features = await runFeatureLiveCheck(db, { deployedSha: BUILD_COMMIT, token: process.env.GITHUB_FIX_CHECK_TOKEN || undefined });
     if (features.skipped) console.warn(`[check-fixes-live] feature live check skipped: ${features.skipped}`);
-    return { ...result, ticketsAutoClosed, features };
+    // The approval record (docs/review-tiers-plan.md, Phase 3): every PR merged into staging/main, its tier and
+    // second-opinion verdict, however it was merged. Never throws.
+    const approvals = await sweepMergedPrs(db);
+    if (approvals.skipped) console.warn(`[check-fixes-live] approval sweep skipped: ${approvals.skipped}`);
+    return { ...result, ticketsAutoClosed, features, approvals };
 }
 
 export default withLambda(async () => {

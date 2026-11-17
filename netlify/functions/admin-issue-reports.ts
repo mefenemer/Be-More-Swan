@@ -24,6 +24,7 @@ import { stampFixedAt, loadFixLiveFields, parsePrNumber } from '../../src/utils/
 import { dispatchHotfix, syncHotfix } from '../../src/utils/issue-hotfix';
 import { CLOUD_RUNNER_ID } from '../../src/utils/issue-github';
 import { dispatchCloudMerge, syncCloudMerge, syncOpenCloudMerges, MERGE_BULK_MAX } from '../../src/utils/issue-cloud-merge';
+import { cloudMergeReviewBlocker } from '../../src/utils/pr-review-remote';
 import { loadSeverities, setIssueSeverity, isIssueSeverity } from '../../src/utils/issue-severity';
 import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
@@ -207,7 +208,9 @@ export default withLambda(async (event) => {
             return json(409, { error: 'This merge changed state while you were looking at it — reload the ticket and try again.' });
         }
 
-        const err = await dispatchCloudMerge({ issueId: id, pr: prNum });
+        // Same second-opinion review gate as ask-approval (docs/review-tiers-plan.md, Phase 3): checked after the claim
+        // so the failure path below releases it and shows the reason on the ticket.
+        const err = (await cloudMergeReviewBlocker(prNum)) || await dispatchCloudMerge({ issueId: id, pr: prNum });
         if (err) {
             await db.update(issueReports).set({
                 devMergeStatus: stuck ? 'failed' : (issue.devMergeStatus || 'ready'), devMergeResult: err,
@@ -323,7 +326,7 @@ export default withLambda(async (event) => {
         const errors: string[] = [...sqlErrors];
         for (const c of claimed) {
             const prNum = parsePrNumber(c.devPrUrl);
-            const err = prNum ? await dispatchCloudMerge({ issueId: c.id, pr: prNum }) : 'The pull request is not in this repository.';
+            const err = prNum ? ((await cloudMergeReviewBlocker(prNum)) || await dispatchCloudMerge({ issueId: c.id, pr: prNum })) : 'The pull request is not in this repository.';
             if (err) {
                 errors.push(err);
                 await db.update(issueReports).set({ devMergeStatus: 'failed', devMergeResult: err, devRunnerId: null, devRunnerHeartbeat: null, updatedAt: new Date() })

@@ -922,6 +922,8 @@
         <div id="systems-panel">
           <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
         </div>
+        <!-- Approvals: every merged PR, its risk tier and second-opinion review (docs/review-tiers-plan.md, Phase 3) -->
+        <div id="approvals-panel" class="mt-8"></div>
       </section>
 
       <!-- ── US4.2: Reward Distribution Audit & Reporting ────────────── -->
@@ -6498,11 +6500,11 @@ function _approvalNoteHtml(note) {
     head = `<p data-review-gate class="text-xs font-bold text-gray-800">${_escH(lines[0])}</p>`;
     rest = lines.slice(1);
     const meta = [];
-    while (rest.length && (/^reviewed commit [0-9a-f]{40}$/.test(rest[0]) || /^https:\/\/github\.com\/\S+$/.test(rest[0]))) {
+    while (rest.length && (/^(?:reviewed|approved) commit [0-9a-f]{40}$/.test(rest[0]) || /^https:\/\/github\.com\/\S+$/.test(rest[0]))) {
       const l = rest.shift();
       meta.push(/^https:/.test(l)
         ? `<a href="${_escH(l)}" target="_blank" rel="noopener" class="underline">read the review ↗</a>`
-        : `merges only commit <code>${_escH(l.slice(16, 23))}</code>`);
+        : `merges only commit <code>${_escH(l.replace(/^\w+ commit /, '').slice(0, 7))}</code>`);
     }
     if (meta.length) head += `<p class="text-[11px] text-gray-500">${meta.join(' · ')}</p>`;
   }
@@ -6516,8 +6518,8 @@ function prApproveButton(kind, it, big) {
   return big
     ? `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">✅ Approve ${where}PR #${m[1]}</button>
        ${it.approvalNote ? _approvalNoteHtml(it.approvalNote) : ''}
-       <p class="text-[11px] text-gray-500">${/reviewed commit [0-9a-f]{40}/.test(it.approvalNote || '')
-         ? 'Merges the reviewed commit now if its checks have passed (otherwise click again once they do) and moves this ticket on.'
+       <p class="text-[11px] text-gray-500">${/(?:reviewed|approved) commit [0-9a-f]{40}/.test(it.approvalNote || '')
+         ? 'Merges the commit you were shown now if its checks have passed (otherwise click again once they do) and moves this ticket on.'
          : 'Approves it on GitHub, merges it (or sets it to merge itself once its checks pass) and moves this ticket on.'}</p>`
     : `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="mt-1.5 w-full text-xs font-bold px-2 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">✅ Approve ${where}PR #${m[1]}</button>`;
 }
@@ -7820,6 +7822,53 @@ function loadSystemStatus() {
   if (!panel) return;
   if (!window.AdminSystemMap) { panel.innerHTML = '<div class="text-sm text-red-600">The system map did not load. Refresh the page.</div>'; return; }
   window.AdminSystemMap.load(panel);
+  loadApprovalsPanel();
+}
+
+// ── Approvals (docs/review-tiers-plan.md, Phase 3; src/utils/pr-approvals.ts) ───────────────────────────────
+// The last merged PRs into staging/main: tier, the second-opinion verdict for the commit that merged, and how it
+// was approved. A medium/high PR into staging merged with no passing review for that commit gets ⚠️.
+const _APPROVAL_FLAG = {
+  'ok': ['✅', 'Reviewed', 'text-emerald-700'],
+  'no-review': ['⚠️', 'Merged with no review', 'text-red-700 font-bold'],
+  'stale-review': ['⚠️', 'Changed after its review', 'text-red-700 font-bold'],
+  'changes-needed': ['⚠️', 'Review said Changes needed', 'text-amber-700 font-bold'],
+  'before-reviews': ['·', 'Before reviews began', 'text-gray-400'],
+  'not-needed': ['·', 'No review needed', 'text-gray-400'],
+};
+const _TIER_DOT = { high: '🔴', medium: '🟠', low: '🟢' };
+async function loadApprovalsPanel() {
+  const panel = document.getElementById('approvals-panel');
+  if (!panel) return;
+  panel.innerHTML = '<div class="text-gray-400 animate-pulse text-sm">Loading approvals…</div>';
+  let data;
+  try { data = await api('/.netlify/functions/admin-system-status?view=approvals'); }
+  catch (err) { panel.innerHTML = `<div class="text-sm text-red-600">Approvals could not load: ${_escH(err.message)}</div>`; return; }
+  const head = `<h2 class="text-base font-bold text-gray-800">Approvals</h2>
+    <p class="text-sm text-gray-500 mt-1 mb-3 max-w-2xl">Every pull request merged into staging or main: its risk tier (from the files it changed), the second-opinion review for the commit that merged, and how it was approved. Filled in on each live-check run.</p>`;
+  if (!data.ready) { panel.innerHTML = head + '<div class="text-sm text-amber-700">Run <code>db/z-pr-approvals.sql</code> on this database to start the record.</div>'; return; }
+  if (!data.items.length) { panel.innerHTML = head + '<div class="text-sm text-gray-500">No merges recorded yet. The next live-check run fills this in.</div>'; return; }
+  const flagged = data.items.filter((i) => ['no-review', 'stale-review', 'changes-needed'].includes(i.flag)).length;
+  const rows = data.items.map((i) => {
+    const [icon, label, cls] = _APPROVAL_FLAG[i.flag] || ['·', i.flag, 'text-gray-500'];
+    const verdict = i.reviewerVerdict ? ({ pass: 'Pass', notes: 'Pass with notes', changes: 'Changes needed' })[i.reviewerVerdict] : '—';
+    const how = i.approvedVia === 'button' ? `Approve button${i.approvedBy ? ` (${_escH(i.approvedBy)})` : ''}` : 'Merged outside the button';
+    return `<tr data-approval-row="${Number(i.prNumber)}" class="border-t border-gray-100 align-top">
+      <td class="py-2 pr-3 whitespace-nowrap text-xs text-gray-500">${i.mergedAt ? _escH(i.mergedAt.slice(0, 16).replace('T', ' ')) : ''}</td>
+      <td class="py-2 pr-3"><a href="${_escH(i.url || '#')}" target="_blank" rel="noopener" class="text-sm font-semibold text-violet-700 hover:underline">#${Number(i.prNumber)}</a> <span class="text-sm text-gray-700">${_escH(i.title || '')}</span><div class="text-[11px] text-gray-400">into ${_escH(i.base || '?')}</div></td>
+      <td class="py-2 pr-3 whitespace-nowrap text-sm" title="${_escH(i.tierReason || '')}">${_TIER_DOT[i.tier] || '·'} ${_escH(i.tier || '?')}</td>
+      <td class="py-2 pr-3 whitespace-nowrap text-sm">${i.reviewUrl ? `<a href="${_escH(i.reviewUrl)}" target="_blank" rel="noopener" class="hover:underline">${verdict}</a>` : verdict}</td>
+      <td class="py-2 pr-3 text-xs text-gray-600">${how}</td>
+      <td class="py-2 text-xs ${cls}" data-approval-flag="${_escH(i.flag)}">${icon} ${label}</td>
+    </tr>`;
+  }).join('');
+  panel.innerHTML = head + (flagged ? `<div class="mb-3 text-sm font-semibold text-red-700">⚠️ ${flagged} merge${flagged === 1 ? '' : 's'} to look at.</div>` : '') + `
+    <div class="overflow-x-auto bg-white border border-gray-200 rounded-xl px-4">
+      <table class="w-full text-left">
+        <thead><tr class="text-[11px] uppercase text-gray-400"><th class="py-2 pr-3">Merged</th><th class="py-2 pr-3">Pull request</th><th class="py-2 pr-3">Tier</th><th class="py-2 pr-3">Review</th><th class="py-2 pr-3">Approved</th><th class="py-2"></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function loadSandboxPanel() {
