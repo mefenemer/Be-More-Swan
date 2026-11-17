@@ -3,8 +3,8 @@
 // 2026-11-15: on request only, one task per carousel).
 //
 // POST { postId } → { ok, slides: [{ assetId, url, kind }], postIds, formats: { [postId]: formatKey } }
-//   Auth: aura_session (requireTenant). The post must be this org's, still editable, on Instagram or
-//   Threads, and its caption must hold a numbered list of at least 2 items.
+//   Auth: aura_session (requireTenant). The post must be this org's, still editable, on Instagram,
+//   Threads or LinkedIn, and its caption must hold a numbered list of at least 2 items.
 //
 // ── What it does ──────────────────────────────────────────────────────────────────────────────────
 // Reads the numbered items already in the caption (top-lists.ts carouselSlideTexts — no AI call,
@@ -14,9 +14,10 @@
 //
 // ── Which rows ────────────────────────────────────────────────────────────────────────────────────
 // A cross-post is one post on several platforms. The carousel goes on every row of the group whose
-// platform has a live carousel format (Instagram, Threads) and that can still change — never on
-// LinkedIn, Facebook or X, whose feed formats take one picture (LinkedIn's document carousel is
-// still `planned`). The cards are rendered once at 4:5, which both platforms accept, and shared.
+// platform has a live carousel format (Instagram, Threads, LinkedIn) and that can still change —
+// never on Facebook or X, whose feed formats take one picture. The cards are rendered once at 4:5,
+// which all three accept, and shared. LinkedIn's row gets the same slide images with `li_document`;
+// the publisher turns them into one PDF when it posts (publishLinkedInDocument, social-publish.ts).
 //
 // ── Cost ──────────────────────────────────────────────────────────────────────────────────────────
 // One `carousel` task per press, however many slides or platform rows (decision 4). Asked before
@@ -42,7 +43,7 @@ const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-/** Both live carousel formats accept 4:5 (post-formats.ts), and it is the taller, better-read one. */
+/** Every live carousel format accepts 4:5 (post-formats.ts), and it is the taller, better-read one. */
 const CAROUSEL_ASPECT = '4:5' as const;
 
 export default withLambda(async (event) => {
@@ -85,7 +86,7 @@ export default withLambda(async (event) => {
         return json(422, {
             error: onCarouselPlatform
                 ? 'This post has already gone out, so it can’t become a carousel now.'
-                : 'Carousels are made for Instagram and Threads. Add one of those to this post first.',
+                : 'Carousels are made for Instagram, Threads and LinkedIn. Add one of those to this post first.',
         });
     }
 

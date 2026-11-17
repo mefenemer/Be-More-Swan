@@ -13474,9 +13474,11 @@ async function _pceCanvasAttachFiles(fileList) {
     }
 
     if (!fmt || fmt.max < files.length) {
-        // The narrowest live format that fits: on Instagram that is the Carousel.
+        // The narrowest live format that fits: on Instagram that is the Carousel. Never a format that is
+        // only used when the post says so (ap: false — LinkedIn's Document carousel goes out as a PDF;
+        // "Make it a carousel" or picking it sets that, a photo drop doesn't).
         const target = _pceFormatsFor(post.platform)
-            .filter(f => f.a === 'live' && f.max >= files.length)
+            .filter(f => f.a === 'live' && f.ap !== false && f.max >= files.length)
             .sort((a, b) => a.max - b.max)[0];
         if (!target) {
             window.showToast?.(`${fmt ? fmt.n : 'This format'} takes one item — attaching the first of your ${files.length}.`);
@@ -14953,12 +14955,12 @@ function _pceSyncCarouselBtn(post, editable) {
     const btn = _pceEl('pce-carousel-go');
     if (!btn) return;
     const platforms = [...new Set([post?.platform, ..._rqReviewGroupIds.map(id => _rqPostCache[id]?.platform)].filter(Boolean))];
-    const onCarouselPlatform = platforms.some(p => p === 'instagram' || p === 'threads');
+    const onCarouselPlatform = platforms.some(p => p === 'instagram' || p === 'threads' || p === 'linkedin');
     const show = !!editable && onCarouselPlatform && _pceListItemCount(post?.caption) >= 2;
     btn.classList.toggle('hidden', !show);
     btn.classList.toggle('flex', show);
     const cost = window.taskCost ? window.taskCost('carousel') : '';
-    btn.title = `A cover slide plus one branded slide per numbered item, on Instagram and Threads.${cost ? ` Uses ${cost}.` : ''}`;
+    btn.title = `A cover slide plus one branded slide per numbered item, on Instagram, Threads and LinkedIn.${cost ? ` Uses ${cost}.` : ''}`;
 }
 
 async function _pceMakeCarousel() {
@@ -15697,7 +15699,7 @@ function _pceFormatAccepts(fmt, kind) {
  */
 function _pceBestFormatForMedia(platform, kind, count = 1) {
     return _pceFormatsFor(platform)
-        .filter(f => f.a === 'live' && _pceFormatAccepts(f, kind) && (f.min || 0) <= count && (f.max || 1) >= count)
+        .filter(f => f.a === 'live' && f.ap !== false && _pceFormatAccepts(f, kind) && (f.min || 0) <= count && (f.max || 1) >= count)
         .sort((a, b) => (a.max || 1) - (b.max || 1))[0] || null;
 }
 

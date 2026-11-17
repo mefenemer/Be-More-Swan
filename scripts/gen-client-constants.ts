@@ -148,6 +148,8 @@ export function renderClientConstants(): string {
         // on, rather than a second copy typed into the page.
         ...(f.maxDurationS != null ? { maxd: f.maxDurationS } : {}),
         a: f.availability === 'live' ? 'live' : f.availability === 'planned' ? 'planned' : 'blocked',
+        // Only used when the post says so (li_document): the composer must never switch to it by itself either.
+        ...(f.autoPick === false ? { ap: false } : {}),
         ...(f.unavailableReason ? { why: f.unavailableReason } : {}),
     })).map(j => `    ${j},`).join('\n');
 

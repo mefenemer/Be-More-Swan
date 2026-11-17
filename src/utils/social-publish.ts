@@ -14,6 +14,7 @@ import { contentAssets, systemConnections } from '../../db/schema';
 import { getSecret, storeSecret } from './vault';
 import { WORKSPACE_BACKED_PLATFORMS } from './live-social-connections';
 import { getFreshAccessToken, IntegrationError, type IntegrationProvider } from './workspace-integrations';
+import { pdfLib } from '../lib/render-libs';
 
 // One client per process. Presigning is local crypto, but building an S3Client is not free, and a
 // list endpoint presigns once per row — My Content's GET built ~340 clients per call for one
@@ -718,6 +719,198 @@ export async function publishLinkedIn(text: string, token: string, authorId: str
             lifecycleState: 'PUBLISHED',
             specificContent: { 'com.linkedin.ugc.ShareContent': shareContent },
             visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
+        }),
+    });
+    if (res.status === 201 || res.ok) {
+        const id = res.headers.get('x-restli-id') || (await res.json().catch(() => ({})) as any)?.id || 'posted';
+        return { ok: true, id: String(id) };
+    }
+    const data: any = await res.json().catch(() => ({}));
+    return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
+}
+
+// ── LinkedIn document carousel (li_document) ─────────────────────────────────────────────────────
+// docs/linkedin-document-carousel-plan.md. The row carries the slide IMAGES (like an Instagram
+// carousel); here they become one PDF, one page per slide in order, sent through LinkedIn's newer
+// Documents API + Posts API — ugcPosts has no document type. Phase 0 (staging, 2026-11-17) proved a
+// w_member_social token may call both for a personal profile: initializeUpload → PUT 201 → document
+// AVAILABLE → POST /rest/posts 201 → DELETE 204. Reading a post back (GET /rest/posts) is 403 with
+// that scope, so nothing here depends on it. Every other LinkedIn post stays on ugcPosts above.
+
+/** Pinned Posts/Documents API version (YYYYMM). Phase 0 ran on it. LinkedIn sunsets a version ~1 year on. */
+export const LINKEDIN_REST_VERSION = '202608';
+
+/** The fewest slides a document carousel carries (li_document minItems). */
+export const LI_DOCUMENT_MIN_SLIDES = 2;
+
+const LITTLE_RESERVED = /[\\|{}@[\]()<>#*_~]/g;
+
+/**
+ * Plain text → LinkedIn "little text" for the Posts API `commentary`. LinkedIn reserves
+ * \ | { } @ [ ] ( ) < > # * _ ~ and says every one must be backslash-escaped "even if those characters
+ * are not used in one of the supported elements" (little-text-format, li-lms-2026-04). ugcPosts took
+ * plain text, so captions were never written this way. A `#word` stays a clickable hashtag via the
+ * {hashtag|\#|word} template; everything else is escaped to read exactly as written. Pure.
+ */
+export function littleText(text: string): string {
+    const esc = (t: string) => t.replace(LITTLE_RESERVED, (c) => `\\${c}`);
+    // A link is escaped like everything else but never cut into a hashtag: the post's link is appended
+    // to the caption, and "https://site.com/#pricing" must stay one link (#712 review).
+    return String(text ?? '').split(/(https?:\/\/\S+)/i)
+        .map((part, i) => (i % 2 ? esc(part) : withHashtags(part, esc)))
+        .join('');
+}
+
+function withHashtags(text: string, esc: (t: string) => string): string {
+    let out = '';
+    let last = 0;
+    // A hashtag starts at the beginning or after a non-word character, like LinkedIn's own composer, and
+    // holds at least one letter: "#1 pick" in a Top list is a rank, not a hashtag.
+    const re = /(^|[^\p{L}\p{N}_&])#([\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu;
+    for (const m of String(text ?? '').matchAll(re)) {
+        const at = (m.index ?? 0) + m[1].length;
+        out += esc(String(text).slice(last, at)) + `{hashtag|\\#|${esc(m[2])}}`;
+        last = at + 1 + m[2].length;
+    }
+    return out + esc(String(text ?? '').slice(last));
+}
+
+/** PNG or JPEG from the first bytes — the only kinds pdf-lib embeds. Null for anything else. Pure. */
+export function slideImageKind(bytes: Uint8Array): 'png' | 'jpg' | null {
+    if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+    return null;
+}
+
+/**
+ * The slides as one PDF: one page per image, in order, each page the image's own pixel size (a
+ * 1080×1350 brand card is a 1080×1350 page). Throws a MediaUploadError naming the slide when one is
+ * not PNG/JPEG (a webp the PDF cannot hold) so the post fails with a reason instead of a broken file.
+ */
+export async function slidesPdf(slides: readonly Uint8Array[]): Promise<Uint8Array> {
+    const { PDFDocument } = await pdfLib();
+    const doc = await PDFDocument.create();
+    for (let i = 0; i < slides.length; i++) {
+        // An own copy at offset 0: a small Node Buffer is a view into a shared pool, and pdf-lib's JPEG
+        // reader looks past a view's offset ("SOI not found") — found by the test, not in theory.
+        const bytes = Uint8Array.from(slides[i]);
+        const kind = slideImageKind(bytes);
+        if (!kind) throw new MediaUploadError(`slide ${i + 1} is not a PNG or JPEG picture, which a LinkedIn document needs. Replace it and try again.`);
+        const img = kind === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+        const page = doc.addPage([img.width, img.height]);
+        page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+    }
+    return doc.save();
+}
+
+/** PNG or JPEG by declared type — the slides a LinkedIn document can carry. Pure. */
+export function isPdfSlideMime(mimeType: string | null | undefined): boolean {
+    return /^image\/(png|jpe?g)$/i.test(String(mimeType ?? '').trim());
+}
+
+/**
+ * The first slide type a LinkedIn document can't carry, or null. `mimeById` holds what the content
+ * library says; a slide with no recorded type is let through (legacy) — the publisher still checks bytes.
+ * Pure (approve-post.ts uses it).
+ */
+export function nonPdfSlideMime(ids: readonly number[], mimeById: ReadonlyMap<number, string | null | undefined>): string | null {
+    for (const id of ids) {
+        const m = mimeById.get(id);
+        if (m && !isPdfSlideMime(m)) return m;
+    }
+    return null;
+}
+
+/**
+ * True when a LinkedIn row goes out as a document carousel: ONLY when its stored format says so. A row
+ * with no stored format (most posts, including ones approved before this shipped) keeps the old
+ * multi-image post however many pictures it has — and the router never labels such a row "Document
+ * carousel" either (li_document is autoPick: false), so what the editor shows is what goes out. Pure.
+ */
+export function isLinkedInDocument(formatKey: string | null | undefined): boolean {
+    return formatKey === 'li_document';
+}
+
+const liRestHeaders = (token: string, extra: Record<string, string> = {}) => ({
+    Authorization: `Bearer ${token}`, 'Linkedin-Version': LINKEDIN_REST_VERSION, 'X-Restli-Protocol-Version': '2.0.0', ...extra,
+});
+
+/**
+ * How long to wait for LinkedIn to process an uploaded document before posting it: at most ~7.5 s.
+ * The publish run is a scheduled function; a long wait risks it being killed mid-post and the row being
+ * reclaimed without counting the attempt (#712 review). Phase 0's document was ready on the first check,
+ * and the post call after the loop is the real test either way.
+ */
+export const LI_DOCUMENT_POLL_MS = 1500;
+export const LI_DOCUMENT_MAX_POLLS = 5;
+
+/**
+ * Post the slides as a LinkedIn document carousel. `title` shows above the document (the cover line).
+ * Upload failures come back as a media-dropped failure — never a text-only post in its place.
+ */
+export async function publishLinkedInDocument(
+    text: string, token: string, authorId: string | null, media: PostImage | PostImage[] | null, title: string,
+    opts: { pollMs?: number } = {},
+): Promise<DriverResult> {
+    if (!authorId) return { ok: false, status: null, error: 'No LinkedIn author URN on connection.' };
+    const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
+    const items = mediaItems(media);
+    if (items.some(isVideoMedia)) return { ok: false, status: null, error: 'A LinkedIn document carousel takes pictures only, not video.' };
+    if (items.length < LI_DOCUMENT_MIN_SLIDES) {
+        return { ok: false, status: null, error: `A LinkedIn document carousel needs at least ${LI_DOCUMENT_MIN_SLIDES} slides — this post has ${items.length}.` };
+    }
+
+    let documentUrn: string;
+    try {
+        const slides = await Promise.all(items.map(async (it) => new Uint8Array(await fetchImageBytes(it.url))));
+        const pdf = await slidesPdf(slides);
+        const init = await fetch('https://api.linkedin.com/rest/documents?action=initializeUpload', {
+            method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ initializeUploadRequest: { owner: author } }),
+        });
+        const initData: any = await init.json().catch(() => ({}));
+        if (!init.ok) throw new MediaUploadError(initData?.message || `LinkedIn document upload could not start (${init.status})`, init.status);
+        const uploadUrl: string | undefined = initData?.value?.uploadUrl;
+        documentUrn = initData?.value?.document;
+        if (!uploadUrl || !documentUrn) throw new MediaUploadError(`LinkedIn started the upload but returned no ${uploadUrl ? 'document id' : 'upload URL'} (${init.status})`, init.status);
+        const put = await fetch(uploadUrl, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: Buffer.from(pdf) });
+        if (!put.ok) {
+            const raw = await put.text().catch(() => '');
+            let message = '';
+            try { message = JSON.parse(raw)?.message || ''; } catch { /* not JSON */ }
+            throw new MediaUploadError(message || `LinkedIn document upload failed (${put.status})`, put.status);
+        }
+    } catch (err) {
+        return mediaDropped('LinkedIn', err);
+    }
+
+    // LinkedIn processes the PDF before a post may use it. A read we are not allowed (403) or a status
+    // that never settles is not fatal: the post call below is the real test, and its error says why.
+    const pollMs = opts.pollMs ?? LI_DOCUMENT_POLL_MS;
+    let stillProcessing = false;
+    for (let i = 0; i < LI_DOCUMENT_MAX_POLLS; i++) {
+        const st = await fetch(`https://api.linkedin.com/rest/documents/${encodeURIComponent(documentUrn)}`, { headers: liRestHeaders(token) }).catch(() => null);
+        if (!st || !st.ok) { stillProcessing = false; break; }   // can't read it: let the post call decide
+        const status = ((await st.json().catch(() => ({}))) as any)?.status;
+        if (status === 'AVAILABLE') { stillProcessing = false; break; }
+        if (status === 'PROCESSING_FAILED') return { ok: false, status: null, error: 'LinkedIn could not process the document. Check the slides and try again.' };
+        stillProcessing = true;
+        if (i < LI_DOCUMENT_MAX_POLLS - 1) await sleep(pollMs);
+    }
+    // Still processing after the wait: a retryable failure (503 → the normal back-off) rather than posting an
+    // unready document, which LinkedIn may refuse with a 4xx that would fail the post for good (#712 review 3).
+    if (stillProcessing) return { ok: false, status: 503, error: 'LinkedIn is still processing the document. It will be tried again shortly.' };
+
+    const res = await fetch('https://api.linkedin.com/rest/posts', {
+        method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+            author,
+            commentary: littleText(text),
+            visibility: 'PUBLIC',
+            distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
+            content: { media: { title: String(title || 'Carousel').slice(0, 200), id: documentUrn } },
+            lifecycleState: 'PUBLISHED',
+            isReshareDisabledByAuthor: false,
         }),
     });
     if (res.status === 201 || res.ok) {
