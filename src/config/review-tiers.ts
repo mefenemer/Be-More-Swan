@@ -70,7 +70,7 @@ export const TIER_RULES: TierRule[] = [
         tier: 'high', key: 'platform', label: 'RLS, redirects/headers, workflows, migrations runner, secrets, these review rules',
         // The review rules themselves are high: otherwise a PR could lower its own tier.
         match: [/^db\/rls\//, /^netlify\.toml$/, /^\.github\//, /^scripts\/migrate/, /^db\/schema\.ts$/, /^db\/client\.ts$/, /^\.env/,
-            /^src\/config\/review-tiers\.ts$/, /^src\/utils\/(?:pr-evidence|pr-approval|issue-sql)\.ts$/, /^scripts\/pr-tier\.ts$/],
+            /^src\/config\/review-tiers\.ts$/, /^src\/utils\/(?:pr-evidence|pr-review|pr-approval|issue-sql)\.ts$/, /^scripts\/pr-(?:tier|review-gate)\.ts$/, /^\.claude\/agents\//],
     },
     // ── LOW (explicit only) ─────────────────────────────────────────────────────────────────────
     {
@@ -88,8 +88,9 @@ const DEFAULT_RULE = { tier: 'medium' as ReviewTier, key: 'default', label: 'cod
 export interface FileTier { path: string; tier: ReviewTier; key: string; label: string; note?: string }
 
 /** One file. `sqlText` = the SQL a db/*.sql change adds (added lines), when known. */
-export function tierForFile(path: string, sqlText?: string | null): FileTier {
+export function tierForFile(path: string, sqlText?: string | null, forceHigh?: string | null): FileTier {
     const p = path.replace(/^\.\//, '');
+    if (forceHigh) return { path: p, tier: 'high', key: 'unreadable', label: 'change the tier rules could not read', note: forceHigh };
     for (const r of TIER_RULES) {
         if (r.tier === 'high' && r.match.some((re) => re.test(p))) return { path: p, tier: 'high', key: r.key, label: r.label };
     }
@@ -108,8 +109,8 @@ export function tierForFile(path: string, sqlText?: string | null): FileTier {
 export interface ChangeTier { tier: ReviewTier; files: FileTier[]; reasons: FileTier[] }
 
 /** A whole change: the highest file wins. `reasons` = the files at that tier. An empty change is medium. */
-export function tierForChange(files: Array<{ path: string; sqlText?: string | null }>): ChangeTier {
-    const out = files.map((f) => tierForFile(f.path, f.sqlText));
+export function tierForChange(files: Array<{ path: string; sqlText?: string | null; forceHigh?: string | null }>): ChangeTier {
+    const out = files.map((f) => tierForFile(f.path, f.sqlText, f.forceHigh));
     if (!out.length) return { tier: 'medium', files: out, reasons: [] };
     const tier = out.reduce<ReviewTier>((t, f) => (TIER_RANK[f.tier] > TIER_RANK[t] ? f.tier : t), 'low');
     return { tier, files: out, reasons: out.filter((f) => f.tier === tier) };

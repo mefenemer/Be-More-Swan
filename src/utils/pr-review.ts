@@ -36,10 +36,17 @@ export function formatReviewComment(o: { sha: string; verdict: ReviewVerdict; ti
 
 export interface ReviewRecord { sha: string; verdict: ReviewVerdict; tier: ReviewTier; at: string; url: string | null }
 
-/** Every review comment on the PR, oldest first. */
-export function parseReviews(comments: Array<{ body?: string | null; createdAt?: string | null; url?: string | null }>): ReviewRecord[] {
+/** Only comments from people with write access to the repo count: the repo is public, so anyone could post
+ *  a marker. Claude posts through the owner's gh account (OWNER). */
+export const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+export interface ReviewComment { body?: string | null; createdAt?: string | null; url?: string | null; authorAssociation?: string | null }
+
+/** Every review comment on the PR from a trusted author, oldest first. */
+export function parseReviews(comments: ReviewComment[]): ReviewRecord[] {
     const out: ReviewRecord[] = [];
     for (const c of comments || []) {
+        if (!TRUSTED_ASSOCIATIONS.has(String(c.authorAssociation || '').toUpperCase())) continue;
         const m = MARKER_RE.exec(String(c.body || ''));
         if (m) out.push({ sha: m[1], verdict: m[2] as ReviewVerdict, tier: m[3] as ReviewTier, at: String(c.createdAt || ''), url: c.url || null });
     }
@@ -76,7 +83,7 @@ export function reviewGate(g: GateInput): GateResult {
     const label = `🔎 Review: ${VERDICT_ICON[forHead.verdict]} ${VERDICT_LABEL[forHead.verdict]} (${REVIEW_MODEL})`;
     const tail = `reviewed commit ${forHead.sha}${forHead.url ? `\n${forHead.url}` : ''}`;
     if (forHead.verdict === 'changes') {
-        const why = (g.override || '').trim();
+        const why = (g.override || '').replace(/\s+/g, ' ').trim();
         if (why.length < 10) return { ok: false, reason: 'The review says Changes needed. Fix the findings and review again, or pass --override-review "<why it is safe anyway>" (the owner sees it).', summary: `${tierText} · ${label}`, reviewedSha: forHead.sha, review: forHead };
         return { ok: true, reason: null, summary: `${tierText} · ${label} · ⚠️ Claude asks anyway: ${why}\n${tail}`, reviewedSha: forHead.sha, review: forHead };
     }

@@ -23,7 +23,7 @@ export interface PrReviewState { pr: string; base: string; headSha: string; body
 
 export function loadPrReviewState(pr: string): PrReviewState {
     const v = JSON.parse(gh(['pr', 'view', pr, '--json', 'baseRefName,headRefOid,body,comments'])) as {
-        baseRefName: string; headRefOid: string; body: string; comments: Array<{ body: string; createdAt: string; url: string }>;
+        baseRefName: string; headRefOid: string; body: string; comments: Array<{ body: string; createdAt: string; url: string; authorAssociation: string }>;
     };
     return { pr, base: v.baseRefName, headSha: v.headRefOid, body: v.body || '', tier: prTier(pr), reviews: parseReviews(v.comments || []) };
 }

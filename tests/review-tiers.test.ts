@@ -48,6 +48,9 @@ check('owner high-tier areas are high', () => {
         'src/config/review-tiers.ts': 'platform',
         'src/utils/pr-evidence.ts': 'platform',
         'src/utils/issue-sql.ts': 'platform',
+        'src/utils/pr-review.ts': 'platform',
+        'scripts/pr-review-gate.ts': 'platform',
+        '.claude/agents/code-reviewer.md': 'platform',
     };
     for (const [p, key] of Object.entries(high)) {
         const t = tierForFile(p);
@@ -130,6 +133,27 @@ check('a unified diff gives each file and the lines it adds', () => {
     assert.strictEqual(files[2].added, '');
     const t = tierForDiff(DIFF);
     assert.strictEqual(t.tier, 'medium', 'additive SQL + a util + a removed SQL file = medium');
+});
+
+check('renames are tiered by BOTH paths; quoted and spaced paths are read; an unreadable header is high', () => {
+    const rename = [
+        'diff --git a/src/utils/stripe.ts b/src/utils/money.ts',
+        'similarity index 100%',
+        'rename from src/utils/stripe.ts',
+        'rename to src/utils/money.ts',
+    ].join('\n');
+    const r = parseUnifiedDiff(rename);
+    assert.deepStrictEqual([r[0].path, r[0].oldPath], ['src/utils/money.ts', 'src/utils/stripe.ts']);
+    assert.strictEqual(tierForDiff(rename).tier, 'high', 'moving stripe.ts out of its name must stay high');
+    const quoted = 'diff --git "a/src/utils/caf\\303\\251.ts" "b/src/utils/caf\\303\\251.ts"\n--- a/x\n+++ b/x\n+hi';
+    assert.deepStrictEqual(parseUnifiedDiff(quoted).map((f) => [f.path, !!f.unparsed]), [['src/utils/café.ts', false]]);
+    const spaced = 'diff --git a/docs/my notes.md b/docs/my notes.md\n+x';
+    assert.deepStrictEqual(parseUnifiedDiff(spaced).map((f) => f.path), ['docs/my notes.md']);
+    assert.strictEqual(tierForDiff(spaced).tier, 'low');
+    const odd = 'diff --git a/one two b/three four\n+x';
+    const t = tierForDiff(odd);
+    assert.strictEqual(t.tier, 'high');
+    assert.strictEqual(t.reasons[0].key, 'unreadable');
 });
 
 check('the template fills tier + SQL and is NOT accepted until filled in', () => {

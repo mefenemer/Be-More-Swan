@@ -20,18 +20,47 @@ export const EVIDENCE_FIELDS = [
 ] as const;
 export type EvidenceKey = typeof EVIDENCE_FIELDS[number]['key'];
 
-export interface DiffFile { path: string; added: string; deleted: boolean }
+export interface DiffFile { path: string; added: string; deleted: boolean; oldPath?: string; unparsed?: boolean }
 
-/** Files in a unified diff (`git diff` / `gh pr diff`), with the lines each one ADDS. */
+/** Git quotes paths with unusual characters: "a/caf\303\251.ts". Undo the C-style escapes. */
+function unquote(p: string): string {
+    if (!p.startsWith('"')) return p;
+    const bytes: number[] = [];
+    const s = p.slice(1, -1);
+    for (let i = 0; i < s.length; i++) {
+        if (s[i] !== '\\') { bytes.push(...Buffer.from(s[i], 'utf8')); continue; }
+        const n = s[++i];
+        if (/[0-7]/.test(n)) { bytes.push(parseInt(s.slice(i, i + 3), 8)); i += 2; }
+        else bytes.push(({ n: 10, t: 9, '"': 34, '\\': 92 } as Record<string, number>)[n] ?? n.charCodeAt(0));
+    }
+    return Buffer.from(bytes).toString('utf8');
+}
+
+const PATH = '("(?:[^"\\\\]|\\\\.)*"|\\S+)';
+const HEADER_RE = new RegExp(`^diff --git ${PATH} ${PATH}$`);
+
+/** Files in a unified diff (`git diff` / `gh pr diff`), with the lines each one ADDS. A rename keeps its old
+ *  path too (moving a file out of a high-tier folder must not lower the tier). A header that can't be read is
+ *  marked `unparsed` (tierForDiff counts it as high). */
 export function parseUnifiedDiff(diff: string): DiffFile[] {
     const files: DiffFile[] = [];
     let cur: DiffFile | null = null;
     const added: string[] = [];
     const flush = () => { if (cur) { cur.added = added.join('\n'); files.push(cur); } added.length = 0; };
     for (const line of String(diff || '').split('\n')) {
-        const head = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-        if (head) { flush(); cur = { path: head[2], added: '', deleted: false }; continue; }
+        if (line.startsWith('diff --git ')) {
+            flush();
+            // Git doesn't quote spaces: "a/my file.ts b/my file.ts" — same path both sides is unambiguous.
+            const same = /^diff --git a\/(.+) b\/\1$/.exec(line);
+            const h = same ? [line, `a/${same[1]}`, `b/${same[1]}`] : HEADER_RE.exec(line);
+            const a = h ? unquote(h[1]).replace(/^a\//, '') : '';
+            const b = h ? unquote(h[2]).replace(/^b\//, '') : '';
+            cur = h ? { path: b, added: '', deleted: false, ...(a !== b ? { oldPath: a } : {}) } : { path: line.slice(11), added: '', deleted: false, unparsed: true };
+            continue;
+        }
         if (!cur) continue;
+        const ren = /^(?:rename|copy) from (.+)$/.exec(line);
+        if (ren) { const old = unquote(ren[1]); if (old !== cur.path) cur.oldPath = old; continue; }
         if (line.startsWith('+++ ') || line.startsWith('--- ')) {
             if (line === '+++ /dev/null') cur.deleted = true;
             continue;
@@ -44,7 +73,12 @@ export function parseUnifiedDiff(diff: string): DiffFile[] {
 
 /** Tier of a diff. SQL files are judged on the SQL they ADD; a deleted SQL file adds none (medium). */
 export function tierForDiff(diff: string): ChangeTier {
-    return tierForChange(parseUnifiedDiff(diff).map((f) => ({ path: f.path, sqlText: f.added })));
+    const out: Array<{ path: string; sqlText?: string | null; forceHigh?: string | null }> = [];
+    for (const f of parseUnifiedDiff(diff)) {
+        out.push({ path: f.path, sqlText: f.added, forceHigh: f.unparsed ? 'diff header could not be read' : null });
+        if (f.oldPath) out.push({ path: f.oldPath, sqlText: f.added, forceHigh: null });
+    }
+    return tierForChange(out);
 }
 
 /** A blank block with the tier and SQL lines already filled from the diff. */

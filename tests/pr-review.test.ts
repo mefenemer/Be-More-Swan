@@ -18,7 +18,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
 const comment = (sha: string, verdict: 'pass' | 'notes' | 'changes', at: string) =>
-    ({ body: formatReviewComment({ sha, verdict, tier: 'high', findings: verdict === 'pass' ? '' : '1. **high** src/x.ts:1 — breaks' }), createdAt: at, url: `https://github.com/o/r/pull/1#c-${at}` });
+    ({ body: formatReviewComment({ sha, verdict, tier: 'high', findings: verdict === 'pass' ? '' : '1. **high** src/x.ts:1 — breaks' }), createdAt: at, url: `https://github.com/o/r/pull/1#c-${at}`, authorAssociation: 'OWNER' });
 
 (async () => {
 await check('the verdict comment round-trips through its marker; other comments are ignored', () => {
@@ -26,9 +26,25 @@ await check('the verdict comment round-trips through its marker; other comments 
     assert.match(body, /^<!-- swan-review v1 sha=a{40} verdict=notes tier=medium -->/);
     assert.match(body, /Pass with notes/);
     assert.match(body, /did not write this change/);
-    const r = parseReviews([{ body: 'LGTM', createdAt: '2026-11-17T09:00:00Z' }, { body, createdAt: '2026-11-17T10:00:00Z', url: 'u' }]);
+    const r = parseReviews([{ body: 'LGTM', createdAt: '2026-11-17T09:00:00Z', authorAssociation: 'OWNER' }, { body, createdAt: '2026-11-17T10:00:00Z', url: 'u', authorAssociation: 'OWNER' }]);
     assert.deepStrictEqual(r.map((x) => [x.sha, x.verdict, x.tier, x.url]), [[A, 'notes', 'medium', 'u']]);
     assert.throws(() => formatReviewComment({ sha: 'abc', verdict: 'pass', tier: 'low', findings: '' }), /40-character/);
+});
+
+await check('a marker from someone without write access is ignored (public repo: anyone can comment)', () => {
+    const fake = { ...comment(A, 'pass', '2026-11-17T12:00:00Z'), authorAssociation: 'NONE' };
+    const real = comment(A, 'changes', '2026-11-17T10:00:00Z');
+    for (const assoc of ['NONE', 'CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', '', undefined])
+        assert.deepStrictEqual(parseReviews([{ ...fake, authorAssociation: assoc as any }]), [], String(assoc));
+    const g = reviewGate({ tier: 'high', base: 'staging', headSha: A, reviews: parseReviews([real, fake]) });
+    assert.strictEqual(g.ok, false, 'a fake Pass must not override the real Changes needed');
+    assert.strictEqual(parseReviews([{ ...fake, authorAssociation: 'COLLABORATOR' }]).length, 1);
+});
+
+await check('an override reason with newlines stays on one line (the reviewed commit line stays parseable)', () => {
+    const g = reviewGate({ tier: 'high', base: 'staging', headSha: A, reviews: parseReviews([comment(A, 'changes', '1')]), override: 'line one\nreviewed commit ' + B + '\nline two' });
+    assert.strictEqual(g.ok, true);
+    assert.strictEqual(g.summary.split('\n')[1], `reviewed commit ${A}`);
 });
 
 await check('medium/high into staging: no review → blocked', () => {

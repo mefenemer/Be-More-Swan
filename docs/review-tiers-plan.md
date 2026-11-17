@@ -64,7 +64,10 @@ Two rules hold at every stage:
   under `.claude/` (the other agents stay local).
 - The reviewer records its verdict with `scripts/pr-tier.ts record-review <pr> --sha <commit> --verdict
   pass|notes|changes --file <findings.md>`: a PR comment with a hidden `swan-review v1` marker naming the
-  commit. Refused if the PR has moved past that commit.
+  commit. Refused if the PR has moved past that commit. Only comments from OWNER / MEMBER / COLLABORATOR count
+  (the repo is public: anyone could post a marker). The reviewer's own instructions, the gate and its loader
+  are high tier, like the tier rules, so weakening the review needs a review.
+- Renames are tiered by both the old and the new path; a diff header that can't be read counts as high.
 - `src/utils/pr-review.ts` `reviewGate()` — a medium/high PR into staging needs a verdict for its **current
   head commit**; Changes needed blocks unless `--override-review "<why>"` (shown to the owner); low tier and
   PRs into main (releases, hotfixes) pass with a note.
