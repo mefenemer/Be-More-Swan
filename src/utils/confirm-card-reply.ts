@@ -122,6 +122,22 @@ export function proseReplyLostItsCard(raw: string, parsed: { content: string; ui
     return replyPointsAtCard(parsed.content);
 }
 /**
+ * Minute Taker run B/C (staging 2026-11-17): on a route whose instructions say EVERY reply is one JSON object,
+ * a reply that is plain text — or nothing — is a format fault however it is worded. The model sees only the TEXT
+ * of its earlier replies, so after a few turns it copied that shape: "Here are the minutes for …" with no
+ * envelope and no minutes card, so no meeting was ever filed (and no "card below" wording to catch). Pure.
+ */
+export function strictJsonReplyIsProse(raw: string, parsed: { uiElement: unknown }): boolean {
+    if (parsed.uiElement) return false;
+    const t = raw.trim();
+    if (!t) return true;   // an empty reply
+    return !t.startsWith('{') && !/"(?:reply|uiElement)"\s*:/.test(t);
+}
+
+/** The retry sent when strictJsonReplyIsProse: model-only, never stored or shown. */
+export const JSON_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text (or empty), but every reply must be the one JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>} or null}. If the user\'s message held meeting notes or a transcript, uiElement is the minutes card. If they asked to change, approve or reject a meeting, it is the meeting_action_proposal card. Send your answer again as that JSON object and nothing else.';
+
+/**
  * How long the "send that again as JSON" retry may take, or 0 to skip it. The request has 26 s in all.
  */
 export const CARD_RETRY_DEADLINE_MS = 23_500;   // of the 26 s: leaves time to save the reply and answer
