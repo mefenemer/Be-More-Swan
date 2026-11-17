@@ -133,6 +133,71 @@ export function carouselSlideTexts(caption: string, fallbackTitle?: string | nul
     return { cover, items: items.slice(0, CAROUSEL_MAX_SLIDES - 1).map((item, i) => slideTextForItem(i + 1, item)) };
 }
 
+// ── Phase 3: Email "Top 5", Video countdown, Mentor suggestion (plan §3, §6) ──────────────────────
+
+/**
+ * How many numbered items an email body holds: headings at level 2 or 3 that start with a number
+ * ("### 1. The first pick"). An email's items are level-3 headings in the "Top 5" layout and may be
+ * level-2 in a plain Markdown draft, so both count. Same run rule as everywhere else.
+ */
+export function countHeadingItems(markdown: string): number {
+    const nums: number[] = [];
+    for (const line of String(markdown || '').split(/\r?\n/)) {
+        const m = line.match(/^#{2,3}\s+(?:\*\*)?(\d{1,2})[.):]\s*\S/);
+        if (m) nums.push(Number(m[1]));
+    }
+    return sequentialRun(nums);
+}
+
+/** The newsletter template key for the "Top 5" layout (src/config/newsletter-templates.ts). */
+export const TOP_LIST_TEMPLATE = 'top_list';
+
+/** The only email purpose a "Top 5" belongs in (plan §3): never an incident, a notice or an offer. */
+export const TOP_LIST_EMAIL_PURPOSES: readonly string[] = ['newsletter'];
+
+/** The brief a "Top 5" newsletter is drafted to. Placed beside the purpose block in the prompt. */
+export const TOP_LIST_EMAIL_BRIEF = [
+    'THIS EMAIL IS A TOP LIST ("Top 5" layout). Set it out as: a one-line greeting; ONE short intro line that names the real count and the topic;',
+    'then the items, each a level-3 heading numbered "1.", "2.", "3." (a short label that leads with the answer) followed by one or two sentences on why it is worth their time —',
+    'and, where the brief gives a real page for it, a link to that page; then a one-line close. 3 to 5 items.',
+    'The subject line names the real count and topic too ("5 ways to…").',
+    TOP_LIST_RULES,
+].join(' ');
+
+/** A countdown video counts down at most this many items: hook + 5 + call to action = 7 of the 8 scenes. */
+export const COUNTDOWN_MIN_ITEMS = 3;
+export const COUNTDOWN_MAX_ITEMS = 5;
+
+/** The brief a countdown video is planned to (src/lib/storyboard.ts storyboardUserPrompt). */
+export const COUNTDOWN_VIDEO_BRIEF = [
+    `COUNTDOWN VIDEO: the hook scene says how many things are coming and what they are ("3 mistakes people make with…").`,
+    `Then ONE scene per item, counting DOWN to number 1 (the best or most important last), each with onScreenText starting with its number ("#3 Book early").`,
+    `Then the call to action as the last scene. ${COUNTDOWN_MIN_ITEMS} to ${COUNTDOWN_MAX_ITEMS} items. Every item scene gets a full voiceover line, never a single word.`,
+    TOP_LIST_RULES,
+].join(' ');
+
+/** The number a countdown scene's on-screen text starts with ("#3 Book early", "3. Book early", "No. 3"), or null. */
+export function countdownNumber(text: string | null | undefined): number | null {
+    const m = String(text ?? '').match(/^\s*(?:#|no\.?\s*|number\s+)?(\d{1,2})\b/i);
+    return m ? Number(m[1]) : null;
+}
+
+/** Days without a list piece before the Mentor suggests one (plan §3). */
+export const LIST_GAP_DAYS = 30;
+
+/** A product range this size or bigger is worth a "Top N" (plan §3). */
+export const LIST_PRODUCT_RANGE = 5;
+
+/** A search term people look up as a list ("best…", "ideas", "tips"…). */
+export function isListSearchTerm(term: string): boolean {
+    return /\b(best|top|ideas|tips|ways|things to|reasons|mistakes|vs|versus|alternatives)\b/i.test(String(term || ''));
+}
+
+/** Whether a piece of writing is a list piece: a blog body with numbered headings, or a numbered caption. */
+export function isListPiece(text: string): boolean {
+    return countArticleItems(text) >= 3 || countHeadingItems(text) >= 3 || countCaptionItems(text) >= 3;
+}
+
 /** The length of the run 1, 2, 3… at the start of `nums` (duplicates and gaps end it). */
 function sequentialRun(nums: number[]): number {
     let n = 0;

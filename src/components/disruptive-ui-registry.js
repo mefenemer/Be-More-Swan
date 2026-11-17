@@ -1831,6 +1831,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ...(VIDEO_MUSIC[ui.musicMood] ? { musicMood: ui.musicMood } : {}),
       ...(VIDEO_LOOKS[ui.look] ? { look: ui.look } : {}),
       ...(VIDEO_LOWER_THIRDS[ui.lowerThird] ? { lowerThird: ui.lowerThird } : {}),
+      // Top lists Phase 3: a countdown video (the server checks the hook's count against the scenes).
+      ...(ui.countdown === true ? { countdown: true } : {}),
     };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
@@ -1841,6 +1843,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <p class="text-sm text-gray-900 mt-2 break-words">${runnable ? esc(brief.message) : '<span class="text-amber-700">It needs a sentence or two on what the video is about.</span>'}</p>
       ${row('Length', `${brief.lengthS} seconds`)}
       ${row('Kind', brief.purpose)}
+      ${brief.countdown ? row('Shape of the story', 'Countdown — one scene per item, down to number 1') : ''}
       ${row('Ends with', brief.cta)}
       ${row('Voiceover', brief.voiceover ? (brief.voice ? (window.VoicePicker?.describe(brief.voice) || brief.voice) : 'Yes, in your set-up voice') : 'No — on-screen text only')}
       ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
@@ -3273,6 +3276,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       // the older #chat-modal or the newer one (assistant-chat-modal.js), which stayed open over the
       // destination (staging, 2026-11-11).
       closeChatWindows();
+      // A new Top list article (Top lists Phase 3): Blog Studio opens over the page, "Top list" chosen.
+      if (ui.studio === 'top_list' && ui.assistantId && typeof window.openBlogStudio === 'function') {
+        window.openBlogStudio({ assistantId: ui.assistantId, articleType: 'list' });
+        return;
+      }
       if (ui.assistantId && typeof window.routeToAssistantDetail === 'function') {
         if (ui.assistantTab) window._assistantDetailInitialTab = ui.assistantTab;
         window.routeToAssistantDetail(ui.assistantId);

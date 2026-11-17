@@ -11,8 +11,9 @@
 // Findings are words, never edits: each says where the user fixes it. Only ACTIVE assistants are checked.
 // Never throws.
 
-import { and, eq, inArray } from 'drizzle-orm';
-import { goals } from '../../db/schema';
+import { and, eq, gte, inArray } from 'drizzle-orm';
+import { blogPosts, goals, orgProducts, scheduledPosts } from '../../db/schema';
+import { LIST_GAP_DAYS, LIST_PRODUCT_RANGE, isListPiece, isListSearchTerm } from './top-lists';
 import { connectionDisplayName, getGoalMetric } from '../config/goal-metrics';
 import { CTA_LABELS, CTA_ROLES, type CtaKind, type ResolvedCta } from '../config/call-to-action';
 import { ctaChoiceFromContext, resolveCta } from './call-to-action';
@@ -52,6 +53,11 @@ export interface ContentCheckInputs {
     seasons?: Array<{ term: string; peakMonths: number[]; monthsAway: number }>;
     /** Suggested search terms still waiting for the owner's OK. */
     pendingTerms?: number;
+    /**
+     * Top lists Phase 3 (plan §3): whether to suggest a list piece. Absent = no check (older callers).
+     * `listedRecently` = a published blog article or post in the last LIST_GAP_DAYS days was a list.
+     */
+    lists?: { blogWriters: Array<{ id: number; name: string }>; listedRecently: boolean; productCount: number; listTerms: string[] };
 }
 
 /** A season is worth flagging when it starts in 1–2 months: early enough to write for it, close enough to act. */
@@ -60,7 +66,7 @@ export const SEASON_LEAD_MONTHS = [1, 2];
 export interface ContentFinding { text: string; where: string }
 
 /** Pure: the checks code can decide on its own. */
-export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | 'goals' | 'services' | 'seasons' | 'pendingTerms'>): ContentFinding[] {
+export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | 'goals' | 'services' | 'seasons' | 'pendingTerms' | 'lists'>): ContentFinding[] {
     const out: ContentFinding[] = [];
     for (const c of i.ctas) {
         if (c.chosen !== 'own' && c.resolved.kind === 'own' && c.resolved.unusable) {
@@ -97,6 +103,21 @@ export function contentFindings(i: Pick<ContentCheckInputs, 'ctas' | 'offer' | '
         out.push({
             text: `Searches for "${s.term.replace(/["<>]/g, '')}" usually peak in ${monthList(s.peakMonths)} (Google Trends, last year) — that starts in about ${s.monthsAway} month${s.monthsAway === 1 ? '' : 's'}. Articles and posts published a few weeks before a busy spell tend to be found.`,
             where: 'your Blog Writer\'s chat (ask for an article on it), or Business Information ▸ What People Search',
+        });
+    }
+    // Top lists: nothing published lately has been a list, and there is a Blog Writer to write one.
+    // Only on a gap — a workspace already publishing lists is never nagged — with the best reason first.
+    const l = i.lists;
+    if (l && l.blogWriters.length && !l.listedRecently) {
+        const term = l.listTerms[0]?.replace(/["<>]/g, '');
+        const why = term
+            ? `People search "${term}", and a list article answers that search directly.`
+            : l.productCount >= LIST_PRODUCT_RANGE
+                ? `You have ${l.productCount} products and services, so a "Top ${Math.min(l.productCount, 7)}" of them is an easy one to start with.`
+                : 'A numbered "Top 5"-style piece is one of the formats people save and come back to.';
+        out.push({
+            text: `Nothing you've published in the last ${LIST_GAP_DAYS} days has been a list. ${why}`,
+            where: `${l.blogWriters[0].name}'s Blog Studio (Type of article: Top list)`,
         });
     }
     if (i.pendingTerms && i.pendingTerms > 0) {
@@ -138,7 +159,8 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
         const active = data.team.filter((t) => t.state === 'active');
         const ctaTeam = active.filter((t) => (CTA_ROLES as readonly string[]).includes(t.roleKey ?? ''));
         const activeIds = active.map((t) => t.id);
-        const [ctas, intro, goalRows, services, knowledge, trends] = await Promise.all([
+        const since = new Date(Date.now() - LIST_GAP_DAYS * 24 * 60 * 60 * 1000);
+        const [ctas, intro, goalRows, services, knowledge, trends, recentBlogs, recentPosts, productRows] = await Promise.all([
             Promise.all(ctaTeam.map(async (t) => ({
                 name: t.name, chosen: ctaChoiceFromContext(t.setup).kind, resolved: await resolveCta(db, orgId, t.setup),
                 incentive: typeof t.setup?.incentive === 'string' ? t.setup.incentive : null,
@@ -151,7 +173,18 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
             connectedServices(db, orgId),
             loadBusinessKnowledge(db, orgId).catch(() => null),
             loadOrgTrends(db, orgId).catch(() => [] as OrgTrend[]),
+            // What went out lately, to tell whether any of it was a list. Capped: a busy workspace
+            // only needs one list found, and the check must never be the slow part of a review.
+            db.select({ body: blogPosts.bodyMarkdown }).from(blogPosts)
+                .where(and(eq(blogPosts.organisationId, orgId), eq(blogPosts.status, 'published'), gte(blogPosts.publishedAt, since)))
+                .limit(40).catch(() => []),
+            db.select({ caption: scheduledPosts.caption }).from(scheduledPosts)
+                .where(and(eq(scheduledPosts.organisationId, orgId), eq(scheduledPosts.status, 'published'), gte(scheduledPosts.publishedAt, since)))
+                .limit(80).catch(() => []),
+            db.select({ id: orgProducts.id }).from(orgProducts)
+                .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).limit(50).catch(() => []),
         ]);
+        const blogWriters = active.filter((t) => t.roleKey === 'blog_writer').map((t) => ({ id: t.id, name: t.name }));
         const names = new Map(active.map((t) => [t.id, t.name]));
         return {
             ctas,
@@ -167,6 +200,13 @@ export async function loadContentChecks(db: Db, orgId: number, data: MentorSnaps
             seasons: trends.filter((t) => t.approved && t.status === 'ok' && t.nextPeak)
                 .map((t) => ({ term: t.term, peakMonths: t.peakMonths, monthsAway: t.nextPeak!.monthsAway })),
             pendingTerms: trends.filter((t) => !t.approved).length,
+            lists: {
+                blogWriters,
+                listedRecently: (recentBlogs as Array<{ body: string | null }>).some((b) => isListPiece(b.body ?? ''))
+                    || (recentPosts as Array<{ caption: string | null }>).some((p) => isListPiece(p.caption ?? '')),
+                productCount: (productRows as unknown[]).length,
+                listTerms: trends.filter((t) => t.approved && isListSearchTerm(t.term)).map((t) => t.term),
+            },
         };
     } catch (err) {
         console.error('[mentor-content-checks] could not read (non-fatal)', err instanceof Error ? err.message : err);

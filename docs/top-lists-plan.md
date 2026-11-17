@@ -1,7 +1,7 @@
 # Top lists (listicles) — PLAN (feature request #34)
 
-2026-11-15. **All six decisions agreed by the owner (2026-11-15) — see §8. Phase 1 BUILT 2026-11-15 (uncommitted on
-the working tree; see §9). Phases 2–3 not started.**
+2026-11-15. **All six decisions agreed by the owner (2026-11-15) — see §8. Phase 1 live on prod (§9), Phase 2 live on
+prod (§10, editor fix #650 via #651), Phase 3 built 2026-11-17 (§11).**
 
 The ask: *"Top n lists of something is a very popular technique I believe on line to get people to read. I think
 because people are curious to see or it helps their research. Is this something we should build into Be More Swan
@@ -143,4 +143,33 @@ item has real substance. They fail as filler or as a "we're #1" ad.
   offered only when asked, never on the model's own initiative (decision 3).
 - **Shared:** `src/utils/post-slides.ts` `writePostSlides` writes the junction rows and the legacy array together, for
   both `set-post-slides.ts` and `make-carousel.ts`.
-- Tests: `tests/top-lists-carousel.test.ts` (12 checks).
+- Tests: `tests/top-lists-carousel.test.ts` (13 checks).
+- Browser-checked on staging 2026-11-16 (post 205): slides right, "Seven" → "Five" cover. The editor showed only the last
+  slide until #650 (a carousel of brand cards is not "one brand card"). The chat card is not browser-checked yet: no
+  Marmalade Social assistant has Instagram or Threads switched on.
+
+## 11. Phase 3 — Email "Top 5", Video countdown, Mentor suggestion (built 2026-11-17)
+
+No new tables, no new task kinds, no SQL. Every count is computed from the finished piece (§5.1), never taken from the model.
+
+- **Email "Top 5":** a `top_list` template in `newsletter-templates.ts` (a greeting, one intro line, five `### 1.`
+  headings each with a sentence and a link, a close). It is limited to the **Newsletter** purpose (`purposes`): the New
+  Issue dialog and the "start from a template" picker only offer it there, and `newsletter-issues.ts` refuses it for any
+  other purpose. Drafting (`newsletter-generate.ts`): `isTopListIssue` is true for a newsletter started from the layout
+  or sent `shape: 'list'`; the prompt then carries `TOP_LIST_EMAIL_BRIEF`, and the subject's count is rewritten to the
+  numbered headings written (`countHeadingItems`). ⚠️ Fixed on the way: an issue with a design of its own ignored the
+  model's layout, so a reply with only a layout failed as "unreadable". Its words are now flattened to prose
+  (`layoutAsProse`) and poured into the author's layout as before.
+- **Email chat:** "TOP 5 EMAILS" in the Email assistant's prompt (newsletters only). `newsletter-chat-draft.ts` fixes
+  the card's subject count from its `###` headings.
+- **Video countdown:** `countdown` on the brief (`VideoBrief`, `readBrief`; dropped for own footage). The planner gets
+  `COUNTDOWN_VIDEO_BRIEF`. `fixCountdown` (in `enforceStoryboard`) numbers the item scenes "#N … #1" on screen, keeps
+  any label, and rewrites the hook's and the title's count to the real number of items. Too few or too many items is
+  reported in the change notes, never padded. GUI: a **Countdown** tick-box on the New video form. Chat:
+  `"countdown": true` on `video_brief_proposal`, shown on the card as "Shape of the story: Countdown".
+- **Mentor:** a code-only weekly-review check (`mentor-content-checks.ts`, free). If an active Blog Writer exists and
+  nothing published (blog or social) in the last 30 days was a list, it suggests one. The reason is a list-shaped
+  search term ("best…", "ideas", "tips"…), a product range of 5+, or the format itself. It points at that Blog Writer's
+  Blog Studio. **Take Me There** gets a `blog_top_list` place. The card opens Blog Studio (`openBlogStudio({ articleType:
+  'list' })`) with the AI draft form open and "Top list" chosen. Nothing is drafted until the user presses it.
+- Tests: `tests/top-lists-phase3.test.ts` (16 checks).
