@@ -81,6 +81,8 @@ check('the picker reads the one catalogue and plays the static samples (watching
     // Cards clip their picture (overflow-hidden), so without explicit row sizing the grid squashed every card to a
     // sliver inside the modal's max height (browser check, 2026-11-17).
     assert.ok(js.includes('style="grid-auto-rows:max-content"') && js.includes('overflow-y-auto min-h-0 flex-1'));
+    // A pre-filled field is repainted with the presenter's name once the catalogue arrives (review of #715).
+    assert.ok(/load\(\)\.then\(\(\) => \{\s*document\.querySelectorAll\('\[data-ppf\]'\)/.test(js));
     // The same file names the server uses.
     assert.ok(js.includes("kind === 'thumb' ? '-thumb.jpg' : kind === 'face' ? '.jpg' : '.mp4'"));
 });

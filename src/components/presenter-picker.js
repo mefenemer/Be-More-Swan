@@ -170,5 +170,15 @@
     });
   });
 
+  // The names come from the catalogue: fetch it at once (a few KB) and repaint any field row drawn before it
+  // arrived, so a pre-filled field reads "Amara · 30s, woman", not "amara".
+  load().then(() => {
+    document.querySelectorAll('[data-ppf]').forEach((row) => {
+      const v = row.querySelector('input[type="hidden"]')?.value;
+      const name = row.querySelector('[data-ppf-name]');
+      if (v && name) name.textContent = describe(v);
+    });
+  }).catch(() => {});
+
   window.PresenterPicker = { load, open, describe, fieldHtml, presenter: (id) => presenterOf(id), files: (id) => ({ face: file(id, 'face'), thumb: file(id, 'thumb'), sample: file(id, 'sample') }) };
 })();

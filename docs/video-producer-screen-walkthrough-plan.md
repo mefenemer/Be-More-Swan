@@ -364,8 +364,8 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 | Phase | What | Size |
 |---|---|---|
 | **A0** ✅ | Bake-off (5 models × 3 language lines, one face each; drift and Welsh clips), plus Welsh check on ElevenLabs; owner picked Kling Standard | S |
-| **A1** ✅ | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker (GUI + chat) | M |
-| **A2** | `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
+| **A1** ✅ | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker component (not yet on a page) | M |
+| **A2** | Picker on the brief form + chat presenter card; `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
 | **A3** | Screen walkthrough with AI presenter: covers from word timings (needs §3 Phases 1–2) | M |
 | **A4** | "Make it in another language" versions; add voices to the catalogue for new languages | M |
 | **A5** | Copy: help, FAQ, pricing (tasks per presenter-second), Terms notice if charged, assistant page sample | S |
