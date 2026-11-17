@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { enforceStoryboard, fitLength, clampSegment, keepsOwnSound, minScenesFor, storyboardUserPrompt, type VideoBrief, type Scene } from '../src/lib/storyboard';
 import {
-    enforceShotList, enforceReview, reviewSystemPrompt, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
+    enforceShotList, enforceReview, reviewSystemPrompt, reviewUserPrompt, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
 } from '../src/lib/footage';
 import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces, sceneOverlays } from '../src/utils/video-producer';
@@ -248,7 +248,23 @@ check('a stretch is kept only on edits about one; the prompt rules out what it c
     assert.strictEqual(r.suggestions[0].assetId, 11);
     assert.deepStrictEqual([r.suggestions[1].inS, r.suggestions[1].outS], [0, 2]);
     const p = reviewSystemPrompt();
-    assert.ok(/can NOT add background music/.test(p) && /never 8:00/.test(p));
+    assert.ok(/never 8:00/.test(p));
+});
+
+check('the review offers what the Video Producer can do now (music, name captions, text styles, shapes since 2026-11-10)', () => {
+    const p = reviewSystemPrompt();
+    // Music, lower-thirds and shapes shipped 2026-11-10; the old "can NOT add background music, … lower-thirds" made
+    // reviews never suggest a name caption and contradict the music the owner chose.
+    assert.ok(!/can NOT add background music/.test(p) && !/lower-thirds/.test(p), 'no stale "can NOT add music / lower-thirds"');
+    assert.ok(/name caption/.test(p), 'name captions are offered');
+    assert.ok(/rise, fade or pop/.test(p) && /brand-colour box/.test(p), 'text place, style and entrance are offered');
+    assert.ok(/Music, the colour look and the video's shape are the owner's choices/.test(p), 'options-row choices are left to the owner');
+    assert.ok(!/every video is made vertical/.test(p), 'no claim that every video is vertical');
+    assert.ok(/crop and reframe/.test(p) && /never over someone speaking/.test(p), 'the real limits stay');
+    const wide = reviewUserPrompt({ brief: { purpose: 'promo', lengthS: 30, message: 'Our studio', voiceover: false, allowAi: 'stock_only', shape: '16:9' } as VideoBrief, businessName: 'Marmalade', videos: [] });
+    assert.ok(/30-second wide \(16:9\) promo video/.test(wide), wide);
+    const plain = reviewUserPrompt({ brief: { purpose: 'promo', lengthS: 15, message: 'Hi', voiceover: true, allowAi: 'stock_only' } as VideoBrief, businessName: 'B', videos: [] });
+    assert.ok(/15-second vertical \(9:16\) promo video/.test(plain), plain);
 });
 
 check('suggestion lines and the planner block name the video and the stretch', () => {
