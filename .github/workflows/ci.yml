@@ -40,8 +40,14 @@ jobs:
           [ $tsc -eq 0 ] && [ $tests -eq 0 ]
 
   e2e:
-    name: Browser smoke tests (Playwright)
+    name: Browser smoke tests (Playwright ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    # Two runners, each taking half the specs with Playwright's usual 2 workers: same tests, same
+    # retries, about half the wall time. Not a required check, so the name can carry the shard.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -49,13 +55,24 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # The browser download is cached per lockfile; the system libraries it needs are installed
+      # either way (they live outside the cache).
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       # Static pages in a real browser, every function stubbed (e2e/fixtures.ts) — no DB or secrets.
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/

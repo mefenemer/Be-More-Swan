@@ -19,6 +19,7 @@ import assert from 'node:assert';
 import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { closeDbPools } from '../db/client';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -120,6 +121,8 @@ async function main() {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();
+        // The code under test also opened db/client's shared pool; left open it holds the process 20 s.
+        await closeDbPools();
     }
     console.log(`\n${passed} passed`);
 }
