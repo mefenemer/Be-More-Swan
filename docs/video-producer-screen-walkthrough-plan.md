@@ -364,7 +364,7 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 | Phase | What | Size |
 |---|---|---|
 | **A0** ✅ | Bake-off (5 models × 3 language lines, one face each; drift and Welsh clips), plus Welsh check on ElevenLabs; owner picked Kling Standard | S |
-| **A1** | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker (GUI + chat) | M |
+| **A1** ✅ | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker (GUI + chat) | M |
 | **A2** | `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
 | **A3** | Screen walkthrough with AI presenter: covers from word timings (needs §3 Phases 1–2) | M |
 | **A4** | "Make it in another language" versions; add voices to the catalogue for new languages | M |
@@ -373,6 +373,14 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 
 A1 and A2 work for **any** video, not only walkthroughs: "an AI presenter introduces your offer" for
 30-second social videos is likely the most-used version.
+
+**A1 as built (2026-11-17):** `src/public/presenter-catalogue.json` (12: Amara, Priya, Grace, Mei, Sofia, Eileen,
+Daniel, Kwame, Arjun, Luis, Callum, Kenji; each with their own English voice), `src/lib/presenters.ts` (`presenterVoice`:
+own voice, else the catalogue voice of their gender for that language), `presenters/<id>.jpg` (1920×1080 face for the
+avatar model), `-thumb.jpg` and `.mp4` (5-second "Hi, I'm …" made with Kling AI Avatar v2 Standard), made by
+`scripts/make-presenters.mjs` (about $4 in all), and `src/components/presenter-picker.js` (Female / Male filter, Watch,
+Use; `fieldHtml` for forms). **Not yet on any page and no chat card:** a picker that changes nothing would mislead, so the
+brief form and the chat get it with A2, when choosing a presenter makes one.
 
 ### 11.9 Decisions (all taken 2026-11-17)
 
