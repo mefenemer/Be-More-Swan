@@ -259,6 +259,34 @@ export async function recordManualFeatureSql(db: Db, id: number, where: 'staging
     return null;
 }
 
+/**
+ * A new PR for a feature (scripts/feature-requests.ts `pr`): its checks start again — SQL, staging merge,
+ * CI, deploys, the prod PR and "live" are all re-proved. ONE statement, so the status it reports is the
+ * status it changed.
+ *
+ * ⚠️ A RELEASED request getting another PR (its next phase) goes back to In progress. live_at is cleared
+ * here and runFeatureLiveCheck only looks at requests that are NOT Released — left Released, its "Live on
+ * production" line said "Not in main yet" for ever (FR#43 Phase 2, 2026-11-16). Reopened, the live check
+ * releases it again once the deploy contains the new work.
+ * ⚠️ prod_pr_url is cleared too: the live check tries it FIRST, and the previous phase's release PR is
+ * already in main — kept, it would release the request the moment the new PR reached staging. The new
+ * release PR is recorded with `prod-pr` / `ask-approval`. Declined / duplicate keep their status.
+ */
+export async function resetFeatureForNewPr(db: Db, id: number, change: { sqlText: string | null; safety: SqlSafety }): Promise<{ found: boolean; reopened: boolean }> {
+    const rows = await db.execute(sql`
+        WITH old AS (SELECT id, status FROM feature_requests WHERE id = ${id} FOR UPDATE)
+        UPDATE feature_requests f SET dev_sql = ${change.sqlText}, dev_sql_safety = ${change.safety}, dev_sql_hash = ${change.sqlText ? sqlHash(change.sqlText) : null},
+               dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
+               dev_merged_at = NULL, dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
+               dev_prod_sql_status = NULL, dev_prod_sql_result = NULL, dev_prod_sql_ran_at = NULL, dev_prod_merged_at = NULL,
+               prod_pr_url = NULL, live_at = NULL,
+               status = CASE WHEN old.status = 'released' THEN 'in_progress' ELSE f.status END,
+               updated_at = now()
+          FROM old WHERE f.id = old.id
+        RETURNING old.status AS was`) as Array<{ was: string }>;
+    return { found: rows.length > 0, reopened: rows[0]?.was === 'released' };
+}
+
 /** Follow one feature merged to staging: CI on its merge commit, and the staging deploy. Never throws. */
 export async function syncFeatureStaging(db: Db, row: Pick<FeatureProofRow, 'id' | 'devPrUrl' | 'devStagingCiStatus' | 'devStagingLiveAt'>, opts: { token?: string; repo?: string; fetchImpl?: FetchLike; stagingCommit?: string | null } = {}): Promise<boolean> {
     const token = opts.token ?? readToken();
