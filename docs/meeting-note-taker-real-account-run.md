@@ -6,8 +6,9 @@ connection is marked Live until **every** one below passes; then step 9 moves th
 Staging: https://staging--bemoreswan.netlify.app (steps 2–7 deployed at `bc761ed3`, 2026-11-16).
 
 **Status (2026-11-17):** runs A and A2 done in Marmalade Productions (org 58), Minute Taker "Orbit Scribe"
-(assistant 66), meetings 918 and 919. Gmail, Slack, Notion and Jira pass; Asana, Outlook and the chat
-cards wait on run B; run C now checks that nothing is sent without a mailbox (owner, 2026-11-17: no Be More Swan sender). Eleven bugs found and fixed
+(assistant 66), meetings 918 and 919. Gmail, Slack, Notion and Jira pass. **Run B done (meeting 920):**
+Outlook, Asana and the chat cards pass on the server, but the chat lost its card on 3 of 6 deployed turns
+(§6). Run C now checks that nothing is sent without a mailbox (owner, 2026-11-17: no Be More Swan sender). Eleven bugs found and fixed
 on the way (§6).
 
 ## 0. Before you start
@@ -111,9 +112,9 @@ ORDER BY meeting_record_id, id;
 | Slack summary | A2 | ✅ | posted 17 Nov 07:42 to the workspace's main channel | first try failed (#general doesn't exist in new workspaces, real error hidden by a logging bug) — fixed by #668 |
 | Notion page | A2 | ✅ | created 17 Nov 06:38 | needed the staging redirect URI added to the Notion connection |
 | Jira tickets | A2 | ✅ | SCRUM-5, SCRUM-6, SCRUM-7 | stopped after one ticket until #668; three of four because Asana was also on (split, fixed by #671) |
-| Asana tickets | A2 / B | ⏳ | 1 task (1220597676877372) from the split | a full four-task run is part of run B |
-| Outlook follow-up | B | ⏳ | | |
-| Chat review cards | B | ⏳ | | add Cara's address, shorten the follow-up, approve |
+| Asana tickets | B | ✅ | 4 tasks: 1220615169703322, …773693, …686301, 1220614692499888 | one per action item, all `synced`, in Mark's first project; Jira switched itself off |
+| Outlook follow-up | B | ✅ (server) | sent 17 Nov 14:37 via Outlook (mefenemer@hotmail.com) to +ana, +bo, +cara | once (`handoffs.email_meeting_followup.sentAt`); **check the inbox and Outlook's Sent Items by eye** |
+| Chat review cards | B | ⚠️ | add-email ✅ (card from a local run of the same code), shorten ✅, approve ✅ | the deployed chat lost its card 3 times out of 6 — see §6 |
 | No inbox = no email | C | ⏳ | | the Resend fallback was removed (owner, 2026-11-17) — see §6 |
 | Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
 | Long transcript (60 min file, step 4) | any | ⏳ | | the 26 s limit, unproven so far |
@@ -140,6 +141,19 @@ When every row passes, step 9 (go live) can start, after the Note Taker rename P
 app owned by another Atlassian account (switched to hello@bemoreswan.com's app, staging callback added);
 Notion's connection only allowed `/api/auth/callback` (staging callback added); the archived Minute Taker
 "Lux" (past its deletion date — the purge job never runs on staging) blocked hiring one (deleted).
+
+**Run B findings (2026-11-17):**
+- **Chat lost its card, intermittently.** For the add-email request, the deployed chat (Haiku 5.5): (1) replied
+  "I've prepared a card… confirm it on the card" with no card; (2) sent an unreadable reply ("something went
+  wrong formatting that"); (3) after #696, an EMPTY reply. The same turn run in-process locally on the same code
+  and data came back with the card (as prose + a bare card object, which the parser recovers), and so did 4 of
+  4 runs of the prompt alone. "Shorten" and "approve" then worked first time on staging. #696 adds the
+  "no card came with this reply" note for that wording and keeps the raw text of unreadable replies;
+  **an empty reply still leaves no trace** — next step.
+- **The chat said "Cara Singh still has no email address"** beside an approve card that listed her address
+  (the card is built from the row and was right). The prose came from the model, not the meeting row.
+- **Connecting Outlook from the assistant's Connections tab returned to `integrations.html`**, not the tab
+  (#664 fixed this for the actions' Connect links, not the mailbox rows).
 
 **Still open:**
 - ~~Resend fallback (run C)~~ — **decided 2026-11-17: removed.** The owner does not want customers'
