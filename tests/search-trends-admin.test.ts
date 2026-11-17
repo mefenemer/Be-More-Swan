@@ -9,6 +9,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { termHealth } from '../src/utils/search-trends-admin';
 import { checkProvider, classifyProviderError, type TrendsProvider } from '../src/lib/trends-provider';
+import { useVirtualTime } from './virtual-time';
+
+// Polls, back-off and timeouts run on a virtual clock: same order, same Date.now() deltas, no waiting.
+useVirtualTime();
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {

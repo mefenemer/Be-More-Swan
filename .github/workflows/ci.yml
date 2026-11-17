@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, staging]
 
+# A new push to a PR cancels that PR's run still in progress — its result no longer matters.
+# Pushes to main/staging are never cancelled: every commit there keeps its own result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     name: Typecheck + tests
@@ -19,7 +25,19 @@ jobs:
       - run: npm ci
       # Typecheck + every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully).
       # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
-      - run: npm run test:all
+      # Same checks as `npm run test:all`, but tsc runs alongside the tests instead of before them,
+      # and the runner runs one test file per core. The job name stays: "Protect main" requires it.
+      - name: Typecheck + tests (side by side)
+        run: |
+          # Steps run under `bash -e`: capture each exit code with `||` so one failure can't hide the other.
+          npx tsc --noEmit > "$RUNNER_TEMP/tsc.log" 2>&1 &
+          tsc_pid=$!
+          tests=0; node scripts/run-tests.mjs || tests=$?
+          tsc=0; wait $tsc_pid || tsc=$?
+          echo "──────── tsc --noEmit (exit $tsc) ────────"; cat "$RUNNER_TEMP/tsc.log"
+          if [ $tsc -ne 0 ]; then echo "::error::Typecheck failed"; fi
+          if [ $tests -ne 0 ]; then echo "::error::Tests failed"; fi
+          [ $tsc -eq 0 ] && [ $tests -eq 0 ]
 
   e2e:
     name: Browser smoke tests (Playwright)

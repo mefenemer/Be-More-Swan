@@ -8,11 +8,15 @@
 //   · A hedge that fires on every call doubles the image bill; one whose loser isn't cancelled keeps
 //     billing at fal after we've stopped waiting.
 //   · The cost log must name the model that actually drew the picture — they're priced differently.
-// No network (fetch is faked), no database. Takes ~15 s: it waits on the real 1.5 s poll.
+// No network (fetch is faked), no database. The 1.5 s polls run on a virtual clock (tests/virtual-time.ts).
 //
 // Run:  npx tsx tests/image-hedge.test.ts
 
 import assert from 'node:assert';
+import { useVirtualTime } from './virtual-time';
+
+// Polls, back-off and timeouts run on a virtual clock: same order, same Date.now() deltas, no waiting.
+useVirtualTime();
 
 process.env.FAL_KEY = 'test-key';
 delete process.env.FAL_IMAGE_MODEL;
