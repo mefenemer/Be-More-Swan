@@ -4747,6 +4747,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
             }
             content = fixed;
+            // An unreadable reply (STRUCTURED_REPLY_FALLBACK) keeps its raw text the same way: its console.warn
+            // was the only trace, and staging function logs are often empty by the time anyone looks (2026-11-17).
+            if (!droppedCard && content === STRUCTURED_REPLY_FALLBACK) {
+                droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: null, raw });
+                droppedCard.content = `${droppedCard.content} (reply could not be read)`;
+            }
         }
 
         // Written before the reply so a meeting card can carry its record's id: its Approve button
