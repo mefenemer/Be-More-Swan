@@ -116,6 +116,11 @@ document preview it doesn't have. Cost and tasks are unchanged (one `carousel` t
   multi-image post, and the editor doesn't label it a document.
 - Approval refuses a Document carousel with a slide that isn't PNG/JPEG (`LI_DOCUMENT_SLIDE_TYPE`).
 - Links in a caption stay whole: escaped, but a `#` inside a link is never turned into a hashtag.
+- A document still processing after the wait (~7.5 s) is a retryable failure (503 → the normal back-off), never an
+  unready post.
+- **A Document carousel left stuck in "publishing" is not retried on its own.** It may already be on LinkedIn (the run
+  can be cut off after LinkedIn accepted it), and we can't read posts back to check. It goes to Needs attention saying
+  to check LinkedIn first; "Try again" re-queues it.
 - Every other LinkedIn post stays on ugcPosts (§7).
 - `/connections` and the Help Centre say nothing yet — only once one has posted for real on prod.
 

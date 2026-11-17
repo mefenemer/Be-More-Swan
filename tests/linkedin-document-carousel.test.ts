@@ -14,7 +14,7 @@ import { routeAsset } from '../src/utils/format-router';
 import { carouselFormatFor, linkedInDocumentTitle, CAROUSEL_MAX_SLIDES } from '../src/utils/top-lists';
 import {
     littleText, slideImageKind, slidesPdf, isLinkedInDocument, publishLinkedInDocument, LINKEDIN_REST_VERSION,
-    isPdfSlideMime, LI_DOCUMENT_POLL_MS, LI_DOCUMENT_MAX_POLLS,
+    isPdfSlideMime, nonPdfSlideMime, LI_DOCUMENT_POLL_MS, LI_DOCUMENT_MAX_POLLS,
 } from '../src/utils/social-publish';
 
 let passed = 0;
@@ -95,15 +95,26 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
         assert.ok(LI_DOCUMENT_POLL_MS * LI_DOCUMENT_MAX_POLLS <= 8000);
     });
 
-    await check('approval refuses a non-PNG/JPEG slide on a Document carousel, naming it (#712 review)', () => {
+    await check('approval: the first slide type a document can\'t carry; unknown types let through (#712 review)', () => {
+        const m = new Map<number, string | null>([[1, 'image/png'], [2, 'image/webp'], [3, 'image/jpeg'], [4, null]]);
+        assert.equal(nonPdfSlideMime([1, 3, 4], m), null);
+        assert.equal(nonPdfSlideMime([1, 2, 3], m), 'image/webp');
+        assert.equal(nonPdfSlideMime([9], m), null, 'an asset with no row is the publisher\'s to check');
         const src = readFileSync('netlify/functions/approve-post.ts', 'utf8');
         const i = src.indexOf("if ((post as any).formatKey === 'li_document' && Array.isArray(post.contentAssetIds)");
-        assert.ok(i > 0);
+        assert.ok(i > 0 && i < src.indexOf('const routableAssets = await loadAssetMetrics('), 'checked before the format validation');
         const block = src.slice(i, i + 1600);
-        assert.ok(block.includes('!isPdfSlideMime(m)'));
+        assert.ok(block.includes('const bad = nonPdfSlideMime(ids, new Map(rows.map((r) => [r.id, r.mimeType])));'));
         assert.ok(block.includes("code: 'LI_DOCUMENT_SLIDE_TYPE'"));
-        assert.ok(block.includes('One of the slides is a'));
-        assert.ok(i < src.indexOf('const routableAssets = await loadAssetMetrics('), 'checked before the format validation');
+    });
+
+    await check('a stranded Document carousel goes to Needs attention, never silently re-posted (#712 review 3)', () => {
+        const src = readFileSync('netlify/functions/publish-social-posts.ts', 'utf8');
+        const a = src.indexOf("WHERE status = 'publishing' AND platform = 'linkedin' AND format_key = 'li_document'");
+        const b = src.indexOf("WHERE status = 'publishing' AND platform IN ('linkedin','x','threads')");
+        assert.ok(a > 0 && b > a, 'runs BEFORE the generic re-queue, so the generic one never sees it');
+        assert.ok(src.slice(a - 400, a).includes("SET status = 'failed'"));
+        assert.match(src, /may already be on LinkedIn\. Check your LinkedIn profile first/);
     });
 
     await check('the document title is the cover line, else the first line', () => {
@@ -114,7 +125,7 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
     });
 
     // A stand-in LinkedIn: records every call and answers like Phase 0's real run did.
-    function fakeLinkedIn(overrides: { init?: number; postStatus?: number } = {}) {
+    function fakeLinkedIn(overrides: { init?: number; postStatus?: number; docStatus?: string } = {}) {
         const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: unknown }> = [];
         const real = globalThis.fetch;
         globalThis.fetch = (async (input: any, init: any = {}) => {
@@ -128,7 +139,7 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
                     : json(200, { value: { uploadUrl: 'https://upload.example/doc', document: 'urn:li:document:D1' } });
             }
             if (url === 'https://upload.example/doc') return new Response('', { status: 201 });
-            if (url.includes('/rest/documents/')) return json(200, { status: 'AVAILABLE' });
+            if (url.includes('/rest/documents/')) return json(200, { status: overrides.docStatus ?? 'AVAILABLE' });
             if (url.endsWith('/rest/posts')) {
                 return overrides.postStatus ? json(overrides.postStatus, { message: 'bad request' })
                     : new Response('', { status: 201, headers: { 'x-restli-id': 'urn:li:share:99' } });
@@ -167,6 +178,16 @@ const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'latin1');
             await publishLinkedInDocument('x', 'tok', 'urn:li:organization:7', slides, 't', { pollMs: 0 });
             const init = li.calls.find((c) => c.url.includes('initializeUpload'))!;
             assert.equal(JSON.parse(String(init.body)).initializeUploadRequest.owner, 'urn:li:organization:7');
+        } finally { li.restore(); }
+    });
+
+    await check('a document still processing after the wait is a retryable 503, not an unready post (#712 review 3)', async () => {
+        const li = fakeLinkedIn({ docStatus: 'PROCESSING' });
+        try {
+            const r = await publishLinkedInDocument('x', 'tok', 'abc', slides, 't', { pollMs: 0 });
+            assert.deepEqual(r, { ok: false, status: 503, error: 'LinkedIn is still processing the document. It will be tried again shortly.' });
+            assert.equal(li.calls.filter((c) => c.url.includes('/rest/documents/urn')).length, LI_DOCUMENT_MAX_POLLS);
+            assert.ok(!li.calls.some((c) => c.url.endsWith('/rest/posts')));
         } finally { li.restore(); }
     });
 

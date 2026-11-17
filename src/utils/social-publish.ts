@@ -809,6 +809,19 @@ export function isPdfSlideMime(mimeType: string | null | undefined): boolean {
 }
 
 /**
+ * The first slide type a LinkedIn document can't carry, or null. `mimeById` holds what the content
+ * library says; a slide with no recorded type is let through (legacy) — the publisher still checks bytes.
+ * Pure (approve-post.ts uses it).
+ */
+export function nonPdfSlideMime(ids: readonly number[], mimeById: ReadonlyMap<number, string | null | undefined>): string | null {
+    for (const id of ids) {
+        const m = mimeById.get(id);
+        if (m && !isPdfSlideMime(m)) return m;
+    }
+    return null;
+}
+
+/**
  * True when a LinkedIn row goes out as a document carousel: ONLY when its stored format says so. A row
  * with no stored format (most posts, including ones approved before this shipped) keeps the old
  * multi-image post however many pictures it has — and the router never labels such a row "Document
@@ -874,14 +887,19 @@ export async function publishLinkedInDocument(
     // LinkedIn processes the PDF before a post may use it. A read we are not allowed (403) or a status
     // that never settles is not fatal: the post call below is the real test, and its error says why.
     const pollMs = opts.pollMs ?? LI_DOCUMENT_POLL_MS;
+    let stillProcessing = false;
     for (let i = 0; i < LI_DOCUMENT_MAX_POLLS; i++) {
         const st = await fetch(`https://api.linkedin.com/rest/documents/${encodeURIComponent(documentUrn)}`, { headers: liRestHeaders(token) }).catch(() => null);
-        if (!st || !st.ok) break;
+        if (!st || !st.ok) { stillProcessing = false; break; }   // can't read it: let the post call decide
         const status = ((await st.json().catch(() => ({}))) as any)?.status;
-        if (status === 'AVAILABLE') break;
+        if (status === 'AVAILABLE') { stillProcessing = false; break; }
         if (status === 'PROCESSING_FAILED') return { ok: false, status: null, error: 'LinkedIn could not process the document. Check the slides and try again.' };
-        await sleep(pollMs);
+        stillProcessing = true;
+        if (i < LI_DOCUMENT_MAX_POLLS - 1) await sleep(pollMs);
     }
+    // Still processing after the wait: a retryable failure (503 → the normal back-off) rather than posting an
+    // unready document, which LinkedIn may refuse with a 4xx that would fail the post for good (#712 review 3).
+    if (stillProcessing) return { ok: false, status: 503, error: 'LinkedIn is still processing the document. It will be tried again shortly.' };
 
     const res = await fetch('https://api.linkedin.com/rest/posts', {
         method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),

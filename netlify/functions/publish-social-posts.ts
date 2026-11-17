@@ -34,6 +34,12 @@ const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', 
 const STALE_PUBLISHING_MINS = 10;
 // YouTube's upload lives in a background function that holds the row far longer — see the sweep below.
 const STALE_YOUTUBE_MINS = 30;
+/** Why a stranded LinkedIn Document carousel is in Needs attention (see the sweep below). JSON for failure_reason. */
+const LI_DOCUMENT_STRANDED_REASON = JSON.stringify({
+    httpStatus: null,
+    errorMessage: 'Publishing this LinkedIn carousel was interrupted, so it may already be on LinkedIn. Check your LinkedIn profile first — use Try again only if it is not there.',
+    isRetryable: false,
+}).replace(/'/g, "''");
 
 // errorCode/errorSubcode are the PLATFORM's own numbers, not the HTTP status, and they are what
 // post-failure-diagnosis.ts branches on. Optional: only the Meta family reports them.
@@ -60,6 +66,21 @@ export default withLambda(async () => {
     const tickStart = Date.now();
     const now = new Date();
     let processed = 0, succeeded = 0, failed = 0;
+
+    // A LinkedIn Document carousel stranded in 'publishing' is NOT retried on its own. It may already be
+    // on LinkedIn: the run could have been cut off after LinkedIn accepted the post but before the row was
+    // marked published, and our LinkedIn access cannot read a post back to check (GET /rest/posts is 403
+    // with w_member_social — plan §4a). The building and uploading of the PDF make this row the slowest in
+    // the batch, so it is the one most likely to be cut off. Silently re-queueing it could post the same
+    // carousel publicly again every 10 minutes (#712 review 3). It goes to Needs attention instead, saying
+    // to check LinkedIn first; "Try again" there re-queues it as usual.
+    await db.execute(
+        `UPDATE scheduled_posts
+            SET status = 'failed', retry_at = NULL, updated_at = now(),
+                failure_reason = '${LI_DOCUMENT_STRANDED_REASON}'::jsonb
+          WHERE status = 'publishing' AND platform = 'linkedin' AND format_key = 'li_document'
+            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
+    );
 
     // Self-heal: reclaim posts stranded in 'publishing' by an earlier timed-out tick so they
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').

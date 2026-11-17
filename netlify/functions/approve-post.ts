@@ -17,7 +17,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestions, scheduledPosts, scheduledPostAssets, systemConnections } from '../../db/schema';
 import { isBakedFor, renderableOverlays } from '../../src/lib/post-render';
 import { recordPostedAssets } from '../../src/utils/pexels';
-import { resolvePostImage, resolvePostVideo, isPdfSlideMime } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo, nonPdfSlideMime } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor, resolveHorizonDays, DEFAULT_POSTING_TIMEZONE } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
@@ -398,14 +398,13 @@ export default withLambda(async (event) => {
         const rows = ids.length
             ? await db.select({ id: contentAssets.id, mimeType: contentAssets.mimeType }).from(contentAssets).where(inArray(contentAssets.id, ids)).catch(() => [])
             : [];
-        const mimeById = new Map(rows.map((r) => [r.id, r.mimeType]));
-        const bad = ids.findIndex((id) => { const m = mimeById.get(id); return !!m && !isPdfSlideMime(m); });
-        if (bad >= 0) {
+        const bad = nonPdfSlideMime(ids, new Map(rows.map((r) => [r.id, r.mimeType])));
+        if (bad) {
             return {
                 statusCode: 422,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    error: `One of the slides is a ${String(mimeById.get(ids[bad])).replace('image/', '').toUpperCase()} picture. A LinkedIn document carousel needs PNG or JPEG pictures — replace it, then approve.`,
+                    error: `One of the slides is a ${bad.replace('image/', '').toUpperCase()} picture. A LinkedIn document carousel needs PNG or JPEG pictures — replace it, then approve.`,
                     code: 'LI_DOCUMENT_SLIDE_TYPE',
                     formatKey: 'li_document',
                 }),
