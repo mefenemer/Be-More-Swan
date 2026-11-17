@@ -1633,3 +1633,7 @@ node_bundler = "esbuild"
 # admin-assistants: "Suggest" on a go-live check waits on a model call.
 [functions.admin-assistants]
   timeout = 26
+
+# Feature request "Review with AI" calls Opus 5.5 (thinking always on), which can pass 10 s.
+[functions.admin-feature-requests]
+  timeout = 26

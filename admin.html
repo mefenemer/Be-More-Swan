@@ -2613,7 +2613,24 @@
           <input type="hidden" id="fr-form-id">
           <div class="flex items-center justify-between">
             <h3 id="fr-form-title" class="text-sm font-extrabold text-gray-900">Add request</h3>
-            <button onclick="closeRoadmapForm()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            <div class="flex items-center gap-3">
+              <!-- Owner 2026-11-17: Opus 5.5 reviews the request; the admin ticks which suggestions to add. -->
+              <button id="fr-review-btn" onclick="frReviewRequest()" title="Opus 5.5 reviews the request under fixed headings (UX, UI, performance, value, will people pay…) and suggests improvements. You choose which to add." class="text-xs font-semibold text-violet-600 hover:text-violet-800 inline-flex items-center gap-1">🔍 Review with AI</button>
+              <button onclick="closeRoadmapForm()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+          </div>
+          <div id="fr-review-panel" class="hidden bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <p class="text-[11px] font-bold uppercase text-violet-500">AI review · Opus 5.5</p>
+              <button onclick="frCloseReview()" class="text-violet-400 hover:text-violet-600 text-sm leading-none" aria-label="Close review">✕</button>
+            </div>
+            <p id="fr-review-summary" class="text-sm text-gray-700"></p>
+            <div id="fr-review-list" class="space-y-2 max-h-[28rem] overflow-y-auto pr-1"></div>
+            <div class="flex items-center gap-2 pt-1">
+              <button id="fr-review-apply" onclick="frApplyReview()" class="btn-primary px-3 py-1 text-xs font-bold rounded-md transition">Add selected</button>
+              <button onclick="frCloseReview()" class="btn-secondary px-3 py-1 border text-xs font-semibold rounded-md transition">Dismiss</button>
+              <span class="text-[11px] text-gray-500">Added text goes into the form. Nothing is saved until you press Save.</span>
+            </div>
           </div>
           <div>
             <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Title</label>
@@ -7606,6 +7623,12 @@ function _frResetEnhance() {
   document.getElementById('fr-enhance-preview').classList.add('hidden');
   document.getElementById('fr-enhance-text').textContent = '';
 }
+function _frResetReview() {
+  _frReview = null;
+  document.getElementById('fr-review-panel').classList.add('hidden');
+  document.getElementById('fr-review-list').innerHTML = '';
+  document.getElementById('fr-review-summary').textContent = '';
+}
 // Populates the Parent select with every other request, grouped by title; "None" clears it.
 function _frFillParentSelect(excludeId, val) {
   const el = document.getElementById('fr-form-parent');
@@ -7629,6 +7652,7 @@ function openRoadmapAdd() {
   document.getElementById('fr-form-delete').classList.add('hidden');
   document.getElementById('fr-form-brief-wrap').classList.add('hidden');
   _frResetEnhance();
+  _frResetReview();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form-title-input').focus();
 }
@@ -7657,6 +7681,7 @@ function openRoadmapEdit(id) {
       : '';
   }
   _frResetEnhance();
+  _frResetReview();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -7683,6 +7708,69 @@ function frAcceptEnhance() {
   _frResetEnhance();
 }
 function frRejectEnhance() { _frResetEnhance(); }
+
+// ── Review with AI (owner 2026-11-17) ───────────────────────────────────────
+// Opus 5.5 reviews against a fixed set of headings (src/utils/feature-review.ts REVIEW_AREAS): a verdict per
+// heading plus tick-box suggestions, all unticked to start. "Add selected" appends only the ticked ones to the
+// description or the brief, grouped by heading. The admin still presses Save.
+let _frReview = null;
+async function frReviewRequest() {
+  const title = document.getElementById('fr-form-title-input').value.trim();
+  if (!title) { window.showToast?.('Add a title first.', { icon: '⚠️' }); return; }
+  const description = document.getElementById('fr-form-desc').value.trim();
+  const brief = document.getElementById('fr-form-brief').value.trim();
+  const btn = document.getElementById('fr-review-btn');
+  const prev = btn.textContent; btn.textContent = '🔍 Reviewing… (up to 30 s)'; btn.disabled = true;
+  try {
+    const d = await api(`${FR_API}?action=review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description, brief }),
+    });
+    const suggestions = Array.isArray(d.suggestions) ? d.suggestions : [];
+    const areas = Array.isArray(d.areas) ? d.areas : [];
+    _frReview = { suggestions, labels: Object.fromEntries(areas.map(a => [a.key, a.label])) };
+    document.getElementById('fr-review-summary').textContent = d.summary || '';
+    // The brief box only shows when editing; on + Add request every suggestion goes to the description.
+    const briefShown = !document.getElementById('fr-form-brief-wrap').classList.contains('hidden');
+    document.getElementById('fr-review-list').innerHTML = areas.map(a => {
+      const picks = suggestions.map((s, i) => [s, i]).filter(([s]) => s.area === a.key);
+      return `<div class="bg-white border border-violet-100 rounded-lg p-2" data-fr-review-area="${_esc(a.key)}">
+        <p class="text-xs"><span class="font-bold text-gray-900">${_esc(a.label)}</span> <span class="text-gray-600">${_esc(a.verdict)}</span></p>
+        ${picks.map(([s, i]) => `<label class="flex items-start gap-2 mt-1.5 cursor-pointer">
+          <input type="checkbox" class="mt-0.5" data-fr-review-pick="${i}">
+          <span class="text-sm text-gray-700"><span class="font-semibold text-gray-900">${_esc(s.title)}</span>
+          <span class="ml-1 text-[10px] font-bold uppercase text-violet-500">→ ${s.target === 'brief' && briefShown ? 'Brief' : 'Description'}</span><br>${_esc(s.detail)}</span>
+        </label>`).join('')}
+      </div>`;
+    }).join('');
+    document.getElementById('fr-review-apply').classList.toggle('hidden', !suggestions.length);
+    document.getElementById('fr-review-panel').classList.remove('hidden');
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+  finally { btn.textContent = prev; btn.disabled = false; }
+}
+// Same text as appendSuggestions() in src/utils/feature-review.ts (the page can't import TS).
+function _frAppendSuggestions(existing, picked) {
+  if (!picked.length) return existing;
+  const lines = picked.map(s => `- [${_frReview?.labels?.[s.area] || s.area}] ${s.title}: ${s.detail}`).join('\n');
+  const base = (existing || '').replace(/\s+$/, '');
+  return base ? `${base}\n\nImprovements (AI review):\n${lines}` : `Improvements (AI review):\n${lines}`;
+}
+function frApplyReview() {
+  if (!_frReview) return;
+  const picked = [...document.querySelectorAll('#fr-review-list [data-fr-review-pick]')]
+    .filter(cb => cb.checked).map(cb => _frReview.suggestions[Number(cb.dataset.frReviewPick)]).filter(Boolean);
+  if (!picked.length) { window.showToast?.('Tick at least one suggestion, or Dismiss.', { icon: '⚠️' }); return; }
+  const briefShown = !document.getElementById('fr-form-brief-wrap').classList.contains('hidden');
+  const toBrief = briefShown ? picked.filter(s => s.target === 'brief') : [];
+  const toDesc = picked.filter(s => !toBrief.includes(s));
+  const desc = document.getElementById('fr-form-desc');
+  const brief = document.getElementById('fr-form-brief');
+  desc.value = _frAppendSuggestions(desc.value, toDesc);
+  brief.value = _frAppendSuggestions(brief.value, toBrief);
+  _frResetReview();
+  window.showToast?.(`Added ${picked.length} suggestion${picked.length === 1 ? '' : 's'}. Press Save to keep them.`, { icon: '✅' });
+}
+function frCloseReview() { _frResetReview(); }
 
 // ── Brief drafting (for Claude to execute) ──────────────────────────────────
 async function frDraftBrief() {
