@@ -60,6 +60,7 @@ import { TOP_LIST_RULES, countCaptionItems, fixCaptionListCount, fixListCount } 
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../../src/utils/newsletter-campaign-chat-draft';
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
+import { GENERATED_CHAT_MANIFEST } from '../../src/config/chat-capabilities.generated';
 import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/utils/form-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, splitProseAndCard, stripCodeFences } from '../../src/utils/model-json';
@@ -504,7 +505,22 @@ function onScreenCardBlock(uiElement: unknown): string | null {
     return `[ON SCREEN — the card under this reply, exactly as the user sees it]\n${JSON.stringify(card)}`;
 }
 
-function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
+/** Card types the browser can draw (src/components/disruptive-ui-registry.js, via the generated manifest). */
+const UI_CARD_TYPES: ReadonlySet<string> = new Set(GENERATED_CHAT_MANIFEST.uiCards);
+
+/** The text as ONE JSON object and nothing else (fences already stripped), or null. */
+function wholeJsonObject(text: string): Record<string, unknown> | null {
+    const t = text.trim();
+    if (!t.startsWith('{') || !t.endsWith('}')) return null;
+    try {
+        const v = JSON.parse(t);
+        return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+    } catch {
+        return null;
+    }
+}
+
+export function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
     const stripped = stripCodeFences(raw);
 
     // This route hand-rolled its own strip plus an outermost-{...} recovery. The shared extractor
@@ -514,8 +530,14 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // The card ON ITS OWN, no envelope and no words (Minute Taker run B, staging 2026-11-17: an add-email card sent
     // bare was read as a broken reply and the user got STRUCTURED_REPLY_FALLBACK). Kept as the card; the words
     // are filled in by the handler (CARD_ONLY_REPLY).
-    if (parsed && typeof parsed.reply !== 'string' && typeof parsed.type === 'string' && !('uiElement' in parsed)) {
-        return { content: '', uiElement: parsed };
+    // ⚠️ Only when the WHOLE reply is that object (#703 review): parseModelJson falls back to the first balanced
+    // {…} anywhere, so "prose, then a bare card" (prod 2026-11-08, org 40) would land here and lose its words —
+    // that shape is splitProseAndCard's, below. And only a card the page can DRAW (uiCards, generated from
+    // disruptive-ui-registry.js): {"type":"text",…} is a content block, not a card, and would put "Here it is"
+    // over nothing.
+    const bare = wholeJsonObject(stripped);
+    if (bare && typeof bare.reply !== 'string' && typeof bare.type === 'string' && !('uiElement' in bare) && UI_CARD_TYPES.has(bare.type)) {
+        return { content: '', uiElement: bare };
     }
     if (parsed && typeof parsed.reply === 'string') {
         const { card, extra } = firstCard(parsed);
@@ -4776,6 +4798,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
             // A card with no words: a line that points at it, never an empty bubble above it.
             if (uiElement && !content.trim()) content = CARD_ONLY_REPLY;
+            // A bare card the route's checks then REFUSED (wrong shape, a gate, an empty minutes card…): no card AND
+            // no words. Never an empty bubble — the retry line, and the card kept in the hidden row (#703 review).
+            if (!uiElement && !content.trim()) {
+                content = STRUCTURED_REPLY_FALLBACK;
+                if (!droppedCard) {
+                    droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
+                    droppedCard.content = `${droppedCard.content} (card sent on its own was refused)`;
+                }
+            }
         }
 
         // Written before the reply so a meeting card can carry its record's id: its Approve button

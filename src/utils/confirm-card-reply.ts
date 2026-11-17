@@ -236,6 +236,8 @@ export function firstCard(parsed: Record<string, unknown>): { card: unknown | nu
     // The card under some other key ("card", "proposal", the card's own type name…) — but only an object that
     // IS a card (a string `type`), and only when exactly one is there (Minute Taker run B, staging 2026-11-17:
     // "I've prepared a card" over a reply whose card never reached the page).
+    // An explicit `"uiElement": null` is the model saying "no card" — keep it (#703 review).
+    if ('uiElement' in parsed && parsed.uiElement === null) return { card: null, extra: 0 };
     const typed = Object.entries(parsed)
         .filter(([k, v]) => k !== 'reply' && isCard(v) && typeof (v as { type?: unknown }).type === 'string')
         .map(([, v]) => v);
