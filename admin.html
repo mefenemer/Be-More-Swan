@@ -6516,7 +6516,9 @@ function prApproveButton(kind, it, big) {
   return big
     ? `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">✅ Approve ${where}PR #${m[1]}</button>
        ${it.approvalNote ? _approvalNoteHtml(it.approvalNote) : ''}
-       <p class="text-[11px] text-gray-500">Approves it on GitHub, merges it (or sets it to merge itself once its checks pass) and moves this ticket on.</p>`
+       <p class="text-[11px] text-gray-500">${/reviewed commit [0-9a-f]{40}/.test(it.approvalNote || '')
+         ? 'Merges the reviewed commit now if its checks have passed (otherwise click again once they do) and moves this ticket on.'
+         : 'Approves it on GitHub, merges it (or sets it to merge itself once its checks pass) and moves this ticket on.'}</p>`
     : `<button type="button" data-pr-approve="${Number(it.id)}" onclick="approvePr('${kind}', ${Number(it.id)}, this)" class="mt-1.5 w-full text-xs font-bold px-2 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">✅ Approve ${where}PR #${m[1]}</button>`;
 }
 function prBlock(kind, it) {

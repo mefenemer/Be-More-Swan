@@ -156,6 +156,7 @@ await check('both ask-approval scripts run the gate; the Approve card shows it',
     const html = readFileSync('admin.html', 'utf8');
     assert.ok(html.includes('it.approvalNote ? _approvalNoteHtml(it.approvalNote)'));
     assert.ok(html.includes('data-review-gate'));
+    assert.ok(html.includes('Merges the reviewed commit now if its checks have passed'), 'the card must not promise auto-merge for a reviewed PR');
     const agent = readFileSync('.claude/agents/code-reviewer.md', 'utf8');
     assert.match(agent, /^model: claude-opus-5-5$/m, 'owner D3: Opus 5.5 for every review');
     assert.match(agent, /record-review <pr> --sha/);
