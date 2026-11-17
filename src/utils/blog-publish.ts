@@ -69,6 +69,67 @@ export async function stripMediaForSyndication(bodyMarkdown: string): Promise<st
 // `baseUrl` is this app's own origin (resolveBaseUrl), used only for the self-canonical fallback when
 // the org hasn't told us their public site URL. Optional: passing null just means a post with no
 // customer site + no baseUrl gets a null canonical (recomputed on next publish / read).
+type PayloadSource = Pick<BlogPostRow, 'title' | 'bodyMarkdown' | 'metaTitle' | 'metaDescription' | 'tags' | 'featureAssetId'>;
+
+// The live copy every reader-facing surface serves (widget-api, the /b/ permalink, hosted-site /blog,
+// the Swan Index). Built from the post's CURRENT columns; shared by publishBlogPost and
+// refreshLiveSnapshot so a refresh can never drift from what a fresh publish would write.
+export async function buildPublishedPayload(db: any, post: PayloadSource, organisationId: number) {
+    // Snapshot the hero/feature graphic as a STABLE reference (assetId, not a URL): presigned R2
+    // URLs expire, so widget-api resolves a fresh URL from this assetId at read time (US 2.1).
+    let featureImage: { assetId: number; alt: string; attribution: string | null } | null = null;
+    if (post.featureAssetId) {
+        const [asset] = await db
+            .select({ id: contentAssets.id, name: contentAssets.name, attributionName: contentAssets.attributionName })
+            .from(contentAssets)
+            .where(and(eq(contentAssets.id, post.featureAssetId), eq(contentAssets.organisationId, organisationId)))
+            .limit(1);
+        if (asset) featureImage = { assetId: asset.id, alt: asset.name || post.title, attribution: asset.attributionName };
+    }
+
+    // Render the embed-safe snapshot.
+    const html = await renderMarkdown(post.bodyMarkdown);
+    return {
+        html,
+        title: post.metaTitle || post.title,
+        description: post.metaDescription || await excerpt(post.bodyMarkdown, 200),
+        tags: post.tags,
+        featureImage,
+        renderedAt: new Date().toISOString(),
+    };
+}
+
+// An edit to a LIVE article (Blog Studio autosave, a new feature picture) reaches the blog.
+//
+// ⚠️ Until 2026-11-17 nothing did this: published_payload was written only by publishBlogPost, so a
+// customer who changed the pictures on a published post saw the old ones on their blog for ever,
+// while the Studio said "Saved" and chat said "live on your blog now" (kudzucollab.com).
+//
+// Rebuilds ONLY the payload + list thumbnail. Deliberately not a republish: no syndication (the
+// external copies were sent once and the adapters cannot edit), no provenance re-stamp, no
+// orchestration hand-off, publishedAt and slug untouched. The status='published' guard on the write
+// means an unpublish that lands meanwhile wins. Returns true when the live copy was rebuilt; false for
+// a post that isn't live (nothing to do) — callers report that to the author.
+export async function refreshLiveSnapshot(db: any, organisationId: number, postId: number): Promise<boolean> {
+    const live = and(eq(blogPosts.id, postId), eq(blogPosts.organisationId, organisationId), eq(blogPosts.status, 'published'));
+    const [post] = await db
+        .select({
+            title: blogPosts.title, bodyMarkdown: blogPosts.bodyMarkdown, metaTitle: blogPosts.metaTitle,
+            metaDescription: blogPosts.metaDescription, tags: blogPosts.tags, featureAssetId: blogPosts.featureAssetId,
+        })
+        .from(blogPosts)
+        .where(live)
+        .limit(1);
+    if (!post) return false;
+    const publishedPayload = await buildPublishedPayload(db, post, organisationId);
+    const rows = await db
+        .update(blogPosts)
+        .set({ publishedPayload, ...cardImageColumns(pickCardImage(publishedPayload)) })
+        .where(live)
+        .returning({ id: blogPosts.id });
+    return rows.length > 0;
+}
+
 export async function publishBlogPost(db: any, post: BlogPostRow, organisationId: number, baseUrl?: string | null): Promise<BlogPostRow> {
     const id = post.id;
 
@@ -103,28 +164,8 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         baseUrl,
     });
 
-    // Snapshot the hero/feature graphic as a STABLE reference (assetId, not a URL): presigned R2
-    // URLs expire, so widget-api resolves a fresh URL from this assetId at read time (US 2.1).
-    let featureImage: { assetId: number; alt: string; attribution: string | null } | null = null;
-    if (post.featureAssetId) {
-        const [asset] = await db
-            .select({ id: contentAssets.id, name: contentAssets.name, attributionName: contentAssets.attributionName })
-            .from(contentAssets)
-            .where(and(eq(contentAssets.id, post.featureAssetId), eq(contentAssets.organisationId, organisationId)))
-            .limit(1);
-        if (asset) featureImage = { assetId: asset.id, alt: asset.name || post.title, attribution: asset.attributionName };
-    }
-
-    // Render the immutable, embed-safe snapshot.
-    const html = await renderMarkdown(post.bodyMarkdown);
-    const publishedPayload = {
-        html,
-        title: post.metaTitle || post.title,
-        description: post.metaDescription || await excerpt(post.bodyMarkdown, 200),
-        tags: post.tags,
-        featureImage,
-        renderedAt: new Date().toISOString(),
-    };
+    const publishedPayload = await buildPublishedPayload(db, post, organisationId);
+    const featureImage = publishedPayload.featureImage;
 
     // Stamp provenance (create on first publish, refresh publishedAt on re-publish).
     // The AI flag comes from the shared predicate — this used to inline `jobId || blueprintId ||

@@ -22,6 +22,9 @@ import { isBlogDestinationId } from '../../src/utils/blog-destinations';
 import { normalizeKeywords, syncSwanIndexKeywords } from '../../src/utils/blog-keywords';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+// What the published copy is built from (buildPublishedPayload). robots/distribution are read live.
+export const LIVE_FIELDS = ['title', 'bodyMarkdown', 'tags', 'metaTitle', 'metaDescription'] as const;
+
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -78,5 +81,14 @@ export default withLambda(async (event: HandlerEvent) => {
     // A live article's Swan Index copy follows its keywords (blog-keywords.ts).
     if (Array.isArray(body.tags)) await syncSwanIndexKeywords(db, ctx.organisationId, [updated.id]);
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, updatedAt: updated.updatedAt, ...(Array.isArray(body.tags) ? { tags: updates.tags } : {}) }) };
+    // A live article's blog copy follows its words, title, keywords and SEO text (blog-publish.ts
+    // refreshLiveSnapshot). No-op unless the post is published. A failed rebuild must not fail the
+    // save — the words ARE saved — so it reports live:false and the Studio says Publish now updates it.
+    let live = false;
+    if (LIVE_FIELDS.some((k) => k in updates)) {
+        try { live = await (await import('../../src/utils/blog-publish')).refreshLiveSnapshot(db, ctx.organisationId, updated.id); }
+        catch (err) { console.warn(`[save-blog-draft] live copy not refreshed for post ${updated.id}:`, err instanceof Error ? err.message : err); }
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true, live, updatedAt: updated.updatedAt, ...(Array.isArray(body.tags) ? { tags: updates.tags } : {}) }) };
 });
