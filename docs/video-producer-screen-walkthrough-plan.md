@@ -269,9 +269,10 @@ Audio-driven "talking avatar" models on fal, the supplier we already use (no new
 | InfiniteTalk `fal-ai/infinitalk` | $0.20 | ~29 s per call | Too dear |
 
 - **No independent quality benchmark exists.** Like the Kling clip bake-off on 2026-11-01, **Phase A0
-  is a bake-off:** the same 45-second script in English, French and Polish, with one female and one male
-  face, through Kling Std, Kling Pro, OmniHuman 1.5, Fabric 720p and HeyGen Avatar IV. Score lip-sync,
-  eyes and blinking, head and hand movement, teeth, and drift over 45 s. Rerun every quarter, because the
+  is a bake-off.** As run on 2026-11-15: one ~10–13 s line each in English (female face), French (male face) and
+  Polish (female face), through Kling Std, Kling Pro, OmniHuman 1.5, Fabric 720p and HeyGen Avatar IV (15 clips),
+  plus one 37 s English drift clip and one Welsh clip on Kling Std. Judged on lip-sync, eyes and blinking, head
+  and hand movement, teeth, and drift. Rerun every quarter, because the
   rankings change monthly. The model is picked by env (`FAL_AVATAR_MODEL`), like `FAL_I2V_MODEL`.
 - **Long videos are made in chunks** of about 30 to 60 seconds, split at sentence ends, all from the
   same face picture, submitted **in parallel** (the background worker has a 15-minute cap; the
@@ -357,7 +358,7 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 
 | Phase | What | Size |
 |---|---|---|
-| **A0** | Bake-off (5 models × 2 faces × 3 languages), plus Welsh check on ElevenLabs; owner picks | S |
+| **A0** ✅ | Bake-off (5 models × 3 language lines, one face each; drift and Welsh clips), plus Welsh check on ElevenLabs; owner picked Kling Standard | S |
 | **A1** | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker (GUI + chat) | M |
 | **A2** | `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
 | **A3** | Screen walkthrough with AI presenter: covers from word timings (needs §3 Phases 1–2) | M |

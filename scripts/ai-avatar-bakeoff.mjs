@@ -7,10 +7,13 @@
 // alone. A longer English line goes through the expected default only, to look for drift. Writes every
 // file plus results.json (timings, cost at the price on each model's fal page on the day) to <outDir>.
 //
-// Spends real money (round 1, 2026-11-15: ≈ $23 on fal, a few cents of ElevenLabs). Keys are never printed:
+// Spends real money on the LIVE fal and ElevenLabs balances (round 1, 2026-11-15: $21.43 on fal, a few cents of
+// ElevenLabs) — check the fal balance first, and update MODELS' prices from each fal page. Keys are never printed:
 //   FAL_KEY=$(netlify env:get FAL_KEY --context production) \
 //   ELEVENLABS_API_KEY=$(netlify env:get ELEVENLABS_API_KEY --context production) \
-//   node scripts/ai-avatar-bakeoff.mjs <outDir> [step]      step = faces | voices | clips | drift | welsh | all (default)
+//   BAKEOFF_DATE=2026-11-15 node scripts/ai-avatar-bakeoff.mjs <outDir> [step]
+//     step = faces | voices | clips | drift | welsh | all (default: every step above, in order)
+//            | welshclip (on its own, after welsh: the eleven_v3 Welsh line through MODELS[0])
 // Each step skips files that already exist, so a rerun only redoes what failed.
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 const FAL = process.env.FAL_KEY;
 const EL = process.env.ELEVENLABS_API_KEY;
 const [outDir, step = 'all'] = process.argv.slice(2);
-if (!outDir) { console.error('usage: ai-avatar-bakeoff.mjs <outDir> [faces|voices|clips|drift|welsh|all]'); process.exit(1); }
+if (!outDir) { console.error('usage: ai-avatar-bakeoff.mjs <outDir> [faces|voices|clips|drift|welsh|all|welshclip]'); process.exit(1); }
 mkdirSync(outDir, { recursive: true });
 const want = (s) => step === 'all' || step === s;
 
@@ -41,7 +44,7 @@ const LINES = [
 const DRIFT = { id: 'en_male_long', face: 'male', voice: 'Fahco4VZzobUeiPqni1S', voiceName: 'Archer (en)', lang: 'en',
     text: "Welcome. I'm going to walk you through the whole thing, start to finish. First, the dashboard. Everything you need today is right here: your bookings, the messages waiting for a reply, and the money coming in this week. Next, let's add a new client. Type their name, their email and their phone number, then choose the service they want. It takes about ten seconds. Now, reminders. Every client gets a text the day before, so fewer people forget. And when the job's done, you send the invoice from the same screen, and they can pay by card straight away. That's it. Simple, and all in one place." };
 
-// Prices per output second from each model's fal page on 2026-11-15, at the resolution used.
+// Prices per output second from each model's fal page on 2026-11-15, at the resolution used. Re-read them on every rerun.
 const MODELS = [
     { id: 'fal-ai/kling-video/ai-avatar/v2/standard', label: 'Kling AI Avatar v2 Standard', usdPerS: 0.0562, input: (img, aud) => ({ image_url: img, audio_url: aud }) },
     { id: 'fal-ai/kling-video/ai-avatar/v2/pro', label: 'Kling AI Avatar v2 Pro', usdPerS: 0.115, input: (img, aud) => ({ image_url: img, audio_url: aud }) },
@@ -53,7 +56,7 @@ const MODELS = [
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const falAuth = () => { if (!FAL) throw new Error('FAL_KEY is not set'); return { Authorization: `Key ${FAL}`, 'Content-Type': 'application/json' }; };
 const resultsFile = join(outDir, 'results.json');
-const results = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, 'utf8')) : { date: '2026-11-15', faces: {}, voices: {}, clips: [], welsh: {} };
+const results = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, 'utf8')) : { date: process.env.BAKEOFF_DATE || new Date().toISOString().slice(0, 10), faces: {}, voices: {}, clips: [], welsh: {} };
 const save = () => writeFileSync(resultsFile, JSON.stringify(results, null, 2));
 
 async function falRun(modelId, input, timeoutMs = 20 * 60 * 1000) {
@@ -150,6 +153,7 @@ async function clip(model, line) {
 
 // Welsh: does ElevenLabs speak it? Speak one line, then have Scribe write down what it heard in Welsh.
 async function welsh() {
+    if (!EL) throw new Error('ELEVENLABS_API_KEY is not set');
     const text = 'Croeso! Heddiw, rydw i am ddangos i chi sut i archebu apwyntiad a chael eich talu, i gyd o un lle syml.';
     for (const [model, voice] of [['eleven_multilingual_v2', '6vIP9mPY4dr6w8krUg01'], ['eleven_v3', '6vIP9mPY4dr6w8krUg01']]) {
         const file = join(outDir, `welsh-${model}.mp3`);
@@ -169,6 +173,7 @@ async function welsh() {
             form.append('file', new Blob([readFileSync(file)], { type: 'audio/mpeg' }), 'welsh.mp3');
             const s = await fetch('https://api.elevenlabs.io/v1/speech-to-text', { method: 'POST', headers: { 'xi-api-key': EL }, body: form });
             const j = await s.json();
+            if (!s.ok) throw new Error(`scribe ${s.status}: ${JSON.stringify(j).slice(0, 300)}`);
             Object.assign(row, { ok: true, file: file.split('/').pop(), heard: j.text ?? JSON.stringify(j).slice(0, 300) });
         } catch (e) {
             Object.assign(row, { ok: false, error: String(e.message || e).slice(0, 400) });
@@ -188,6 +193,7 @@ if (want('welsh')) await welsh();
 if (step === 'welshclip') {
     const line = { id: 'cy_female', face: 'female', lang: 'cy' };
     const file = join(outDir, 'welsh-eleven_v3.mp3');
+    if (!existsSync(file) || !results.welsh.eleven_v3?.ok) { console.error('Run the welsh step first: no working eleven_v3 Welsh line yet.'); process.exit(1); }
     if (!results.voices[line.id]?.url) {
         results.voices[line.id] = { url: await falUpload(file, 'audio/mpeg'), seconds: durationOf(file), voice: 'Pepper (eleven_v3, cy)', lang: 'cy', text: results.welsh.eleven_v3?.text };
         save();
