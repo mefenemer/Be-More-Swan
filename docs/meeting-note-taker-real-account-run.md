@@ -115,7 +115,7 @@ ORDER BY meeting_record_id, id;
 | Asana tickets | B | ✅ | 4 tasks: 1220615169703322, …773693, …686301, 1220614692499888 | one per action item, all `synced`, in Mark's first project; Jira switched itself off |
 | Outlook follow-up | B | ✅ (server) | sent 17 Nov 14:37 via Outlook (mefenemer@hotmail.com) to +ana, +bo, +cara | once (`handoffs.email_meeting_followup.sentAt`); **check the inbox and Outlook's Sent Items by eye** |
 | Chat review cards | B | ⚠️ | add-email ✅ (card from a local run of the same code), shorten ✅, approve ✅ | the deployed chat lost its card 3 times out of 6 — see §6 |
-| No inbox = no email | C | ⏳ | | the Resend fallback was removed (owner, 2026-11-17) — see §6 |
+| No inbox = no email | C | ✅ | meeting 921, 17 Nov | switch-on refused (409 no_mailbox); a switch left on reads "On, but not sending"; the chat's approve card warned; approved → nothing sent, `followupNotSent` stamped, job completed (no retries); Inbox showed "Follow-up not sent"; **Send the follow-up now** refused with no mailbox, then (Gmail reconnected) sent once via Gmail and refused a second press ("already sent") |
 | Nothing early | A, A2 | ✅ | | nothing went anywhere before Approve |
 | Long transcript (60 min file, step 4) | any | ⏳ | | the 26 s limit, unproven so far |
 
@@ -154,6 +154,15 @@ Notion's connection only allowed `/api/auth/callback` (staging callback added); 
   (the card is built from the row and was right). The prose came from the model, not the meeting row.
 - **Connecting Outlook from the assistant's Connections tab returned to `integrations.html`**, not the tab
   (#664 fixed this for the actions' Connect links, not the mailbox rows).
+
+**Run C findings (2026-11-17):**
+- **The chat filed no meeting.** Pasted notes got "Here are the minutes…" as plain text with no minutes card (the
+  model copies the text-only shape of its earlier replies). Fixed by #706: the Minute Taker asks again whenever a
+  reply is prose or empty; proven in-process against staging (meeting 921 filed on the retry). #703 also keeps a
+  card sent bare or under another key, and turns an empty reply into a message plus a hidden row with its stop reason.
+- **The approve card says "including 4 action items for your task tracker" with no task tool switched on.**
+- A Gmail sign-in done outside the browser pane never reached staging (no row saved) — nothing to fix, but
+  "connected" should be checked on staging, not taken from the sign-in screen.
 
 **Still open:**
 - ~~Resend fallback (run C)~~ — **decided 2026-11-17: removed.** The owner does not want customers'
