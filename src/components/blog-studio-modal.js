@@ -1208,7 +1208,16 @@
       var editor = openWorkspace(made, title, video && video.words ? String(video.words) : '');
       // A video handed over by the Video Producer goes into the body straight away.
       if (video) attachInline({ assetId: Number(video.assetId) });
-      if (editor && editor.focus) editor.focus();   // drop straight into typing
+      var preset = state.presetArticleType;
+      state.presetArticleType = null;
+      if (preset && el('bs-ai-draft-form') && el('bs-ai-type')) {
+        // Opened to write a particular kind of article: the draft form is open with it chosen, and
+        // the cursor waits in the topic box. Nothing is drafted until they press the button.
+        el('bs-ai-type').value = preset;
+        el('bs-ai-draft-form').classList.remove('bs-hidden');
+        setStatus('bs-ai-draft-status', '');
+        el('bs-ai-topic').focus();
+      } else if (editor && editor.focus) editor.focus();   // drop straight into typing
     }).catch(function () {
       // The draft row may already exist; Try again reopens it rather than creating a second one.
       openFailed('Could not start a new draft: please try again.', made ? function () { loadExistingPost(made); } : startBlankPost);
@@ -3457,6 +3466,11 @@
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
     state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;
+    // "Type of article" chosen on the way in — the Mentor's Take Me There for a Top list (Phase 3).
+    // Only a key the select actually offers; anything else opens as before.
+    state.presetArticleType = typeof opts.articleType === 'string'
+      && ((window.ContentShapes && window.ContentShapes.articleTypes) || []).some(function (t) { return t.key === opts.articleType; })
+      ? opts.articleType : null;
     state.nextPostId = null;
     el('bs-approved').classList.add('bs-hidden');
     var setup = opts.mode === 'setup';

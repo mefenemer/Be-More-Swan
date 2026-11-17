@@ -20,6 +20,11 @@ export interface TakeMeTherePlace {
     notificationsTab?: 'messages';
     /** One assistant's page: the card needs an assistantId, and opens this tab on it. */
     assistantTab?: string;
+    /**
+     * Opens Blog Studio for that assistant with "Type of article" already chosen, instead of a tab
+     * (Top lists Phase 3: the Mentor suggests a list piece and the button starts one).
+     */
+    studio?: 'top_list';
 }
 
 export const TAKE_ME_THERE_PLACES: Readonly<Record<string, TakeMeTherePlace>> = {
@@ -58,6 +63,8 @@ export const TAKE_ME_THERE_PLACES: Readonly<Record<string, TakeMeTherePlace>> = 
     assistant_website: { label: 'the Website Assistant\'s Website tab', assistantTab: 'sitebuilder' },
     assistant_videos: { label: 'the Video Producer\'s Videos tab', assistantTab: 'videos' },
     mentor_plan: { label: 'your Business Mentor\'s Plan tab', assistantTab: 'mentorplan' },
+    // A new Top list article: Blog Studio, "Type of article: Top list" chosen (needs the Blog Writer's id).
+    blog_top_list: { label: 'the Blog Writer\'s Blog Studio, with "Top list" chosen', assistantTab: '', studio: 'top_list' },
 };
 
 export type TakeMeThereKey = keyof typeof TAKE_ME_THERE_PLACES;
@@ -73,6 +80,8 @@ export interface TakeMeThereCard {
     notificationsTab: string | null;
     assistantId: number | null;
     assistantTab: string | null;
+    /** Open Blog Studio with this preset rather than the assistant's page (see TakeMeTherePlace.studio). */
+    studio: 'top_list' | null;
 }
 
 /**
@@ -93,14 +102,15 @@ export function buildTakeMeThereCard(
         if (!who) return { error: 'I couldn\'t tell which assistant\'s page to open.' };
         return {
             type: 'mentor_take_me_there', summary, place: key,
-            label: place.label.replace(/^the assistant's|^the Brand Designer's|^the Website Assistant's|^the Video Producer's|^your Business Mentor's/, `${who.name}'s`),
+            label: place.label.replace(/^the assistant's|^the Brand Designer's|^the Website Assistant's|^the Video Producer's|^the Blog Writer's|^your Business Mentor's/, `${who.name}'s`),
             view: null, bizTab: null, notificationsTab: null, assistantId: who.id, assistantTab: place.assistantTab || null,
+            studio: place.studio ?? null,
         };
     }
     return {
         type: 'mentor_take_me_there', summary, place: key, label: place.label,
         view: place.view ?? null, bizTab: place.bizTab ?? null, notificationsTab: place.notificationsTab ?? null,
-        assistantId: null, assistantTab: null,
+        assistantId: null, assistantTab: null, studio: null,
     };
 }
 

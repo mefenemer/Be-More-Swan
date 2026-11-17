@@ -165,6 +165,8 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             platforms: platforms.length ? [...new Set(platforms)] : ['instagram'],
             ...(footage.length ? { footageAssetIds: footage, tighten: b.tighten !== false } : {}),
             shape: isVideoShape(b.shape) ? b.shape : '9:16',
+            // A countdown (Top lists Phase 3) is planned from scratch; own footage keeps its own order.
+            ...(b.countdown === true && !footage.length ? { countdown: true } : {}),
         },
     };
 }

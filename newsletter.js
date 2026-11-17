@@ -1524,7 +1524,8 @@
   function openTemplateModal() {
     const host = $('nl-template-list');
     if (!host) return;
-    host.innerHTML = state.templates.map((t) => `
+    const purpose = (state.current && state.current.purpose) || 'newsletter';
+    host.innerHTML = state.templates.filter((t) => templateFits(t.key, purpose)).map((t) => `
       <button type="button" data-nl-tpl="${esc(t.key)}"
         class="btn-secondary text-left px-3 py-2.5 rounded-xl border cursor-pointer">
         <p class="text-sm font-bold text-gray-900">${esc(t.label)}</p>
@@ -1544,6 +1545,12 @@
   // ── New issue ──────────────────────────────────────────────────────────────
 
   let newIssueChoice = { purpose: 'newsletter', template: '' };
+
+  /** Whether a layout may start this kind of email. The server sends `purposes` only for limited ones (Top 5). */
+  function templateFits(key, purpose) {
+    const t = state.templates.find((x) => x.key === key);
+    return !t || !Array.isArray(t.purposes) || t.purposes.includes(purpose);
+  }
 
   function openNewIssue() {
     newIssueChoice = { purpose: 'newsletter', template: '' };
@@ -1572,6 +1579,8 @@
         // announcement starts with a picture — and the author can override it in the row below.
         const p = state.purposes.find((x) => x.key === newIssueChoice.purpose);
         if (p && newIssueChoice.template) newIssueChoice.template = p.defaultTemplate;
+        // A layout this purpose can't use (the "Top 5" list is newsletters only) can't stay chosen.
+        if (newIssueChoice.template && !templateFits(newIssueChoice.template, newIssueChoice.purpose)) newIssueChoice.template = '';
         renderNewIssueChoices();
       }));
     }
@@ -1579,7 +1588,7 @@
       const suggested = (state.purposes.find((x) => x.key === newIssueChoice.purpose) || {}).defaultTemplate;
       tHost.innerHTML = tile(!newIssueChoice.template, 'Plain text',
         'Just words, in Markdown. What the assistant writes, and what most newsletters should be.', 'data-nt=""')
-        + state.templates.map((t) =>
+        + state.templates.filter((t) => templateFits(t.key, newIssueChoice.purpose)).map((t) =>
           tile(newIssueChoice.template === t.key, t.label + (t.key === suggested ? ' · suggested' : ''), t.description, `data-nt="${esc(t.key)}"`)).join('');
       tHost.querySelectorAll('[data-nt]').forEach((el) => el.addEventListener('click', () => {
         newIssueChoice.template = el.getAttribute('data-nt');
