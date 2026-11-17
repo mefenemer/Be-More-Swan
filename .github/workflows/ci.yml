@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  checks:
-    name: Typecheck + tests
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,21 +23,42 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      # Typecheck + every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully).
-      # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
-      # Same checks as `npm run test:all`, but tsc runs alongside the tests instead of before them,
-      # and the runner runs one test file per core. The job name stays: "Protect main" requires it.
-      - name: Typecheck + tests (side by side)
+      - run: npx tsc --noEmit
+
+  tests:
+    name: Tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    # Every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully), split across three
+    # runners: each takes every third file (scripts/run-tests.mjs TEST_SHARD) and runs one per core.
+    # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: node scripts/run-tests.mjs
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/3
+
+  # The "Protect main" ruleset requires a check named exactly "Typecheck + tests". This job carries
+  # that name and passes only when the typecheck AND all three test runners passed — a skipped,
+  # cancelled or failed one fails it. Same checks as `npm run test:all`, just spread out.
+  checks:
+    name: Typecheck + tests
+    needs: [typecheck, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Typecheck and every test runner passed
         run: |
-          # Steps run under `bash -e`: capture each exit code with `||` so one failure can't hide the other.
-          npx tsc --noEmit > "$RUNNER_TEMP/tsc.log" 2>&1 &
-          tsc_pid=$!
-          tests=0; node scripts/run-tests.mjs || tests=$?
-          tsc=0; wait $tsc_pid || tsc=$?
-          echo "──────── tsc --noEmit (exit $tsc) ────────"; cat "$RUNNER_TEMP/tsc.log"
-          if [ $tsc -ne 0 ]; then echo "::error::Typecheck failed"; fi
-          if [ $tests -ne 0 ]; then echo "::error::Tests failed"; fi
-          [ $tsc -eq 0 ] && [ $tests -eq 0 ]
+          echo "typecheck: ${{ needs.typecheck.result }}  tests: ${{ needs.tests.result }}"
+          [ "${{ needs.typecheck.result }}" = success ] && [ "${{ needs.tests.result }}" = success ]
 
   e2e:
     name: Browser smoke tests (Playwright ${{ matrix.shard }}/2)

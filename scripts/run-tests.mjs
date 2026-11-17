@@ -61,6 +61,11 @@ if (process.env.TEST_SHARD && !shard) {
 }
 if (shard) {
     const [i, n] = [Number(shard[1]), Number(shard[2])];
+    // An out-of-range shard would select nothing and "pass" — fail loudly instead.
+    if (i < 1 || i > n) {
+        console.error(`TEST_SHARD ${i}/${n} is out of range: the first number must be 1–${n}.`);
+        process.exit(1);
+    }
     selected = files.filter((_, k) => k % n === i - 1);
 }
 
