@@ -77,7 +77,7 @@ check('Off is sent the way each 5.5 model accepts it (Sonnet 5.5 rejects "disabl
 
 check('no request ends on an assistant turn (5.5 rejects prefill) in the migrated chat retry', () => {
     const chat = read('netlify/functions/chat-orchestrator.ts');
-    assert.ok(/\{ role: 'assistant' as const, content: raw \}, \{ role: 'user' as const, content: CARD_FORMAT_RETRY \}/.test(chat));
+    assert.ok(/\{ role: 'assistant' as const, content: raw\.trim\(\) \|\| '\(no reply\)' \}, \{ role: 'user' as const, content: strictProse \? JSON_FORMAT_RETRY : CARD_FORMAT_RETRY \}/.test(chat));
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}\n`);
