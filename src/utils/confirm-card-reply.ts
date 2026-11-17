@@ -233,5 +233,12 @@ export function firstCard(parsed: Record<string, unknown>): { card: unknown | nu
             if (cards.length) return { card: cards[0], extra: cards.length - 1 };
         }
     }
+    // The card under some other key ("card", "proposal", the card's own type name…) — but only an object that
+    // IS a card (a string `type`), and only when exactly one is there (Minute Taker run B, staging 2026-11-17:
+    // "I've prepared a card" over a reply whose card never reached the page).
+    const typed = Object.entries(parsed)
+        .filter(([k, v]) => k !== 'reply' && isCard(v) && typeof (v as { type?: unknown }).type === 'string')
+        .map(([, v]) => v);
+    if (typed.length === 1) return { card: typed[0], extra: 0 };
     return { card: null, extra: 0 };
 }
