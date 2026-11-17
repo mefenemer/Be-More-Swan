@@ -32,6 +32,8 @@ export const LINKEDIN_PAGE_PICK_TTL_MS = 10 * 60 * 1000;
 export type PendingPagePick = {
     organisationId: number;
     assistantId: number | null;
+    /** The page to send the person back to, when it differs from the binding (Blog Writer → pool). */
+    returnAssistantId?: number | null;
     pages: LinkedInPage[];
     tokenExpiresAt: string | null;
     expiresAt: number;

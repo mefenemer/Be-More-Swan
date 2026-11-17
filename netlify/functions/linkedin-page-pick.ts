@@ -33,7 +33,7 @@ export default withLambda(async (event) => {
     }
 
     if (event.httpMethod === 'GET') {
-        return json(200, { pages: pending.pages, assistantId: pending.assistantId });
+        return json(200, { pages: pending.pages, assistantId: pending.returnAssistantId ?? pending.assistantId });
     }
 
     let urn = '';
@@ -47,5 +47,5 @@ export default withLambda(async (event) => {
     });
     await deleteSecret(db, key).catch(() => {});
     if (!bound.ok) return json(409, { error: 'tenant_collision', collision: bound.collisionAttemptId });
-    return json(200, { ok: true, page: page.name, assistantId: pending.assistantId });
+    return json(200, { ok: true, page: page.name, assistantId: pending.returnAssistantId ?? pending.assistantId });
 });

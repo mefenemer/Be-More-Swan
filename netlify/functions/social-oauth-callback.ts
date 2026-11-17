@@ -10,7 +10,7 @@ import { systemConnections, auditLogs, users, userOrganisations } from '../../db
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { isConnectAllowedForAssistant, connectViaBlogDestination } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
@@ -62,17 +62,25 @@ export default withLambda(async (event) => {
     }
 
     const organisationId = parseInt(storedState.organisationId ?? '0');
-    const assistantId = storedState.assistantId ? parseInt(storedState.assistantId) : null;
+    // Where the person started: every redirect below returns them to this assistant's page.
+    const returnAssistantId = storedState.assistantId ? parseInt(storedState.assistantId) : null;
+    // Who the connection is BOUND to. Usually the same assistant; null (the workspace pool) when it
+    // was allowed only as a blog destination — see the check below.
+    let assistantId = returnAssistantId;
 
     // Connection sandboxing: if connecting for a specific assistant, this platform
     // must be relevant to that assistant's role.
-    if (assistantId) {
-        const assistant = await resolveAssistantRole(db, organisationId, assistantId);
+    if (returnAssistantId) {
+        const assistant = await resolveAssistantRole(db, organisationId, returnAssistantId);
         // A Company Page is a LinkedIn connection as far as relevance goes.
         const service = platform === 'linkedin_page' ? 'linkedin' : platform;
-        if (!assistant || !isServiceAllowedForAssistant(service, assistant)) {
+        if (!assistant || !isConnectAllowedForAssistant(service, assistant)) {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=connection_not_relevant&platform=${platform}` }, body: '' };
         }
+        // The Blog Writer's LinkedIn card: the connection joins the workspace pool rather than
+        // being bound to the Blog Writer, so it never takes a reconnect away from the Social Media
+        // Manager and the Blog Writer never counts as holding a social connection.
+        if (connectViaBlogDestination(service, assistant)) assistantId = null;
     }
 
     // Must be byte-identical to the redirect_uri sent at authorize time, or the token exchange is
@@ -162,13 +170,13 @@ export default withLambda(async (event) => {
             body: JSON.stringify({ organisationId, platform: 'linkedin' }),
         }).catch(() => {});
 
-        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
     }
 
     // ── LinkedIn Company Page (Community Management app) ─────────────────────
     // Redirects say platform=linkedin: to the user and the workspace toasts this IS LinkedIn.
     if (platform === 'linkedin_page') {
-        const fail = (reason: string) => ({ statusCode: 302, headers: { Location: `/workspace.html?oauth_error=${reason}&platform=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' });
+        const fail = (reason: string) => ({ statusCode: 302, headers: { Location: `/workspace.html?oauth_error=${reason}&platform=linkedin${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' });
         const clientId     = process.env.LINKEDIN_COMMUNITY_CLIENT_ID;
         const clientSecret = process.env.LINKEDIN_COMMUNITY_CLIENT_SECRET;
         if (!clientId || !clientSecret || !linkedinPageAccessEnabled()) return fail('not_configured');
@@ -199,16 +207,16 @@ export default withLambda(async (event) => {
 
         if (pages.length > 1) {
             // Several Pages: workspace.html opens a picker (linkedin-page-pick.ts) on ?linkedin_pick=1.
-            const pending: PendingPagePick = { organisationId, assistantId, pages, tokenExpiresAt: tokenExpiresAt?.toISOString() ?? null, expiresAt: Date.now() + LINKEDIN_PAGE_PICK_TTL_MS };
+            const pending: PendingPagePick = { organisationId, assistantId, returnAssistantId, pages, tokenExpiresAt: tokenExpiresAt?.toISOString() ?? null, expiresAt: Date.now() + LINKEDIN_PAGE_PICK_TTL_MS };
             await storeSecret(db, linkedInPagePickKey(userId), pending);
-            return { statusCode: 302, headers: { Location: `/workspace.html?linkedin_pick=1${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+            return { statusCode: 302, headers: { Location: `/workspace.html?linkedin_pick=1${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
         }
 
         const bound = await bindLinkedInPage(db, { organisationId, userId, assistantId, page: pages[0], tokenExpiresAt });
         if (!bound.ok) {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=linkedin${collisionParam(bound.collisionAttemptId)}` }, body: '' };
         }
-        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
     }
 
     // ── X (Twitter) ───────────────────────────────────────────────────────────
@@ -277,7 +285,7 @@ export default withLambda(async (event) => {
         }
         await db.insert(auditLogs).values({ actionType: existing ? 'x_reconnected' : 'x_connected', resourceType: 'system_connections', resourceId: xUserId, newState: { organisationId, username: xUsername } });
 
-        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=x${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=x${returnAssistantId ? `&assistantId=${returnAssistantId}` : ''}` }, body: '' };
     }
 
     return { statusCode: 400, body: 'Unknown platform' };
