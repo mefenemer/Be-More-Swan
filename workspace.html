@@ -22008,6 +22008,11 @@ document.addEventListener('post:actionFinished', (e) => {
     if (!d.ok || !_pceChatIsThisPost(d.postIds)) return;
     if (d.action === 'video_version') return;   // the post itself is unchanged
     if (['shorter', 'longer', 'voiceover', 'captions', 'time_text', 'carousel'].includes(d.action)) {
+        // ⚠️ Forget the format answer first. The refresh's own _rqLoadRoutes call is unforced and
+        // returns early on the answer cached for this post — which, after a carousel, was worked out
+        // when the post had NO media: the tab stayed struck through with "instagram cannot publish
+        // without media" over five slides (staging, 2026-11-17, post 206).
+        _rqRoutesFor = null;
         _rqOpenPostReview(_rqReviewPostId, { refresh: true });
         return;
     }
