@@ -12,9 +12,54 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+  actions: read   # the promote PR reads staging's push run (dedupe + checks below)
+
 jobs:
+  # ── One run per commit on a promote PR ──────────────────────────────────────────────────────────
+  # A push to staging while a staging → main PR is open fires CI twice on the SAME commit: once for
+  # the push, once for the PR. When staging already contains main, the PR's merge result IS that
+  # commit, so the PR run reuses the push run: the heavy jobs are skipped and the required
+  # "Typecheck + tests" check reports the push run's result. If main has commits staging lacks (a
+  # hotfix not yet merged back), or no push run is found, everything runs as normal.
+  dedupe:
+    name: Reuse staging's push run
+    if: >-
+      github.event_name == 'pull_request' && github.head_ref == 'staging' && github.base_ref == 'main'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      push_run: ${{ steps.find.outputs.push_run }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq .status)
+          if [ "$status" != ahead ] && [ "$status" != identical ]; then
+            echo "main has commits staging lacks (compare: $status), so the merge result differs: running everything."
+            exit 0
+          fi
+          # The push and the PR fire together; give the push run a minute to appear.
+          for i in $(seq 1 12); do
+            id=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=staging&head_sha=$HEAD" --jq '.workflow_runs[0].id // empty')
+            if [ -n "$id" ]; then
+              echo "Reusing https://github.com/$REPO/actions/runs/$id"
+              echo "push_run=$id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "No push run for $HEAD on staging: running everything."
+
   typecheck:
     name: Typecheck
+    needs: dedupe
+    if: ${{ !cancelled() && needs.dedupe.outputs.push_run == '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -27,6 +72,8 @@ jobs:
 
   tests:
     name: Tests (${{ matrix.shard }}/3)
+    needs: dedupe
+    if: ${{ !cancelled() && needs.dedupe.outputs.push_run == '' }}
     runs-on: ubuntu-latest
     # Every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully), split across three
     # runners: each takes every third file (scripts/run-tests.mjs TEST_SHARD) and runs one per core.
@@ -49,19 +96,46 @@ jobs:
   # The "Protect main" ruleset requires a check named exactly "Typecheck + tests". This job carries
   # that name and passes only when the typecheck AND all three test runners passed — a skipped,
   # cancelled or failed one fails it. Same checks as `npm run test:all`, just spread out.
+  # On a promote PR reusing staging's push run, it waits for that run's "Typecheck + tests" instead.
   checks:
     name: Typecheck + tests
-    needs: [typecheck, tests]
+    needs: [dedupe, typecheck, tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Same result as staging's push run
+        if: needs.dedupe.outputs.push_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ needs.dedupe.outputs.push_run }}
+          NAME: Typecheck + tests
+        run: |
+          url="https://github.com/$REPO/actions/runs/$RUN"
+          echo "This commit's checks run on staging's push: $url"
+          for i in $(seq 1 120); do   # up to 30 minutes
+            line=$(gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[] | select(.name == env.NAME) | "\(.status) \(.conclusion // "")"' | head -1)
+            if [ "${line%% *}" = completed ]; then
+              conclusion="${line#* }"
+              echo "\"$NAME\" on the push run: $conclusion"
+              [ "$conclusion" = success ] && exit 0
+              echo "::error::\"$NAME\" did not pass on staging's push run ($conclusion): $url. Fix it on staging, or re-run that job and then this one."
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "::error::Timed out after 30 minutes waiting for \"$NAME\" on $url"
+          exit 1
       - name: Typecheck and every test runner passed
+        if: needs.dedupe.outputs.push_run == ''
         run: |
           echo "typecheck: ${{ needs.typecheck.result }}  tests: ${{ needs.tests.result }}"
           [ "${{ needs.typecheck.result }}" = success ] && [ "${{ needs.tests.result }}" = success ]
 
   e2e:
     name: Browser smoke tests (Playwright ${{ matrix.shard }}/3)
+    needs: dedupe
+    if: ${{ !cancelled() && needs.dedupe.outputs.push_run == '' }}
     runs-on: ubuntu-latest
     # Three runners, each taking a third of the specs with Playwright's usual 2 workers: same tests,
     # same retries, about a third of the wall time. Not a required check, so the name can carry the shard.
