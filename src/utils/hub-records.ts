@@ -1,42 +1,66 @@
 // Structured assistant output filed into assistant_records (the Inbox / Data Hub tabs). Used by the chat
 // (chat-orchestrator.ts) and the Meeting Note Taker's "New meeting" form (netlify/functions/meeting-minutes.ts),
-// so both write a record the same way.
+// so both write a record the same way. New rows start pending_approval (the column default), which is what
+// puts them in the Inbox.
 //
-// Re-processing the SAME notes refreshes the record instead of adding a second one — but only a record that is
-// still waiting for approval and was written in the last hour (REFRESH_WINDOW_MS). Before 2026-11-17 the match
-// was on the title alone, forever: three different 60-minute meetings the model titled alike ("Weekly
-// leadership meeting — 17 Nov 2026") all landed in one record, and a later meeting could silently rewrite an
-// APPROVED one whose follow-up and tasks had already gone out. Anything else is a new record; when its title is
-// already taken, the date and time are added so the two can be told apart in the Inbox.
-// New rows start pending_approval (the column default), which is what puts them in the Inbox.
+// ── Two rules, by record type ─────────────────────────────────────────────────────────────────────
+// LEADS, ENRICHMENT, INVOICES, TICKETS: upsert on (assistant, recordType, title) — the title IS the record's
+// identity (the lead's name, the client on an aging invoice). A re-score or a re-chase refreshes the one row.
+// Unchanged since before 2026-11-17: #719 briefly put every type under the meeting rule below, which would
+// have added a new dated row on every chat run — duplicate leads and invoices, inflated goal counts, and an
+// approved lead coming back as a new pending one (a second outreach email). Review of #719, 2026-11-17.
+//
+// MEETINGS: a title is NOT an identity — the model titles different meetings alike ("Weekly leadership
+// meeting — 17 Nov 2026"), and matching on it let a later meeting overwrite an earlier one's summary, decisions
+// and tasks, even an APPROVED one whose follow-up had gone out (staging timing test, record #925). So a meeting
+// is only ever refreshed by an IDENTICAL re-run: a record of the same title (or that title with a date and
+// time added) that is still waiting for approval and carries exactly the same content. Anything else is a new
+// record, with the date and time added when the title is already taken. A clock window was tried first (#719)
+// and still let two different meetings filed within the hour overwrite each other.
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, like, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { assistantRecords } from '../../db/schema';
 
 export type HubRecord = { recordType: string; title: string; status: string | null; data: unknown };
 
-/** How long after it was written a waiting record may still be refreshed by the same notes. */
-export const REFRESH_WINDOW_MS = 60 * 60 * 1000;
+/** How many same-titled meetings are compared for an identical re-run. */
+export const MEETING_MATCH_LOOKBACK = 10;
 
-type Existing = { id: number; approvalStatus: string | null; createdAt: Date | string };
+type MeetingCandidate = { id: number; title: string; approvalStatus: string | null; data: unknown };
+
+/** Stable JSON for comparing a re-run's content: object keys sorted, so key order can't hide a match. Pure. */
+export function stableJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value as object).sort().map((k) => `${JSON.stringify(k)}:${stableJson((value as Record<string, unknown>)[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(value ?? null);
+}
 
 /**
- * Pure: refresh the record with this title, or write a new one (with the date and time added when the title
- * is taken). `existing` is the newest record with the same title, or null.
+ * Pure: for a MEETING, refresh an identical waiting re-run, or insert — under its own title when that title is
+ * free, else with the date and time added. `candidates` are this assistant's meetings with this title or this
+ * title plus a "(date, time)", newest first.
  */
-export function hubWriteDecision(existing: Existing | null, title: string, now: Date):
+export function meetingWriteDecision(candidates: readonly MeetingCandidate[], rec: HubRecord, now: Date):
     { refresh: number } | { insert: string } {
-    if (!existing) return { insert: title };
-    const age = now.getTime() - new Date(existing.createdAt).getTime();
-    if (existing.approvalStatus === 'pending_approval' && age >= 0 && age <= REFRESH_WINDOW_MS) return { refresh: existing.id };
-    return { insert: titleWithTime(title, now) };
+    const content = stableJson(rec.data);
+    const same = candidates.find((c) => c.approvalStatus === 'pending_approval' && stableJson(c.data) === content);
+    if (same) return { refresh: same.id };
+    const taken = candidates.some((c) => c.title === rec.title);
+    return { insert: taken ? titleWithTime(rec.title, now) : rec.title };
 }
 
 /** Pure: "Weekly team meeting" → "Weekly team meeting (17 Nov 2026, 17:12)". UK time: the product is UK-first. */
 export function titleWithTime(title: string, now: Date): string {
     const when = now.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
     return `${title} (${when})`.slice(0, 300);
+}
+
+/** LIKE pattern for "<title> (…" with the title's own % _ \ taken literally. Pure. */
+export function timedTitlePattern(title: string): string {
+    return `${title.replace(/[\\%_]/g, (c) => `\\${c}`)} (%`;
 }
 
 /** Saves each record and returns their ids in order. Never throws: a failure is logged and skipped. */
@@ -50,31 +74,43 @@ export async function persistHubRecords(
     if (records.length === 0) return ids;
     try {
         for (const rec of records) {
-            const [existing] = await db
-                .select({ id: assistantRecords.id, approvalStatus: assistantRecords.approvalStatus, createdAt: assistantRecords.createdAt })
-                .from(assistantRecords)
-                .where(and(
-                    eq(assistantRecords.organisationId, orgId),
-                    eq(assistantRecords.aiAssistantId, aiAssistantId),
-                    eq(assistantRecords.recordType, rec.recordType),
-                    eq(assistantRecords.title, rec.title),
-                ))
-                .orderBy(desc(assistantRecords.createdAt))
-                .limit(1);
-            const decision = hubWriteDecision(existing ?? null, rec.title, new Date());
+            const scope = and(
+                eq(assistantRecords.organisationId, orgId),
+                eq(assistantRecords.aiAssistantId, aiAssistantId),
+                eq(assistantRecords.recordType, rec.recordType),
+            );
+            let refreshId: number | null = null;
+            let insertTitle = rec.title;
+            if (rec.recordType === 'meeting') {
+                const candidates = await db
+                    .select({ id: assistantRecords.id, title: assistantRecords.title, approvalStatus: assistantRecords.approvalStatus, data: assistantRecords.data })
+                    .from(assistantRecords)
+                    .where(and(scope, or(eq(assistantRecords.title, rec.title), like(assistantRecords.title, timedTitlePattern(rec.title)))))
+                    .orderBy(desc(assistantRecords.createdAt))
+                    .limit(MEETING_MATCH_LOOKBACK);
+                const decision = meetingWriteDecision(candidates, rec, new Date());
+                if ('refresh' in decision) refreshId = decision.refresh; else insertTitle = decision.insert;
+            } else {
+                const [existing] = await db
+                    .select({ id: assistantRecords.id })
+                    .from(assistantRecords)
+                    .where(and(scope, eq(assistantRecords.title, rec.title)))
+                    .limit(1);
+                refreshId = existing?.id ?? null;
+            }
             // source stays 'chat' for the form too: both are written by the assistant's model from the
             // user's own notes (the column's CHECK allows chat, csv_import, integration).
-            if ('refresh' in decision) {
+            if (refreshId != null) {
                 await db.update(assistantRecords)
                     .set({ status: rec.status, data: rec.data, source: 'chat', updatedAt: new Date() })
-                    .where(eq(assistantRecords.id, decision.refresh));
-                ids.push(decision.refresh);
+                    .where(eq(assistantRecords.id, refreshId));
+                ids.push(refreshId);
             } else {
                 const [made] = await db.insert(assistantRecords).values({
                     organisationId: orgId,
                     aiAssistantId,
                     recordType: rec.recordType,
-                    title: decision.insert,
+                    title: insertTitle,
                     status: rec.status,
                     source: 'chat',
                     data: rec.data,

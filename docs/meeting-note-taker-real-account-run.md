@@ -173,8 +173,11 @@ and approve cards came back for each: **9 of 9 cards**, no dropped-card rows. No
 **Timing-test finding (2026-11-17): a meeting with the same title overwrote the earlier one.** The three
 timing runs all landed in ONE record (#925): records were matched on the title forever, so a later meeting
 the model titled alike replaced the earlier one's summary, decisions and action items — even an approved
-one. Fixed (`src/utils/hub-records.ts`): only a meeting still waiting for approval and written in the last
-hour is refreshed; anything else is a new meeting, with the date and time added when the title is taken.
+one. Fixed (`src/utils/hub-records.ts`): a meeting is only refreshed by an IDENTICAL re-run (same title or that
+title with a date and time added, still waiting for approval, exactly the same content); anything else is a new
+meeting, with the date and time added when the title is taken. A one-hour window (#719) was replaced (PR after
+#719's review): it still let two different meetings filed within the hour overwrite each other, and it had been
+applied to leads, invoices and tickets too, which must keep refreshing by title.
 
 **Still open:**
 - ~~Resend fallback (run C)~~ — **decided 2026-11-17: removed.** The owner does not want customers'
