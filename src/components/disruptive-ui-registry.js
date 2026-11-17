@@ -4917,7 +4917,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Meeting Action Proposal Card (Meeting Note Taker chat) ─────────
   // { type: 'meeting_action_proposal', action: 'approve'|'add_email'|'edit_followup'|'reject', recordId,
-  //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, noMailbox?, missing?, tasks?,
+  //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, noMailbox?, taskTool?, missing?, tasks?,
   //   attendeeName?, email?, attendees?, before?, followupEmail?, note? }
   //
   // The Inbox's buttons on a meeting, from chat (finish plan step 6). Every fact comes from the meeting's
@@ -4955,7 +4955,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       const to = Array.isArray(ui.to) ? ui.to : [];
       const missing = Array.isArray(ui.missing) ? ui.missing : [];
       detail = `
-        <p class="text-sm text-gray-700 mt-2">Approving sends it to the connections switched on for this assistant${Number(ui.tasks) ? `, including ${esc(String(ui.tasks))} action item${Number(ui.tasks) === 1 ? '' : 's'} for your task tracker` : ''}.</p>
+        <p class="text-sm text-gray-700 mt-2">Approving sends it to the connections switched on for this assistant${!Number(ui.tasks) || ui.taskTool === null ? ''
+          // The task tool by name when the server said which; "your task tracker" on a card made before it did.
+          : `, including ${esc(String(ui.tasks))} action item${Number(ui.tasks) === 1 ? '' : 's'} for ${typeof ui.taskTool === 'string' ? esc(ui.taskTool) : 'your task tracker'}`}.</p>
+        ${Number(ui.tasks) && ui.taskTool === null ? `<p class="text-xs text-gray-600 mt-1">No task tool is switched on, so the ${esc(String(ui.tasks))} action item${Number(ui.tasks) === 1 ? ' stays' : 's stay'} in the Inbox.</p>` : ''}
         ${ui.noMailbox
           ? `<p class="text-xs text-amber-800 mt-2">The follow-up email won’t be sent: no Gmail or Outlook is connected, and follow-ups only go from your own inbox. Connect one on the Connections tab first — or approve now and use “Send the follow-up now” in the Inbox once it’s connected.</p>`
           : to.length ? `<p class="text-xs text-gray-600 mt-2 break-words">Follow-up email to: ${to.map((x) => esc(x)).join(', ')}</p>` : ''}

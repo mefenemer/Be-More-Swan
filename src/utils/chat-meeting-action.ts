@@ -19,10 +19,11 @@
 // ⚠️ Never throws.
 
 import { createHash } from 'node:crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { assistantRecords } from '../../db/schema';
+import { activeScenarios, assistantRecords, integrationScenarios } from '../../db/schema';
 import { followupBlockedByNoMailbox } from './mailbox-connected';
+import { TASK_TOOL_RECIPES } from '../config/recipe-settings';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -102,6 +103,26 @@ export async function buildMeetingsSnapshot(db: Db, organisationId: number, aiAs
 
 /** Said to the model when the follow-up action is on but no Gmail or Outlook is connected. */
 export const NO_MAILBOX_SNAPSHOT_LINE = 'FOLLOW-UP EMAILS ARE NOT SENDING: the follow-up action is switched on, but no Gmail or Outlook is connected. Follow-ups only ever go from the user’s own inbox — never from Be More Swan’s address — so approving a meeting now will NOT email the attendees. Say so whenever approval or the follow-up comes up, and tell them to connect Gmail or Outlook on the Connections tab first. A meeting already approved without one shows "Send the follow-up now" in the Inbox once it is connected.';
+
+/** Which task tool this assistant has switched on ('Jira' / 'Asana'), or null. Undefined on a read failure (the card keeps its old wording). */
+export async function taskToolOn(db: Db, organisationId: number, aiAssistantId: number): Promise<string | null | undefined> {
+    try {
+        const [row] = await db.select({ key: integrationScenarios.scenarioKey })
+            .from(activeScenarios)
+            .innerJoin(integrationScenarios, eq(activeScenarios.scenarioId, integrationScenarios.id))
+            .where(and(
+                eq(activeScenarios.organisationId, organisationId),
+                eq(activeScenarios.assistantId, aiAssistantId),
+                eq(activeScenarios.isEnabled, true),
+                inArray(integrationScenarios.scenarioKey, [...TASK_TOOL_RECIPES]),
+            )).limit(1);
+        if (!row) return null;
+        return row.key.startsWith('jira') ? 'Jira' : 'Asana';
+    } catch (err) {
+        console.error('[chat-meeting-action] could not read the task tool (non-fatal)', err);
+        return undefined;
+    }
+}
 
 /** Pure: the snapshot text from the rows. */
 export function formatMeetingsSnapshot(
@@ -188,6 +209,8 @@ export interface MeetingActionCard {
     to?: string[];
     /** approve: the follow-up action is on but no Gmail or Outlook is connected — it won't be sent. */
     noMailbox?: boolean;
+    /** approve: the task tool switched on ('Jira' / 'Asana'), or null when none is — the action items then go nowhere. */
+    taskTool?: string | null;
     missing?: string[];
     tasks?: number;
     /** add_email: the attendee, and the full attendees list the click writes back. */
@@ -253,7 +276,10 @@ export async function resolveMeetingActionProposal(
         const rec = await loadMeeting(db, organisationId, aiAssistantId, req.recordId);
         if (!rec) return null;
         const card = buildMeetingActionCard(rec, aiAssistantId, req);
-        if (card.action === 'approve' && !card.blocked) card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);
+        if (card.action === 'approve' && !card.blocked) {
+            card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);
+            card.taskTool = await taskToolOn(db, organisationId, aiAssistantId);
+        }
         return card;
     } catch (err) {
         console.error('[chat-meeting-action] could not resolve the proposal (non-fatal)', err);
@@ -328,7 +354,7 @@ export async function refreshMeetingActionCards<M extends { uiElement: unknown }
             const why = settledReason(ui, rec);
             if (why) return { ...m, uiElement: { ...ui, approvalStatus: rec?.approvalStatus ?? ui.approvalStatus, settled: true, blocked: why } };
             // An approve card made before a mailbox was connected (or after one went away) says the truth now.
-            if (ui.action === 'approve') return { ...m, uiElement: { ...ui, noMailbox: await followupBlockedByNoMailbox(db, organisationId, aiAssistantId) } };
+            if (ui.action === 'approve') return { ...m, uiElement: { ...ui, noMailbox: await followupBlockedByNoMailbox(db, organisationId, aiAssistantId), taskTool: await taskToolOn(db, organisationId, aiAssistantId) } };
             return m;
         } catch (err) {
             console.error('[chat-meeting-action] could not refresh a stored card (non-fatal)', err);
