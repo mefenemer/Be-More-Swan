@@ -1,0 +1,18 @@
+{
+  "_about": "Every AI presenter. ONE list, read by src/lib/presenters.ts (server) and src/components/presenter-picker.js (browser, fetched from /src/public/presenter-catalogue.json). docs/video-producer-screen-walkthrough-plan.md §11.3 (Phase A1, decision D-A2: 12 to start, 6 female and 6 male, mixed ages and backgrounds, all made up). Every face was drawn by FLUX.2 Pro from a written description (scripts/make-presenters.mjs) and checked by eye: none is a real person and none is named after one. `voices.en` is the presenter's own English voice; every other language uses the catalogue voice of the same gender (presenterVoice). `face` is the full-size picture the avatar model is given; `thumb` and `sample` (a 5-second English hello, made once with Kling AI Avatar v2 Standard) are what the picker shows, so choosing a presenter never spends anything.",
+  "model": "fal-ai/kling-video/ai-avatar/v2/standard",
+  "presenters": [
+    { "id": "amara", "name": "Amara", "gender": "female", "age": "30s", "look": "A woman in her thirties with braided hair, in a mustard jumper", "voices": { "en": "british_woman" } },
+    { "id": "priya", "name": "Priya", "gender": "female", "age": "20s", "look": "A young woman with long dark hair, in a teal blouse", "voices": { "en": "en_gb_lucy" } },
+    { "id": "grace", "name": "Grace", "gender": "female", "age": "50s", "look": "A woman in her fifties with a short silver bob, in a navy blazer", "voices": { "en": "en_gb_allison" } },
+    { "id": "mei", "name": "Mei", "gender": "female", "age": "40s", "look": "A woman in her forties with shoulder-length black hair, in a cream shirt", "voices": { "en": "en_us_zara" } },
+    { "id": "sofia", "name": "Sofia", "gender": "female", "age": "30s", "look": "A woman in her thirties with wavy brown hair, in a rust-coloured cardigan", "voices": { "en": "en_au_arabella" } },
+    { "id": "eileen", "name": "Eileen", "gender": "female", "age": "60s", "look": "A woman in her sixties with curly grey hair and glasses, in a green jumper", "voices": { "en": "en_sc_isla" } },
+    { "id": "daniel", "name": "Daniel", "gender": "male", "age": "30s", "look": "A man in his thirties with short brown hair, in a light-blue shirt", "voices": { "en": "en_gb_archer" } },
+    { "id": "kwame", "name": "Kwame", "gender": "male", "age": "40s", "look": "A man in his forties with a short beard, in a charcoal blazer", "voices": { "en": "en_gb_adam" } },
+    { "id": "arjun", "name": "Arjun", "gender": "male", "age": "20s", "look": "A young man with neat black hair, in a white polo shirt", "voices": { "en": "en_us_jon" } },
+    { "id": "luis", "name": "Luis", "gender": "male", "age": "30s", "look": "A man in his thirties with dark curly hair, in an olive overshirt", "voices": { "en": "en_us_mark" } },
+    { "id": "callum", "name": "Callum", "gender": "male", "age": "50s", "look": "A man in his fifties with a ginger-grey beard, in a navy jumper", "voices": { "en": "en_sc_lewis" } },
+    { "id": "kenji", "name": "Kenji", "gender": "male", "age": "60s", "look": "A man in his sixties with grey hair and glasses, in a tweed jacket", "voices": { "en": "en_gb_christopher" } }
+  ]
+}
