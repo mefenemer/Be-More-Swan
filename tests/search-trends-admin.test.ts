@@ -8,6 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { termHealth } from '../src/utils/search-trends-admin';
+import { checkProvider, classifyProviderError, type TrendsProvider } from '../src/lib/trends-provider';
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {
@@ -59,6 +60,20 @@ test('no bare Date inside a raw sql fragment (prod 2026-11-16: the spend query f
     assert.match(src, /\$\{d30Iso\}::timestamp/);
 });
 
+test('provider check: a refused login reads as refused, not "Connected" (prod 2026-11-16)', () => {
+    const refused = classifyProviderError('HTTP 401 40100 You are not authorized to access this resource.');
+    assert.strictEqual(refused.status, 'refused');
+    assert.strictEqual(classifyProviderError('HTTP 403 40104 Please verify your account').status, 'unverified');
+    assert.strictEqual(classifyProviderError('timed out').status, 'unreachable');
+    assert.strictEqual(classifyProviderError('fetch failed').status, 'unreachable');
+    assert.strictEqual(classifyProviderError('HTTP 500 50000 Internal error').status, 'error');
+    const html = read('admin.html');
+    assert.match(html, /case 'refused':\s+return tile\('Provider', 'Login refused'/);
+    assert.match(html, /case 'ok':\s+return tile\('Provider', 'Connected', `Login accepted just now/);
+    const fn = read('netlify/functions/admin-search-trends.ts');
+    assert.match(fn, /Promise\.all\(\[loadAdminTrends\(db, !!provider\), checkProvider\(provider\)\]\)/);
+});
+
 test('page: nav entry under System ▸ Health, title, loader, escaped rows', () => {
     const html = read('admin.html');
     assert.match(html, /\{ view: 'search-trends',\s+icon: '📈', label: 'Search trends',\s+perm: 'platform_config',\s+group: 'Health' \}/);
@@ -69,5 +84,19 @@ test('page: nav entry under System ▸ Health, title, loader, escaped rows', () 
     assert.match(html, /title="\$\{_strEsc\(r\.lastError\)\}"/);
 });
 
-console.log(`\n${passed}/${total} passed`);
-if (passed !== total) process.exit(1);
+// checkProvider is async: a fake provider for each outcome, and a hang that must be cut off.
+const fake = (ready: TrendsProvider['ready']): TrendsProvider => ({ name: 'fake', ready, post: async () => ({ ok: true, posted: [] }), get: async () => ({ ok: false, pending: true, error: '' }), live: async () => ({ ok: false, error: '' }) });
+(async () => {
+    total++;
+    try {
+        assert.deepStrictEqual(await checkProvider(null), { status: 'not_set', detail: null });
+        assert.strictEqual((await checkProvider(fake(async () => ({ ok: true, ids: [] })))).status, 'ok');
+        assert.strictEqual((await checkProvider(fake(async () => ({ ok: false, error: 'HTTP 401 40100 You are not authorized' })))).status, 'refused');
+        assert.strictEqual((await checkProvider(fake(async () => { throw new Error('fetch failed'); }))).status, 'unreachable');
+        const hung = await checkProvider(fake(() => new Promise(() => { /* never answers */ })), 50);
+        assert.strictEqual(hung.status, 'unreachable', 'a hung provider is cut off, never hangs the admin page');
+        passed++; console.log('  ✓ checkProvider: not set, ok, refused, unreachable, and a hang is cut off');
+    } catch (err) { console.error(`  ✗ checkProvider\n    ${(err as Error).message}`); }
+    console.log(`\n${passed}/${total} passed`);
+    if (passed !== total) process.exit(1);
+})();

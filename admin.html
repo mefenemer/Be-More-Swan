@@ -11152,7 +11152,7 @@ function strRender(d) {
     tile('With data', t.ok.toLocaleString('en-GB'), `${t.notEnoughData} too thin to chart, ${t.pending} waiting`),
     tile('Needs a look', (t.stuck + t.stale + t.error).toLocaleString('en-GB'), `${t.stuck} stuck, ${t.stale} stale, ${t.error} errored`, (t.stuck + t.error) > 0),
     tile('DataForSEO, 30 days', _strUsd(s.usd30), `weekly ${_strUsd(s.standard30)} · look-ups ${_strUsd(s.live30)}; ${_strUsd(s.usdAll)} all time`),
-    tile('Provider', d.providerConfigured ? 'Connected' : 'Not set', d.providerConfigured ? `${t.tasksOut} task${t.tasksOut === 1 ? '' : 's'} waiting; ${s.lookups24h} look-ups in 24h` : 'DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD missing — nothing is fetched', !d.providerConfigured),
+    strProviderTile(d, tile),
   ].join('');
   document.getElementById('str-terms').innerHTML = d.terms.length ? d.terms.map((r) => {
     const [label, cls] = STR_HEALTH[r.health] || [r.health, 'bg-gray-100 text-gray-700'];
@@ -11169,6 +11169,24 @@ function strRender(d) {
       <td class="py-1 text-right">${r.tracking && (r.health === 'failing' || r.health === 'stuck' || r.health === 'stale') ? `<button type="button" onclick="strRetry(${Number(r.id)}, this)" class="text-xs font-bold text-indigo-600 hover:underline">Fetch again</button>` : ''}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="8" class="py-2 text-xs text-gray-500">No terms yet. They appear when a workspace adds or approves one in Business Information ▸ What People Search.</td></tr>';
+}
+
+// The Provider tile from a REAL login check (providerCheck: a free DataForSEO call made on every load).
+// Prod 2026-11-16: it said "Connected" for hours while every call was refused, because it only looked
+// at whether the env vars were set.
+function strProviderTile(d, tile) {
+  const t = d.totals, s = d.spend;
+  const c = d.providerCheck || { status: d.providerConfigured ? 'ok' : 'not_set', detail: null };
+  const busy = `${t.tasksOut} task${t.tasksOut === 1 ? '' : 's'} waiting; ${s.lookups24h} look-ups in 24h`;
+  const why = c.detail ? ` (${_strEsc(c.detail)})` : '';
+  switch (c.status) {
+    case 'ok':          return tile('Provider', 'Connected', `Login accepted just now. ${busy}`);
+    case 'refused':     return tile('Provider', 'Login refused', `DataForSEO refused DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD — use the API password from app.dataforseo.com ▸ API Access, then redeploy. Nothing is fetched until then.${why}`, true);
+    case 'unverified':  return tile('Provider', 'Not verified', `The DataForSEO account's email isn't verified yet, so every call is refused.${why}`, true);
+    case 'unreachable': return tile('Provider', 'No answer', `DataForSEO didn't answer the check; it may be a blip. ${busy}${why}`, true);
+    case 'not_set':     return tile('Provider', 'Not set', 'DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD missing — nothing is fetched', true);
+    default:            return tile('Provider', 'Check failed', `The login check came back with an error.${why}`, true);
+  }
 }
 
 async function strRunNow() {
