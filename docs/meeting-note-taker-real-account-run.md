@@ -152,15 +152,21 @@ Notion's connection only allowed `/api/auth/callback` (staging callback added); 
   **an empty reply still leaves no trace** — next step.
 - **The chat said "Cara Singh still has no email address"** beside an approve card that listed her address
   (the card is built from the row and was right). The prose came from the model, not the meeting row.
-- **Connecting Outlook from the assistant's Connections tab returned to `integrations.html`**, not the tab
-  (#664 fixed this for the actions' Connect links, not the mailbox rows).
+- ~~Connecting Outlook from the assistant's Connections tab returned to `integrations.html`~~ — not reproduced:
+  a connect started on the tab carries the assistant through `state` and the page reopens the tab; this one was
+  most likely started from the Integrations page.
 
 **Run C findings (2026-11-17):**
 - **The chat filed no meeting.** Pasted notes got "Here are the minutes…" as plain text with no minutes card (the
   model copies the text-only shape of its earlier replies). Fixed by #706: the Minute Taker asks again whenever a
   reply is prose or empty; proven in-process against staging (meeting 921 filed on the retry). #703 also keeps a
   card sent bare or under another key, and turns an empty reply into a message plus a hidden row with its stop reason.
-- **The approve card says "including 4 action items for your task tracker" with no task tool switched on.**
+- ~~The approve card says "including 4 action items for your task tracker" with no task tool switched on.~~
+  Fixed: it names the tool that is on ("for Asana"), or says the items stay in the Inbox.
+
+**Run D — #706 on the deployed chat (2026-11-17):** three fresh meetings pasted into the same long session
+(104) where the chat had dropped cards — runs D1, D2, D3 → meetings 922, 923, 924 filed, and the add-email
+and approve cards came back for each: **9 of 9 cards**, no dropped-card rows. Not approved (Gmail connected).
 - A Gmail sign-in done outside the browser pane never reached staging (no row saved) — nothing to fix, but
   "connected" should be checked on staging, not taken from the sign-in screen.
 

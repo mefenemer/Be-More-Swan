@@ -50,8 +50,8 @@ for (const f of ['assistants.js', 'src/config/recipe-settings.ts', 'integrations
 const card = buildMeetingActionCard({ id: 7, title: 'Kick-off', approvalStatus: 'pending_approval', data: { attendees: [{ name: 'Ana', email: 'ana@x.com' }] } }, 3, { action: 'approve', recordId: 7 } as never);
 assert.equal(card.noMailbox, undefined, 'the pure builder does not guess — the resolver checks the database');
 const cma = read('src/utils/chat-meeting-action.ts');
-assert.ok(cma.includes("if (card.action === 'approve' && !card.blocked) card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);"));
-assert.ok(cma.includes("if (ui.action === 'approve') return { ...m, uiElement: { ...ui, noMailbox: await followupBlockedByNoMailbox(db, organisationId, aiAssistantId) } };"), 'a stored card is brought up to date');
+assert.ok(cma.includes("if (card.action === 'approve' && !card.blocked) {") && cma.includes('card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);'));
+assert.ok(cma.includes("if (ui.action === 'approve') return { ...m, uiElement: { ...ui, noMailbox: await followupBlockedByNoMailbox(db, organisationId, aiAssistantId),"), 'a stored card is brought up to date');
 assert.match(NO_MAILBOX_SNAPSHOT_LINE, /approving a meeting now will NOT email the attendees/);
 const reg = read('src/components/disruptive-ui-registry.js');
 assert.ok(reg.includes('The follow-up email won’t be sent: no Gmail or Outlook is connected'));
