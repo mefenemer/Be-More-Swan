@@ -5,9 +5,9 @@
 // wording is fixed and written by CODE (each adapter's `label`), never by a model, so a "why now" line
 // can never claim more than the register said.
 
-export type TriggerKind = 'food_premises_registered';
-export type TriggerSourceKey = 'fsa_fhrs';
-export type TriggerSubjectType = 'ch_number' | 'fhrs_id' | 'domain' | 'place_id' | 'us_entity';
+export type TriggerKind = 'food_premises_registered' | 'hiring';
+export type TriggerSourceKey = 'fsa_fhrs' | 'reed_jobs';
+export type TriggerSubjectType = 'ch_number' | 'fhrs_id' | 'domain' | 'place_id' | 'us_entity' | 'reed_employer';
 /** positive = a reason to get in touch; neutral = news; negative = a warning (e.g. liquidation). */
 export type TriggerDirection = 'positive' | 'neutral' | 'negative';
 

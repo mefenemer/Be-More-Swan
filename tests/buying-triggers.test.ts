@@ -176,7 +176,7 @@ check('the Admin page is gated on platform_config and listed in the menu', () =>
 });
 check('Phase 1 is admin only: no workspace code reads trigger_events yet', () => {
     // When Phase 2/3 start using it, replace this with the real gate (opt-in source, corporate-only email).
-    const users = ['src/utils/trigger-engine.ts', 'netlify/functions/admin-triggers.ts'];
+    const users = ['src/utils/trigger-engine.ts', 'netlify/functions/admin-triggers.ts', 'src/utils/reed-poll.ts']; // reed-poll: Phase 5, Admin only too
     const out = execSync('git ls-files src netlify', { cwd: ROOT, encoding: 'utf8' });
     const readers = out.split('\n').filter((f) => /\.(ts|js)$/.test(f) && !users.includes(f))
         .filter((f) => { try { return /\btrigger_events\b/.test(read(f)); } catch { return false; } });
