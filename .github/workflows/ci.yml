@@ -19,9 +19,9 @@ permissions:
 jobs:
   # ── One run per commit on a promote PR ──────────────────────────────────────────────────────────
   # A push to staging while a staging → main PR is open fires CI twice on the SAME commit: once for
-  # the push, once for the PR. When staging already contains main, the PR's merge result IS that
-  # commit, so the PR run reuses the push run: the heavy jobs are skipped and the required
-  # "Typecheck + tests" check reports the push run's result. If main has commits staging lacks (a
+  # the push, once for the PR. When main has no file changes staging lacks, the PR's merge result
+  # IS that commit, so the PR run reuses the push run: the heavy jobs are skipped and the required
+  # "Typecheck + tests" check reports the push run's result. If main changed files staging lacks (a
   # hotfix not yet merged back), or no push run is found, everything runs as normal.
   dedupe:
     name: Reuse staging's push run
@@ -39,9 +39,12 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          status=$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq .status)
-          if [ "$status" != ahead ] && [ "$status" != identical ]; then
-            echo "main has commits staging lacks (compare: $status), so the merge result differs: running everything."
+          # Files main changed since it last met staging. Usually none (only promote merge commits),
+          # and then merging this PR yields exactly staging's commit. A hotfix on main not yet merged
+          # back changes files, and the merge result has never been tested: run everything.
+          changed=$(gh api "repos/$REPO/compare/$HEAD...$BASE" --jq '.files | length')
+          if [ "$changed" != 0 ]; then
+            echo "main changed $changed file(s) staging lacks, so the merge result differs: running everything."
             exit 0
           fi
           # The push and the PR fire together; give the push run a minute to appear.
