@@ -159,7 +159,8 @@ check('terms 5.2 states the per-second rule with its start date', () => {
     const tos = read('terms_of_service.html');
     assert.ok(tos.includes('an AI-generated video as <span data-task-cost="ai_video_per_second">4 tasks a second</span> of video'));
     assert.ok(tos.includes('before 3 December 2026, 20 tasks for any clip'));
-    assert.ok(tos.includes('The change to clause 5.2 takes effect on 3 December 2026'));
+    // The header names the newest change (2.4, the AI presenter); 2.3's start date stays in clause 5's note.
+    assert.ok(tos.includes('Clause 5.2 changed in Version 2.3, effective 3 December 2026:'));
 });
 
 console.log(`\n${passed} checks passed.`);
