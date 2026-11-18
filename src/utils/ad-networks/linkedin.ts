@@ -209,6 +209,20 @@ export function parseAnalytics(payload: unknown): AnalyticsRow[] {
 }
 
 /** The created entity's id, which comes back in a HEADER rather than the body. */
+/**
+ * The new creative's id from a `creatives?action=createInline` response: the x-restli-id header when
+ * present, else the action's body `{ value: { creative: "urn:li:sponsoredCreative:<id>" } }`.
+ */
+export async function createdCreativeId(res: { headers: { get(name: string): string | null }; json(): Promise<unknown> }): Promise<string> {
+    const header = res.headers.get('x-restli-id') || res.headers.get('x-linkedin-id');
+    if (header) return header;
+    type ActionBody = { value?: { creative?: string; id?: string | number } };
+    const body: ActionBody = await res.json().then((b) => (b ?? {}) as ActionBody, () => ({}));
+    const id = body.value?.creative ?? (body.value?.id !== undefined ? String(body.value.id) : '');
+    if (!id) throw new Error('LinkedIn created the advert but did not say which one, so it cannot be tracked. It is paused and cannot spend.');
+    return String(id);
+}
+
 export function parseRestliId(res: { headers: { get(name: string): string | null } }): string {
     const id = res.headers.get('x-restli-id') || res.headers.get('x-linkedin-id');
     if (!id) throw new Error('LinkedIn accepted the write but returned no x-restli-id, so the entity cannot be tracked.');
@@ -343,7 +357,10 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
                         },
                     }),
                 });
-                externalVariantIds[v.variantId] = parseRestliId(cres);
+                // ⚠️ createInline is an ACTION: its id comes back in the BODY
+                // (`value.creative`), not in x-restli-id. Reading only the header threw after
+                // LinkedIn had already created the creative (first full live stage, 2026-11-18).
+                externalVariantIds[v.variantId] = await createdCreativeId(cres);
             }
 
             return { externalCampaignId, externalVariantIds, status: 'paused' };
