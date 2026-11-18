@@ -127,13 +127,15 @@
 <div id="nav-placeholder"></div>
 
 <!-- What each assistant connects to — checked against the code 2026-11-04, not against other copy.
+     2026-11-18: LinkedIn document carousels (li_document) posted for real on prod from the Be More Swan
+     workspace (post #5777) before the personal-feed card mentioned them — docs/linkedin-document-carousel-plan.md.
      "Live" = a customer can connect it today: the social platforms and Canva in integrations.js
      PLATFORMS/SOURCES; Gmail/Outlook (MAILBOX_CATALOG, Lead Generator only); Search Console;
      the blog destinations LinkedIn + The Swan Index (WordPress/Ghost are built but WITHHELD in
      src/utils/blog-destinations — keep them "Coming soon" until they are offered); and the
      Integration Scenario Library recipes in db/seed-catalog.ts with status 'available'.
      "Coming soon" = no connector a customer can switch on: TikTok (no OAuth), LinkedIn Company
-     Pages (no Community Management access), Pipedrive/Zoho (recipes 'coming_soon'), Zoom (meetings
+     Pages (page posting switched off: LINKEDIN_PAGE_POSTING unset), Pipedrive/Zoho (recipes 'coming_soon'), Zoom (meetings
      come in as pasted transcripts), Zendesk/Intercom/Xero/QuickBooks (their categories are not
      live in src/utils/connection-map.ts), and HubSpot/Salesforce (owner's call 2026-10-20: not offered
      yet, though the recipes exist — integrations.html shows them as coming soon too).
@@ -253,7 +255,7 @@
                 <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve a post</li>
-                    <li><span class="cx-step">It</span>Publishes it to your personal LinkedIn feed</li>
+                    <li><span class="cx-step">It</span>Publishes it to your personal LinkedIn feed — a numbered list can go out as a swipeable document carousel</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Stay visible to your network every week.</p>
             </article>
