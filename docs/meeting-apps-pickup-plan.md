@@ -92,8 +92,8 @@ person approves.
 - **D5. Keep the transcript?** Keep it 30 days so the minutes can be re-done (recommended), or delete it once the minutes
   are written.
 - **D6. Wait for push, or launch on polling?** Launch on 15-minute polling (recommended). Push is a later speed-up.
-- **D7. Card wording now:** keep "picks up the meeting automatically" on the Coming-soon cards, or add "when your meeting
-  has a transcript" now, so the promise is exact before anything ships.
+- **D7. Card wording now:** ✅ **Decided 2026-11-18 (owner): yes.** The three Coming-soon cards say "A … with a
+  transcript ends → picks up the transcript and writes the minutes for you to approve" (PR #740).
 
 ## 7. Risks
 
