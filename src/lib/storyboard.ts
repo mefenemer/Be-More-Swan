@@ -524,7 +524,10 @@ export function sceneTimingsFromWords(
         // A count that runs past the last heard word (the transcript merged words) still gets a cut inside the speech,
         // so a short last line keeps its first word (review of #723).
         if (i > 0 && counts[i] > 0 && idx >= words.length) idx = words.length - 1;
-        if (i > 0 && counts[i - 1] > 0 && counts[i] > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
+        // …and only where the previous scene's line ENDS a sentence: a line that stops mid-sentence ("Our fresh coffee"
+        // / "is roasted daily.") already has the right cut from the count (review of #723).
+        const endsSentence = /[.?!…]["'”’)\]]*$/.test((storyboard.scenes[i - 1]?.voiceover ?? '').trim());
+        if (i > 0 && endsSentence && counts[i - 1] > 0 && counts[i] > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
         starts.push(idx < words.length ? words[Math.min(idx, words.length - 1)].start : words[words.length - 1].end);
         idx += Math.round(counts[i] * k);
     }
@@ -560,19 +563,24 @@ export const MIN_PAUSE_S = 0.12;
  */
 export function snapToPause(words: Array<{ start: number; end: number; word?: string }>, idx: number, min: number): number {
     const gap = (j: number) => (j > 0 && j < words.length ? words[j].start - words[j - 1].end : -1);
+    const END = /[.?!…]["'”’)\]]*$/;
+    // Punctuation only when the transcript has some: the fallback transcriber returns bare words, and then a pause
+    // is the only sign of a sentence end.
+    const punctuated = words.some((w) => typeof w.word === 'string' && END.test(w.word.trim()));
     const startsSentence = (j: number) => {
         if (j <= 0 || j >= words.length) return false;
         const prev = words[j - 1].word;
-        return typeof prev === 'string' && prev.trim() ? /[.?!…]["'”’)\]]*$/.test(prev.trim()) : gap(j) >= MIN_PAUSE_S;
+        return punctuated && typeof prev === 'string' ? END.test(prev.trim()) : gap(j) >= MIN_PAUSE_S;
     };
-    if (startsSentence(idx)) return idx;
+    if (idx >= min && startsSentence(idx)) return idx;
     let best = idx, bestDist = Infinity, bestGap = -1;
     for (let j = Math.max(min, idx - SNAP_WORDS); j <= Math.min(words.length - 1, idx + SNAP_WORDS); j++) {
         const g = gap(j), dist = Math.abs(j - idx);
         if (!startsSentence(j)) continue;
         if (dist < bestDist || (dist === bestDist && g > bestGap)) { best = j; bestDist = dist; bestGap = g; }
     }
-    return best;
+    // Never onto (or before) the previous cut: that would leave the previous scene with no words (review of #723).
+    return Math.max(best, min);
 }
 
 /** Credits a storyboard will cost before anything is made (shown on the button). Pure. */

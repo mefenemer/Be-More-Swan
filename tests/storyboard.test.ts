@@ -120,6 +120,18 @@ check('a cut lands in the pause before a sentence, even when the transcript coun
     assert.strictEqual(snapToPause(said, 5, 1), 5, 'after "edit." the cut stays, though "film," has the longer pause');
     assert.strictEqual(snapToPause(said, 6, 1), 5, 'one word late → back to "Book", after the sentence end');
     assert.strictEqual(snapToPause(said, 3, 1), 5, 'mid-sentence → the nearest sentence start, never the comma');
+    // A line that stops mid-sentence keeps the count's cut: "is" stays the next scene's first word (review of #723).
+    const split = enforceStoryboard(raw([sc({ voiceover: 'Our fresh coffee' }), sc({ voiceover: 'is roasted daily. Come try it.' }), sc({ voiceover: 'Book now.' })]), brief()).storyboard;
+    const coffee = [['Our', 0], ['fresh', 0.3], ['coffee', 0.6], ['is', 0.9], ['roasted', 1.2], ['daily.', 1.5], ['Come', 2.2], ['try', 2.5], ['it.', 2.8], ['Book', 3.5], ['now.', 3.8]]
+        .map(([word, t]) => ({ word: String(word), start: Number(t), end: Number(t) + 0.24 }));
+    const dc = sceneTimingsFromWords(split, coffee)!;
+    assert.ok(Math.abs(dc[0] - 0.9) < 0.06 || dc[0] === 1.5, `scene 1 ends where "is" begins (or at its minimum length): ${dc}`);
+    assert.ok(dc[1] >= 2.5, `scene 2 keeps "is roasted daily. Come try it." from 0.9 s to "Book" at 3.5 s: ${dc}`);
+    // Bare words (no punctuation anywhere, the fallback transcriber): a pause still marks the sentence start.
+    const bare = said.map(({ start, end, word }, j) => ({ start: start + (j >= 5 ? 0.2 : 0), end: end + (j >= 5 ? 0.2 : 0), word: word.replace(/[.,]/g, '') }));
+    assert.strictEqual(snapToPause(bare, 6, 1), 5, 'no punctuation in the transcript → the pause before "Book" counts');
+    // Never onto the previous cut.
+    assert.strictEqual(snapToPause(said, 5, 6), 6, 'a cut already taken is not used again');
     // No pause nearby: the estimate stands.
     assert.strictEqual(snapToPause([0, 0.3, 0.6, 0.9].map((t) => ({ start: t, end: t + 0.28 })), 2, 1), 2);
 });
