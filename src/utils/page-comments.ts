@@ -125,7 +125,9 @@ export async function syncCommentsForConnection(
     for (const post of opts.posts) {
         if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
         const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline);
-        if (!topLevel) { r.failedPosts++; continue; }
+        // A read that came back empty-handed AFTER the deadline was most likely cut off by it, not refused:
+        // count it as left for later, so a slow LinkedIn never reads as "reconnect your Company Page".
+        if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }
         r.fetched += topLevel.length;
         // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them only on
         // comments still waiting on our side (new, not stored yet, or a reply LinkedIn never confirmed)

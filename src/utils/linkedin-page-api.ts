@@ -197,6 +197,8 @@ export async function fetchPostComments(token: string, postUrn: string, deadline
     const base = `${API}/socialActions/${restliEncode(postUrn)}/comments?start=0&count=${COMMENTS_PAGE}`;
     const named = await getJson(token, `${base}&${NAME_PROJECTION}`, deadline);
     if (named) return parseCommentsResponse(named);
+    // Past the deadline, a half-second retry would rarely land — give up and let the caller defer the post.
+    if (deadline && Date.now() > deadline) return null;
     const plain = await getJson(token, base, deadline);
     return plain ? parseCommentsResponse(plain) : null;
 }

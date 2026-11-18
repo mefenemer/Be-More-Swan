@@ -235,6 +235,16 @@ check('one slow call can’t overrun the budget: each read waits at most the tim
     assert.ok(src.includes('fetchCommentReplies(opts.token, c.commentUrn, opts.deadline)'));
 });
 
+check('a read cut off by the deadline counts as left for later, never as LinkedIn refusing', async () => {
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes('if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }'));
+    // Past the deadline, the plain retry is skipped: one call, not two.
+    await withFetch(() => json({}, 504), async (calls) => {
+        assert.equal(await fetchPostComments('tok', 'urn:li:share:9', Date.now() - 1), null);
+        assert.equal(calls.length, 1);
+    });
+});
+
 check('the tab says when posts were left for the next automatic check', () => {
     const js = read('src/components/assistant-comments.js');
     assert.ok(js.includes('r.result?.skippedForTime'));
