@@ -519,7 +519,9 @@ export function sceneTimingsFromWords(
         // transcription spells words differently ("fifteen minute" heard as "15-minute": an AI presenter's last
         // clip started on "online", missing "Book", staging 2026-11-18). So the cut moves to the word after the
         // longest pause within SNAP_WORDS of the estimate — never back past the previous scene's first word.
-        if (i > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
+        // Only a cut between two scenes that both have lines moves: next to a silent scene the estimate already sits
+        // where the next line starts, and snapping it would hand those first words to the wrong scene (review of #723).
+        if (i > 0 && counts[i - 1] > 0 && counts[i] > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
         starts.push(idx < words.length ? words[Math.min(idx, words.length - 1)].start : words[words.length - 1].end);
         idx += Math.round(counts[i] * k);
     }

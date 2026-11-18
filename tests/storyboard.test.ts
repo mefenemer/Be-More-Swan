@@ -99,6 +99,12 @@ check('a cut lands in the pause before a sentence, even when the transcript coun
     const starts = d.reduce<number[]>((acc, x, i) => [...acc, i ? acc[i - 1] + d[i - 1] : 0], []);
     assert.ok(Math.abs(starts[4] - 13.6) < 0.06, `scene 5 starts at "Book" (13.56 s), not "online" (13.8 s): ${starts[4]}`);
     assert.ok(Math.abs(starts[3] - 10.3) < 0.06 && Math.abs(starts[1] - 2.6) < 0.06, 'the other cuts still sit before their sentences');
+    // After a silent scene, the next cut isn't moved (review of #723): its first words stay its own.
+    const silent = enforceStoryboard(raw([sc({ voiceover: 'a b c' }), sc({ voiceover: '' }), sc({ voiceover: 'd e f g' })]), brief()).storyboard;
+    const w2 = [0, 0.3, 0.6, 1.5, 1.8, 3.0, 3.3].map((t) => ({ start: t, end: t + 0.25 }));
+    const d2 = sceneTimingsFromWords(silent, w2)!;
+    // Its first word kept: it runs 1.5 → 3.95 s (2.5); snapped to the later pause it would shrink to the 1.5 s minimum.
+    assert.ok(d2[2] >= 2.4, `scene 3 keeps its first word: ${d2[2]}`);
     // No pause nearby: the estimate stands.
     assert.strictEqual(snapToPause([0, 0.3, 0.6, 0.9].map((t) => ({ start: t, end: t + 0.28 })), 2, 1), 2);
 });
