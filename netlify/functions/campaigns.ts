@@ -1468,7 +1468,9 @@ export default withLambda(async (event) => {
             // stream, and the response said only "would not accept". LinkedIn error bodies carry
             // the field at fault and never a credential (the token is a request header), so the
             // reason is safe to show and is the only way anyone can act on it.
-            const detail = linkedInErrorDetail(err);
+            // Our own adapter errors are sentences we wrote — safe to show, and the only clue when
+            // LinkedIn accepted the call and something after it failed (2026-11-18: detail was null).
+            const detail = linkedInErrorDetail(err) ?? (err instanceof Error ? err.message.slice(0, 400) : null);
             console.error(`[campaigns] stage_paid failed at the network (campaign ${campaign.id}): ${detail ?? String(err)}`);
             return json(502, {
                 // A campaign group may already exist (it is created first, and found again on retry),
