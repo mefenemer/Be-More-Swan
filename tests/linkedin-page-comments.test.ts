@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    commentThreadUrn, fetchPageFollowerCount, fetchPostComments, fetchPostStatistics, linkedInCommentUrl, parseComment,
+    commentThreadUrn, fetchCommentReplies, fetchPageFollowerCount, replyDefinitelyRefused, fetchPostComments, fetchPostStatistics, linkedInCommentUrl, parseComment,
     parseShareStatistics, parseShareStatisticsResponse, postUrnKind, replyErrorMessage, replyToComment, restliList,
 } from '../src/utils/linkedin-page-api';
 import { classifyComments, commentView, tidyReply, MAX_REPLY_CHARS, REPLY_RULES } from '../src/utils/page-comments';
@@ -116,10 +116,10 @@ check('a documented comment element parses; names from actor~ when present', () 
 
 check('the Page’s own comments are not kept; its replies mark their parent answered; side-threads are left out', () => {
     const list = [
-        { commentUrn: C1, objectUrn: 'p', actorUrn: 'urn:li:person:a', actorName: null, text: 'Q', createdAt: null, parentCommentUrn: null },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,2)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Thanks!', createdAt: null, parentCommentUrn: C1 },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,3)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Our own note', createdAt: null, parentCommentUrn: null },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,4)', objectUrn: 'p', actorUrn: 'urn:li:person:b', actorName: null, text: 'me too', createdAt: null, parentCommentUrn: C1 },
+        { commentUrn: C1, objectUrn: 'p', actorUrn: 'urn:li:person:a', actorName: null, text: 'Q', createdAt: null, parentCommentUrn: null, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,2)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Thanks!', createdAt: null, parentCommentUrn: C1, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,3)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Our own note', createdAt: null, parentCommentUrn: null, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,4)', objectUrn: 'p', actorUrn: 'urn:li:person:b', actorName: null, text: 'me too', createdAt: null, parentCommentUrn: C1, replyCount: null },
     ];
     const { toKeep, answeredParents } = classifyComments(ORG, list);
     assert.deepEqual(toKeep.map((c) => c.commentUrn), [C1]);
@@ -153,6 +153,55 @@ check('a reply posts AS the Page with object + parentComment, and rebuilds the n
     });
 });
 
+check('a reply LinkedIn never answered (timeout, network, 5xx) is UNCONFIRMED; only a 4xx is a refusal', async () => {
+    assert.equal(replyDefinitelyRefused(403), true);
+    assert.equal(replyDefinitelyRefused(503), false);
+    assert.equal(replyDefinitelyRefused(null), false);
+    await withFetch(() => json({ message: 'boom' }, 503), async () => {
+        const r = await replyToComment('tok', { orgUrn: ORG, objectUrn: 'urn:li:share:9', commentUrn: C1, text: 'x' });
+        assert.deepEqual([r.ok, (r as { unconfirmed: boolean }).unconfirmed], [false, true]);
+    });
+    await withFetch(() => { throw new Error('The operation was aborted due to timeout'); }, async () => {
+        const r = await replyToComment('tok', { orgUrn: ORG, objectUrn: 'urn:li:share:9', commentUrn: C1, text: 'x' });
+        assert.deepEqual([r.ok, (r as { unconfirmed: boolean }).unconfirmed], [false, true]);
+    });
+    await withFetch(() => json({ message: 'no' }, 403), async () => {
+        const r = await replyToComment('tok', { orgUrn: ORG, objectUrn: 'urn:li:share:9', commentUrn: C1, text: 'x' });
+        assert.equal((r as { unconfirmed: boolean }).unconfirmed, false);
+    });
+});
+
+check('postReply rolls back only on a definite refusal, and keeps an unconfirmed reply under Replied', () => {
+    const src = read('src/utils/page-comments.ts');
+    const body = src.slice(src.indexOf('export async function postReply('));
+    const unconfirmed = body.indexOf('if (!result.ok && result.unconfirmed)');
+    const rollback = body.indexOf('status: row.c.status, repliedVia: null');
+    assert.ok(unconfirmed > 0 && rollback > unconfirmed, 'the unconfirmed branch returns before the rollback');
+    assert.ok(body.slice(unconfirmed, rollback).includes('return {'), 'and returns without un-filing');
+    assert.ok(body.includes("?? 'confirmed'"), 'a confirmed reply never has a null URN');
+});
+
+check('the Page’s replies are fetched from UNDER each comment and mark it answered', async () => {
+    await withFetch(() => json({ elements: [{ commentUrn: 'urn:li:comment:(urn:li:activity:6631349431612559360,7)', actor: ORG, message: { text: 'Thanks Sam!' } }] }), async (calls) => {
+        const replies = await fetchCommentReplies('tok', C1);
+        assert.match(calls[0].url, /\/rest\/socialActions\/urn%3Ali%3Acomment%3A%28/);
+        assert.equal(replies?.[0].parentCommentUrn, C1, 'parent implied by the path is filled in');
+        const top = parseComment({ commentUrn: C1, actor: 'urn:li:person:a', message: { text: 'Q' }, commentsSummary: { aggregatedTotalComments: 1 } })!;
+        assert.equal(top.replyCount, 1);
+        const { toKeep, answeredParents } = classifyComments(ORG, [top, ...replies!]);
+        assert.equal(toKeep.length, 1);
+        assert.equal(answeredParents.get(C1)?.text, 'Thanks Sam!');
+    });
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes('await fetchCommentReplies(opts.token, c.commentUrn)'), 'the sync asks for replies');
+});
+
+check('archived assistants gather no comments, and the post cap is logged, not silent', () => {
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes('notArchivedAssistant(scheduledPosts.assistantId)'));
+    assert.ok(src.includes('if (rows.length === MAX_PAGE_POSTS)'));
+});
+
 check('thread URN and LinkedIn link from a comment URN', () => {
     assert.equal(commentThreadUrn(C1), 'urn:li:activity:6631349431612559360');
     assert.equal(commentThreadUrn('nonsense'), null);
@@ -178,6 +227,9 @@ check('the view never shows a blank author', () => {
     assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a', authorName: null }).authorName, 'A LinkedIn member');
     assert.equal(commentView({ ...base, authorUrn: 'urn:li:organization:5', authorName: '' }).authorName, 'A LinkedIn Page');
     assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a', authorName: 'Sam Lee' }, 'Our   new menu').postExcerpt, 'Our new menu');
+    const replied = { ...base, authorUrn: 'urn:li:person:a', authorName: 'Sam', status: 'replied', repliedVia: 'app' };
+    assert.equal(commentView({ ...replied, replyCommentUrn: null }).replyUnconfirmed, true);
+    assert.equal(commentView({ ...replied, replyCommentUrn: 'confirmed' }).replyUnconfirmed, false);
 });
 
 check('the drafting rules never let the model invent facts or post on its own', () => {

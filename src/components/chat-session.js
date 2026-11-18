@@ -1732,7 +1732,7 @@
           respond({ ok: true, comment: r.comment });
         } else if (d.action === 'post_reply') {
           const r = await call({ action: 'post_reply', id: d.commentId, text: d.text || undefined });
-          respond({ ok: true, comment: r.comment, message: 'Posted on LinkedIn as your Page.' });
+          respond({ ok: true, comment: r.comment, message: r.warning || 'Posted on LinkedIn as your Page.' });
         } else if (d.action === 'dismiss') {
           const r = await call({ action: 'set_status', id: d.commentId, status: 'dismissed' });
           respond({ ok: true, comment: r.comment, message: 'Dismissed.' });

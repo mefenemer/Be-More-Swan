@@ -130,10 +130,12 @@
     if (c.status === 'replied') {
       body = `
         <div class="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
-          <p class="text-xs font-bold text-gray-700">${c.repliedVia === 'linkedin' ? 'Your Page replied on LinkedIn' : 'Posted as your Page'}${c.decidedAt ? ` · ${esc(when(c.decidedAt))}` : ''}</p>
+          <p class="text-xs font-bold text-gray-700">${c.repliedVia === 'linkedin' ? 'Your Page replied on LinkedIn' : c.replyUnconfirmed ? 'Sent — LinkedIn didn’t confirm it' : 'Posted as your Page'}${c.decidedAt ? ` · ${esc(when(c.decidedAt))}` : ''}</p>
           <p class="text-sm text-gray-800 mt-1 whitespace-pre-wrap break-words">${esc(c.replyText || '')}</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2 mt-3">${open}</div>`;
+        ${c.replyUnconfirmed ? '<p class="text-xs text-amber-800 mt-2">Check the post on LinkedIn. If your reply isn’t there, put this back in New and post it again.</p>' : ''}
+        <div class="flex flex-wrap items-center gap-2 mt-3">${open}${c.replyUnconfirmed ? `
+          <button type="button" data-cmt-status="${c.id}" data-status="new" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${busy ? 'disabled' : ''}>Put back in New</button>` : ''}</div>`;
     } else if (c.status === 'dismissed') {
       body = `
         <div class="flex flex-wrap items-center gap-2 mt-3">
@@ -270,7 +272,7 @@
       const r = await call('post_reply', { id, text });
       delete state.edits[id];
       replace(r.comment);
-      toastOk('Posted on LinkedIn as your Page.');
+      if (r.warning) toastErr(r.warning); else toastOk('Posted on LinkedIn as your Page.');
     });
   }
 

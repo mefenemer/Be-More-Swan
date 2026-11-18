@@ -11,18 +11,20 @@
 //  3. "Post reply" posts the reply AS the Page — only ever from a person's click (the tab's button or
 //     the chat card's), never from a schedule or a model turn.
 //  4. A reply the Page made on LinkedIn itself is noticed on the next fetch and files the comment as
-//     replied, so nobody answers twice.
+//     replied, so nobody answers twice. LinkedIn lists only top-level comments on a post, so the
+//     replies under each comment are fetched separately (fetchCommentReplies) to see the Page's.
 //
 // Drafting is help with a reply, not a piece of work: metered like the other editing helpers (fair
 // use, no task) — the same rule suggestTopicWording follows (src/utils/discussions.ts).
 
 import Anthropic from '@anthropic-ai/sdk';
-import { and, desc, eq, inArray, isNotNull, like, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, like, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, pageComments, scheduledPosts, systemConnections } from '../../db/schema';
 import {
-    fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment,
+    fetchCommentReplies, fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment,
 } from './linkedin-page-api';
+import { notArchivedAssistant } from './archived-assistant-drafts';
 import { isLinkedInPageUrn } from './linkedin-page';
 import { resolveSocialCredentials } from './social-publish';
 import { loadSenderIdentity } from './sender-identity';
@@ -49,6 +51,10 @@ export type CommentStatus = typeof COMMENT_STATUSES[number];
 export const COMMENT_WINDOW_DAYS = 30;
 /** A LinkedIn comment can be at most 1,250 characters. */
 export const MAX_REPLY_CHARS = 1250;
+/** Reply lookups per post per fetch (one call each) — the newest comments first, as LinkedIn lists them. */
+const REPLY_LOOKUPS_PER_POST = 20;
+/** Posts read per fetch, across every workspace. Hitting it is logged — it must never cut posts off silently. */
+const MAX_PAGE_POSTS = 5000;
 /** "Check for new comments" on the tab — at most once a minute per assistant. */
 const SYNC_MIN_GAP_MS = 60_000;
 const lastSync = new Map<number, number>();
@@ -106,10 +112,18 @@ export async function syncCommentsForConnection(
 ): Promise<SyncResult> {
     const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0 };
     for (const post of opts.posts) {
-        const list = await fetchPostComments(opts.token, post.platformPostId);
-        if (!list) { r.failedPosts++; continue; }
-        r.fetched += list.length;
-        const { toKeep, answeredParents } = classifyComments(opts.orgUrn, list);
+        const topLevel = await fetchPostComments(opts.token, post.platformPostId);
+        if (!topLevel) { r.failedPosts++; continue; }
+        r.fetched += topLevel.length;
+        // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them on every
+        // comment that has replies (or doesn't say), at most REPLY_LOOKUPS_PER_POST a post per tick.
+        const replies: LinkedInComment[] = [];
+        const withReplies = topLevel.filter((c) => c.actorUrn !== opts.orgUrn && !c.parentCommentUrn && c.replyCount !== 0);
+        for (const c of withReplies.slice(0, REPLY_LOOKUPS_PER_POST)) {
+            const got = await fetchCommentReplies(opts.token, c.commentUrn);
+            if (got) replies.push(...got);
+        }
+        const { toKeep, answeredParents } = classifyComments(opts.orgUrn, [...topLevel, ...replies]);
         if (toKeep.length) {
             const inserted = await db.insert(pageComments).values(toKeep.map((c) => ({
                 organisationId: post.organisationId,
@@ -155,14 +169,19 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
             eq(scheduledPosts.platform, 'linkedin'),
             eq(scheduledPosts.status, 'published'),
             isNotNull(scheduledPosts.platformPostId),
-            sql`${scheduledPosts.publishedAt} >= ${since}`,
+            gte(scheduledPosts.publishedAt, since),
             like(systemConnections.externalUserId, 'urn:li:organization:%'),
             eq(systemConnections.isActive, true),
+            // An archived assistant's posts gather no new comments to answer (archived-assistant-drafts.ts).
+            notArchivedAssistant(scheduledPosts.assistantId),
             ...(scope.organisationId != null ? [eq(scheduledPosts.organisationId, scope.organisationId)] : []),
             ...(scope.assistantId != null ? [eq(scheduledPosts.assistantId, scope.assistantId)] : []),
         ))
         .orderBy(desc(scheduledPosts.publishedAt))
-        .limit(500);
+        .limit(MAX_PAGE_POSTS);
+    if (rows.length === MAX_PAGE_POSTS) {
+        console.warn(`[page-comments] loadPagePosts hit its cap of ${MAX_PAGE_POSTS} posts — the oldest LinkedIn Page posts in the ${COMMENT_WINDOW_DAYS}-day window were skipped this tick. Page through them before this grows further.`);
+    }
     const byConnection = new Map<number, { orgUrn: string; organisationId: number; posts: (PagePost & { publishedAt: Date | null })[] }>();
     for (const row of rows) {
         if (!row.connectionId || !row.platformPostId || !isLinkedInPageUrn(row.externalUserId) || row.organisationId == null) continue;
@@ -218,6 +237,8 @@ export interface CommentView {
     status: CommentStatus;
     repliedVia: 'app' | 'linkedin' | null;
     replyText: string | null;
+    /** Posted from here but LinkedIn never confirmed it — it may not be live. */
+    replyUnconfirmed: boolean;
     decidedAt: string | null;
 }
 
@@ -236,6 +257,7 @@ export function commentView(r: CommentRow, postCaption: string | null = null): C
         status: (COMMENT_STATUSES as readonly string[]).includes(r.status) ? r.status as CommentStatus : 'new',
         repliedVia: r.repliedVia === 'app' || r.repliedVia === 'linkedin' ? r.repliedVia : null,
         replyText: r.replyText,
+        replyUnconfirmed: r.status === 'replied' && r.repliedVia === 'app' && !r.replyCommentUrn,
         decidedAt: toIso(r.decidedAt),
     };
 }
@@ -282,13 +304,22 @@ export async function loadComment(db: Db, organisationId: number, assistantId: n
 
 // ── Write ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Dismiss / put back to new. Never "replied" — only postReply (or LinkedIn itself) files that. */
+/** Dismiss / put back to new. Never "replied" — only postReply (or LinkedIn itself) files that. Putting a
+ *  comment back to New clears an unconfirmed reply so it can be posted again. */
 export async function setCommentStatus(
     db: Db, organisationId: number, assistantId: number, id: number, status: 'new' | 'dismissed', userId: number | null,
 ): Promise<CommentView | null> {
     const [row] = await db.update(pageComments)
-        .set({ status, updatedAt: sql`now()`, decidedBy: status === 'new' ? null : userId, decidedAt: status === 'new' ? null : sql`now()` })
-        .where(and(eq(pageComments.id, id), eq(pageComments.organisationId, organisationId), eq(pageComments.aiAssistantId, assistantId), inArray(pageComments.status, ['new', 'dismissed'])))
+        .set({
+            status, updatedAt: sql`now()`, decidedBy: status === 'new' ? null : userId, decidedAt: status === 'new' ? null : sql`now()`,
+            ...(status === 'new' ? { repliedVia: null, replyText: null } : {}),
+        })
+        .where(and(
+            eq(pageComments.id, id), eq(pageComments.organisationId, organisationId), eq(pageComments.aiAssistantId, assistantId),
+            // A reply LinkedIn never confirmed (no reply URN, posted from here) may go back to New once
+            // the person has checked it isn't on LinkedIn; a confirmed reply never can.
+            sql`(${pageComments.status} IN ('new','dismissed') OR (${pageComments.status} = 'replied' AND ${pageComments.repliedVia} = 'app' AND ${pageComments.replyCommentUrn} IS NULL))`,
+        ))
         .returning();
     return row ? commentView(row) : null;
 }
@@ -396,7 +427,7 @@ Return STRICT JSON only (no markdown): { "reply": "<the reply, or an empty strin
  */
 export async function postReply(
     db: Db, organisationId: number, assistantId: number, id: number, text: string | null, userId: number | null,
-): Promise<{ ok: true; comment: CommentView } | { ok: false; status: number; error: string; code?: string }> {
+): Promise<{ ok: true; comment: CommentView; warning?: string } | { ok: false; status: number; error: string; code?: string }> {
     const row = await loadComment(db, organisationId, assistantId, id);
     if (!row) return { ok: false, status: 404, error: 'That comment isn’t on this assistant’s Comments tab.' };
     if (row.c.status === 'replied') return { ok: false, status: 409, error: 'This comment already has a reply.' };
@@ -421,15 +452,28 @@ export async function postReply(
     const result = await replyToComment(token, {
         orgUrn: conn.externalUserId!, objectUrn: row.c.objectUrn ?? '', commentUrn: row.c.commentUrn, text: reply,
     });
+    if (!result.ok && result.unconfirmed) {
+        // LinkedIn didn't answer, or answered 5xx: the reply MAY be live. Keep the comment under Replied
+        // so nobody presses Post reply again and the Page answers twice in public; say to check.
+        const [kept] = await db.select().from(pageComments).where(eq(pageComments.id, row.c.id)).limit(1);
+        return {
+            ok: true,
+            comment: commentView(kept, row.caption),
+            warning: 'LinkedIn didn’t confirm the reply in time, so it may or may not have been posted. Open the post on LinkedIn to check — it’s filed under Replied here so it isn’t posted twice. If it isn’t there, put it back in New and post it again.',
+        };
+    }
     if (!result.ok) {
-        // Give the row back exactly as it was, keeping what they typed as the draft.
+        // A definite refusal (4xx) posted nothing: give the row back exactly as it was, keeping what
+        // they typed as the draft.
         await db.update(pageComments)
             .set({ status: row.c.status, repliedVia: null, replyText: null, decidedBy: row.c.decidedBy, decidedAt: row.c.decidedAt, updatedAt: sql`now()` })
             .where(eq(pageComments.id, row.c.id));
         return { ok: false, status: result.status === 401 || result.status === 403 ? 409 : 502, error: result.error };
     }
     const [updated] = await db.update(pageComments)
-        .set({ replyCommentUrn: result.commentUrn, updatedAt: sql`now()` })
+        // A confirmed reply always has a non-null URN — 'confirmed' when LinkedIn sent no id — because a null
+        // one marks a reply LinkedIn never confirmed (see the unconfirmed branch above and setCommentStatus).
+        .set({ replyCommentUrn: (result.ok ? result.commentUrn : null) ?? 'confirmed', updatedAt: sql`now()` })
         .where(eq(pageComments.id, row.c.id))
         .returning();
     return { ok: true, comment: commentView(updated, row.caption) };

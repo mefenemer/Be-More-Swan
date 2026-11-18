@@ -6,8 +6,10 @@
 //   POST { action: 'sync',       assistantId }                       → { result, comments[], counts, hasPageConnection }
 //   POST { action: 'draft',      assistantId, id, instruction? }     → { comment }
 //   POST { action: 'save_draft', assistantId, id, draft }            → { comment }
-//   POST { action: 'post_reply', assistantId, id, text? }            → { comment }   — posts AS the Page
-//   POST { action: 'set_status', assistantId, id, status }           → { comment }   (new | dismissed)
+//   POST { action: 'post_reply', assistantId, id, text? }            → { comment, warning }   — posts AS the Page;
+//        warning set when LinkedIn never confirmed it (the comment stays under Replied so it can't post twice)
+//   POST { action: 'set_status', assistantId, id, status }           → { comment }   (new | dismissed; new also
+//        un-files a reply LinkedIn never confirmed)
 
 import { and, eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -66,7 +68,7 @@ export default withLambda(async (event) => {
         }
         if (action === 'post_reply') {
             const r = await postReply(db, orgId, assistantId, id, typeof body.text === 'string' ? body.text : null, userId ?? null);
-            return r.ok ? json(200, { comment: r.comment }) : json(r.status, { error: r.error, code: r.code });
+            return r.ok ? json(200, { comment: r.comment, warning: r.warning ?? null }) : json(r.status, { error: r.error, code: r.code });
         }
         if (action === 'set_status') {
             const status = body.status === 'new' || body.status === 'dismissed' ? body.status : null;

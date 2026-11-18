@@ -152,6 +152,8 @@ export interface LinkedInComment {
     createdAt: Date | null;
     /** Set on a reply to another comment. */
     parentCommentUrn: string | null;
+    /** How many replies sit under it (commentsSummary), or null when LinkedIn didn't say. */
+    replyCount: number | null;
 }
 
 /** One element of a comments list → LinkedInComment, or null when it has no usable URN or text. Pure. */
@@ -174,6 +176,7 @@ export function parseComment(el: unknown): LinkedInComment | null {
         text: text.slice(0, 4000),
         createdAt: time != null ? new Date(time) : null,
         parentCommentUrn: typeof e.parentComment === 'string' ? e.parentComment : null,
+        replyCount: num(e.commentsSummary?.aggregatedTotalComments) ?? num(e.commentsSummary?.totalFirstLevelComments),
     };
 }
 
@@ -198,13 +201,35 @@ export async function fetchPostComments(token: string, postUrn: string): Promise
     return plain ? parseCommentsResponse(plain) : null;
 }
 
+/**
+ * The replies under one comment. LinkedIn lists only TOP-LEVEL comments on a post; a reply — the
+ * Page's own included — lives under its parent's comment URN, so this is how a reply the Page made
+ * on LinkedIn itself is seen. No name projection: only the replying actor's URN is needed. Null when
+ * refused. Never throws.
+ */
+export async function fetchCommentReplies(token: string, commentUrn: string): Promise<LinkedInComment[] | null> {
+    const body = await getJson(token, `${API}/socialActions/${restliEncode(commentUrn)}/comments?start=0&count=${COMMENTS_PAGE}`);
+    if (!body) return null;
+    // A reply element may leave parentComment out (it is implied by the path) — fill it in.
+    return parseCommentsResponse(body).map((c) => ({ ...c, parentCommentUrn: c.parentCommentUrn ?? commentUrn }));
+}
+
 /** Comments LinkedIn's own UI can open: the post, scrolled to the comment. Pure. */
 export function linkedInCommentUrl(postUrn: string | null, commentUrn: string): string | null {
     if (!postUrn) return null;
     return `https://www.linkedin.com/feed/update/${encodeURIComponent(postUrn)}/?commentUrn=${encodeURIComponent(commentUrn)}`;
 }
 
-export type ReplyResult = { ok: true; commentUrn: string | null } | { ok: false; status: number | null; error: string };
+/**
+ * `unconfirmed`: LinkedIn did not answer (timeout, network error) or answered 5xx — the reply MAY have
+ * been posted. Only a 4xx is a definite refusal; the caller must never offer to post again otherwise.
+ */
+export type ReplyResult = { ok: true; commentUrn: string | null } | { ok: false; status: number | null; error: string; unconfirmed: boolean };
+
+/** A refusal we can be sure posted nothing: LinkedIn answered, with a 4xx. Pure. */
+export function replyDefinitelyRefused(status: number | null): boolean {
+    return status != null && status >= 400 && status < 500;
+}
 
 /** The comment's thread URN, the first part of urn:li:comment:(<thread>,<id>). Pure. */
 export function commentThreadUrn(commentUrn: string): string | null {
@@ -221,7 +246,7 @@ export async function replyToComment(
     opts: { orgUrn: string; objectUrn: string; commentUrn: string; text: string },
 ): Promise<ReplyResult> {
     const text = opts.text.trim();
-    if (!text) return { ok: false, status: null, error: 'The reply is empty.' };
+    if (!text) return { ok: false, status: null, error: 'The reply is empty.', unconfirmed: false };
     try {
         const res = await fetch(`${API}/socialActions/${restliEncode(opts.commentUrn)}/comments`, {
             method: 'POST',
@@ -241,9 +266,9 @@ export async function replyToComment(
             return { ok: true, commentUrn: data.commentUrn || (id && thread ? `urn:li:comment:(${thread},${id})` : null) };
         }
         const data = await res.json().catch(() => ({})) as { message?: string };
-        return { ok: false, status: res.status, error: replyErrorMessage(res.status, data.message) };
+        return { ok: false, status: res.status, error: replyErrorMessage(res.status, data.message), unconfirmed: !replyDefinitelyRefused(res.status) };
     } catch (err) {
-        return { ok: false, status: null, error: err instanceof Error ? err.message : 'LinkedIn could not be reached.' };
+        return { ok: false, status: null, error: err instanceof Error ? err.message : 'LinkedIn could not be reached.', unconfirmed: true };
     }
 }
 

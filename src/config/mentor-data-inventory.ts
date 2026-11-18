@@ -103,6 +103,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('never', 'Guest review links: private addresses, and names and comments typed by people outside the workspace. Guest text reaches a model only on the user\'s click', [
         'review_links', 'review_link_responses',
     ]),
+    ...group('never', 'LinkedIn Company Page comments: names and words typed by people outside the workspace. Read only by the Social Media assistant\'s own chat and Comments tab (page-comments.ts)', ['page_comments']),
     ...group('never', 'Secrets and connection credentials', [
         'vault_secrets', 'api_keys', 'system_connections', 'workspace_integrations', 'stripe_connect_accounts',
         'newsletter_sending_domains', 'webhook_endpoints',
