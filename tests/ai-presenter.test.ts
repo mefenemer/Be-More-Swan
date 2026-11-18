@@ -92,6 +92,7 @@ check('the labels: always realistic AI, and a small "AI presenter" note where th
     assert.strictEqual(containsRealisticAi(sb, { clip: null }), true);
     const ov = sceneOverlays(sb!.scenes as Scene[], [3, 5]).find((o) => o.id === 'vp_aip_s2');
     assert.ok(ov && ov.text === 'AI presenter' && ov.startS === 3 && ov.endS === 6, 'from where they appear, for 3 seconds');
+    assert.ok(ov!.x === 0.5, 'top centre, so a portrait frame never clips it');
     assert.strictEqual(sceneOverlays([{ id: 's1', beat: 'hook', voiceover: 'x', source: 'stock_video', targetS: 3 }] as Scene[], [3]).some((o) => o.id.startsWith('vp_aip_')), false);
 });
 

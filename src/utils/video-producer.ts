@@ -170,6 +170,8 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             ...(isMusicLevel(b.musicLevel) && b.musicLevel !== 'normal' ? { musicLevel: b.musicLevel } : {}),
             ...(b.voiceover !== false && b.ownVoice === true && !presenter ? { ownVoice: true } : {}),
             ...(presenter ? { presenter } : {}),
+            // The owner's own videos as screens beside the presenter (A3): only with a presenter, never as footage.
+            ...(presenter && readFootageIds(b.screenAssetIds).length ? { screenAssetIds: readFootageIds(b.screenAssetIds) } : {}),
             ...(Number.isInteger(Number(b.shapeOf)) && Number(b.shapeOf) > 0 ? { shapeOf: Number(b.shapeOf) } : {}),
             language,
             captions: b.captions !== false,
@@ -335,11 +337,14 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             libraryPictures(db, p.organisationId),
             loadFootage(db, p.organisationId, brief.footageAssetIds ?? []),
         ]);
+        // Screen recordings beside a presenter (A3): known to the storyboard rules and the presenter instruction, never
+        // listed as footage (the planner would cut scenes of their own from them).
+        const screens = asOwnVideos(await loadFootage(db, p.organisationId, brief.screenAssetIds ?? []));
         // A footage video: the owner's ticks decide which suggested edits the plan must apply.
         const review = p.footageReview as FootageReview | null;
         const acceptedEdits = review?.suggestions.filter((x) => x.ticked).map(suggestionLine) ?? [];
         const declinedEdits = review?.suggestions.filter((x) => !x.ticked).map(suggestionLine) ?? [];
-        const own = asOwnVideos(footage);
+        const own = [...asOwnVideos(footage), ...screens];
         const facts = [org?.industry ? `Industry: ${org.industry}` : '', org?.description ?? '', renderProductFacts(products, 2500)]
             .filter(Boolean).join('\n');
         const rules = p.aiAssistantId
@@ -353,7 +358,7 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
                     brief, businessName: org?.name ?? '', businessFacts: facts, library,
                     today: new Date().toISOString().slice(0, 10), feedback,
                     language: languageLabel(brief.language ?? (brief.voiceover ? voiceLanguage(brief.voice ?? DEFAULT_VOICE) : 'en')),
-                    footageBlock: footagePlannerBlock(footage), acceptedEdits, declinedEdits,
+                    footageBlock: footagePlannerBlock(footage), acceptedEdits, declinedEdits, screens,
                     scriptOf: mode === 'script' ? current : null,
                     sceneNotes: mode === 'notes' && current ? { storyboard: current, notes: noted } : null,
                 }) }],
@@ -570,11 +575,12 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         }
         t += d;
     });
-    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top left, 3 s.
+    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top centre, 3 s.
     const firstAt = scenes.findIndex((s) => s.source === 'ai_presenter');
     if (firstAt >= 0) {
         const at = durations.slice(0, firstAt).reduce((a, d) => a + d, 0);
-        out.push({ id: `vp_aip_${scenes[firstAt].id}`, text: 'AI presenter', x: 0.14, y: 0.06, fontFamily: 'Arial', fontSizePct: 0.028,
+        // Top centre: x 0.14 clipped the box at the left edge of a 9:16 frame (staging video 46, 2026-11-18).
+        out.push({ id: `vp_aip_${scenes[firstAt].id}`, text: 'AI presenter', x: 0.5, y: 0.05, fontFamily: 'Arial', fontSizePct: 0.028,
             color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.45, startS: at, endS: at + Math.min(3, durations[firstAt] ?? 3), anim: 'fade' });
     }
     return out;
@@ -693,7 +699,7 @@ export function timelineCovers(scenes: Scene[], assets: Record<string, number>, 
         const cover = s.cover;
         const assetId = cover ? assets[`${s.id}~cover`] : undefined;
         const st = times[i];
-        if (!cover || !assetId || s.source !== 'own_video' || !st) return;
+        if (!cover || !assetId || (s.source !== 'own_video' && s.source !== 'ai_presenter') || !st) return;
         const win = coverWindow(cover, st.startS, st.endS - st.startS);
         if (!win) return;
         const isVideo = cover.source === 'own_video' || cover.source === 'stock_video';
@@ -1063,7 +1069,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const coverFailed: number[] = [];
         for (const [i, scene] of storyboard.scenes.entries()) {
             const cover = scene.cover;
-            if (!cover || scene.source !== 'own_video') continue;
+            if (!cover || (scene.source !== 'own_video' && scene.source !== 'ai_presenter')) continue;
             const key = `${scene.id}~cover`;
             if (done[key]) continue;
             const win = coverWindow(cover, 0, durations[i] ?? scene.targetS);
@@ -1084,7 +1090,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // THIS build shows the presenter full frame there (timelineCovers skips a cover with no asset). The scene
         // keeps its layout, so the next version tries again, and the finished video says what happened.
         const coverNote = coverFailed.length
-            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} you full frame. Change the video and make it again to try that screen again, or choose another on the scene.`
+            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} the speaker full frame. Change the video and make it again to try that screen again, or choose another on the scene.`
             : null;
         await save({});
         const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
@@ -1435,6 +1441,11 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
         screenNote: (row.timeline as ProjectTimeline | null)?.coverNote ?? null,
+        // The screen recordings beside a presenter, by name, for the Change form's "On the screen" list (A3).
+        screens: (row.brief as VideoBrief | null)?.screenAssetIds?.length
+            ? (await db.select({ id: contentAssets.id, name: contentAssets.name }).from(contentAssets)
+                .where(and(inArray(contentAssets.id, (row.brief as VideoBrief).screenAssetIds!), eq(contentAssets.organisationId, orgId)))).map((x) => ({ id: x.id, name: x.name || `Video ${x.id}` }))
+            : [],
         scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
         // The voiceover made (or, in the owner's own voice, one recording of the whole script).
         voiceoverAssetId: row.voiceoverAssetId,
@@ -1604,7 +1615,8 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}${s.source === 'own_video' && s.assetId ? ` — their video ${s.assetId}${s.inS != null ? ` ${mmss(Number(s.inS))}–${mmss(Number(s.outS))}` : ''}` : ''}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.cover ? `; layout ${s.cover.layout} (screen: ${s.cover.source === 'own_video' ? `their video ${s.cover.assetId}${s.cover.inS ? ` from ${mmss(s.cover.inS)}` : ''}` : s.cover.source === 'product_photo' ? 'their picture' : `${s.cover.source}${s.cover.keywords ? ` "${s.cover.keywords}"` : ''}`}${s.cover.layout !== 'cover' ? `, ${cornerOf(s.cover)}` : ''})` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
             : '';
         const fr = r.footageReview as FootageReview | null;
-        const own = brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '';
+        const own = (brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '')
+            + (brief.screenAssetIds?.length ? ` · AI presenter over their screen recordings (videos ${brief.screenAssetIds.join(', ')})` : '');
         const seen = fr && (r.status === 'reviewed' || r.status === 'planned')
             ? fr.seen.map((v) => `\n    • what you saw in video ${v.assetId} "${v.name.slice(0, 60)}": ${v.summary.slice(0, 200)}${v.problems.length ? ` (problems: ${v.problems.join(', ').slice(0, 160)})` : ''}`).join('')
               + fr.suggestions.map((x) => `\n    • suggestion ${x.id}${x.ticked ? '' : ' (unticked)'}: ${x.text.slice(0, 160)}`).join('')
