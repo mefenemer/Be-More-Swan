@@ -12,7 +12,7 @@ const seed = JSON.parse(read('seed/data/master_assistants.json')) as { roleKey: 
 assert.equal(seed.find((r) => r.roleKey === 'meeting_note_taker')?.name, 'Note Taker');
 assert.ok(read('db/seed-catalog.ts').includes("name: 'Note Taker',"));
 assert.ok(read('connections.html').includes('<h3>Note Taker</h3>') && read('connections.html').includes('</span>Note Taker</a>'));
-assert.ok(read('faq.html').includes('which arrive with the Note Taker.'));
+assert.ok(read('faq.html').includes('with the Note Taker — Slack, Notion, Jira and Asana.'));
 assert.ok(read('src/public/assistant-onboarding-schemas.js').includes('How your Note Taker works'));
 
 // 2. The database: master_assistants.name only, keyed on role_key, re-runnable; the old rename can't revert it.

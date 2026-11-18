@@ -140,10 +140,10 @@
      live in src/utils/connection-map.ts), and HubSpot/Salesforce (owner's call 2026-10-20: not offered
      yet, though the recipes exist — integrations.html shows them as coming soon too).
      An assistant that is itself comingSoon in master_assistants cannot have a Live connection, however
-     finished the recipe is: Slack, Notion, Jira, Asana, the follow-up email and the meeting webhook only
-     fire for the Note Taker's meeting records (assistant-integrations.js RELEVANT_TYPES), so they stay
-     "Coming soon" until it goes live — move them back then, with the hero list and the homepage, pricing
-     and FAQ mentions. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
+     finished the recipe is. The Note Taker went live 2026-11-18 (finish plan step 9) after its real-account
+     run (docs/meeting-note-taker-real-account-run.md): Slack, Notion, Jira, Asana and the follow-up email
+     (Gmail or Outlook only — never a Be More Swan address) are Live. Its webhook (Zapier / Make) stays
+     Coming soon — not covered by that run; HubSpot (owner's call) and Zoom (no recordings) too. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
      YouTube: Coming soon 2026-11-04 while the Google project was in Testing; Live again 2026-11-05 once
      Google approved its verification (project In production, a real upload already landed public).
      Assistant names mirror master_assistants — rename both. -->
@@ -185,6 +185,10 @@
                         <span class="cx-tool"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span>Google Search Console</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span>Canva</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span>Zapier / Make</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span>Slack</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span>Notion</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span>Jira</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span>Asana</span>
                     </div>
                 </div>
             </div>
@@ -517,49 +521,49 @@
                 <span class="cx-icon" aria-hidden="true">📝</span>
                 <div>
                     <h3>Note Taker</h3>
-                    <p>Turns meeting transcripts and notes into minutes and action items. This assistant is coming soon, and its connections will arrive with it.</p>
+                    <p>Turns the meeting transcripts and notes you paste or attach into minutes: a summary, the decisions, and every action item with its owner. Nothing goes anywhere until you approve it.</p>
                 </div>
                 <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">N</span><span class="cx-badge cx-badge-sm" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><span class="cx-badge cx-badge-sm" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><span class="cx-badge cx-badge-sm" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span><span class="cx-badge cx-badge-sm" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><span class="cx-badge cx-badge-sm" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span></div>
-                <span class="cx-count">8 coming soon</span>
+                <span class="cx-count">5 live · 3 coming soon</span>
             </div>
             <div class="cx-grid">
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><h4>Slack</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><h4>Slack</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
-                    <li><span class="cx-step">It</span>Posts the summary and action items to a Slack channel</li>
+                    <li><span class="cx-step">It</span>Posts the summary and action items to the Slack channel you choose</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Everyone sees what was agreed, even if they missed the call.</p>
             </article>
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span><h4>Notion</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span><h4>Notion</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Files a Notion page with the summary and a to-do list</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Your meeting history lives where your team already works.</p>
             </article>
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><h4>Jira</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><h4>Jira</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
-                    <li><span class="cx-step">It</span>Creates one Jira ticket for each action item</li>
+                    <li><span class="cx-step">It</span>Creates one Jira task for each action item, in the project you choose</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
             </article>
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><h4>Asana</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><h4>Asana</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
-                    <li><span class="cx-step">It</span>Creates one Asana task for each action item</li>
+                    <li><span class="cx-step">It</span>Creates one Asana task for each action item, in the project you choose</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
             </article>
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Email follow-up</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Email follow-up</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
-                    <li><span class="cx-step">It</span>Emails the follow-up to everyone who attended, from your Gmail if it is connected</li>
+                    <li><span class="cx-step">It</span>Emails the follow-up to everyone who attended, from your own Gmail or Outlook</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> The follow-up is sent while the meeting is still fresh.</p>
             </article>
