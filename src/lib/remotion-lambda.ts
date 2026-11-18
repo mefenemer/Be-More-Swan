@@ -31,8 +31,8 @@ const SERVE_URL = process.env.REMOTION_SERVE_URL;
 const COMPOSITION_ID = 'PostOverlay';
 
 // ── The concurrency budget, and why we size the fan-out ourselves ───────────────────────────────
-// AWS caps how many Lambdas an account may run AT ONCE. A new account gets 10 and ours is still
-// there (`npx remotion lambda quotas`, eu-west-2, verified 2026-08-02).
+// HISTORY (2026-08-02 to 2026-11-18), kept for why the fan-out is ours: the account then allowed 10
+// Lambdas AT ONCE (`npx remotion lambda quotas`, eu-west-2). Today's sizing is the ⚠️ paragraph below.
 //
 // Remotion's default fan-out knows nothing about that cap. bestFramesPerFunctionParam floors a chunk
 // at 20 frames, so the weekly YouTube Short — 10s at 30fps, 300 frames — asks for 15 renderer
@@ -46,9 +46,8 @@ const COMPOSITION_ID = 'PostOverlay';
 // "A Short can't carry this" — a symptom of this, not a separate bug.
 //
 // So: pick `concurrency` (the renderer-Lambda count) deliberately. The launch function is one MORE
-// on top of it, and two renders can legitimately overlap — a reviewer approving a video while the
-// weekly Short drafts — so the default of 3 keeps two entire renders (2 launch + 6 renderers = 8)
-// inside a limit of 10.
+// on top of it, and two renders can legitimately overlap. In that era a cap of 3 kept two renders
+// (2 launch + 6 renderers = 8) inside the limit of 10.
 //
 // ⚠️ The quota has since been RAISED to 1000 (`npx remotion lambda quotas`, eu-west-2, checked 2026-11-18),
 // and both environments run the 300 s function (remotion-render-…-300sec). Measured the same day on the

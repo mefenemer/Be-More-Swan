@@ -74,6 +74,8 @@ export async function persistRemoteMediaToR2(params: {
      * Pass the download straight through to R2 instead of holding it in memory. For rendered videos: a
      * 10-minute 1080p MP4 can be several hundred MB, close to a function's memory (Phase 4). Needs the
      * response's Content-Length (S3 needs the size up front); without it, falls back to buffering.
+     * Only for responses with no Content-Encoding (Remotion's S3 MP4s): fetch decodes a gzip/br body,
+     * so its length would no longer match Content-Length and the upload would fail (loudly, not silently).
      */
     stream?: boolean;
 }): Promise<{ storageKey: string; fileSize: number }> {

@@ -191,7 +191,7 @@ symptom people report rather than the cause.
 
 Two things keep this fixed, and you want both:
 
-1. **`REMOTION_MAX_LAMBDAS`** (`src/lib/remotion-lambda.ts`, default **3**) sizes the fan-out
+1. **`REMOTION_MAX_LAMBDAS`** (`src/lib/remotion-lambda.ts`; default **120** since 2026-11-18, it was **3** in this era) sizes the fan-out
    ourselves via `renderMediaOnLambda`'s `concurrency`. The launch function is one *more* Lambda on
    top, and two renders can legitimately overlap, so the default keeps `2 × (1 + 3) = 8` inside a
    limit of 10. Raise it once the quota goes up — but note the trade: fewer Lambdas means **more
