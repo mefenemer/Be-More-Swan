@@ -521,6 +521,9 @@ export function sceneTimingsFromWords(
         // longest pause within SNAP_WORDS of the estimate — never back past the previous scene's first word.
         // Only a cut between two scenes that both have lines moves: next to a silent scene the estimate already sits
         // where the next line starts, and snapping it would hand those first words to the wrong scene (review of #723).
+        // A count that runs past the last heard word (the transcript merged words) still gets a cut inside the speech,
+        // so a short last line keeps its first word (review of #723).
+        if (i > 0 && counts[i] > 0 && idx >= words.length) idx = words.length - 1;
         if (i > 0 && counts[i - 1] > 0 && counts[i] > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
         starts.push(idx < words.length ? words[Math.min(idx, words.length - 1)].start : words[words.length - 1].end);
         idx += Math.round(counts[i] * k);
@@ -544,18 +547,25 @@ function wordIndexAt(words: Array<{ start: number }>, t: number): number {
     return i;
 }
 
+/** A gap between words shorter than this isn't a pause. */
+export const MIN_PAUSE_S = 0.12;
+
 /**
- * The word index nearest `idx` (within SNAP_WORDS, never below `min`) that follows the longest pause — where a
- * new sentence, and so a new scene, starts. Ties keep the estimate. A pause under 0.12 s isn't one: the estimate
- * stands. Pure.
+ * The word index NEAREST `idx` (within SNAP_WORDS, never below `min`) that follows a real pause — where a new
+ * sentence, and so a new scene, starts; equally near, the longer pause wins. The estimate stands when it already
+ * follows a pause, or no pause is near. Nearest, not longest: with several sentence pauses close by, the longest
+ * jumped a whole sentence (review of #723). Pure.
  */
 export function snapToPause(words: Array<{ start: number; end: number }>, idx: number, min: number): number {
     const gap = (j: number) => (j > 0 && j < words.length ? words[j].start - words[j - 1].end : -1);
-    let best = idx, bestGap = gap(idx);
+    if (gap(idx) >= MIN_PAUSE_S) return idx;
+    let best = idx, bestDist = Infinity, bestGap = -1;
     for (let j = Math.max(min, idx - SNAP_WORDS); j <= Math.min(words.length - 1, idx + SNAP_WORDS); j++) {
-        if (gap(j) > bestGap + 1e-6) { best = j; bestGap = gap(j); }
+        const g = gap(j), dist = Math.abs(j - idx);
+        if (g < MIN_PAUSE_S) continue;
+        if (dist < bestDist || (dist === bestDist && g > bestGap)) { best = j; bestDist = dist; bestGap = g; }
     }
-    return bestGap >= 0.12 ? best : idx;
+    return best;
 }
 
 /** Credits a storyboard will cost before anything is made (shown on the button). Pure. */

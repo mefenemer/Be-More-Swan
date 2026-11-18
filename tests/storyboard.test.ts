@@ -105,6 +105,13 @@ check('a cut lands in the pause before a sentence, even when the transcript coun
     const d2 = sceneTimingsFromWords(silent, w2)!;
     // Its first word kept: it runs 1.5 → 3.95 s (2.5); snapped to the later pause it would shrink to the 1.5 s minimum.
     assert.ok(d2[2] >= 2.4, `scene 3 keeps its first word: ${d2[2]}`);
+    // The count runs past the last heard word (four lines, words merged): the last line still keeps its first word.
+    const merged = enforceStoryboard(raw([sc({ voiceover: 'a b' }), sc({ voiceover: 'c d' }), sc({ voiceover: 'e f' }), sc({ voiceover: 'Book' })]), brief()).storyboard;
+    const w3 = [[0, 0.25], [0.4, 0.65], [3.0, 3.25], [3.4, 3.65], [6.0, 6.25], [9.0, 10.5]].map(([start, end]) => ({ start, end }));
+    const d3 = sceneTimingsFromWords(merged, w3)!;
+    assert.strictEqual(d3[2], 3, `scene 3 ends where "Book" begins (9.0 s), not after it (10.5 s): ${d3[2]}`);
+    // …and no cut jumps a whole sentence to a longer pause further on (the nearest pause wins).
+    assert.deepStrictEqual(d3.slice(0, 3), [3, 3, 3], `every sentence keeps its own scene: ${d3}`);
     // No pause nearby: the estimate stands.
     assert.strictEqual(snapToPause([0, 0.3, 0.6, 0.9].map((t) => ({ start: t, end: t + 0.28 })), 2, 1), 2);
 });
