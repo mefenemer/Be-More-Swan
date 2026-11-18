@@ -505,7 +505,7 @@ export function scriptOf(storyboard: Storyboard): string {
  */
 export function sceneTimingsFromWords(
     storyboard: Storyboard,
-    words: Array<{ start: number; end: number }>,
+    words: Array<{ start: number; end: number; word?: string }>,
 ): number[] | null {
     const counts = storyboard.scenes.map((s) => (s.voiceover ? s.voiceover.split(/\s+/).filter(Boolean).length : 0));
     const planned = counts.reduce((a, b) => a + b, 0);
@@ -515,6 +515,19 @@ export function sceneTimingsFromWords(
     const starts: number[] = [];
     let idx = 0;
     for (let i = 0; i < counts.length; i++) {
+        // A scene is whole sentences, so its first word starts a sentence. The count estimate drifts when the
+        // transcription spells words differently ("fifteen minute" heard as "15-minute": an AI presenter's last
+        // clip started on "online", missing "Book", staging 2026-11-18). So the cut moves to the nearest sentence
+        // start within SNAP_WORDS of the estimate (snapToPause) — never back past the previous scene's first word.
+        // Only a cut between two scenes that both have lines moves: next to a silent scene the estimate already sits
+        // where the next line starts, and snapping it would hand those first words to the wrong scene (review of #723).
+        // A count that runs past the last heard word (the transcript merged words) still gets a cut inside the speech,
+        // so a short last line keeps its first word (review of #723).
+        if (i > 0 && counts[i] > 0 && idx >= words.length) idx = words.length - 1;
+        // …and only where the previous scene's line ENDS a sentence: a line that stops mid-sentence ("Our fresh coffee"
+        // / "is roasted daily.") already has the right cut from the count (review of #723).
+        const endsSentence = /[.?!…]["'”’)\]]*$/.test((storyboard.scenes[i - 1]?.voiceover ?? '').trim());
+        if (i > 0 && endsSentence && counts[i - 1] > 0 && counts[i] > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
         starts.push(idx < words.length ? words[Math.min(idx, words.length - 1)].start : words[words.length - 1].end);
         idx += Math.round(counts[i] * k);
     }
@@ -525,6 +538,49 @@ export function sceneTimingsFromWords(
         const spoken = Math.max(0, to - from);
         return round1(Math.max(spoken, counts[i] ? MIN_SCENE_S : s.targetS));
     });
+}
+
+/** How far (in words) a scene cut may move to land in a pause. */
+export const SNAP_WORDS = 3;
+
+/** The index of the word starting at `t` (or the last one before it). Pure. */
+function wordIndexAt(words: Array<{ start: number }>, t: number): number {
+    let i = 0;
+    while (i + 1 < words.length && words[i + 1].start <= t + 1e-6) i++;
+    return i;
+}
+
+/** A gap between words shorter than this isn't a pause. */
+export const MIN_PAUSE_S = 0.12;
+
+/**
+ * The word index NEAREST `idx` (within SNAP_WORDS, never below `min`) that starts a sentence — where a new scene
+ * starts; equally near, the longer pause wins. A sentence start is the word after one ending in . ? or ! when the
+ * transcript gives the words' text (ElevenLabs does), else the word after a pause of MIN_PAUSE_S or more. The
+ * estimate stands when it already starts a sentence, or none is near. Nearest, not longest (a longer pause further
+ * on jumped a whole sentence), and sentence ends, not any pause (a comma's pause moved a right cut — reviews of
+ * #723). Pure.
+ */
+export function snapToPause(words: Array<{ start: number; end: number; word?: string }>, idx: number, min: number): number {
+    const gap = (j: number) => (j > 0 && j < words.length ? words[j].start - words[j - 1].end : -1);
+    const END = /[.?!…]["'”’)\]]*$/;
+    // Punctuation only when the transcript has some: the fallback transcriber returns bare words, and then a pause
+    // is the only sign of a sentence end.
+    const punctuated = words.some((w) => typeof w.word === 'string' && END.test(w.word.trim()));
+    const startsSentence = (j: number) => {
+        if (j <= 0 || j >= words.length) return false;
+        const prev = words[j - 1].word;
+        return punctuated && typeof prev === 'string' ? END.test(prev.trim()) : gap(j) >= MIN_PAUSE_S;
+    };
+    if (idx >= min && startsSentence(idx)) return idx;
+    let best = idx, bestDist = Infinity, bestGap = -1;
+    for (let j = Math.max(min, idx - SNAP_WORDS); j <= Math.min(words.length - 1, idx + SNAP_WORDS); j++) {
+        const g = gap(j), dist = Math.abs(j - idx);
+        if (!startsSentence(j)) continue;
+        if (dist < bestDist || (dist === bestDist && g > bestGap)) { best = j; bestDist = dist; bestGap = g; }
+    }
+    // Never onto (or before) the previous cut: that would leave the previous scene with no words (review of #723).
+    return Math.max(best, min);
 }
 
 /** Credits a storyboard will cost before anything is made (shown on the button). Pure. */

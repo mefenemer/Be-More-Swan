@@ -570,11 +570,12 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         }
         t += d;
     });
-    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top left, 3 s.
+    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top centre, 3 s.
     const firstAt = scenes.findIndex((s) => s.source === 'ai_presenter');
     if (firstAt >= 0) {
         const at = durations.slice(0, firstAt).reduce((a, d) => a + d, 0);
-        out.push({ id: `vp_aip_${scenes[firstAt].id}`, text: 'AI presenter', x: 0.14, y: 0.06, fontFamily: 'Arial', fontSizePct: 0.028,
+        // Top centre: x 0.14 clipped the box at the left edge of a 9:16 frame (staging video 46, 2026-11-18).
+        out.push({ id: `vp_aip_${scenes[firstAt].id}`, text: 'AI presenter', x: 0.5, y: 0.05, fontFamily: 'Arial', fontSizePct: 0.028,
             color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.45, startS: at, endS: at + Math.min(3, durations[firstAt] ?? 3), anim: 'fade' });
     }
     return out;
