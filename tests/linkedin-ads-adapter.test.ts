@@ -290,6 +290,15 @@ check('a newly created campaign group is referenced by its full URN', () => {
     assert.match(read('src/utils/ad-networks/linkedin.ts'), /return campaignGroupUrn\(parseRestliId\(created\)\);/);
 });
 
+check('the campaign locale is en_US — LinkedIn refuses en_GB as an interface locale', () => {
+    const b = campaignCreateBody({
+        accountUrn: 'urn:li:sponsoredAccount:1', campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:2',
+        name: 'x', dailyBudgetAmount: '5', currencyCode: 'GBP', startMs: 1, targeting: {},
+    } as never);
+    assert.deepEqual(b.locale, { country: 'US', language: 'en' });
+    assert.ok(!/'locale\.country': 'GB'/.test(read('src/utils/ad-networks/linkedin.ts')), 'typeahead still asks for en_GB');
+});
+
 check('a creative names its campaign by the full URN', () => {
     assert.equal(campaignUrn('987'), 'urn:li:sponsoredCampaign:987');
     assert.equal(campaignUrn('urn:li:sponsoredCampaign:987'), 'urn:li:sponsoredCampaign:987');
