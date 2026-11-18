@@ -76,7 +76,7 @@ import { isOwnVoice, keepRecordings, linesToRecord, MAX_LINE_S, MAX_WHOLE_S, pre
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
-import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
+import { asOwnVideos, canAffordReview, footageStatus, loadFootage, ownVideos } from '../../src/utils/footage-review';
 import { getTaskCosts } from '../../src/utils/task-costs';
 import { findPhrase, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -257,6 +257,14 @@ export default withLambda(async (event) => {
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
+        // Screen recordings beside a presenter (A3): the workspace's own uploads, with the same permission tick as footage.
+        const screenIds = parsed.brief.screenAssetIds ?? [];
+        if (screenIds.length) {
+            if ((body.brief as Record<string, unknown> | undefined)?.footageConsent !== true) {
+                return json(400, { error: 'Tick “I have permission to use the people and music in these videos” first.' });
+            }
+            if ((await ownVideos(db, orgId, screenIds)).length !== screenIds.length) return json(404, { error: 'One of those screen recordings isn’t one of your own uploads.' });
+        }
         const footage = parsed.brief.footageAssetIds ?? [];
         if (footage.length) {
             // The owner says the people and music in their videos may be used (plan §6) — every review.
@@ -616,7 +624,9 @@ export default withLambda(async (event) => {
             if (!hit.length) return json(400, { error: 'Those words aren’t said in that scene. Use “Edit the words” on the Videos tab to pick them.' });
             scene.cutWords = readCutWords([...(scene.cutWords ?? []), ...hit.map((w) => ({ start: w.start, end: w.end }))], scene.inS, scene.outS);
         }
-        const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
+        // Screen recordings beside a presenter (A3) are covers' videos too, never footage.
+        const screens = asOwnVideos(await loadFootage(db, orgId, brief.screenAssetIds ?? []));
+        const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), [...asOwnVideos(footage), ...screens]);
         // A changed cut, or "Keep as filmed", is tightened again from the review's words.
         const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };
         // A scene keeps the owner's recording of its line while the words stay the same.

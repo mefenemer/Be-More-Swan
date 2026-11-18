@@ -96,7 +96,8 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
     if (req.nameCaption !== undefined && JSON.stringify(req.nameCaption) !== JSON.stringify(scene.nameCaption ?? null)) patch.nameCaption = req.nameCaption;
     if (req.cutPhrase && scene.source === 'own_video') patch.cutPhrase = req.cutPhrase;
     // A layout only on their own footage (edit_scene re-checks the screen is one of the video's own videos).
-    if (scene.source === 'own_video') {
+    // …and on an AI presenter's scene (A3): the presenter in a bubble over a screen, or the screen in a window.
+    if (scene.source === 'own_video' || scene.source === 'ai_presenter') {
         // Only one of THIS video's own videos can be the screen: edit_scene would drop any other and leave the
         // presenter full frame, so the card never offers it.
         const ownOk = req.screenVideo == null || (opts.ownVideoIds ?? []).includes(req.screenVideo);

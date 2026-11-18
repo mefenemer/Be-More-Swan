@@ -98,6 +98,11 @@ export interface VideoBrief {
      * the footage keeps its own sound and each own-video scene is exactly its segment.
      */
     footageAssetIds?: number[];
+    /**
+     * The owner's own videos used ONLY as screens over or beside an AI presenter (A3, walkthrough plan §11.7): never
+     * scenes of their own and never their sound, so no footage review. Only with a presenter.
+     */
+    screenAssetIds?: number[];
     /** Cut pauses, "um"s and repeated takes out of own footage in its own sound. Absent = on. */
     tighten?: boolean;
     /** The finished video's shape. Absent = vertical 9:16 (every video before 2026-11-09). */
@@ -278,6 +283,9 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     // Only the videos the owner chose for THIS video, and only once they are measured.
     const chosen = new Set(brief.footageAssetIds ?? []);
     const ownById = new Map(footage.filter((v) => chosen.has(v.id) && v.durationS > 0).map((v) => [v.id, v]));
+    // A screen may be any of the brief's own videos: its footage, or (with a presenter) its screen recordings (A3).
+    const screenIds = new Set([...(brief.footageAssetIds ?? []), ...(brief.screenAssetIds ?? [])]);
+    const screenLens = new Map(footage.filter((v) => screenIds.has(v.id) && v.durationS > 0).map((v) => [v.id, v.durationS]));
     const ownSound = keepsOwnSound(brief);
     const motions: StillMotion[] = ['push_in', 'pan_right', 'pull_out', 'pan_left'];
 
@@ -322,6 +330,16 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             if (cover) scene.cover = cover;
             else if (o.cover) changes.push(`Scene ${i + 1}: that screen isn't one of your chosen videos or pictures, so the presenter shows full frame.`);
         }
+        // The AI presenter over (or beside) a screen (A3): a bubble or a window, never "screen only" — a presenter who
+        // is heard but not seen would be paid for by the second and never shown.
+        if (source === 'ai_presenter' && o.cover) {
+            const cover = readSceneCover(o.cover, { own: screenLens, library: libraryIds });
+            if (cover && cover.layout !== 'cover') scene.cover = cover;
+            else changes.push(cover
+                ? `Scene ${i + 1}: the presenter is shown with the screen in a bubble, not hidden behind it.`
+                : `Scene ${i + 1}: that screen isn't one of your chosen videos or pictures, so the presenter shows full frame.`);
+            if (cover && cover.layout === 'cover') scene.cover = { ...cover, layout: 'bubble' };
+        }
         const text = clip(o.onScreenText, 60);
         if (text) { scene.onScreenText = text; Object.assign(scene, readSceneText(o as Record<string, unknown>)); }
         const prompt = clip(o.prompt, 600);
@@ -363,7 +381,9 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         // when it doesn't, the earliest three keep them (review of #721).
         const isLast = s === scenes[scenes.length - 1];
         const lastIsPresenter = scenes[scenes.length - 1].source === 'ai_presenter';
-        if (!presenter.throughout && !isLast && presenterScenes > PRESENTER_KEY_SCENES - (lastIsPresenter ? 1 : 0)) {
+        // With screen recordings (A3) the presenter guides the whole walkthrough, so the key-moment limit doesn't apply.
+        const walkthrough = !!brief.screenAssetIds?.length;
+        if (!presenter.throughout && !walkthrough && !isLast && presenterScenes > PRESENTER_KEY_SCENES - (lastIsPresenter ? 1 : 0)) {
             s.source = 'stock_video';
             if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' ');
             changes.push(`The presenter appears in at most ${PRESENTER_KEY_SCENES} scenes — scene ${i} uses stock footage.`);
@@ -605,7 +625,7 @@ Rules:
 - On-screen text is optional and short (under 8 words). The voiceover is captioned automatically, so do not repeat it on screen.
 - Where on-screen text goes (optional; leave all four out and it sits clear of the captions for the whole scene): "textPos" top | middle | bottom — never where the captions are (the brief says where); "textWhen" scene | first | last | words (the whole scene, its first or last 3 seconds, or only while that scene's line is spoken — good for a key phrase or the call to action); "textStyle" dark | plain | brand (a brand-colour box suits the call to action); "textAnim" rise | fade | pop | none. Use them sparingly: most scenes need none.
 - Visual sources, in order of preference: stock_video, stock_photo, product_photo (ONLY with an id from the library list), brand_card (a branded text card — good for the call to action), ai_image, ai_video.
-- ai_presenter ONLY when the brief names a PRESENTER: that person speaks the scene's voiceover line to camera (so the scene must have one). No keywords or prompt needed.
+- ai_presenter ONLY when the brief names a PRESENTER: that person speaks the scene's voiceover line to camera (so the scene must have one). No keywords or prompt needed. With SCREEN RECORDINGS listed, an ai_presenter scene may add "cover" ({"layout": "bubble" | "window", "source": "own_video", "assetId": <id>, "inS": <seconds>}) to show a recording with the presenter in a corner bubble or the recording in a corner window.
 - AI prompts describe a scene with NO words, letters, logos or signs in it. Never use AI to picture the business's own product — use product_photo or stock.
 - Stock keywords are 2–4 plain words a stock library would match.
 - Use only facts from the business information given. Never invent prices, offers, awards or claims.
@@ -628,6 +648,8 @@ export function storyboardUserPrompt(args: {
     language?: string | null;
     /** The owner's footage with its shot lists (src/lib/footage.ts footagePlannerBlock); absent = none. */
     footageBlock?: string | null;
+    /** The owner's screen recordings beside an AI presenter (A3): listed for covers, never cut into scenes. */
+    screens?: OwnVideo[];
     /** The suggested edits the owner ticked, and the ones they left unticked (footage videos only). */
     acceptedEdits?: string[];
     declinedEdits?: string[];
@@ -653,7 +675,7 @@ export function storyboardUserPrompt(args: {
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',
         brief.goal ? `WHAT THEY SHOULD DO AFTER WATCHING: ${clip(brief.goal, 200)} — build towards it, and end on it.` : '',
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
-        presenterBlock(brief),
+        presenterBlock(brief, args.screens ?? []),
         // Where the captions sit, so the words placed on screen keep clear of them (scene-text.ts).
         brief.captions === false ? 'CAPTIONS: off — on-screen text may sit anywhere.' : `CAPTIONS: at the ${brief.captionStyle?.position ?? 'bottom'} of the frame — never put textPos there.`,
         keepsOwnSound(brief)
@@ -702,10 +724,17 @@ export function parseStoryboardJson(text: string): unknown | null {
 }
 
 /** The planner's instruction for a video with an AI presenter (A2, D-A7). Empty without one. Pure. */
-export function presenterBlock(brief: Pick<VideoBrief, 'presenter' | 'footageAssetIds'>): string {
+export function presenterBlock(brief: Pick<VideoBrief, 'presenter' | 'footageAssetIds' | 'screenAssetIds'>, screens: OwnVideo[] = []): string {
     const bp = readBriefPresenter(brief.presenter);
     const p = bp ? presenterById(bp.id) : null;
     if (!bp || !p || brief.footageAssetIds?.length) return '';
+    // A walkthrough (A3): the presenter in a round bubble over the owner's screen recordings, full frame at the
+    // opening and the call to action. Each recording is shown in order, a stretch per scene.
+    const mine = screens.filter((v) => (brief.screenAssetIds ?? []).includes(v.id));
+    if (mine.length) {
+        const list = mine.map((v) => `id ${v.id} "${clip(v.name, 60)}" (${Math.round(v.durationS)} s)`).join('; ');
+        return `PRESENTER WITH SCREEN RECORDINGS: ${p.name}, an AI presenter, walks the viewer through the business's own screen recordings — ${list}. Open and close with "ai_presenter" full frame (no cover). Every scene in between is "ai_presenter" with "cover": {"layout": "bubble", "source": "own_video", "assetId": <a recording's id>, "inS": <seconds into it>} — move through each recording in order, a fresh stretch per scene (inS growing by about the scene's length), never past its end. Use "layout": "window" instead where the presenter's face matters more than the screen. Never "layout": "cover".`;
+    }
     return bp.throughout
         ? `PRESENTER: ${p.name}, an AI presenter, speaks to camera. Use source "ai_presenter" for every scene where a person speaking suits the line (most of them); show the product or place with stock or the business's own pictures where that says more.`
         : `PRESENTER: ${p.name}, an AI presenter, speaks to camera at the key moments only: use source "ai_presenter" for the opening scene, the call to action, and at most one other scene that matters most. Every other scene uses stock, the business's own pictures or a branded card.`;
