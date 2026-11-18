@@ -156,16 +156,27 @@
     if (!row) return;
     e.preventDefault();
     const input = row.querySelector('input[type="hidden"]');
+    const field = input.name;
     open({
       value: input.value, title: 'Choose a presenter',
       onSelect: (id) => {
-        input.value = id;
-        const name = row.querySelector('[data-ppf-name]');
+        // The host form may have re-rendered its rows while the modal was open: find the live field by its name,
+        // so the choice is never written into a row that has left the page (review of #715).
+        let liveRow = row;
+        if (!row.isConnected) {
+          const found = field ? document.querySelector(`[data-ppf] input[type="hidden"][name="${CSS.escape(field)}"]`) : null;
+          if (!found) { window.showToast?.('The form changed while you were choosing — please choose the presenter again.'); return; }
+          liveRow = found.closest('[data-ppf]');
+        }
+        const liveInput = liveRow.querySelector('input[type="hidden"]');
+        liveInput.value = id;
+        const name = liveRow.querySelector('[data-ppf-name]');
         if (name) name.textContent = describe(id);
-        const thumb = row.querySelector('[data-ppf-thumb]');
+        const thumb = liveRow.querySelector('[data-ppf-thumb]');
         if (thumb) { thumb.src = file(id, 'thumb'); thumb.classList.remove('hidden'); }
-        b.textContent = 'Change';
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+        const btn = liveRow.querySelector('[data-ppf-act]');
+        if (btn) btn.textContent = 'Change';
+        liveInput.dispatchEvent(new Event('change', { bubbles: true }));
       },
     });
   });

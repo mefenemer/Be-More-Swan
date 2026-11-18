@@ -172,7 +172,8 @@ export function logMessageUsage(
 //   • fal Hailuo 2.3 Standard text-to-video: $0.28 per 6 s, $0.56 per 10 s.
 //   • fal Kling image-to-video (fal pricing page 2026-10-31): v2.5 Turbo Pro $0.07/s, v3 Pro $0.14/s.
 //   • Stability Stable Audio 3.0: 26 credits per SUCCESSFUL track at $0.01 a credit.
-export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; firstMegapixel?: { first: number; extra: number }; perDuration?: Record<number, number>; perItem?: number }> = {
+//   • fal Kling AI Avatar v2 Standard (the AI presenter, 2026-11-15): $0.0562 per second.
+export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; firstMegapixel?: { first: number; extra: number }; perDuration?: Record<number, number>; perSecond?: number; perItem?: number }> = {
     'fal-ai/flux-pro/v1.1': { perMegapixel: 0.04 },
     'fal-ai/flux-2-pro': { firstMegapixel: { first: 0.03, extra: 0.015 } },
     // Priced per clip LENGTH, not per second: 10 s is not 10/6 of 6 s.
@@ -180,6 +181,8 @@ export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; first
     'fal-ai/kling-video/v2.5-turbo/pro/image-to-video': { perDuration: { 5: 0.35, 10: 0.70 } },
     'fal-ai/kling-video/v3/pro/image-to-video': { perDuration: { 3: 0.42, 4: 0.56, 5: 0.70, 6: 0.84, 8: 1.12, 10: 1.40, 15: 2.10 } },
     'stable-audio-3': { perItem: 0.26 },
+    // The AI presenter (fal model page 2026-11-15): $0.0562 per output second, billed by the second.
+    'fal-ai/kling-video/ai-avatar/v2/standard': { perSecond: 0.0562 },
 };
 
 /** Cost of one media generation in USD (6 dp). Pure. An unpriced model is '0'. */
@@ -204,6 +207,7 @@ export function mediaCostUsd(model: string, opts: { images?: Array<{ width?: num
         const d = opts.durationSeconds ?? 0;
         usd += p.perDuration[d] ?? Math.max(...Object.values(p.perDuration));
     }
+    if (p.perSecond != null) usd += p.perSecond * Math.max(0, opts.durationSeconds ?? 0);
     if (p.perItem != null) usd += p.perItem;
     return usd.toFixed(6);
 }

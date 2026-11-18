@@ -69,7 +69,8 @@ export function outputName(title: string, version: number): string {
 
 /** Does this storyboard use AI for any scene? Shown as "Contains AI" (owner decision D-S6). Pure. */
 export function containsAi(sb: Storyboard | null): boolean {
-    return !!sb?.scenes.some((s) => s.source === 'ai_video' || s.source === 'ai_image');
+    // An AI presenter is a realistic made-up person (A2): always counted, never an animated style.
+    return !!sb?.scenes.some((s) => s.source === 'ai_video' || s.source === 'ai_image' || s.source === 'ai_presenter');
 }
 
 /**

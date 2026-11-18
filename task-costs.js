@@ -21,7 +21,9 @@
     if (kind === 'chat_messages_per_task' && typeof figures.chatMessagesPerTask === 'number') return 'every ' + figures.chatMessagesPerTask + (figures.chatMessagesPerTask === 1 ? ' message' : ' messages');
     var n = figures.weights && figures.weights[kind];
     if (typeof n !== 'number') return fallback == null ? '' : fallback;
-    return n === 0 ? 'no tasks' : plural(n);
+    if (n === 0) return 'no tasks';
+    // An AI presenter is priced per second on screen (formatCost: 'ai_presenter').
+    return kind === 'ai_presenter' ? plural(n) + ' a second' : plural(n);
   }
 
   function apply(root) {

@@ -16,6 +16,11 @@
 //   FAL_KEY=$(netlify env:get FAL_KEY --context production) \
 //   ELEVENLABS_API_KEY=$(netlify env:get ELEVENLABS_API_KEY --context production) \
 //   node scripts/make-presenters.mjs [faces|samples|all] [--redo id,id]
+//
+// `storage` (A2) uploads each face, cropped for every video shape, to the shared R2 bucket at
+// presenters/<id>-16x9.jpg | -9x16.jpg | -1x1.jpg (src/lib/presenters.ts presenterFaceKey) — the build gives the
+// avatar model a signed link to it. Free; needs R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME:
+//   node scripts/make-presenters.mjs storage
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,3 +144,21 @@ if (step === 'faces' || step === 'all') await Promise.all(list.map((p) => face(p
 // Three at a time: ElevenLabs limits how many voices are made at once.
 async function inBatches(items, n, fn) { for (let i = 0; i < items.length; i += n) await Promise.all(items.slice(i, i + n).map(fn)); }
 if (step === 'samples' || step === 'all') await inBatches(list, 3, (p) => sample(p).catch((e) => console.error(`sample ${p.id}: ${e.message}`)));
+
+// ── storage (A2): the faces, cropped per shape, in the shared R2 bucket ─────────────────────────────
+// 16:9 is the face as made; 9:16 and 1:1 are centre crops (every face sits in the middle third), scaled to 1080 wide.
+const CROPS = { '16x9': 'scale=1920:1080', '9x16': 'crop=608:1080:656:0,scale=1080:1920', '1x1': 'crop=1080:1080:420:0,scale=1080:1080' };
+if (step === 'storage') {
+    const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+    for (const k of ['R2_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME']) if (!process.env[k]) throw new Error(`${k} is not set`);
+    const r2 = new S3Client({ region: 'auto', endpoint: process.env.R2_ENDPOINT, credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
+    for (const p of list) {
+        for (const [shape, vf] of Object.entries(CROPS)) {
+            const tmp = join(out, `${p.id}-${shape}.tmp.jpg`);
+            ffmpeg('-i', join(out, `${p.id}.jpg`), '-vf', vf, '-q:v', '3', tmp);
+            await r2.send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: `presenters/${p.id}-${shape}.jpg`, Body: readFileSync(tmp), ContentType: 'image/jpeg' }));
+            rmSync(tmp);
+        }
+        console.log(`storage ${p.id} done`);
+    }
+}

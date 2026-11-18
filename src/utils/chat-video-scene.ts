@@ -18,7 +18,8 @@ import { isBubbleSize, isCorner, isCoverLayout, type BubbleSize, type Corner, ty
 export const VIDEO_SCENE_EDIT_TYPE = 'video_scene_edit';
 
 /** product_photo needs a picture of theirs, which a card can't choose. */
-const CARD_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card'] as const;
+// ai_presenter only matters where the video has a presenter: edit_scene's storyboard rules turn it into stock otherwise.
+const CARD_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'ai_presenter'] as const;
 type CardSource = typeof CARD_SOURCES[number];
 
 export interface VideoSceneRequest {

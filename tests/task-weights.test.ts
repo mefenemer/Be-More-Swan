@@ -45,7 +45,8 @@ check('every weight is a positive integer and every kind has a customer-facing l
 });
 
 check('media kinds are exactly the AI-generated ones (the autonomous cap counts these)', () => {
-    assert.deepStrictEqual([...MEDIA_KINDS].sort(), ['ai_image', 'ai_music', 'ai_music_shared', 'ai_video', 'ai_voiceover']);
+    // ai_presenter since 2026-11-17 (A2): an AI presenter clip is AI-generated media too.
+    assert.deepStrictEqual([...MEDIA_KINDS].sort(), ['ai_image', 'ai_music', 'ai_music_shared', 'ai_presenter', 'ai_video', 'ai_voiceover']);
 });
 
 check('a pre-cutover credit amount converts to the same tasks as the weight', () => {

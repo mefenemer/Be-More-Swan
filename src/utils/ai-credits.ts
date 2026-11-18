@@ -61,12 +61,13 @@ export function tierCanGenerateVideo(tierKey: string | null | undefined): boolea
 }
 
 /** What a credit charge bought. 'voiceover' is speech, kept apart from 'audio' (music) so it is priced and counted as itself. */
-export type MediaKind = 'image' | 'video' | 'audio' | 'voiceover';
+export type MediaKind = 'image' | 'video' | 'audio' | 'voiceover' | 'presenter';
 
 export function creditCostFor(mediaType: MediaKind): number {
     if (mediaType === 'voiceover') return VOICEOVER_CREDIT_COST;
     if (mediaType === 'audio') return MUSIC_CREDIT_COST;
-    return mediaType === 'video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
+    // An AI presenter scene is a video clip: the same credit price where legacy credits still apply.
+    return mediaType === 'video' || mediaType === 'presenter' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 }
 
 export interface CreditBalance {
@@ -79,6 +80,7 @@ export interface CreditBalance {
 /** The WorkKind a credit charge becomes under the single task allowance. */
 export function workKindForMedia(mediaType: MediaKind, amount: number): WorkKind {
     if (mediaType === 'video') return 'ai_video';
+    if (mediaType === 'presenter') return 'ai_presenter';
     if (mediaType === 'voiceover') return 'ai_voiceover';
     if (mediaType === 'audio') return amount === MUSIC_SHARED_CREDIT_COST ? 'ai_music_shared' : 'ai_music';
     return 'ai_image';
@@ -310,7 +312,7 @@ export async function settleHold(db: Db, params: {
         // A voiceover is recorded under 'music_generation' (the audio reason the CHECK already
         // allows) rather than a new reason that would need a migration: this legacy credits path is
         // off on both DBs (unified_task_metering), where the task ledger names it 'ai_voiceover'.
-        const reason = params.mediaType === 'video' ? 'video_generation'
+        const reason = params.mediaType === 'video' || params.mediaType === 'presenter' ? 'video_generation'
             : params.mediaType === 'audio' || params.mediaType === 'voiceover' ? 'music_generation'
             : 'image_generation';
         await db.execute(sql`
