@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import { LINKEDIN_ADS_SCOPES, adsCsrfKey } from '../netlify/functions/linkedin-ads-oauth-init';
 import { ADS_SERVICE_NAME } from '../netlify/functions/linkedin-ads-oauth-callback';
+import { linkedInAdsClient } from '../src/config/linkedin-capabilities';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -55,6 +56,33 @@ check('the two flows are separate functions, not a shared one with a branch', ()
     // A branch would put the spend path one boolean away from the posting path.
     assert.ok(!code(social).includes('linkedin_ads'), 'the social flow now knows about ads');
     assert.ok(!code(init).includes('w_member_social'), 'the ads flow now knows about posting');
+});
+
+console.log('\n──── the ads flow uses the Adverts app, never the main app ────');
+
+check('both ads functions take their keys from linkedInAdsClient(), not LINKEDIN_CLIENT_*', () => {
+    // The main app holds no Advertising product; sending rw_ads under its client id fails the whole
+    // authorization. Init and callback must also present the SAME app or the exchange is refused.
+    for (const [name, src] of [['init', init], ['callback', cb]] as const) {
+        assert.ok(code(src).includes('linkedInAdsClient()'), `${name} does not use linkedInAdsClient()`);
+        assert.ok(!/LINKEDIN_CLIENT_(ID|SECRET)/.test(code(src)), `${name} reads the main app's keys`);
+    }
+});
+
+check('linkedInAdsClient reads only LINKEDIN_ADS_* and has no fallback to the main app', () => {
+    const saved = { ...process.env };
+    try {
+        process.env.LINKEDIN_CLIENT_ID = 'main-app';
+        process.env.LINKEDIN_CLIENT_SECRET = 'main-secret';
+        delete process.env.LINKEDIN_ADS_CLIENT_ID;
+        delete process.env.LINKEDIN_ADS_CLIENT_SECRET;
+        assert.deepEqual(linkedInAdsClient(), { clientId: undefined, clientSecret: undefined });
+        process.env.LINKEDIN_ADS_CLIENT_ID = '77ji7h15dgy32l';
+        process.env.LINKEDIN_ADS_CLIENT_SECRET = 'ads-secret';
+        assert.deepEqual(linkedInAdsClient(), { clientId: '77ji7h15dgy32l', clientSecret: 'ads-secret' });
+    } finally {
+        process.env = saved;
+    }
 });
 
 console.log('\n──── the ads connection is a different row ────');

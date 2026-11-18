@@ -29,6 +29,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { linkedInAdsClient } from '../../src/config/linkedin-capabilities';
 
 const CSRF_TTL_MS = 10 * 60 * 1000;
 
@@ -67,7 +68,8 @@ export default withLambda(async (event) => {
         };
     }
 
-    const clientId = process.env.LINKEDIN_CLIENT_ID;
+    // The Adverts app's own client — never LINKEDIN_CLIENT_ID (see linkedin-capabilities.ts).
+    const { clientId } = linkedInAdsClient();
     if (!clientId) {
         return { statusCode: 302, headers: { Location: '/integrations.html?ads_error=not_configured' }, body: '' };
     }
