@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
     LINKEDIN_API_VERSION, accountId, analyticsUrl, campaignCreateBody, creativeStatusPatchBody,
     dateParam, parseAnalytics, parseRestliId, statusPatchBody,
-    LinkedInAdsError, linkedInErrorDetail,
+    LinkedInAdsError, linkedInErrorDetail, campaignGroupUrn, campaignUrn,
 } from '../src/utils/ad-networks/linkedin';
 import { anyNetworkAvailable, linkedInAdapter, resolveAdapter } from '../src/utils/ad-networks/registry';
 import { isProductionDeploy } from '../src/utils/deploy-context';
@@ -280,6 +280,28 @@ check('stage_paid returns LinkedIn\'s reason and logs it as a string', () => {
     const camp = read('netlify/functions/campaigns.ts');
     assert.ok(camp.includes('const detail = linkedInErrorDetail(err);'));
     assert.match(camp, /error: 'LinkedIn would not accept the campaign\. No advert was created and nothing has been spent\.',\s*\n\s*detail,/);
+});
+
+console.log('\n──── what LinkedIn refused on the first live stage (2026-11-18) ────');
+
+check('a newly created campaign group is referenced by its full URN', () => {
+    assert.equal(campaignGroupUrn('1258941973'), 'urn:li:sponsoredCampaignGroup:1258941973');
+    assert.equal(campaignGroupUrn('urn:li:sponsoredCampaignGroup:7'), 'urn:li:sponsoredCampaignGroup:7');
+    assert.match(read('src/utils/ad-networks/linkedin.ts'), /return campaignGroupUrn\(parseRestliId\(created\)\);/);
+});
+
+check('a creative names its campaign by the full URN', () => {
+    assert.equal(campaignUrn('987'), 'urn:li:sponsoredCampaign:987');
+    assert.equal(campaignUrn('urn:li:sponsoredCampaign:987'), 'urn:li:sponsoredCampaign:987');
+    assert.match(read('src/utils/ad-networks/linkedin.ts'), /campaign: campaignUrn\(externalCampaignId\),/);
+});
+
+check('the campaign body declares politicalIntent', () => {
+    const b = campaignCreateBody({
+        accountUrn: 'urn:li:sponsoredAccount:1', campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:2',
+        name: 'x', dailyBudgetAmount: '5', currencyCode: 'GBP', startMs: 1, targeting: {},
+    } as never);
+    assert.equal(b.politicalIntent, 'NOT_POLITICAL');
 });
 
 console.log(`\n${passed} checks passed.\n`);
