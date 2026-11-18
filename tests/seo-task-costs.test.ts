@@ -51,6 +51,18 @@ check('a tagged cost takes today\'s figure; a clip example is worked out from th
     assert.deepStrictEqual(bakeTaskCostSpans('<span data-task-cost="typo">1 task</span>', figures(false)).unknown, ['typo']);
 });
 
+check('a data-task-cost-next span bakes the announced change too, as task-costs.js words it (review of #738)', () => {
+    const f = { ...figures(false, { ai_presenter: 0 }), upcoming: { ai_presenter: { units: 2, from: '2026-12-19' } } };
+    const next = '<span data-task-cost="ai_presenter" data-task-cost-next>2 tasks a second</span>';
+    const plain = '<span data-task-cost="ai_presenter">2 tasks a second</span>';
+    assert.strictEqual(bakeTaskCostSpans(next, f).html, '<span data-task-cost="ai_presenter" data-task-cost-next>no tasks until 19 December 2026, then 2 tasks a second</span>');
+    assert.strictEqual(bakeTaskCostSpans(plain, f).html, '<span data-task-cost="ai_presenter">no tasks</span>');
+    // Nothing announced: today's figure alone.
+    assert.strictEqual(bakeTaskCostSpans(next, figures(false, { ai_presenter: 2 })).html, '<span data-task-cost="ai_presenter" data-task-cost-next>2 tasks a second</span>');
+    // The FAQ's span is one of these, so search engines and the FAQ JSON-LD read the coming charge as well.
+    assert.match(read('faq.html'), /<span data-task-cost="ai_presenter" data-task-cost-next>/);
+});
+
 check('JSON-LD placeholders are filled, and only inside JSON-LD', () => {
     const html = '<p>{{tasks.site_draft}}</p><script type="application/ld+json">{"text":"uses {{tasks.site_draft}}"}</script>';
     const r = fillJsonLdTaskTokens(html, figures(false, { site_draft: 2 }));

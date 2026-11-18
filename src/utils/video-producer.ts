@@ -35,7 +35,7 @@ import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
 import { aiVideoTasks, formatCost, type TaskCosts } from '../config/task-weights';
-import { getTaskCosts } from './task-costs';
+import { getTaskCosts, getUpcomingTaskCosts } from './task-costs';
 import { isFeatureEnabled } from './feature-flags';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
@@ -1548,6 +1548,14 @@ export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProj
     return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map((r) => ({ id: r.id, name: r.name || `File ${r.id}`, kind: kindOf(r) }));
 }
 
+/** The presenter's price in words for the chat: today's, then any announced change ("no tasks until 19 December 2026, then 2 tasks a second"). Pure. */
+export function presenterPriceWords(perSecond: number, next?: { units: number; from: string }): string {
+    const words = (n: number) => (n === 0 ? 'no tasks' : `${n} task${n === 1 ? '' : 's'} a second`);
+    if (!next) return words(perSecond);
+    const day = new Date(`${next.from}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return `${words(perSecond)} until ${day}, then ${words(next.units)}`;
+}
+
 /**
  * The AI presenters the chat may set on a new video's brief — listed only where the ai_presenter flag is on, so the
  * chat never offers a feature the workspace can't use (A2). Empty otherwise.
@@ -1555,7 +1563,7 @@ export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProj
 async function presentersSnapshot(orgId: number): Promise<string> {
     if (!await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false)) return '';
     const perSecond = (await getTaskCosts()).weights.ai_presenter;
-    return `AI PRESENTERS (made-up people who speak a script to camera; ${perSecond} task${perSecond === 1 ? '' : 's'} a second on screen; set "presenter" on a video_brief_proposal): ${PRESENTERS.map((x) => `${x.id} — ${x.name}, ${x.gender === 'female' ? 'woman' : 'man'}, ${x.age}: ${x.look}`).join('; ')}`;
+    return `AI PRESENTERS (made-up people who speak a script to camera; ${presenterPriceWords(perSecond, (await getUpcomingTaskCosts()).ai_presenter)} on screen; set "presenter" on a video_brief_proposal): ${PRESENTERS.map((x) => `${x.id} — ${x.name}, ${x.gender === 'female' ? 'woman' : 'man'}, ${x.age}: ${x.look}`).join('; ')}`;
 }
 
 /**

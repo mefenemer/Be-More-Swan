@@ -68,15 +68,44 @@ async function readRows(): Promise<CostRow[] | null> {
     }
 }
 
-/** The costs in force now. Cached for a minute per function instance. Never throws. */
-export async function getTaskCosts(now: Date = new Date()): Promise<TaskCosts> {
+/** The next cost set for each key after `now`: the soonest item still to start, with its day. Pure. */
+export function upcomingTaskCosts(rows: readonly CostRow[], now: Date = new Date()): Partial<Record<CostKey, { units: number; from: string }>> {
+    const soonest = new Map<CostKey, CostRow>();
+    for (const r of rows) {
+        if (!isCostKey(r.key) || !Number.isInteger(r.units) || r.units < 0) continue;
+        if (r.effectiveFrom.getTime() <= now.getTime()) continue;
+        const had = soonest.get(r.key);
+        const sooner = !had || r.effectiveFrom.getTime() < had.effectiveFrom.getTime()
+            || (r.effectiveFrom.getTime() === had.effectiveFrom.getTime() && r.changeId > had.changeId);
+        if (sooner) soonest.set(r.key, r);
+    }
+    const out: Partial<Record<CostKey, { units: number; from: string }>> = {};
+    for (const [key, r] of soonest) out[key] = { units: r.units, from: r.effectiveFrom.toISOString().slice(0, 10) };
+    return out;
+}
+
+/** Every counting item, cached for a minute per function instance. Never throws. */
+async function cachedRows(): Promise<CostRow[]> {
     if (!cache || Date.now() - cache.at > TTL_MS) {
         inFlight ??= readRows().finally(() => { inFlight = null; });
         const rows = await inFlight;
         // A failed read keeps the last good figures, and tries again a minute later rather than on every charge.
         cache = { at: Date.now(), rows: rows ?? cache?.rows ?? [] };
     }
-    return resolveTaskCosts(cache.rows, now);
+    return cache.rows;
+}
+
+/** The costs in force now. Cached for a minute per function instance. Never throws. */
+export async function getTaskCosts(now: Date = new Date()): Promise<TaskCosts> {
+    return resolveTaskCosts(await cachedRows(), now);
+}
+
+/**
+ * Costs already announced (or set) to change after now — e.g. the AI presenter, free until its priced day.
+ * Pages say "no tasks until 19 December 2026, then 2 tasks a second" from this, not from a typed date. Never throws.
+ */
+export async function getUpcomingTaskCosts(now: Date = new Date()): Promise<Partial<Record<CostKey, { units: number; from: string }>>> {
+    return upcomingTaskCosts(await cachedRows(), now);
 }
 
 /** After an admin changes something: this instance sees it at once, others within a minute. */

@@ -71,7 +71,7 @@ Quoted exactly as shipped in `terms_of_service.html` and `workspace.html` (PR #7
 1. Check that Admin → Money → Task costs shows change 3 in force, and that the public costs read
    `ai_presenter: 2`.
 2. Make one real presenter video on prod and check the charge matches the quote.
-3. Start A5 (help articles and public copy), which can now name the price.
+3. A5 (help and public copy) shipped in PR #738. Its pages and chat read the live figures, so they say "2 tasks a second" from 19 December by themselves. The help SQL typed the price out, because a token would have read "no tasks" before then. After 19 December, a small dated help SQL should swap both typed prices in `db/help-articles-2026-11-18-ai-presenter.sql` (the *Making a Video* section and the *What Counts as a Task* row) to `{{tasks.ai_presenter}}`.
 
 ## To undo
 

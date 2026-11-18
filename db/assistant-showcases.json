@@ -425,6 +425,10 @@
         "body": "Six voices to choose from. Captions show each word as it’s spoken, so the video works with the sound off."
       },
       {
+        "title": "An AI presenter, if you want one",
+        "body": "Choose one of 12 made-up presenters, men and women, to speak your script to camera, full frame or in a round bubble over your own screen recordings. Every video with one is labelled as made with AI."
+      },
+      {
         "title": "Videos from your posts and campaigns",
         "body": "Turn a post into a video version with one click and it goes back onto that post, have it plan up to three storyboards a week, or let your Campaign Assistant commission one."
       }
@@ -432,7 +436,7 @@
     "faqs": [
       {
         "q": "Does it use tasks?",
-        "a": "Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: {{tasks.ai_video}} for an AI clip (at most 3 in a video), {{tasks.ai_image}} for an AI picture and {{tasks.ai_voiceover}} for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none. Making videos is on the Busywork Buster plan."
+        "a": "Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: {{tasks.ai_video}} for an AI clip (at most 3 in a video), {{tasks.ai_image}} for an AI picture and {{tasks.ai_voiceover}} for the voiceover. An AI presenter uses {{tasks.ai_presenter}} while they're on screen. Stock footage, stock photos, your own pictures and branded cards use none. Making videos is on the Busywork Buster plan."
       },
       {
         "q": "Can it edit my own footage?",

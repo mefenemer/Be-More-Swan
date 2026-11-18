@@ -31,6 +31,21 @@ export function taskCostText(key, figures, seconds) {
     return key === 'ai_presenter' ? `${plural(n)} a second` : plural(n);
 }
 
+const longDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * A data-task-cost-next span: today's figure, then the announced change (`figures.upcoming[key]`), worded as
+ * task-costs.js withNext(): "no tasks until 19 December 2026, then 2 tasks a second". Today's text alone when
+ * nothing is announced.
+ */
+export function withUpcoming(key, text, figures) {
+    const up = figures && figures.upcoming && figures.upcoming[key];
+    if (!up || typeof up.units !== 'number' || !up.from) return text;
+    const next = taskCostText(key, { ...figures, weights: { ...(figures.weights || {}), [key]: up.units } });
+    return next === null ? text : `${text} until ${longDate(up.from)}, then ${next}`;
+}
+
+const NEXT = /\bdata-task-cost-next\b/;
 const SPAN = /(<span\b[^>]*\bdata-task-cost="([a-z_]+)"[^>]*>)([^<]*)(<\/span>)/g;
 const SECONDS = /\bdata-task-seconds="(\d+(?:\.\d+)?)"/;
 
@@ -40,8 +55,9 @@ export function bakeTaskCostSpans(html, figures) {
     let count = 0;
     const out = html.replace(SPAN, (whole, open, key, text, close) => {
         const secs = Number((open.match(SECONDS) || [])[1]);
-        const live = taskCostText(key, figures, secs);
+        let live = taskCostText(key, figures, secs);
         if (live === null) { unknown.push(key); return whole; }
+        if (NEXT.test(open) && !(secs > 0)) live = withUpcoming(key, live, figures);
         count++;
         return `${open}${live}${close}`;
     });
