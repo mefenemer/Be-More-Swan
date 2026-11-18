@@ -108,7 +108,11 @@ const PLATFORMS = [
             { text: 'Go to the <strong>"OAuth 2.0 Tools"</strong> tab and click <strong>"Create token"</strong> with those scopes.' },
             { text: 'Copy the access token and paste it below.' },
         ],
-        note: 'Posts are published to your personal LinkedIn feed. Posting to a Company Page needs LinkedIn’s Community Management access, which we have not been granted yet.',
+        // Which note shows depends on whether Company Page posting is switched on (_linkedinPages, from
+        // linkedinPageAccessEnabled()). The old single note said Community Management access had "not been
+        // granted yet" — untrue since 2026-11 (Development Tier), and wrong wherever page posting is on.
+        note: 'Posts are published to your personal LinkedIn feed.',
+        notePages: 'Posts go to your personal LinkedIn feed, or to a Company Page you’re an admin of — you choose which when you connect.',
     },
     {
         id: 'X',
@@ -272,6 +276,11 @@ let _xCredits = null;
 // Off, LinkedIn connects to the member's personal feed only, exactly as before.
 let _linkedinPages = false;
 const _LINKEDIN_PAGE_OAUTH_URL = '/.netlify/functions/social-oauth-init?platform=linkedin_page';
+
+// A platform's setup note: its Company Page wording where page posting is switched on, else the plain one.
+function _platformNote(platform) {
+    return (_linkedinPages && platform && platform.notePages) || (platform && platform.note) || '';
+}
 
 // A slim usage gauge for the X card: "X posts this month — used / total", where total = monthly
 // allowance + any purchased (non-expiring) bonus. Bar turns amber near the cap, red when spent.
@@ -2350,9 +2359,10 @@ window._intOpenModal = function (platformId) {
 
     // Note
     const noteEl = document.getElementById('modal-note');
-    if (platform.note) {
+    const note = _platformNote(platform);
+    if (note) {
         noteEl.classList.remove('hidden');
-        noteEl.innerHTML = `<svg class="w-4 h-4 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>${platform.note}</span>`;
+        noteEl.innerHTML = `<svg class="w-4 h-4 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>${note}</span>`;
     } else {
         noteEl.classList.add('hidden');
     }

@@ -318,6 +318,21 @@ async function defaultOnSwanProfile(db: Db, organisationId: number) {
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
+/**
+ * Who a live social connection posts as, from the connection itself — or null to fall back to the label
+ * saved when the destination was switched on. The saved label was the only source before 2026-11-18, so
+ * switching the workspace's LinkedIn from a personal profile to a Company Page left the Blog Writer's card
+ * naming the person. A Company Page connection carries its page name (linkedin-page-bind.ts); a member
+ * connection stores no name, so it keeps the saved one. Pure.
+ */
+export function socialAccountLabel(row: { externalUserId?: string | null; metadata?: unknown }): string | null {
+    if (String(row.externalUserId ?? '').startsWith('urn:li:organization:')) {
+        const name = (row.metadata as { linkedinPageName?: unknown } | null)?.linkedinPageName;
+        return `${typeof name === 'string' && name.trim() ? name.trim() : 'Company Page'} (Company Page)`;
+    }
+    return null;
+}
+
 export async function listBlogDestinations(db: Db, organisationId: number): Promise<BlogDestinationStatus[]> {
     const rows = await db
         .select({ provider: workspaceIntegrations.provider, name: workspaceIntegrations.externalAccountName, status: workspaceIntegrations.status })
@@ -339,9 +354,14 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
         .filter((a) => a.authKind === 'social' && a.socialPlatform)
         .map((a) => a.socialPlatform!);
     const liveSocial = new Set<string>();
+    // The account a live social connection posts as, read fresh — see socialAccountLabel.
+    const liveLabel = new Map<string, string | null>();
     if (socialPlatforms.length) {
         const socialRows = await db
-            .select({ serviceName: systemConnections.serviceName, vaultRefKey: systemConnections.vaultRefKey })
+            .select({
+                serviceName: systemConnections.serviceName, vaultRefKey: systemConnections.vaultRefKey,
+                externalUserId: systemConnections.externalUserId, metadata: systemConnections.metadata,
+            })
             .from(systemConnections)
             .where(and(
                 eq(systemConnections.organisationId, organisationId),
@@ -349,7 +369,11 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
                 eq(systemConnections.status, 'active'),
                 eq(systemConnections.isActive, true),
             ));
-        for (const row of socialRows) if (row.vaultRefKey) liveSocial.add(row.serviceName);
+        for (const row of socialRows) {
+            if (!row.vaultRefKey) continue;
+            liveSocial.add(row.serviceName);
+            liveLabel.set(row.serviceName, socialAccountLabel(row));
+        }
     }
     // ⚠️ AVAILABLE, not every registered adapter. This one list feeds all three surfaces — the
     // Connections grid, Blog Studio's per-post picker and the Overview's "Publishing to" block — and
@@ -391,7 +415,7 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
                 id,
                 label: adapter.label,
                 connected,
-                accountLabel: connected ? (prefs.labels?.[id] ?? null) : null,
+                accountLabel: connected ? (liveLabel.get(adapter.socialPlatform) ?? prefs.labels?.[id] ?? null) : null,
                 credFields: [],
                 oauth: false,
                 social: true,
