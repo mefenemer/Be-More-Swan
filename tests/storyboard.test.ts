@@ -101,7 +101,9 @@ check('a cut lands in the pause before a sentence, even when the transcript coun
     assert.ok(Math.abs(starts[3] - 10.3) < 0.06 && Math.abs(starts[1] - 2.6) < 0.06, 'the other cuts still sit before their sentences');
     // After a silent scene, the next cut isn't moved (review of #723): its first words stay its own.
     const silent = enforceStoryboard(raw([sc({ voiceover: 'a b c' }), sc({ voiceover: '' }), sc({ voiceover: 'd e f g' })]), brief()).storyboard;
-    const w2 = [0, 0.3, 0.6, 1.5, 1.8, 3.0, 3.3].map((t) => ({ start: t, end: t + 0.25 }));
+    // Scene 3's first word ("d", 0.9 s) follows no pause, and a long one sits two words on: only the silent-scene
+    // guard keeps the cut where it is.
+    const w2 = [0, 0.3, 0.6, 0.9, 1.2, 2.5, 2.8].map((t) => ({ start: t, end: t + 0.25 }));
     const d2 = sceneTimingsFromWords(silent, w2)!;
     // Its first word kept: it runs 1.5 → 3.95 s (2.5); snapped to the later pause it would shrink to the 1.5 s minimum.
     assert.ok(d2[2] >= 2.4, `scene 3 keeps its first word: ${d2[2]}`);
@@ -112,6 +114,12 @@ check('a cut lands in the pause before a sentence, even when the transcript coun
     assert.strictEqual(d3[2], 3, `scene 3 ends where "Book" begins (9.0 s), not after it (10.5 s): ${d3[2]}`);
     // …and no cut jumps a whole sentence to a longer pause further on (the nearest pause wins).
     assert.deepStrictEqual(d3.slice(0, 3), [3, 3, 3], `every sentence keeps its own scene: ${d3}`);
+    // With the words' text, only a sentence end counts: a comma's pause nearby never moves a right cut.
+    const said = [['We', 0], ['film,', 0.3], ['shoot', 0.75], ['and', 1.0], ['edit.', 1.25], ['Book', 1.6], ['today.', 1.85]]
+        .map(([word, t]) => ({ word: String(word), start: Number(t), end: Number(t) + 0.24 }));
+    assert.strictEqual(snapToPause(said, 5, 1), 5, 'after "edit." the cut stays, though "film," has the longer pause');
+    assert.strictEqual(snapToPause(said, 6, 1), 5, 'one word late → back to "Book", after the sentence end');
+    assert.strictEqual(snapToPause(said, 3, 1), 5, 'mid-sentence → the nearest sentence start, never the comma');
     // No pause nearby: the estimate stands.
     assert.strictEqual(snapToPause([0, 0.3, 0.6, 0.9].map((t) => ({ start: t, end: t + 0.28 })), 2, 1), 2);
 });

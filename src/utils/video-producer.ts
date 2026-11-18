@@ -570,7 +570,7 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         }
         t += d;
     });
-    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top left, 3 s.
+    // The AI presenter is labelled where they first appear (§11.6; EU AI Act Art. 50): a small note, top centre, 3 s.
     const firstAt = scenes.findIndex((s) => s.source === 'ai_presenter');
     if (firstAt >= 0) {
         const at = durations.slice(0, firstAt).reduce((a, d) => a + d, 0);

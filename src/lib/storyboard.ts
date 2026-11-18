@@ -505,7 +505,7 @@ export function scriptOf(storyboard: Storyboard): string {
  */
 export function sceneTimingsFromWords(
     storyboard: Storyboard,
-    words: Array<{ start: number; end: number }>,
+    words: Array<{ start: number; end: number; word?: string }>,
 ): number[] | null {
     const counts = storyboard.scenes.map((s) => (s.voiceover ? s.voiceover.split(/\s+/).filter(Boolean).length : 0));
     const planned = counts.reduce((a, b) => a + b, 0);
@@ -515,10 +515,10 @@ export function sceneTimingsFromWords(
     const starts: number[] = [];
     let idx = 0;
     for (let i = 0; i < counts.length; i++) {
-        // A scene is whole sentences, so its first word follows a pause. The count estimate drifts when the
+        // A scene is whole sentences, so its first word starts a sentence. The count estimate drifts when the
         // transcription spells words differently ("fifteen minute" heard as "15-minute": an AI presenter's last
-        // clip started on "online", missing "Book", staging 2026-11-18). So the cut moves to the word after the
-        // longest pause within SNAP_WORDS of the estimate — never back past the previous scene's first word.
+        // clip started on "online", missing "Book", staging 2026-11-18). So the cut moves to the nearest sentence
+        // start within SNAP_WORDS of the estimate (snapToPause) — never back past the previous scene's first word.
         // Only a cut between two scenes that both have lines moves: next to a silent scene the estimate already sits
         // where the next line starts, and snapping it would hand those first words to the wrong scene (review of #723).
         // A count that runs past the last heard word (the transcript merged words) still gets a cut inside the speech,
@@ -551,18 +551,25 @@ function wordIndexAt(words: Array<{ start: number }>, t: number): number {
 export const MIN_PAUSE_S = 0.12;
 
 /**
- * The word index NEAREST `idx` (within SNAP_WORDS, never below `min`) that follows a real pause — where a new
- * sentence, and so a new scene, starts; equally near, the longer pause wins. The estimate stands when it already
- * follows a pause, or no pause is near. Nearest, not longest: with several sentence pauses close by, the longest
- * jumped a whole sentence (review of #723). Pure.
+ * The word index NEAREST `idx` (within SNAP_WORDS, never below `min`) that starts a sentence — where a new scene
+ * starts; equally near, the longer pause wins. A sentence start is the word after one ending in . ? or ! when the
+ * transcript gives the words' text (ElevenLabs does), else the word after a pause of MIN_PAUSE_S or more. The
+ * estimate stands when it already starts a sentence, or none is near. Nearest, not longest (a longer pause further
+ * on jumped a whole sentence), and sentence ends, not any pause (a comma's pause moved a right cut — reviews of
+ * #723). Pure.
  */
-export function snapToPause(words: Array<{ start: number; end: number }>, idx: number, min: number): number {
+export function snapToPause(words: Array<{ start: number; end: number; word?: string }>, idx: number, min: number): number {
     const gap = (j: number) => (j > 0 && j < words.length ? words[j].start - words[j - 1].end : -1);
-    if (gap(idx) >= MIN_PAUSE_S) return idx;
+    const startsSentence = (j: number) => {
+        if (j <= 0 || j >= words.length) return false;
+        const prev = words[j - 1].word;
+        return typeof prev === 'string' && prev.trim() ? /[.?!…]["'”’)\]]*$/.test(prev.trim()) : gap(j) >= MIN_PAUSE_S;
+    };
+    if (startsSentence(idx)) return idx;
     let best = idx, bestDist = Infinity, bestGap = -1;
     for (let j = Math.max(min, idx - SNAP_WORDS); j <= Math.min(words.length - 1, idx + SNAP_WORDS); j++) {
         const g = gap(j), dist = Math.abs(j - idx);
-        if (g < MIN_PAUSE_S) continue;
+        if (!startsSentence(j)) continue;
         if (dist < bestDist || (dist === bestDist && g > bestGap)) { best = j; bestDist = dist; bestGap = g; }
     }
     return best;
