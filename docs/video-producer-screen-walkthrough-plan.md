@@ -393,3 +393,69 @@ brief form and the chat get it with A2, when choosing a presenter makes one.
 | D-A5 | Languages at launch | ✅ **The 11 in the voice list, plus Welsh** (the bake-off showed `eleven_v3` speaks it; Welsh lines use `eleven_v3`, and a Welsh voice entry is added to the catalogue). |
 | D-A6 | Customers' own face as a presenter | ✅ **Not at launch.** A later phase with recorded consent and a DPA note. |
 | D-A7 | Presenter on screen the whole video, or only key moments? | ✅ **Key moments by default** (opening, call to action, marked moments), "Show me throughout" as a choice. It keeps the cost about 4× lower on long videos. |
+
+---
+
+## 12. Phase 4 as found (2026-11-18)
+
+Phase 4 was sized S–M. A full read of the code (every limit a 10-minute video meets) shows it is three
+pieces of work, because several systems stop well short of 10 minutes:
+
+| Where | Today | At 10 minutes |
+|---|---|---|
+| Voiceover script | `VOICEOVER_MAX_CHARS` 1200 (`tts.ts:52`) and 240 characters × 8 scenes (`storyboard.ts:316`) | about 80–128 s of speech at most; a longer script is cut silently |
+| Voice and word timings | ElevenLabs 12 s, OpenAI 15 s, Scribe/whisper 8 s timeouts | time out; OpenAI caps at 4096 characters |
+| AI presenter | one Kling call per scene, 8-minute wait, every scene decodes the whole voiceover | 75 s+ scenes time out; memory grows with each scene |
+| Render | 3 Lambdas, 120 s per chunk (`remotion-lambda.ts`), cap 600 s | 6000 frames per Lambda: times out |
+| Build | one background function, 15-minute limit | can run past 15 minutes |
+| Music | made tracks capped at 190 s, not looped | stops at about 3:12 |
+| Own footage | 5-minute videos, 40 pieces, "Edit the words" 600 words, review transcript 6000 characters | long takes lose their cuts and the end of their transcript |
+| Lengths, scenes | 15/30/60 s, 3–8 scenes, in the form, chat cards, planner, campaign orders, setup default | no long choice anywhere |
+
+### Phase 4 in three slices
+
+- **4a. Render at length (no customer change).** Lambda concurrency and per-chunk timeout sized from the
+  frame count (needs a Remotion function redeploy), poll timeout from the length, the MP4 streamed to R2
+  instead of buffered, one cap of 600 s everywhere. Measure a real 2, 5 and 10-minute staging render:
+  time and cost. That measurement settles D-W3 (is a long render charged?).
+- **4b. Long own-footage videos.** 2/5/10 min for footage briefs only; footage up to 10 minutes; up to 20
+  scenes and 200 pieces; "Edit the words" and the review transcript sized for 10 minutes; music looped or
+  made longer; form, chat cards, planner and help. No AI voice is needed: the owner's own sound plays.
+- **4c. Long script videos (AI presenter + screen recordings, the Atera format).** The voiceover made in
+  parts and joined, longer timeouts for voice and word timings, presenter clips in parts of at most
+  about 30–60 s, the build split across background functions so no step meets the 15-minute limit.
+
+Stock and AI-only videos keep 15/30/60 s, and setup defaults, autopilot and campaign orders stay short.
+
+### 4a measured (2026-11-18, staging Remotion site, 1080p 16:9)
+
+The AWS Lambda quota is **1000** (it was 10), and both environments already run the **300 s** render function,
+so no function redeploy was needed.
+
+**Speed:** a 2048 MB renderer does about **2.6 frames a second** on plain 1080p and about **1.4 with a screen
+cover** (two videos decoding). That's far slower than the old sizing assumed: at the old 3 renderers, even a
+60 s 1080p video with a cover (600 frames each, about 430 s) would pass the 300 s chunk timeout. So
+`planConcurrency` now gives every render about **200 frames per renderer** (never fewer than 3, capped at 120).
+
+Measured straight through one continuous 630 s H.264 take, with tightening gaps and a bubble or window cover on
+two scenes in three:
+
+| Length | Renderers | Render time | AWS cost | MP4 size |
+|---|---|---|---|---|
+| 2 min | 18 | 2 min 47 s | $0.053 | 128 MB |
+| 5 min | 45 | 3 min 3 s | $0.132 | 322 MB |
+| 10 min | 90 | 3 min 13 s | $0.266 | 641 MB |
+
+The streamed copy into R2 (`persistRemoteMediaToR2 { stream: true }`) moved the 641 MB file with about 206 MB
+of memory growth, instead of holding all of it.
+
+**D-W3 (charge for long renders?)**: about **$0.027 a minute** of video. A 10-minute render costs less than one
+AI voiceover. Recommendation: **don't charge tasks for rendering**, at any length.
+
+**Found for 4b:**
+- **iPhone HEVC 10-bit footage** (`IMG_1935.MOV`) rendered under 3 frames a second and failed with Remotion's
+  "No frame found" error. Long own-footage videos need uploads converted to H.264 first, or a check that refuses
+  them with a clear message.
+- **Looping one short clip** dozens of times (jumping back to its start in every chunk) also triggered
+  "No frame found". `loopToLength` should keep its 4-piece cap, and long scenes should pick longer stock.
+- **File size:** a 10-minute video is about 640 MB in My Content. Storage limits and downloads need checking.

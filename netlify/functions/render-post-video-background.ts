@@ -237,6 +237,8 @@ export default withLambda(async (event: HandlerEvent) => {
             contentType: 'video/mp4',
             folder: 'rendered',
             label: 'rendered video',
+            // Streamed: a long render (up to 10 minutes) is too big to hold in memory.
+            stream: true,
         });
 
         const [asset] = await db.insert(contentAssets).values({

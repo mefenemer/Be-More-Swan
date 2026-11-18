@@ -165,7 +165,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             await sleep(POLL_INTERVAL_MS);
         }
 
-        const stored = await persistRemoteMediaToR2({ orgId, url: outputUrl, contentType: 'video/mp4', folder: 'video-producer', label: 'finished video' });
+        const stored = await persistRemoteMediaToR2({ orgId, url: outputUrl, contentType: 'video/mp4', folder: 'video-producer', label: 'finished video', stream: true });
         const sb = p.storyboard as Storyboard | null;
         const [asset] = await db.insert(contentAssets).values({
             userId: p.createdBy, organisationId: orgId, name: outputName(p.title, p.version),

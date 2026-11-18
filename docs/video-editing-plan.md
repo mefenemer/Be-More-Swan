@@ -138,7 +138,7 @@ These have external lead times and gate everything downstream.
    Original note: account limit is 10 (`npx remotion lambda quotas`),
    and the deployed function times out at **120s per chunk**
    (`remotion-render-4-0-498-mem2048mb-disk2048mb-120sec`). A 10s Short already had to be throttled to
-   fit — `src/lib/remotion-lambda.ts` pins `concurrency` from `REMOTION_MAX_LAMBDAS` (default 3) for
+   fit — `src/lib/remotion-lambda.ts` pins `concurrency` from `REMOTION_MAX_LAMBDAS` (default 3 then; since 2026-11-18 renders are sized at ~200 frames per renderer, default cap 120, on the 300 s function) for
    exactly this reason. Fewer Lambdas means more frames each against that 120s ceiling, so
    `REMOTION_MAX_LAMBDAS` is also the real cap on clip length. A 45s stitched reel will not render
    until this moves.
