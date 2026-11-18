@@ -35,7 +35,7 @@ person approves.
 4. **What the user sees.** In the Inbox, a pill on the meeting saying where it came from ("From Google Meet") with a link
    to the call. In the chat, the meetings block names the platform. Nothing is sent until it is approved, as today.
 5. **Cost.** This is background work, so it spends tasks ([background-work-metered]): "check before, record after". The
-   amount comes from Admin → Money → Task costs. **D3 below.**
+   amount comes from Admin → Money → Task costs: 1 task per meeting (**D3, decided**).
 6. **Connections tab.** Under "Meeting apps", a Connect button per platform. Its action is "Pick up my meetings
    automatically", with the platform's requirements in plain words (paid plan, transcription on).
 
@@ -83,15 +83,18 @@ person approves.
 
 ## 6. Decisions for the owner
 
-- **D1. Order:** Meet → Teams → Zoom (recommended), or start with whichever you or your first customers use most.
-- **D2. Which meetings:** every meeting with a transcript (recommended, simplest), or only ones the user marks, e.g. a
-  word in the calendar title, or a per-meeting tick.
-- **D3. Cost:** what one picked-up meeting costs in tasks. Suggest the same as writing up a pasted meeting, plus nothing
-  for the polling itself.
-- **D4. Plan:** every plan, like the rest of the Note Taker (recommended), or the higher plans only.
-- **D5. Keep the transcript?** Keep it 30 days so the minutes can be re-done (recommended), or delete it once the minutes
-  are written.
-- **D6. Wait for push, or launch on polling?** Launch on 15-minute polling (recommended). Push is a later speed-up.
+- **D1. Order:** ✅ **Decided 2026-11-18 (owner): Meet → Teams → Zoom.** Start the Zoom Marketplace review early,
+  as soon as a working build exists, because its review time is outside our control.
+- **D2. Which meetings:** ✅ **Decided 2026-11-18 (owner): every meeting with a transcript.** No title word or tick.
+- **D3. Cost:** ✅ **Decided 2026-11-18 (owner): 1 task per picked-up meeting**, as a new `meeting_pickup` key in Admin →
+  Money → Task costs (in line with other 1-task background work). Polling itself costs nothing, and a meeting with no
+  transcript costs nothing. Note: a *pasted* meeting stays free (counted like chat). Pick-up is background work, so it
+  spends a task ([background-work-metered]).
+- **D4. Plan:** ✅ **Decided 2026-11-18 (owner): every plan**, like the rest of the Note Taker.
+- **D5. Keep the transcript?** ✅ **Decided 2026-11-18 (owner): keep it 30 days** so the minutes can be re-done, then
+  delete it. Say so in the Privacy Policy before launch.
+- **D6. Wait for push, or launch on polling?** ✅ **Decided 2026-11-18 (owner): launch on 15-minute polling.** Push is
+  a later speed-up.
 - **D7. Card wording now:** ✅ **Decided 2026-11-18 (owner): yes.** The three Coming-soon cards say "A … with a
   transcript ends → picks up the transcript and writes the minutes for you to approve" (PR #740).
 
