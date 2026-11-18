@@ -21,7 +21,7 @@ import { landmark } from './landmark';
 import { LINKEDIN_ADS_SCOPES, adsCsrfKey } from '../netlify/functions/linkedin-ads-oauth-init';
 import { ADS_SERVICE_NAME } from '../netlify/functions/linkedin-ads-oauth-callback';
 import { linkedInAdsClient } from '../src/config/linkedin-capabilities';
-import { ADS_REQUIRED_SCOPES, assessAdsReadiness } from '../src/utils/linkedin-ads-connection';
+import { ADS_REQUIRED_SCOPES, adsNeedsReconnect, adsScopeProblem, assessAdsReadiness } from '../src/utils/linkedin-ads-connection';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -58,16 +58,34 @@ check('readiness requires exactly the scopes the flow requests', () => {
     assert.deepEqual(ADS_REQUIRED_SCOPES, LINKEDIN_ADS_SCOPES.split(' '));
 });
 
-check('an ads connection made before w_organization_social asks to reconnect', () => {
+check('an ads connection made before w_organization_social must reconnect to CREATE, but stays ready', () => {
     const base = {
         connectionId: 1, status: 'active',
         adAccounts: [{ urn: 'urn:li:sponsoredAccount:1', name: 'Acme', currency: 'GBP' }],
         selectedAccountUrn: 'urn:li:sponsoredAccount:1', selectedCurrency: 'GBP',
     } as const;
-    const old = assessAdsReadiness({ ...base, scopes: 'rw_ads r_ads_reporting' } as never);
-    assert.equal(old.ready, false);
-    assert.match((old as { reason: string }).reason, /Reconnect/);
-    assert.equal(assessAdsReadiness({ ...base, scopes: LINKEDIN_ADS_SCOPES } as never).ready, true);
+    const oldConn = { ...base, scopes: 'rw_ads r_ads_reporting' } as never;
+    // ⚠️ Still READY: the optimiser halts through the adapter only when ready, and rw_ads can pause.
+    assert.equal(assessAdsReadiness(oldConn).ready, true);
+    assert.match(String(adsScopeProblem(oldConn)), /Reconnect/);
+    assert.equal(adsNeedsReconnect(oldConn), true);
+    const fresh = { ...base, scopes: LINKEDIN_ADS_SCOPES } as never;
+    assert.equal(adsScopeProblem(fresh), null);
+    assert.equal(adsNeedsReconnect(fresh), false);
+});
+
+check('the create paths refuse an old connection; the optimiser does not check scopes', () => {
+    const media = read('netlify/functions/linkedin-ads-media.ts');
+    const camp = read('netlify/functions/campaigns.ts');
+    const opt = read('netlify/functions/optimise-paid-campaigns.ts');
+    assert.ok(code(media).includes('adsScopeProblem('), 'media upload does not check scopes');
+    assert.ok(code(camp).includes('adsScopeProblem(stageConnection)'), 'stage_paid does not check scopes');
+    assert.ok(!code(opt).includes('adsScopeProblem'), 'the optimiser must keep pausing old connections');
+});
+
+check('the panel offers the connect link whenever the fix is a reconnect', () => {
+    const ui = read('src/components/assistant-campaigns.js');
+    assert.ok(ui.includes('|| p.needsReconnect ?'), 'reconnect link not offered');
 });
 
 check('the two flows are separate functions, not a shared one with a branch', () => {

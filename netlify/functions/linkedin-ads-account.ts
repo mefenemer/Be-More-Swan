@@ -23,7 +23,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import {
-    ADS_SERVICE_NAME, assessAdsReadiness, getAdsConnection,
+    ADS_SERVICE_NAME, adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection,
 } from '../../src/utils/linkedin-ads-connection';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -53,11 +53,14 @@ export default withLambda(async (event) => {
 
     if (action === 'list') {
         const readiness = assessAdsReadiness(connection);
+        const scopeProblem = readiness.ready ? adsScopeProblem(connection) : null;
         return json(200, {
             connected: !!connection,
-            ready: readiness.ready,
+            ready: readiness.ready && !scopeProblem,
             // The sentence, not a boolean. Each refusal leads somewhere different.
-            reason: readiness.ready ? null : readiness.reason,
+            reason: readiness.ready ? scopeProblem : readiness.reason,
+            // The fix is the OAuth flow again — the client shows the connect link for these.
+            needsReconnect: adsNeedsReconnect(connection),
             // ⚠️ null and [] are passed through as they are. null means the listing failed;
             // [] means the member genuinely has no ad accounts. The client renders different
             // things, and flattening either would send someone to fix the wrong problem.
