@@ -72,6 +72,8 @@
  *                //   (Briefs, Videos, Campaigns, Mentor) leaves this out.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
+ *   cfg.commentsTab // → optional Comments tab config (assistant-comments.js); social_media_manager only —
+ *                //   { label }. LinkedIn Company Page comments with replies a person posts as the Page.
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
  *                //   roles (social_media_manager, blog_writer) only — { label }. Reuses the
  *                //   org-wide content library (my-content.html/.js), not assistant-scoped.
@@ -162,6 +164,10 @@
       // AI-generated images/video) this assistant draws on for posts, or that feeds Inspo.
       // Placed right after Calendar (issue #213).
       myContentTab: { label: 'My Content' },
+      // Comments tab (assistant-comments.js → page-comments.ts) — comments on the posts this assistant
+      // published to a LinkedIn Company Page, each with a drafted reply a person posts AS the Page.
+      // Sits straight after Posts. ⚠️ The chat-orchestrator prompt names this tab; rename both together.
+      commentsTab: { label: 'Comments' },
     },
 
     // Email Marketing Assistant. Its primary action ("Write Email") is special-cased in assistants.js

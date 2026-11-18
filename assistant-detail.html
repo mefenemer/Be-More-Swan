@@ -829,6 +829,13 @@
         <span id="review-queue-tab-label">Review</span>
         <span id="detail-rq-pending-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Comments — Social Media only (commentsTab: social_media_manager). Comments on the posts it
+           published to a LinkedIn Company Page, each with a reply the assistant drafts and a person
+           posts as the Page. Badge = new comments. assistant-comments.js → page-comments.ts. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-comments" id="maintab-btn-comments" data-maintab="comments" class="main-tab-btn hidden">
+        <span id="comments-tab-label">Comments</span>
+        <span id="comments-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Email flows — Email Marketing Assistant only (emailCampaignsTab). Its automatic email
            series (welcome + form-started) with status and results; each opens in the Email Studio.
            Sits right after Review: emails move draft → review → sent there, campaigns live here.
@@ -1204,6 +1211,10 @@
   <div id="maintab-signals" role="tabpanel" aria-labelledby="maintab-btn-signals" class="main-tab-content hidden">
     <div id="signal-inbox-host"></div>
   </div><!-- /maintab-signals -->
+
+  <div id="maintab-comments" role="tabpanel" aria-labelledby="maintab-btn-comments" class="main-tab-content hidden">
+    <div id="comments-host"></div>
+  </div><!-- /maintab-comments -->
 
   <div id="maintab-discussions" role="tabpanel" aria-labelledby="maintab-btn-discussions" class="main-tab-content hidden">
     <div id="discussions-host"></div>

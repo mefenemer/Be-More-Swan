@@ -12,14 +12,17 @@
 //   Instagram/Facebook — Graph followers_count / fan_count
 //   X (Twitter)        — public_metrics.followers_count, IF the app's API tier allows /users/me
 //   Threads            — best-effort; needs the threads_manage_insights scope we don't request
-//   LinkedIn           — NOT available for personal profiles, so it's entered manually and this module
-//                        skips it entirely (reported back via `manualPlatforms`)
+//   LinkedIn           — a Company Page connection: networkSizes (linkedin-page-api.ts). A personal
+//                        profile has no follower API, so it's entered manually and this module skips
+//                        it (reported back via `manualPlatforms`)
 // Every fetch is wrapped so one platform failing never fails the whole sweep (that row shows "—").
 import { and, eq } from 'drizzle-orm';
 import { systemConnections, workspaceIntegrations } from '../../db/schema';
 import { getSecret } from './vault';
 import { getFreshAccessToken, isIntegrationProvider } from './workspace-integrations';
 import { normalizePlatform } from '../config/platform-formats';
+import { isLinkedInPageUrn } from './linkedin-page';
+import { fetchPageFollowerCount } from './linkedin-page-api';
 
 // Platforms whose token lives in workspace_integrations (not system_connections).
 const WORKSPACE_PLATFORMS = ['threads', 'youtube'] as const;
@@ -36,7 +39,7 @@ export const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // Platforms that have an active connection but can never be fetched from an API, so the count is
 // user-entered. The caller pairs these with its own manual-entry store.
-const MANUAL_ONLY_PLATFORMS = new Set(['linkedin']);
+const MANUAL_ONLY_PLATFORMS = new Set(['linkedin']); // except a Company Page connection — see the loop below
 
 export type CountResult = { count: number | null; available: boolean; note?: string };
 
@@ -109,8 +112,13 @@ export async function fetchPlatformCount(
             return Number.isFinite(n) ? { count: n, available: true } : { count: null, available: false };
         }
         if (platform === 'linkedin') {
-            // Personal-profile follower count is not exposed by LinkedIn's member API, and we don't
-            // hold organisation-page scopes here — so it's entered manually by the user.
+            // A Company Page connection (Community app) can read its follower total from networkSizes.
+            // A personal profile can't — LinkedIn's member API has no follower count — so for those
+            // the figure is entered by the user (the caller never reaches here; see MANUAL below).
+            if (isLinkedInPageUrn(externalUserId)) {
+                const n = await fetchPageFollowerCount(token, externalUserId!);
+                return n != null ? { count: n, available: true } : { count: null, available: false, note: 'fetch failed' };
+            }
             return { count: null, available: false, note: 'not available on LinkedIn' };
         }
         return { count: null, available: false };
@@ -204,7 +212,8 @@ export async function refreshOrgFollowerCounts(
     for (const c of conns) {
         const platform = normalizePlatform(c.serviceName);
         if (!platform) continue;
-        if (MANUAL_ONLY_PLATFORMS.has(platform)) { manualPlatforms.push(platform); continue; }
+        // A LinkedIn Company Page has a follower API; a personal profile does not.
+        if (MANUAL_ONLY_PLATFORMS.has(platform) && !(platform === 'linkedin' && isLinkedInPageUrn(c.externalUserId))) { manualPlatforms.push(platform); continue; }
 
         const meta = (c.metadata as Record<string, unknown>) ?? {};
         await handle(

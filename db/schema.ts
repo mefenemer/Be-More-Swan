@@ -7150,6 +7150,46 @@ export const discussions = pgTable("discussions", {
   check("discussions_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
 ]);
 
+// ── Page comments (Social Media assistant's Comments tab) — db/z-page-comments.sql ──────────────
+// Comments on posts this workspace published to a LinkedIn Company Page, each with a reply the
+// assistant drafts and a Page admin approves; the reply is posted AS the Page. src/utils/page-comments.ts.
+export const pageComments = pgTable("page_comments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  connectionId: integer("connection_id").notNull().references(() => systemConnections.id, { onDelete: "cascade" }),
+  scheduledPostId: integer("scheduled_post_id").references(() => scheduledPosts.id, { onDelete: "cascade" }),
+  // 'linkedin' only today.
+  platform: text("platform").notNull().default("linkedin"),
+  // urn:li:comment:(<thread>,<id>)
+  commentUrn: text("comment_urn").notNull(),
+  // The post the comment is on — a reply's `object`.
+  objectUrn: text("object_urn"),
+  authorUrn: text("author_urn"),
+  // Null when LinkedIn would not say — the tab says "A LinkedIn member".
+  authorName: text("author_name"),
+  body: text("body").notNull(),
+  commentedAt: timestamp("commented_at"),
+  draftReply: text("draft_reply"),
+  // 'new' | 'replied' | 'dismissed'
+  status: text("status").notNull().default("new"),
+  // 'app' | 'linkedin'
+  repliedVia: text("replied_via"),
+  replyText: text("reply_text"),
+  replyCommentUrn: text("reply_comment_urn"),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("page_comments_connection_urn_uq").on(t.connectionId, t.commentUrn),
+  index("page_comments_assistant_status_idx").on(t.aiAssistantId, t.status, t.commentedAt),
+  index("page_comments_org_idx").on(t.organisationId),
+  check("page_comments_platform_check", sql`${t.platform} IN ('linkedin')`),
+  check("page_comments_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
+  check("page_comments_replied_via_check", sql`${t.repliedVia} IN ('app','linkedin')`),
+]);
+
 // The site page directory (db/z-site-directory.sql, src/utils/site-directory.ts): one per workspace,
 // a map of its website — each page's address, title, one-line summary and what it offers — that
 // every live assistant reads (capped). 'hosted' is read from the published Be More Swan site,

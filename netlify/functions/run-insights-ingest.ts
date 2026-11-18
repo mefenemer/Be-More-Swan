@@ -1,6 +1,7 @@
 // netlify/functions/run-insights-ingest.ts
 // On-demand HTTP trigger for the social insights ingests — Instagram
-// (ingest-instagram-insights.ts) and Facebook (ingest-facebook-insights.ts).
+// (ingest-instagram-insights.ts), Facebook (ingest-facebook-insights.ts) and LinkedIn Company Pages
+// (ingest-linkedin-insights.ts).
 //
 // WHY THIS EXISTS: Netlify runs scheduled functions ONLY on the production deploy — never on
 // branch/preview deploys. Staging (a branch deploy of `staging`) therefore never fires
@@ -21,6 +22,7 @@
 import { Handler } from '@netlify/functions';
 import { ingestInstagramInsights } from './ingest-instagram-insights';
 import { ingestFacebookInsights } from './ingest-facebook-insights';
+import { ingestLinkedInInsights } from './ingest-linkedin-insights';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -55,12 +57,17 @@ export default withLambda(async (event) => {
             console.error('[run-insights-ingest] facebook', err);
             return { error: err instanceof Error ? err.message : 'error' };
         });
+        // LinkedIn Company Page posts (statistics + comments). A different API, settled on its own too.
+        const linkedin = await ingestLinkedInInsights().catch((err) => {
+            console.error('[run-insights-ingest] linkedin', err);
+            return { error: err instanceof Error ? err.message : 'error' };
+        });
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
             // `...instagram` is kept at the top level so the existing staging cron's log output and
             // any check reading `processed`/`updated` keeps working unchanged.
-            body: JSON.stringify({ ok: true, ...instagram, instagram, facebook }),
+            body: JSON.stringify({ ok: true, ...instagram, instagram, facebook, linkedin }),
         };
     } catch (err) {
         console.error('[run-insights-ingest]', err);
