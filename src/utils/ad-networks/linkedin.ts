@@ -92,6 +92,11 @@ export function campaignCreateBody(input: {
         creativeSelection: 'OPTIMIZED',
         audienceExpansionEnabled: false,
         offsiteDeliveryEnabled: false,
+        // ⚠️ REQUIRED since LinkedIn's political-ads rules (422 "politicalIntent :: field is required",
+        // first live stage 2026-11-18). This is a DECLARATION on the advertiser's behalf. Our
+        // campaigns are small-business marketing, but before any customer stages a campaign the
+        // stage form must ask them, not assume — see docs/campaign-orchestrator-plan.md follow-ups.
+        politicalIntent: 'NOT_POLITICAL',
 
         // ── Bidding: AUTO, and this trio must move together ──────────────────
         // ⚠️ THE FIRST DRAFT WOULD HAVE CREATED A CAMPAIGN THAT NEVER DELIVERED. It sent
@@ -600,7 +605,15 @@ export async function ensureCampaignGroup(
             status: 'ACTIVE',
         }),
     });
-    return parseRestliId(created);
+    // ⚠️ The header carries the BARE id (seen live 2026-11-18: "1258941973"), and a campaign's
+    // `campaignGroup` must be the full URN — LinkedIn 422 "Invalid Urn format. Invalid prefix".
+    // The search branch above already builds the URN; this one has to as well.
+    return campaignGroupUrn(parseRestliId(created));
+}
+
+/** A campaign group id or URN, as the URN LinkedIn requires in `campaignGroup`. */
+export function campaignGroupUrn(idOrUrn: string): string {
+    return idOrUrn.startsWith('urn:') ? idOrUrn : `urn:li:sponsoredCampaignGroup:${idOrUrn}`;
 }
 
 /**

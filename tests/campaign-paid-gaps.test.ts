@@ -285,7 +285,7 @@ check('the group is created ACTIVE while the campaign is created PAUSED', () => 
     // ⚠️ LinkedIn applies the MOST RESTRICTIVE status across levels, so nothing serves. Creating
     // the group paused too would mean approval had to flip TWO things — two writes that could
     // half-succeed and leave a live group over a paused campaign, or the reverse.
-    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return parseRestliId(created);'));
+    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return campaignGroupUrn(parseRestliId(created));'));
     assert.match(create, /status: 'ACTIVE',/);
     assert.match(code(lk), /status: 'PAUSED',/);
 });
@@ -293,7 +293,7 @@ check('the group is created ACTIVE while the campaign is created PAUSED', () => 
 check('no lifetime budget is invented for the group', () => {
     // We only ever ask for a DAILY figure. A totalBudget would be us deciding something the
     // customer never told us.
-    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return parseRestliId(created);'));
+    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return campaignGroupUrn(parseRestliId(created));'));
     assert.ok(!/totalBudget/.test(create), 'a lifetime budget is being invented for the campaign group');
 });
 
