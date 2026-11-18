@@ -1,6 +1,6 @@
 # LinkedIn document carousels — PLAN (Top lists follow-on, FR#34)
 
-2026-11-17. **All four decisions in §6 agreed. Phase 0: GO for personal profiles (§4a). Phase 1 built on `feat/linkedin-document-carousel` (§4b); not yet live on prod.**
+2026-11-17. **All four decisions in §6 agreed. Phase 0: GO for personal profiles (§4a). Phase 1 LIVE on prod 2026-11-18 (§4b, §4c).**
 
 The ask: "Make it a carousel" (Top lists Phase 2, live on prod) works on Instagram and Threads and leaves LinkedIn alone.
 LinkedIn's swipeable carousel is a different kind of post — a **PDF document**, where each page shows as one slide —
@@ -123,6 +123,18 @@ document preview it doesn't have. Cost and tasks are unchanged (one `carousel` t
   to check LinkedIn first, and the owner gets the usual "post failed" notification; "Try again" re-queues it.
 - Every other LinkedIn post stays on ugcPosts (§7).
 - `/connections` and the Help Centre say nothing yet — only once one has posted for real on prod.
+
+## 4c. Live (2026-11-18)
+
+- Released to prod in #720 (ff8be0b3, 2026-11-18 04:31 UTC).
+- **Real prod post:** Be More Swan workspace, Marvin's post #5777 (goal tracking, 6 points) → Make it a carousel
+  (7 slides; its Instagram version became a Carousel and stays in Review) → Post now → published 04:47 UTC, first
+  attempt. Public view on LinkedIn: document "· 7 pages", cover line as title, clean text, 4 clickable hashtags,
+  pricing link correct.
+- Staging post first (2026-11-17, Marmalade #202) with a `#` and `_` in its link: escaping confirmed.
+- `/connections` LinkedIn card and the Help Centre ("Creating and Editing a Post" → "Make it a carousel") updated
+  after the prod post.
+- Still not done: Company Page carousels (page posting switched off).
 
 ## 5. Costs
 
