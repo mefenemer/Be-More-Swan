@@ -11,7 +11,7 @@ import {
     commentThreadUrn, fetchCommentReplies, fetchPageFollowerCount, replyDefinitelyRefused, fetchPostComments, fetchPostStatistics, linkedInCommentUrl, parseComment,
     parseShareStatistics, parseShareStatisticsResponse, postUrnKind, replyErrorMessage, replyToComment, restliList,
 } from '../src/utils/linkedin-page-api';
-import { classifyComments, commentView, tidyReply, MAX_REPLY_CHARS, REPLY_RULES } from '../src/utils/page-comments';
+import { classifyComments, commentView, settledUrns, tidyReply, MAX_REPLY_CHARS, REPLY_RULES, TAB_SYNC_BUDGET_MS } from '../src/utils/page-comments';
 import { commentActionFromUiElement } from '../src/utils/chat-comment-action';
 import { LINKEDIN_PAGE_DEFAULT_SCOPES } from '../src/config/linkedin-capabilities';
 
@@ -200,6 +200,29 @@ check('archived assistants gather no comments, and the post cap is logged, not s
     const src = read('src/utils/page-comments.ts');
     assert.ok(src.includes('notArchivedAssistant(scheduledPosts.assistantId)'));
     assert.ok(src.includes('if (rows.length === MAX_PAGE_POSTS)'));
+});
+
+check('reply lookups skip comments already settled; both callers carry a time budget', () => {
+    const settled = settledUrns([
+        { commentUrn: 'a', status: 'new', replyCommentUrn: null },
+        { commentUrn: 'b', status: 'dismissed', replyCommentUrn: null },
+        { commentUrn: 'c', status: 'replied', replyCommentUrn: 'urn:li:comment:(urn:li:activity:1,2)' },
+        { commentUrn: 'd', status: 'replied', replyCommentUrn: null },
+    ]);
+    assert.deepEqual([...settled].sort(), ['b', 'c'], 'new and unconfirmed still get looked up');
+    assert.ok(TAB_SYNC_BUDGET_MS < 10_000, 'inside an on-demand function');
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes('!settled.has(c.commentUrn)'));
+    assert.ok(src.includes('posts: g.posts, deadline }'));
+    assert.ok(read('netlify/functions/ingest-linkedin-insights.ts').includes('deadline: commentsDeadline'));
+});
+
+check('a late-seen Page reply confirms an unconfirmed one; an unconfirmed reply can go back to New, never to Dismissed', () => {
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes("eq(pageComments.repliedVia, 'app'), isNull(pageComments.replyCommentUrn)"));
+    const fn = src.slice(src.indexOf('export async function setCommentStatus('), src.indexOf('export function tidyReply('));
+    assert.match(fn, /status === 'new'\s*\?\s*sql`/);
+    assert.ok(fn.includes(": inArray(pageComments.status, ['new', 'dismissed'])"));
 });
 
 check('thread URN and LinkedIn link from a comment URN', () => {

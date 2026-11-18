@@ -20,12 +20,12 @@
 import { getDb } from '../../db/client';
 import { postInsights } from '../../db/schema';
 import { fetchPostStatistics } from '../../src/utils/linkedin-page-api';
-import { isMissingTable, loadPagePosts, pageToken, syncCommentsForConnection } from '../../src/utils/page-comments';
+import { INGEST_COMMENTS_BUDGET_MS, isMissingTable, loadPagePosts, pageToken, syncCommentsForConnection } from '../../src/utils/page-comments';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export type LinkedInIngestResult = {
     connections: number; processed: number; updated: number; failed: number;
-    comments: { added: number; repliedOnLinkedIn: number; failedPosts: number } | { skipped: string };
+    comments: { added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number } | { skipped: string };
     durationMs: number;
 };
 
@@ -35,7 +35,10 @@ export async function ingestLinkedInInsights(): Promise<LinkedInIngestResult> {
     const groups = await loadPagePosts(db);
 
     let processed = 0, updated = 0, failed = 0;
-    let comments: LinkedInIngestResult['comments'] = { added: 0, repliedOnLinkedIn: 0, failedPosts: 0 };
+    let comments: LinkedInIngestResult['comments'] = { added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
+    // Comments make one call per post plus reply lookups; statistics are one call per 20 posts. So the
+    // comments half carries the time budget — a busy tick defers comments to the next run, never stats.
+    const commentsDeadline = tickStart + INGEST_COMMENTS_BUDGET_MS;
 
     for (const [connectionId, g] of groups) {
         processed += g.posts.length;
@@ -82,7 +85,8 @@ export async function ingestLinkedInInsights(): Promise<LinkedInIngestResult> {
         // 2. Comments. A missing page_comments table (SQL not applied yet) skips this half only.
         if ('skipped' in comments) continue;
         try {
-            const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts });
+            const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts, deadline: commentsDeadline });
+            comments.skippedForTime += r.skippedForTime;
             comments.added += r.added;
             comments.repliedOnLinkedIn += r.repliedOnLinkedIn;
             comments.failedPosts += r.failedPosts;

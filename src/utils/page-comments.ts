@@ -18,7 +18,7 @@
 // use, no task) — the same rule suggestTopicWording follows (src/utils/discussions.ts).
 
 import Anthropic from '@anthropic-ai/sdk';
-import { and, desc, eq, gte, inArray, isNotNull, like, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, pageComments, scheduledPosts, systemConnections } from '../../db/schema';
 import {
@@ -55,6 +55,10 @@ export const MAX_REPLY_CHARS = 1250;
 const REPLY_LOOKUPS_PER_POST = 20;
 /** Posts read per fetch, across every workspace. Hitting it is logged — it must never cut posts off silently. */
 const MAX_PAGE_POSTS = 5000;
+/** "Check for new comments": stop starting new posts after this long (the rest come with the 6-hourly fetch). */
+export const TAB_SYNC_BUDGET_MS = 6_500;
+/** The scheduled fetch's comments half: stop starting new posts after this long into the tick. */
+export const INGEST_COMMENTS_BUDGET_MS = 20_000;
 /** "Check for new comments" on the tab — at most once a minute per assistant. */
 const SYNC_MIN_GAP_MS = 60_000;
 const lastSync = new Map<number, number>();
@@ -80,7 +84,7 @@ export interface PagePost {
     platformPostId: string;
 }
 
-export interface SyncResult { posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number }
+export interface SyncResult { posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number }
 
 /**
  * Decide what one post's comment list means for our rows. Pure, so tests can feed it LinkedIn's
@@ -103,23 +107,37 @@ export function classifyComments(orgUrn: string, list: LinkedInComment[]): { toK
     return { toKeep, answeredParents };
 }
 
+/** Comment URNs (of these) already settled on our side: replied with a confirmed URN, or dismissed. Pure. */
+export function settledUrns(rows: { commentUrn: string; status: string; replyCommentUrn: string | null }[]): Set<string> {
+    return new Set(rows.filter((x) => x.status === 'dismissed' || (x.status === 'replied' && !!x.replyCommentUrn)).map((x) => x.commentUrn));
+}
+
 /**
  * Fetch and store the comments on one Page connection's posts. Throws only on a database error
  * (the caller decides whether a missing table is fatal); LinkedIn refusals count as failedPosts.
+ * `deadline` (epoch ms): no new post is started after it — the rest wait for the next fetch, so the
+ * caller's function never runs out of time (Netlify's default is 10 s on demand).
  */
 export async function syncCommentsForConnection(
-    db: Db, opts: { connectionId: number; orgUrn: string; token: string; posts: PagePost[] },
+    db: Db, opts: { connectionId: number; orgUrn: string; token: string; posts: PagePost[]; deadline?: number },
 ): Promise<SyncResult> {
-    const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0 };
+    const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
     for (const post of opts.posts) {
+        if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
         const topLevel = await fetchPostComments(opts.token, post.platformPostId);
         if (!topLevel) { r.failedPosts++; continue; }
         r.fetched += topLevel.length;
-        // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them on every
-        // comment that has replies (or doesn't say), at most REPLY_LOOKUPS_PER_POST a post per tick.
+        // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them only on
+        // comments still waiting on our side (new, not stored yet, or a reply LinkedIn never confirmed)
+        // that have replies (or don't say) — at most REPLY_LOOKUPS_PER_POST a post per fetch. A settled
+        // comment needs no lookup, so replying from the app makes later fetches cheaper, not dearer.
+        const urns = topLevel.map((c) => c.commentUrn);
+        const settled = urns.length ? settledUrns(await db.select({ commentUrn: pageComments.commentUrn, status: pageComments.status, replyCommentUrn: pageComments.replyCommentUrn })
+            .from(pageComments).where(and(eq(pageComments.connectionId, opts.connectionId), inArray(pageComments.commentUrn, urns)))) : new Set<string>();
         const replies: LinkedInComment[] = [];
-        const withReplies = topLevel.filter((c) => c.actorUrn !== opts.orgUrn && !c.parentCommentUrn && c.replyCount !== 0);
+        const withReplies = topLevel.filter((c) => c.actorUrn !== opts.orgUrn && !c.parentCommentUrn && c.replyCount !== 0 && !settled.has(c.commentUrn));
         for (const c of withReplies.slice(0, REPLY_LOOKUPS_PER_POST)) {
+            if (opts.deadline && Date.now() > opts.deadline) break;
             const got = await fetchCommentReplies(opts.token, c.commentUrn);
             if (got) replies.push(...got);
         }
@@ -141,11 +159,16 @@ export async function syncCommentsForConnection(
             r.added += inserted.length;
         }
         for (const [parent, reply] of answeredParents) {
+            // Still waiting → the Page answered on LinkedIn itself.
             const done = await db.update(pageComments)
                 .set({ status: 'replied', repliedVia: 'linkedin', replyText: reply.text, replyCommentUrn: reply.commentUrn, decidedAt: sql`now()`, updatedAt: sql`now()` })
                 .where(and(eq(pageComments.connectionId, opts.connectionId), eq(pageComments.commentUrn, parent), eq(pageComments.status, 'new')))
                 .returning({ id: pageComments.id });
             r.repliedOnLinkedIn += done.length;
+            // Sent from here but never confirmed → it did go live: confirm it (the warning goes away).
+            await db.update(pageComments)
+                .set({ replyCommentUrn: reply.commentUrn, updatedAt: sql`now()` })
+                .where(and(eq(pageComments.connectionId, opts.connectionId), eq(pageComments.commentUrn, parent), eq(pageComments.status, 'replied'), eq(pageComments.repliedVia, 'app'), isNull(pageComments.replyCommentUrn)));
         }
     }
     return r;
@@ -210,14 +233,16 @@ export async function syncAssistantComments(db: Db, organisationId: number, assi
     lastSync.set(assistantId, Date.now());
     const groups = await loadPagePosts(db, { organisationId, assistantId });
     if (!groups.size) return { ok: false, status: 422, error: 'This assistant hasn’t published to a LinkedIn Company Page in the last 30 days, so there are no comments to check.', code: 'no_page_posts' };
-    const total: SyncResult = { posts: 0, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0 };
+    const total: SyncResult = { posts: 0, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
+    // Inside an on-demand function's 10 s, with room to read the list back and answer.
+    const deadline = Date.now() + TAB_SYNC_BUDGET_MS;
     for (const [connectionId, g] of groups) {
         const token = await pageToken(db, organisationId, connectionId);
         if (!token) { total.posts += g.posts.length; total.failedPosts += g.posts.length; continue; }
-        const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts });
+        const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts, deadline });
         for (const k of Object.keys(total) as (keyof SyncResult)[]) total[k] += r[k];
     }
-    if (total.failedPosts && total.failedPosts === total.posts) {
+    if (total.failedPosts && total.failedPosts === total.posts - total.skippedForTime) {
         return { ok: false, status: 502, error: 'LinkedIn wouldn’t share the comments just now. If this keeps happening, reconnect your Company Page in Connections.', code: 'linkedin_refused' };
     }
     return { ok: true, result: total };
@@ -318,7 +343,10 @@ export async function setCommentStatus(
             eq(pageComments.id, id), eq(pageComments.organisationId, organisationId), eq(pageComments.aiAssistantId, assistantId),
             // A reply LinkedIn never confirmed (no reply URN, posted from here) may go back to New once
             // the person has checked it isn't on LinkedIn; a confirmed reply never can.
-            sql`(${pageComments.status} IN ('new','dismissed') OR (${pageComments.status} = 'replied' AND ${pageComments.repliedVia} = 'app' AND ${pageComments.replyCommentUrn} IS NULL))`,
+            status === 'new'
+                ? sql`(${pageComments.status} IN ('new','dismissed') OR (${pageComments.status} = 'replied' AND ${pageComments.repliedVia} = 'app' AND ${pageComments.replyCommentUrn} IS NULL))`
+                // Dismiss only what is waiting: an unconfirmed reply goes back to New first, never straight to Dismissed.
+                : inArray(pageComments.status, ['new', 'dismissed']),
         ))
         .returning();
     return row ? commentView(row) : null;
