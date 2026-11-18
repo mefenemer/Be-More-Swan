@@ -51,20 +51,20 @@ short in-app message or email:
 
 Clause 5.2's figures are written in the Terms, not filled in automatically. Built as `CURRENT_TOS_VERSION = '2.4'`, so every signed-in user is asked to accept at login. The presenter's figures are plain text, not `data-task-cost` spans: the live cost is 0 until 19 December, so a span would read "no tasks". After 19 December a minor update may switch them to spans.
 
-**Header:** Version 2.4 · Last updated: 18 November 2026 (clause 5.2: the AI presenter counts by
-the second) · The change to clause 5.2 takes effect on 19 December 2026
+Quoted exactly as shipped in `terms_of_service.html` and `workspace.html` (PR #733).
 
-**Clause 5 intro, add after the Version 2.3 sentence:**
-> Clause 5.2 changed in Version 2.4, effective 19 December 2026: an AI presenter counts as 2 tasks a
-> second. We gave notice of this by email and in-app on 18 November 2026.
+**Header:** Version 2.4 · Last updated: 18 November 2026 (clause 5.2: an AI presenter counts by the second) · The change to clause 5.2 takes effect on 19 December 2026
 
-**Clause 5.2, insert after "…before 3 December 2026, 20 tasks for any clip),":**
-> an AI presenter (a made-up person who speaks your video's script) as **2 tasks** for each second
-> the presenter is on screen, rounded up to the next whole second (a 15-second appearance is
-> **30 tasks**; free before 19 December 2026),
+**Clause 5 note, added after the Version 2.3 sentence:**
+> Clause 5.2 changed again in Version 2.4, effective 19 December 2026: an AI presenter counts as 2 tasks for each second the presenter is on screen. Before that date it uses no tasks. We gave notice of this by email and in-app on 18 November 2026.
 
-**"What changed" modal:** "Clause 5.2: an AI presenter counts as 2 tasks for each second on screen,
-from 19 December 2026."
+**Clause 5.2, inserted after "…before 3 December 2026, 20 tasks for any clip),":**
+> an AI presenter (a made-up person who speaks your video's script to camera) as 2 tasks for each second the presenter is on screen, rounded up to the next whole second (a 15-second appearance is 30 tasks; before 19 December 2026, no tasks),
+
+**"What changed in Terms v2.4 (from 19 December 2026)" modal:**
+- An AI presenter, a made-up person who speaks your video's script to camera, counts as 2 tasks for each second they are on screen (clause 5.2). A 15-second appearance is 30 tasks. Until 19 December it uses no tasks.
+- It's optional. Videos without a presenter cost the same as before, and your assistants always show what a video will use before you make it.
+- Nothing else changes. Version 2.3's change still applies: an AI video clip counts as 4 tasks for each second of video from 3 December 2026.
 
 ## On 19 December
 
