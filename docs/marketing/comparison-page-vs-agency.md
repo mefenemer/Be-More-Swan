@@ -12,8 +12,8 @@ freelancer with Be More Swan's team of AI assistants for social media, blog, ema
 >   assistant) will discount.
 > - Our prices below are today's (£29 and £69). On the real page, use `data-plan-price="saver"` /
 >   `data-plan-price="buster"` slots so they stay right if prices change.
-> - Don't claim Facebook/Instagram publishing while Meta App Review is pending. The copy below says
->   "your connected accounts" and links to /connections for that reason.
+> - Meta App Review was APPROVED 2026-11-18, so Facebook/Instagram publishing is claimed. The platform
+>   list must match /connections and db/assistant-showcases.json.
 
 ---
 
@@ -108,7 +108,9 @@ Not by default. Everything waits in your review queue. Once you trust an assista
 to let it publish on its own.
 
 **Which platforms does it post to?**
-See our [Connections page](/connections) for what's live today and what's coming soon.
+Facebook Pages, Instagram, LinkedIn (your personal feed), X, Threads and YouTube. Instagram must be a
+professional account (Business or Creator) linked to a Facebook Page. TikTok and LinkedIn Company Pages
+are coming soon. Our [Connections page](/connections) has the full list.
 
 **What if I want to stop?**
 Cancel any time from your billing page. There's no contract or notice period.
