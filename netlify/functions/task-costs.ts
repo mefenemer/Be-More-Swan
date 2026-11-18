@@ -4,7 +4,7 @@
 // shown there. Only the figures, nothing about any customer. Terms 5.2 is why this is the live number
 // rather than one typed into the page.
 
-import { getTaskCosts } from '../../src/utils/task-costs';
+import { getTaskCosts, getUpcomingTaskCosts } from '../../src/utils/task-costs';
 import { basicWorkCharged, videoPricedBySecond } from '../../src/config/task-weights';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -20,6 +20,8 @@ export default withLambda(async (event) => {
             chatMessagesPerTask: costs.chatMessagesPerTask,
             videoPricedBySecond: videoPricedBySecond(),
             basicWorkCharged: basicWorkCharged(),
+            // Changes already announced and still to start: { key: { units, from: 'YYYY-MM-DD' } }.
+            upcoming: await getUpcomingTaskCosts(),
         }),
     };
 });
