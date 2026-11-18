@@ -168,7 +168,7 @@ import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { buildMeetingsSnapshot, meetingActionFromUiElement, meetingActionsPromptBlock, resolveMeetingActionProposal } from '../../src/utils/chat-meeting-action';
 import { MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt, meetingHubRecord, normaliseMinutesCard } from '../../src/utils/meeting-minutes';
-import { persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
+import { chatRevisionTarget, persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 import { linkedPagesBlock } from '../../src/utils/chat-links';
@@ -4816,7 +4816,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Written before the reply so a meeting card can carry its record's id: its Approve button
         // uses the Inbox's own PATCH, the one way anything leaves the workspace (finish plan step 3).
         // The id rides on the card only, after the record's own copy of the card was saved.
-        const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+        // A short follow-up right after a meeting card ("make Sam the owner of task 2") revises that meeting; a
+        // second set of notes pasted into the same chat is a new one (hub-records.ts chatRevisionTarget). The id
+        // rides on the card (recordId, set just below on the turn it was filed).
+        const reviseMeetingId = chatRevisionTarget(history, typed, attached.length);
+        const hubRecordIds = await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords, { reviseMeetingId });
         if (hubRecords.length === 1 && hubRecords[0].recordType === 'meeting' && hubRecordIds.length === 1
             && uiElement && typeof uiElement === 'object') {
             uiElement = { ...(uiElement as Record<string, unknown>), recordId: hubRecordIds[0] };
