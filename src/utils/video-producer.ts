@@ -50,7 +50,7 @@ import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
-    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength,
+    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
@@ -62,7 +62,7 @@ import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
-import { isMusicLevel, musicLevelGain, MUSIC_LEVEL_LABELS, readMusicChoice, moodFor, speechWindows, musicTrack, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
+import { isMusicLevel, musicLevelGain, MUSIC_LEVEL_LABELS, readMusicChoice, moodFor, speechWindows, musicTracks, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
 import { footageLufs, mixLevels, musicLufs, voiceLufs, TARGET_LUFS } from '../lib/loudness';
 import { LIMIT_CEILING_DB, wavBytes } from '../lib/loudness-measure';
 import { decodeAudio, levelledVoiceover, measureAsset } from './audio-levelling';
@@ -139,7 +139,7 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
     const message = String(b.message ?? '').trim();
     if (message.length < 10) return { error: 'Say what the video should be about (a sentence or two).' };
     const lengthS = isVideoLength(b.lengthS) ? Number(b.lengthS) as VideoBrief['lengthS'] : 30;
-    const allowAi = b.allowAi === 'stock_only' || b.allowAi === 'ai_first' ? b.allowAi : 'stock_and_ai';
+    const allowAi: VideoBrief['allowAi'] = b.allowAi === 'stock_only' || b.allowAi === 'ai_first' ? b.allowAi : 'stock_and_ai';
     const platforms = (Array.isArray(b.platforms) ? b.platforms : ['instagram'])
         .map((p) => String(p).toLowerCase()).filter((p) => p in VIDEO_DESTINATIONS);
     const footage = readFootageIds(b.footageAssetIds);
@@ -151,7 +151,7 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
     const presenterVoiceId = asked ? presenterVoice(presenterById(asked.id)!, language ?? (isVoiceId(b.voice) ? voiceLanguage(b.voice) : 'en')) : null;
     // No voice of their gender in that language: no presenter, rather than their face on another voice (review of #721).
     const presenter = asked && presenterVoiceId && isVoiceId(presenterVoiceId) ? asked : null;
-    return {
+    const brief: VideoBrief & { platforms: string[] } = {
         brief: {
             purpose: String(b.purpose ?? 'promo').slice(0, 60),
             lengthS,
@@ -182,7 +182,11 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             // A countdown (Top lists Phase 3) is planned from scratch; own footage keeps its own order.
             ...(b.countdown === true && !footage.length ? { countdown: true } : {}),
         },
-    };
+    }.brief;
+    // A long length (2, 5 or 10 minutes, Phase 4b) only for a video in its own footage's sound: anything else
+    // (stock, AI voice, a presenter) is the longest short length.
+    if (isLongLength(brief.lengthS) && !allowsLongLength(brief)) brief.lengthS = 60;
+    return { brief };
 }
 
 /** The owner's chosen videos from a brief: positive integers, unique, at most MAX_VIDEOS_PER_REVIEW. Pure. */
@@ -362,8 +366,9 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
                     scriptOf: mode === 'script' ? current : null,
                     sceneNotes: mode === 'notes' && current ? { storyboard: current, notes: noted } : null,
                 }) }],
-                maxTokens: 2500,
-                deadlineMs: 120_000,
+                // A long video's plan is up to 20 scenes (Phase 4b): room for all of them, and the time to write them.
+                maxTokens: isLongLength(brief.lengthS) ? 8000 : 2500,
+                deadlineMs: isLongLength(brief.lengthS) ? 240_000 : 120_000,
                 usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
                 ...model,
             });
@@ -1218,7 +1223,11 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             const wordsByAsset = new Map(footage.map((v) => [v.id, v.words as FootageWord[]]));
             spokenWindows = speechWindows(ownSpeechOnTimeline(storyboard.scenes, durations, wordsByAsset));
         }
-        if (music) audio.push(musicTrack({ assetId: music.assetId, title: music.title, durationS: totalS, gap: levels.music, under: levels.musicUnder, windows: spokenWindows }));
+        if (music) {
+            // Looped when shorter than the video (a long video, Phase 4b): the track's own length decides.
+            const [m] = await db.select({ durationS: contentAssets.durationS }).from(contentAssets).where(eq(contentAssets.id, music.assetId)).limit(1);
+            audio.push(...musicTracks({ assetId: music.assetId, title: music.title, durationS: totalS, gap: levels.music, under: levels.musicUnder, windows: spokenWindows, trackS: m?.durationS ?? null }));
+        }
         const frame = shapeFrame(shape);
         const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom',
             { style: brief.lowerThird, accent: kit.primaryColor, aspect: frame.width / frame.height },

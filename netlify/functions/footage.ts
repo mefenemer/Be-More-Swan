@@ -25,7 +25,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-/** Five minutes of 16 kHz mono 16-bit WAV is ~9.6 MB; whisper takes 25 MB. */
+/** Ten minutes of 16 kHz mono 16-bit WAV is ~19.2 MB (MAX_FOOTAGE_S, Phase 4b); whisper takes 25 MB. */
 const MAX_AUDIO_BYTES = 24 * 1024 * 1024;
 
 function r2(): S3Client {
