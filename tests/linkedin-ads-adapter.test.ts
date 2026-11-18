@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
     LINKEDIN_API_VERSION, accountId, analyticsUrl, campaignCreateBody, creativeStatusPatchBody,
     dateParam, parseAnalytics, parseRestliId, statusPatchBody,
+    LinkedInAdsError, linkedInErrorDetail,
 } from '../src/utils/ad-networks/linkedin';
 import { anyNetworkAvailable, linkedInAdapter, resolveAdapter } from '../src/utils/ad-networks/registry';
 import { isProductionDeploy } from '../src/utils/deploy-context';
@@ -263,6 +264,22 @@ check('production is derived from the HOST, and fails closed without one', () =>
 check('the API version is pinned and documented as a sunset risk', () => {
     assert.match(LINKEDIN_API_VERSION, /^20\d{4}$/);
     assert.match(read('src/utils/ad-networks/linkedin.ts'), /sunsets versions on a\s*\n \* schedule/);
+});
+
+console.log('\n──── a refusal says WHY ────');
+
+check('linkedInErrorDetail names the status, message and field LinkedIn gives', () => {
+    const body = JSON.stringify({ message: 'Validation failed', status: 400,
+        errorDetails: { inputErrors: [{ description: 'Invalid value', input: { inputPath: { fieldPath: 'targetingCriteria' } } }] } });
+    assert.equal(linkedInErrorDetail(new LinkedInAdsError(400, body, 'x')), '400: Validation failed Invalid value (field: targetingCriteria)');
+    assert.equal(linkedInErrorDetail(new LinkedInAdsError(422, 'not json', 'x')), '422: not json');
+    assert.equal(linkedInErrorDetail(new Error('network down')), null);
+});
+
+check('stage_paid returns LinkedIn\'s reason and logs it as a string', () => {
+    const camp = read('netlify/functions/campaigns.ts');
+    assert.ok(camp.includes('const detail = linkedInErrorDetail(err);'));
+    assert.match(camp, /error: 'LinkedIn would not accept the campaign\. No advert was created and nothing has been spent\.',\s*\n\s*detail,/);
 });
 
 console.log(`\n${passed} checks passed.\n`);

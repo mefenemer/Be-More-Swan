@@ -219,6 +219,24 @@ export class LinkedInAdsError extends Error {
     get controlLost(): boolean { return this.status === 401 || this.status === 403; }
 }
 
+/**
+ * LinkedIn's reason for a refusal, short enough to show a person: "400: <message>", with the
+ * offending field when LinkedIn names one. null for anything that is not a LinkedIn API error.
+ */
+export function linkedInErrorDetail(err: unknown): string | null {
+    if (!(err instanceof LinkedInAdsError)) return null;
+    let msg = '';
+    try {
+        const b = JSON.parse(err.body) as { message?: string; errorDetails?: { inputErrors?: { description?: string; input?: { inputPath?: { fieldPath?: string } } }[] } };
+        const first = b.errorDetails?.inputErrors?.[0];
+        const field = first?.input?.inputPath?.fieldPath;
+        msg = [b.message, first?.description, field ? `(field: ${field})` : ''].filter(Boolean).join(' ');
+    } catch {
+        msg = err.body;
+    }
+    return `${err.status}: ${(msg || 'no reason given').slice(0, 400)}`;
+}
+
 async function call(url: string, init: RequestInit): Promise<Response> {
     const res = await fetch(url, init);
     if (!res.ok) {
