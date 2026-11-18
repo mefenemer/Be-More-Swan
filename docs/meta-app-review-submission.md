@@ -1,5 +1,11 @@
 # Meta App Review — Facebook/Instagram app submission
 
+> ✅ **APPROVED 2026-11-18.** pages_manage_posts and instagram_content_publish approved; pages_show_list,
+> business_management, pages_read_engagement, instagram_manage_insights and instagram_basic renewed.
+> Every customer can now connect Facebook + Instagram and publish — no Tester role needed. The
+> sections below are kept as the record of what was submitted (reuse them for the next renewal).
+> Not covered: DM permissions (pages_messaging / instagram_manage_messages), ads, Threads.
+
 Copy-paste answers for the "Allowed usage" step of the App Review form. Each answer is based on
 how the code uses the permission (file references included so they can be kept accurate).
 

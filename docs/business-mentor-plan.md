@@ -1009,8 +1009,8 @@ the screen instead.
 
 ### 12.3 Data that may be missing, and must not be read as "zero"
 
-- **Facebook and Instagram figures:** Meta App Review is still pending, so customers can't connect
-  them. No numbers there means *not connected*, not *no engagement*.
+- **Facebook and Instagram figures:** Meta App Review was approved 2026-11-18, so customers can connect
+  them — but many won't have yet. No numbers there means *not connected*, not *no engagement*.
 - **Any assistant that isn't active:** no data from it means it isn't hired, not that nothing happened.
 - **New workspaces:** everything is thin. The Mentor says "not enough data yet" (§5).
 
