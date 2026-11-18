@@ -73,6 +73,9 @@ check('connectors named as working are Live on connections.html, and the Coming-
     for (const name of ['Google Meet', 'Microsoft Teams', 'Zoom']) assert.ok(meetings.includes(`<h4>${name}</h4><span class="cx-pill cx-soon">`), `the Note Taker's ${name} card is Coming soon`);
     for (const name of ['Zapier / Make', 'HubSpot']) assert.ok(!meetings.includes(`<h4>${name}</h4>`), `no ${name} card on the Note Taker`);
     assert.ok(!/recording/i.test(meetings), 'no card promises recordings');
+    // D7 (owner 2026-11-18, docs/meeting-apps-pickup-plan.md): the promise is exact — only a meeting with a transcript.
+    for (const app of ['Google Meet call', 'Teams meeting', 'Zoom meeting']) assert.ok(meetings.includes(`A ${app} with a transcript ends`), `${app}: says it needs a transcript`);
+    assert.strictEqual((meetings.match(/Picks up the transcript and writes the minutes for you to approve/g) || []).length, 3);
     assert.ok(meetings.includes('from your own Gmail or Outlook') && !/Be More Swan(’|')s address/.test(meetings), 'the follow-up goes from the customer\'s own mailbox only');
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
     // Nor anywhere else on the homepage: Cat's customer story used to say she used "a connected Notion pad".

@@ -6519,6 +6519,97 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('discussion_action_proposal', renderDiscussionActionProposalCard);
 
+  // ── Built-in: Comment Action Proposal Card (Social Media chat) ──────────────
+  // { type: 'comment_action_proposal', action: 'draft'|'post_reply'|'dismiss', assistantId, commentId,
+  //   authorName, body, postExcerpt, linkedInUrl, draftReply, instruction, maxReplyChars, blocked, settled? }
+  //
+  // The Comments tab's buttons, from chat. Every fact comes from the page_comments row
+  // (src/utils/chat-comment-action.ts). The click dispatches `comment:action`; chat-session.js calls
+  // page-comments.ts, the endpoint the tab uses. Only "Post reply" posts — as the Company Page, after
+  // the person has read (and can edit) the reply on this card.
+  const COMMENT_ACTION_COPY = {
+    draft: { head: 'Draft a reply', button: 'Draft reply', busy: 'Drafting…' },
+    post_reply: { head: 'Reply as your Page', button: 'Post reply', busy: 'Posting…' },
+    dismiss: { head: 'Dismiss this comment', button: 'Dismiss', busy: 'Dismissing…' },
+  };
+
+  function renderCommentActionProposalCard(ui, esc) {
+    const copy = COMMENT_ACTION_COPY[ui.action];
+    if (!copy) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const max = Number(ui.maxReplyChars) || 1250;
+    const replyBox = (text) => `
+        <label class="block text-xs font-bold text-gray-700 mt-3">The reply — you can edit it</label>
+        <textarea data-cap-reply rows="4" maxlength="${max}" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">${esc(text || '')}</textarea>
+        <p class="text-xs text-gray-600 mt-1">“Post reply” posts it under the post, as your Company Page, where everyone can see it.</p>`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">#${esc(String(ui.commentId))} · LinkedIn · ${esc(ui.authorName || 'A LinkedIn member')}</p>
+      <div class="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(ui.body || '')}</p></div>
+      ${ui.postExcerpt ? `<p class="text-xs text-gray-500 mt-1 break-words">On your post: “${esc(ui.postExcerpt)}”</p>` : ''}
+      ${ui.linkedInUrl ? `<a href="${esc(ui.linkedInUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs underline text-gray-700">Open on LinkedIn</a>` : ''}
+      ${ui.action === 'draft' ? `<p class="text-sm text-gray-800 mt-3">${ui.instruction ? `<span class="font-bold">What to change:</span> ${esc(ui.instruction)}` : 'I’ll write a reply in your brand’s voice. Nothing is posted until you press Post reply.'}</p>` : ''}
+      ${ui.action === 'post_reply' && !blocked ? replyBox(ui.draftReply) : ''}
+      ${ui.action === 'dismiss' ? '<p class="text-xs text-gray-600 mt-3">It moves to Dismissed on the Comments tab and nothing is posted. You can put it back from there.</p>' : ''}
+      <div data-cap-drafted></div>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3" data-cap-buttons>
+        ${blocked ? '' : `<button type="button" data-cap-go class="${ui.action === 'dismiss' ? 'btn-secondary border' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-cap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-cap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-cap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-cap-go], [data-cap-cancel], [data-cap-post]').forEach((x) => { x.disabled = b; });
+    const dispatch = (action, extra, onOk) => el.dispatchEvent(new CustomEvent('comment:action', {
+      bubbles: true,
+      detail: {
+        action, assistantId: Number(ui.assistantId) || null, commentId: Number(ui.commentId) || null, ...extra,
+        respond({ ok, message, error, comment }) {
+          if (ok) { onOk ? onOk(comment, message) : say(message || 'Done.'); return; }
+          setBusy(false);
+          say(error || 'That didn’t work — please try again.', 'error');
+        },
+      },
+    }));
+    const postFromBox = () => {
+      const text = (el.querySelector('[data-cap-reply]')?.value || '').trim();
+      if (!text) { say('Write a reply first.', 'error'); return; }
+      setBusy(true);
+      say('Posting…');
+      dispatch('post_reply', { text }, (c, message) => {
+        el.querySelectorAll('[data-cap-reply]').forEach((x) => { x.readOnly = true; });
+        say(message || 'Posted on LinkedIn as your Page.');
+      });
+    };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-cap-post]')) { postFromBox(); return; }
+      if (!e.target.closest('[data-cap-go]')) return;
+      if (ui.action === 'post_reply') { postFromBox(); return; }
+      setBusy(true);
+      say(copy.busy);
+      if (ui.action === 'draft') {
+        dispatch('draft', { instruction: ui.instruction || null }, (c) => {
+          // The draft comes back on the card, ready to edit and post — or to leave on the Comments tab.
+          el.querySelector('[data-cap-drafted]').innerHTML = `${replyBox(c && c.draftReply)}
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <button type="button" data-cap-post class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Post reply</button>
+            </div>`;
+          el.querySelector('[data-cap-buttons]').innerHTML = '';
+          say('Drafted — nothing has been posted. Edit it here or on the Comments tab.');
+        });
+        return;
+      }
+      dispatch(ui.action, {});
+    });
+    return el;
+  }
+
+  register('comment_action_proposal', renderCommentActionProposalCard);
+
   // ── Built-in: Watch list Action Proposal Card (Lead Generator chat) ─────────
   // { type: 'watch_action_proposal', action: 'add'|'remove'|'resume'|'set_enabled', assistantId,
   //   watchId?, companyName?, number?, kind?, candidates?, enabled?, blocked, settled? }

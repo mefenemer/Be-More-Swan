@@ -1498,6 +1498,12 @@ node_bundler = "esbuild"
 [functions.ingest-facebook-insights]
   schedule = "30 */6 * * *"
 
+# LinkedIn Company Page posts: statistics → post_insights, new comments → page_comments (the Social
+# Media assistant's Comments tab). A different API from the two Meta runs, so no rate-limit offset is
+# needed; 15 past keeps it clear of both anyway.
+[functions.ingest-linkedin-insights]
+  schedule = "15 */6 * * *"
+
 # SMART Goals AC4.1.1: poll current metric values for active goals — hourly. Each goal is
 # throttled to its tier cadence (premium hourly, others daily) inside the worker.
 [functions.poll-goal-telemetry]

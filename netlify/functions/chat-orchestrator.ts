@@ -100,6 +100,8 @@ import {
 import { LEAD_BULK_MAX, leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
 import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '../../src/utils/chat-discussion-action';
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
+import { buildCommentsChatBlock } from '../../src/utils/page-comments';
+import { commentActionFromUiElement, resolveCommentActionProposal } from '../../src/utils/chat-comment-action';
 import { buildWatchActionsChatBlock, resolveWatchActionProposal, watchActionFromUiElement } from '../../src/utils/chat-watch-action';
 import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
@@ -273,6 +275,9 @@ interface RouteContext {
     /** This Lead Generator's Discussions tab — what it watches, its new threads, and the card that acts
      *  on them. Same routes as leadsSnapshot. src/utils/discussions.ts buildDiscussionsChatBlock. */
     discussionsBlock?: string | null;
+    /** The Social Media assistant's Comments tab — its LinkedIn Page comments and the card that acts on
+     *  them. src/utils/page-comments.ts buildCommentsChatBlock. Null on failure / before the SQL. */
+    commentsBlock?: string | null;
     /** This Lead Generator's Watch list (buying triggers Phase 2): what it watches, the news, and the card
      *  that changes it. Same routes as leadsSnapshot. src/utils/chat-watch-action.ts. */
     watchListBlock?: string | null;
@@ -328,6 +333,9 @@ interface AssistantRoute {
      *  summary into buildRolePrompt via rc.leadsSnapshot. See buildLeadsSnapshot() for why a
      *  role that OWNS a records tab still could not see it. */
     usesLeadSnapshot?: boolean;
+    /** When true the handler reads this assistant's LinkedIn Page comments for this turn
+     *  (rc.commentsBlock) and the comment_action_proposal card is resolved. */
+    usesPageComments?: boolean;
     /** When true the handler reads this assistant's campaigns for this turn and passes them into
      *  buildRolePrompt via rc.campaignsSnapshot. */
     usesCampaignSnapshot?: boolean;
@@ -3065,6 +3073,8 @@ OR, for A PART THEY SELECTED, uiElement is instead:
         model: DEFAULT_MODEL,
         usesInspo: true,
         contentSnapshot: 'posts',
+        // Its Comments tab (LinkedIn Company Page comments) — src/utils/page-comments.ts.
+        usesPageComments: true,
         // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
         // the failure mode is the worst one available: the envelope truncates mid-string, the
         // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
@@ -3117,6 +3127,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
                 platformCraftBlock(platforms.length ? platforms : ['instagram', 'linkedin', 'facebook', 'x', 'threads']),
                 socialSurfaces(rc.taskCosts),
                 rc.contentSnapshot ?? 'YOUR POSTS — your list of posts could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing post, say you cannot see it right now and point them to the "Posts" tab.',
+                rc.commentsBlock ?? '',
                 // Before the JSON contract, deliberately. The block ends with up to four excerpts
                 // that are themselves finished social posts, so it is the last thing that should be
                 // allowed to suggest a reply SHAPE — the envelope instruction has to come after it.
@@ -3150,6 +3161,9 @@ OR, to act on a post that already exists (see EXISTING POSTS), uiElement is inst
 }
 
 ${voiceOptionsBlock()}
+
+OR, to act on a comment on the Comments tab (see YOUR COMMENTS TAB), uiElement is instead:
+{ "type": "comment_action_proposal", "action": "draft" | "post_reply" | "dismiss", "commentId": <the number after # in YOUR COMMENTS TAB>, "instruction": "<draft only: what to change>" | null }
 
 OR, to offer redrafting the upcoming drafts after a change to what you post about (see UPCOMING DRAFTS AFTER A CHANGE), uiElement is instead:
 { "type": "redraft_upcoming_proposal", "summary": "<one sentence: which change, and that the upcoming drafts don't use it yet>" }
@@ -3517,6 +3531,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const discussionsBlock = route.usesLeadSnapshot
         ? await buildDiscussionsChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Comments tab (src/utils/page-comments.ts) — per turn, so a reply posted on the tab a moment ago
+    // is not offered again. Null on failure, including before db/z-page-comments.sql is applied.
+    const commentsBlock = route.usesPageComments
+        ? await buildCommentsChatBlock(db, orgId, session.aiAssistantId)
+        : null;
     // Its Watch list (src/utils/chat-watch-action.ts) — per turn, null before db/z-lead-watch.sql is applied.
     const watchListBlock = route.usesLeadSnapshot
         ? await buildWatchActionsChatBlock(db, orgId, session.aiAssistantId)
@@ -3632,6 +3651,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         outreachOfferBlock,
         followUpPlanBlock,
         discussionsBlock,
+        commentsBlock,
         watchListBlock,
         campaignsSnapshot,
         taskCosts: await getTaskCosts(),
@@ -4485,6 +4505,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!uiElement) content = !DISCUSSIONS_ENABLED
                 ? 'Watching forums for threads to reply to is switched off for now, so I haven’t set anything up.'
                 : 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
+        }
+        // The Social Media assistant's Comments tab (src/utils/chat-comment-action.ts), rebuilt from the
+        // page_comments row; the click calls page-comments.ts, the same endpoint as the tab's buttons.
+        const commentReq = route === ROUTES.social_media_manager ? commentActionFromUiElement(uiElement) : null;
+        if (commentReq) {
+            uiElement = await resolveCommentActionProposal(db, orgId, session.aiAssistantId, commentReq);
+            if (!uiElement) content = 'I couldn’t find that comment on this assistant’s Comments tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Comments" tab.';
         }
         // And its Watch list (src/utils/chat-watch-action.ts); the click calls lead-watch.ts, the tab's endpoint.
         const watchReq = route === ROUTES.lead_qualifier ? watchActionFromUiElement(uiElement) : null;

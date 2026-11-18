@@ -149,7 +149,25 @@ export type LiConn = { id: number; vaultRefKey: string | null; metadata: any };
 // org's LinkedIn goals the moment a figure is saved, so the bar moves without waiting for the cron.
 //
 // Never 'disconnected': no figure yet is "nothing entered", not a broken connection.
+//
+// A Company Page connection is the exception (2026-11-18): refresh-follower-counts.ts reads the Page's
+// total from LinkedIn (networkSizes) into the connection's metadata.followerCount, and that figure
+// wins over a typed one — it is the real number. Still never 'disconnected' when it is missing.
 async function fetchLinkedInFollowers(db: any, organisationId: number): Promise<FetchResult> {
+    const pages = await db
+        .select({ metadata: systemConnections.metadata })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, organisationId),
+            eq(systemConnections.serviceName, 'linkedin'),
+            eq(systemConnections.isActive, true),
+            sql`${systemConnections.externalUserId} LIKE 'urn:li:organization:%'`,
+        ))
+        .limit(5);
+    for (const p of pages) {
+        const n = Number((p.metadata as Record<string, unknown> | null)?.followerCount);
+        if (Number.isFinite(n) && (p.metadata as Record<string, unknown>)?.followerCount != null) return { value: n, disconnected: false };
+    }
     const [row] = await db
         .select({ count: manualFollowerCounts.count })
         .from(manualFollowerCounts)

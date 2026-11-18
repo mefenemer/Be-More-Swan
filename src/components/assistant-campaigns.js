@@ -1767,10 +1767,10 @@
           <p class="text-xs font-bold text-amber-900">Before you can advertise</p>
           <p class="text-xs text-amber-900 mt-1 leading-relaxed">${esc(p.adsReason || '')}</p>
           ${picker}
-          ${acc !== null && acc.length === 0 ? `
+          ${(acc !== null && acc.length === 0) || p.needsReconnect ? `
             <a href="/.netlify/functions/linkedin-ads-oauth-init"
               class="inline-flex items-center mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
-              Connect LinkedIn advertising
+              ${p.needsReconnect ? 'Reconnect LinkedIn advertising' : 'Connect LinkedIn advertising'}
             </a>` : ''}
           <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-account-status></p>
         </div>`;

@@ -193,7 +193,8 @@ check('list returns the paid block with all three facts', () => {
 
 check('readiness is only computed when the feature is on', () => {
     // No point asking about an ads connection for a workspace that cannot have one.
-    assert.match(code(api), /const adsReadiness = featureEnabled\s*\n\s*\? assessAdsReadiness/);
+    assert.match(code(api), /const adsConnection = featureEnabled \? await getAdsConnection\(db, orgId\) : null;/);
+    assert.match(code(api), /const adsReadiness = featureEnabled \? assessAdsReadiness\(adsConnection\) : null;/);
 });
 
 check('the client treats a null paid block as "offer nothing"', () => {

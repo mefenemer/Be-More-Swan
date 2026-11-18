@@ -38,7 +38,7 @@ check('the LinkedIn note: no "not granted" claim; Company Pages only where page 
     const js = readFileSync('integrations.js', 'utf8');
     assert.ok(!js.includes('which we have not been granted yet'));
     assert.ok(js.includes("note: 'Posts are published to your personal LinkedIn feed.',"));
-    assert.ok(js.includes("notePages: 'Posts go to your personal LinkedIn feed, or to a Company Page you’re an admin of — you choose which when you connect.',"));
+    assert.ok(js.includes("notePages: 'Posts go to your personal LinkedIn feed, or to a Company Page you’re an admin of — you choose which when you connect. A Company Page also brings each post’s results and its comments back here, so you can reply as the Page.',"));
     assert.ok(js.includes('return (_linkedinPages && platform && platform.notePages) || (platform && platform.note) || \'\';'));
     assert.ok(js.includes('const note = _platformNote(platform);'));
 });
