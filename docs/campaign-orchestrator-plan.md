@@ -643,6 +643,24 @@ Each step lands with: DDL in an idempotent `db/*.sql` applied to both envs **bef
 (`requireCampaign` selects every column), the drizzle mirror, the GUI control, the chat card and
 prompt text (§9.0), and the prompt-surfaces test extended.
 
+### 9.10 Paid: open follow-ups from the first live LinkedIn run (2026-11-18)
+
+Found while staging a paused test campaign on staging (Marmalade, ad account 561389113).
+
+1. **Political intent is declared FOR the advertiser.** `campaignCreateBody` sends
+   `politicalIntent: 'NOT_POLITICAL'` (LinkedIn requires the field). Before any customer can stage a
+   campaign, the stage form must ask them and pass their answer through. Owner decision.
+2. **Development Tier: every ad account must be added by hand** to the "Be More Swan Adverts" app's
+   Account Management list (developer portal → Products → Advertising API → View Ad Accounts), max 5.
+   Reads work without it; every write is a 403. Standard Tier is needed before paid opens to customers.
+3. **The stage error box drops LinkedIn's reason.** `stage_paid` returns `detail` (#742), but
+   `assistant-campaigns.js` `post()` only shows `data.error`.
+4. **A failed creative leaves an orphan PAUSED campaign**, and a retry creates another — campaign
+   creation does not search first, unlike the group. Nothing can spend.
+5. **Reconnecting clears the chosen ad account**, so the user has to pick it again.
+6. **The paid surface is unreachable everywhere** while `ADAPTERS` is empty (`anyNetworkAvailable()`),
+   including staging. The live run drove the endpoints directly.
+
 ## 10. Brand Designer (proposed 2026-10-08)
 
 Planned as its own assistant (`brand_designer`) — see [brand-designer-plan.md](./brand-designer-plan.md).

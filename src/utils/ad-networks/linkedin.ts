@@ -95,7 +95,7 @@ export function campaignCreateBody(input: {
         // ⚠️ REQUIRED since LinkedIn's political-ads rules (422 "politicalIntent :: field is required",
         // first live stage 2026-11-18). This is a DECLARATION on the advertiser's behalf. Our
         // campaigns are small-business marketing, but before any customer stages a campaign the
-        // stage form must ask them, not assume — see docs/campaign-orchestrator-plan.md follow-ups.
+        // stage form must ask them, not assume — docs/campaign-orchestrator-plan.md §9.10 item 1.
         politicalIntent: 'NOT_POLITICAL',
 
         // ── Bidding: AUTO, and this trio must move together ──────────────────
@@ -314,7 +314,10 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
                     headers: headers(cfg.accessToken),
                     body: JSON.stringify({
                         creative: {
-                            campaign: externalCampaignId,
+                            // ⚠️ The URN, not the bare id the create header returns (the
+                            // same trap as campaignGroup, 2026-11-18). The stored id stays bare:
+                            // activate/pause/checkControl strip it with accountId() either way.
+                            campaign: campaignUrn(externalCampaignId),
                             intendedStatus: 'ACTIVE',
                             inlineContent: {
                                 post: {
@@ -609,6 +612,11 @@ export async function ensureCampaignGroup(
     // `campaignGroup` must be the full URN — LinkedIn 422 "Invalid Urn format. Invalid prefix".
     // The search branch above already builds the URN; this one has to as well.
     return campaignGroupUrn(parseRestliId(created));
+}
+
+/** A campaign id or URN, as the URN LinkedIn requires in a creative's `campaign`. */
+export function campaignUrn(idOrUrn: string): string {
+    return idOrUrn.startsWith('urn:') ? idOrUrn : `urn:li:sponsoredCampaign:${idOrUrn}`;
 }
 
 /** A campaign group id or URN, as the URN LinkedIn requires in `campaignGroup`. */
