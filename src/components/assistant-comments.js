@@ -228,7 +228,12 @@
       applyList(r);
       setBadge();
       const added = r.result?.added || 0;
-      toastOk(added ? `${added} new comment${added === 1 ? '' : 's'}.` : 'No new comments.');
+      const later = r.result?.skippedForTime || 0;
+      const found = added ? `${added} new comment${added === 1 ? '' : 's'}` : (later ? 'No new comments so far' : 'No new comments');
+      // Ran out of time: say so — "No new comments" would be untrue for the posts not checked yet.
+      toastOk(later
+        ? `${found}. ${later} older post${later === 1 ? ' wasn’t' : 's weren’t'} checked this time — they’re picked up by the next automatic check, within 6 hours.`
+        : `${found}.`);
     });
   }
 

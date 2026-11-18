@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    commentThreadUrn, fetchCommentReplies, fetchPageFollowerCount, replyDefinitelyRefused, fetchPostComments, fetchPostStatistics, linkedInCommentUrl, parseComment,
+    callTimeoutMs, commentThreadUrn, fetchCommentReplies, fetchPageFollowerCount, replyDefinitelyRefused, fetchPostComments, fetchPostStatistics, linkedInCommentUrl, parseComment,
     parseShareStatistics, parseShareStatisticsResponse, postUrnKind, replyErrorMessage, replyToComment, restliList,
 } from '../src/utils/linkedin-page-api';
 import { classifyComments, commentView, settledUrns, tidyReply, MAX_REPLY_CHARS, REPLY_RULES, TAB_SYNC_BUDGET_MS } from '../src/utils/page-comments';
@@ -193,7 +193,7 @@ check('the Page’s replies are fetched from UNDER each comment and mark it answ
         assert.equal(answeredParents.get(C1)?.text, 'Thanks Sam!');
     });
     const src = read('src/utils/page-comments.ts');
-    assert.ok(src.includes('await fetchCommentReplies(opts.token, c.commentUrn)'), 'the sync asks for replies');
+    assert.ok(src.includes('await fetchCommentReplies(opts.token, c.commentUrn, opts.deadline)'), 'the sync asks for replies');
 });
 
 check('archived assistants gather no comments, and the post cap is logged, not silent', () => {
@@ -223,6 +223,22 @@ check('a late-seen Page reply confirms an unconfirmed one; an unconfirmed reply 
     const fn = src.slice(src.indexOf('export async function setCommentStatus('), src.indexOf('export function tidyReply('));
     assert.match(fn, /status === 'new'\s*\?\s*sql`/);
     assert.ok(fn.includes(": inArray(pageComments.status, ['new', 'dismissed'])"));
+});
+
+check('one slow call can’t overrun the budget: each read waits at most the time left (at least 0.5 s)', () => {
+    assert.equal(callTimeoutMs(undefined), 10_000);
+    assert.equal(callTimeoutMs(1_000 + 3_000, 1_000), 3_000);
+    assert.equal(callTimeoutMs(1_000 + 60_000, 1_000), 10_000);
+    assert.equal(callTimeoutMs(1_000, 5_000), 500, 'past the deadline still gets a short try');
+    const src = read('src/utils/page-comments.ts');
+    assert.ok(src.includes('fetchPostComments(opts.token, post.platformPostId, opts.deadline)'));
+    assert.ok(src.includes('fetchCommentReplies(opts.token, c.commentUrn, opts.deadline)'));
+});
+
+check('the tab says when posts were left for the next automatic check', () => {
+    const js = read('src/components/assistant-comments.js');
+    assert.ok(js.includes('r.result?.skippedForTime'));
+    assert.ok(js.includes('picked up by the next automatic check'));
 });
 
 check('thread URN and LinkedIn link from a comment URN', () => {

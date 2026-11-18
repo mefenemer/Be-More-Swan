@@ -193,11 +193,11 @@ const COMMENTS_PAGE = 50;
  * The newest comments on one Page post (up to 50). Null when LinkedIn refused the call — the
  * caller must not read null as "no comments". Never throws.
  */
-export async function fetchPostComments(token: string, postUrn: string): Promise<LinkedInComment[] | null> {
+export async function fetchPostComments(token: string, postUrn: string, deadline?: number): Promise<LinkedInComment[] | null> {
     const base = `${API}/socialActions/${restliEncode(postUrn)}/comments?start=0&count=${COMMENTS_PAGE}`;
-    const named = await getJson(token, `${base}&${NAME_PROJECTION}`);
+    const named = await getJson(token, `${base}&${NAME_PROJECTION}`, deadline);
     if (named) return parseCommentsResponse(named);
-    const plain = await getJson(token, base);
+    const plain = await getJson(token, base, deadline);
     return plain ? parseCommentsResponse(plain) : null;
 }
 
@@ -207,8 +207,8 @@ export async function fetchPostComments(token: string, postUrn: string): Promise
  * on LinkedIn itself is seen. No name projection: only the replying actor's URN is needed. Null when
  * refused. Never throws.
  */
-export async function fetchCommentReplies(token: string, commentUrn: string): Promise<LinkedInComment[] | null> {
-    const body = await getJson(token, `${API}/socialActions/${restliEncode(commentUrn)}/comments?start=0&count=${COMMENTS_PAGE}`);
+export async function fetchCommentReplies(token: string, commentUrn: string, deadline?: number): Promise<LinkedInComment[] | null> {
+    const body = await getJson(token, `${API}/socialActions/${restliEncode(commentUrn)}/comments?start=0&count=${COMMENTS_PAGE}`, deadline);
     if (!body) return null;
     // A reply element may leave parentComment out (it is implied by the path) — fill it in.
     return parseCommentsResponse(body).map((c) => ({ ...c, parentCommentUrn: c.parentCommentUrn ?? commentUrn }));
@@ -283,9 +283,23 @@ export function replyErrorMessage(status: number | null, linkedInMessage?: strin
 
 // ── Shared ─────────────────────────────────────────────────────────────────────────────────────
 
-async function getJson(token: string, url: string): Promise<unknown | null> {
+/** The longest any one read waits. */
+const CALL_TIMEOUT_MS = 10_000;
+/** However late, a call is given at least this long — a near-zero abort would just waste the call. */
+const MIN_CALL_MS = 500;
+
+/**
+ * How long one call may wait: CALL_TIMEOUT_MS, or the time left before `deadline` (at least
+ * MIN_CALL_MS) — so a caller's time budget holds even when one LinkedIn call is slow. Pure.
+ */
+export function callTimeoutMs(deadline: number | undefined, now = Date.now()): number {
+    if (!deadline) return CALL_TIMEOUT_MS;
+    return Math.min(CALL_TIMEOUT_MS, Math.max(MIN_CALL_MS, deadline - now));
+}
+
+async function getJson(token: string, url: string, deadline?: number): Promise<unknown | null> {
     try {
-        const res = await fetch(url, { headers: headers(token), signal: AbortSignal.timeout(10_000) });
+        const res = await fetch(url, { headers: headers(token), signal: AbortSignal.timeout(callTimeoutMs(deadline)) });
         if (!res.ok) {
             const msg = await res.text().catch(() => '');
             console.warn(`[linkedin-page-api] ${res.status} ${url.split('?')[0]} ${msg.slice(0, 200)}`);

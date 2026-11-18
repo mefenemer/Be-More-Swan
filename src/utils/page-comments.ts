@@ -124,7 +124,7 @@ export async function syncCommentsForConnection(
     const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
     for (const post of opts.posts) {
         if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
-        const topLevel = await fetchPostComments(opts.token, post.platformPostId);
+        const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline);
         if (!topLevel) { r.failedPosts++; continue; }
         r.fetched += topLevel.length;
         // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them only on
@@ -138,7 +138,7 @@ export async function syncCommentsForConnection(
         const withReplies = topLevel.filter((c) => c.actorUrn !== opts.orgUrn && !c.parentCommentUrn && c.replyCount !== 0 && !settled.has(c.commentUrn));
         for (const c of withReplies.slice(0, REPLY_LOOKUPS_PER_POST)) {
             if (opts.deadline && Date.now() > opts.deadline) break;
-            const got = await fetchCommentReplies(opts.token, c.commentUrn);
+            const got = await fetchCommentReplies(opts.token, c.commentUrn, opts.deadline);
             if (got) replies.push(...got);
         }
         const { toKeep, answeredParents } = classifyComments(opts.orgUrn, [...topLevel, ...replies]);
