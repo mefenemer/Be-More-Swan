@@ -537,10 +537,11 @@ const SCENARIOS = [
     {
         scenarioKey: 'universal_webhook_meeting', providerKey: 'custom_webhook', tier: 2,
         direction: 'outbound', scenarioType: 'meeting_handoff',
-        title: 'Send Booked Meeting to a Webhook',
-        description: 'POST the booked-meeting payload to any URL (Zapier / Make / your own endpoint).',
+        title: 'Send Approved Meetings to a Webhook',
+        description: 'When you approve a meeting, POST it to any URL as one meeting.approved event — title, summary, decisions, risks, action items and attendees (Zapier / Make / your own endpoint).',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
-        actionType: null, fieldSchema: MEETING_CRM_FIELDS, status: 'available', sortOrder: 42,
+        // No field map: the runner sends a fixed meeting event (scenario-engine buildMeetingWebhookPayload).
+        actionType: null, fieldSchema: [], status: 'available', sortOrder: 42,
     },
     {
         scenarioKey: 'email_meeting_followup', providerKey: 'email', tier: 1,
