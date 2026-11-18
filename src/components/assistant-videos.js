@@ -325,7 +325,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (on && list && !list.dataset.loaded) {
       list.dataset.loaded = '1';
       fetch(`${FOOTAGE_API}?list=1`, { credentials: 'same-origin' }).then((r) => r.json()).then((j) => {
-        const vids = (j && j.videos) || [];
+        // Only measured recordings: a screen needs its length to be laid out (review of #725).
+        const vids = ((j && j.videos) || []).filter((x) => Number(x.durationS) > 0);
         list.innerHTML = vids.length
           ? vids.map((x) => `<label class="flex items-center gap-1.5"><input type="checkbox" name="screenIds" value="${esc(x.id)}"> <span class="truncate">${esc(x.name || `Video ${x.id}`)}</span>${x.durationS ? ` <span class="text-gray-400">${esc(mmss(x.durationS))}</span>` : ''}</label>`).join('')
           : 'No videos of your own yet. Upload a screen recording to My Content, or use “Use my own footage”.';
@@ -651,6 +652,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     cover: 'The screen fills the frame. You’re heard but not seen.',
     window: 'You fill the frame, with the screen in a small window in a corner.',
   };
+  // The same choices on an AI presenter's scene (A3), about the presenter, not the owner.
+  const COVER_HINT_PRESENTER = {
+    presenter: 'The presenter, full frame.',
+    bubble: 'The screen fills the frame and the presenter appears in a round bubble in a corner, still talking.',
+    window: 'The presenter fills the frame, with the screen in a small window in a corner.',
+  };
+  const hintFor = (source, layout) => (source === 'ai_presenter' ? COVER_HINT_PRESENTER : COVER_HINT)[layout] || '';
   const CORNER = [['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']];
   const coverLayoutOf = (s) => (s.cover && s.cover.layout) || 'presenter';
   const coverCornerOf = (c) => (c && c.corner) || (c && c.layout === 'window' ? 'bl' : 'br');
@@ -706,7 +714,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <div class="flex flex-col sm:flex-row gap-3">
           <div class="flex-1 min-w-0 space-y-2">
             <label class="block"><span class="block text-[11px] font-bold text-gray-600">${s.source === 'ai_presenter' ? 'What people see while the presenter talks' : 'What people see while you talk'}</span>${sel('coverLayout', layouts, layout)}</label>
-            <p data-vid-cover-hint class="text-[11px] text-gray-500">${esc(COVER_HINT[layout])}</p>
+            <p data-vid-cover-hint class="text-[11px] text-gray-500">${esc(hintFor(s.source, layout))}</p>
             <div data-vid-cover-more class="space-y-2${off}">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">On the screen</span>${sel('coverScreen', screens, screen)}</label>
               <div class="grid grid-cols-2 gap-2">
@@ -734,7 +742,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const v = state.videos.find((x) => x.id === Number(f.dataset.id));
     const layout = f.elements.coverLayout.value;
     const screen = f.elements.coverScreen.value;
-    f.querySelector('[data-vid-cover-hint]').textContent = COVER_HINT[layout] || '';
+    f.querySelector('[data-vid-cover-hint]').textContent = hintFor(f.elements.source ? f.elements.source.value : '', layout);
     f.querySelector('[data-vid-cover-more]').classList.toggle('hidden', layout === 'presenter');
     f.querySelector('[data-vid-cover-own]').classList.toggle('hidden', !screen.startsWith('own:'));
     f.querySelector('[data-vid-cover-stock]').classList.toggle('hidden', !(screen === 'stock_video' || screen === 'stock_photo'));

@@ -263,7 +263,10 @@ export default withLambda(async (event) => {
             if ((body.brief as Record<string, unknown> | undefined)?.footageConsent !== true) {
                 return json(400, { error: 'Tick “I have permission to use the people and music in these videos” first.' });
             }
-            if ((await ownVideos(db, orgId, screenIds)).length !== screenIds.length) return json(404, { error: 'One of those screen recordings isn’t one of your own uploads.' });
+            const owned = await ownVideos(db, orgId, screenIds);
+            if (owned.length !== screenIds.length) return json(404, { error: 'One of those screen recordings isn’t one of your own uploads.' });
+            // A screen is laid out by its length; one never measured would be dropped from the plan (review of #725).
+            if (owned.some((v) => !(Number(v.durationS) > 0))) return json(409, { error: 'One of those screen recordings has no length yet. Upload it again, or use it once with “Use my own footage”, then choose it.' });
         }
         const footage = parsed.brief.footageAssetIds ?? [];
         if (footage.length) {

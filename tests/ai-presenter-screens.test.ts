@@ -72,7 +72,7 @@ check('the build and timeline: a presenter clip splits at the screen\'s edges an
 
 check('create checks screens are their own and asks for the same permission tick', () => {
     const fn = read('netlify/functions/video-projects.ts');
-    assert.ok(fn.includes("const screenIds = parsed.brief.screenAssetIds ?? [];") && fn.includes('(await ownVideos(db, orgId, screenIds)).length !== screenIds.length'));
+    assert.ok(fn.includes("const screenIds = parsed.brief.screenAssetIds ?? [];") && fn.includes('const owned = await ownVideos(db, orgId, screenIds);'));
     assert.ok(fn.includes('const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), [...asOwnVideos(footage), ...screens]);'), 'edit_scene keeps a presenter\'s screen');
 });
 
@@ -85,6 +85,19 @@ check('the form, the Change form and the chat offer it', () => {
     const card = videoSceneCard(videoSceneRequestFromUiElement({ type: 'video_scene_edit', projectId: 4, scene: 1, layout: 'bubble', screenVideo: 21, screenStartS: 5 })!, sb, { ownVideoIds: [21] });
     assert.deepStrictEqual(card?.patch.cover, { layout: 'bubble', source: 'own_video', assetId: 21, inS: 5 }, 'the chat can set it on a presenter scene');
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('...((project.brief as { screenAssetIds?: number[] } | null)?.screenAssetIds ?? [])'));
+});
+
+check('review of #725: unmeasured screens are refused and never lift the limit; a demoted scene loses its screen; hints speak of the presenter', () => {
+    // A screen with no length: not used, the owner told, and the key-moment limit stays.
+    const r = enforceStoryboard({ title: 't', caption: 'c', scenes: Array.from({ length: 5 }, () => p({ layout: 'bubble', source: 'own_video', assetId: 21 })) }, brief(), [], []);
+    assert.ok(r.changes.some((x) => /has no length yet/.test(x)));
+    assert.strictEqual(r.storyboard.scenes.filter((s) => s.source === 'ai_presenter').length, 3, 'no measured screen: the 3-scene limit applies');
+    assert.ok(r.storyboard.scenes.filter((s) => s.source === 'stock_video').every((s) => !s.cover), 'a scene switched to stock keeps no screen');
+    const fn = read('netlify/functions/video-projects.ts');
+    assert.ok(fn.includes("if (owned.some((v) => !(Number(v.durationS) > 0))) return json(409,"));
+    const ui = read('src/components/assistant-videos.js');
+    assert.ok(ui.includes(".filter((x) => Number(x.durationS) > 0);"), 'the form lists only measured recordings');
+    assert.ok(ui.includes("bubble: 'The screen fills the frame and the presenter appears in a round bubble in a corner, still talking.'"));
 });
 
 console.log(`\nai-presenter-screens: ${passed} passed`);

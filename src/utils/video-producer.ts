@@ -1090,7 +1090,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // THIS build shows the presenter full frame there (timelineCovers skips a cover with no asset). The scene
         // keeps its layout, so the next version tries again, and the finished video says what happened.
         const coverNote = coverFailed.length
-            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} you full frame. Change the video and make it again to try that screen again, or choose another on the scene.`
+            ? `The screen for ${coverFailed.length === 1 ? `scene ${coverFailed[0] + 1}` : `scenes ${coverFailed.map((i) => i + 1).join(', ')}`} couldn’t be found, so ${coverFailed.length === 1 ? 'it shows' : 'they show'} the speaker full frame. Change the video and make it again to try that screen again, or choose another on the scene.`
             : null;
         await save({});
         const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);

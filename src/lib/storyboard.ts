@@ -286,6 +286,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     // A screen may be any of the brief's own videos: its footage, or (with a presenter) its screen recordings (A3).
     const screenIds = new Set([...(brief.footageAssetIds ?? []), ...(brief.screenAssetIds ?? [])]);
     const screenLens = new Map(footage.filter((v) => screenIds.has(v.id) && v.durationS > 0).map((v) => [v.id, v.durationS]));
+    if (brief.screenAssetIds?.some((id) => !screenLens.has(id))) changes.push('A screen recording you chose has no length yet, so it isn\'t used. Upload it again, or use it once with “Use my own footage”.');
     const ownSound = keepsOwnSound(brief);
     const motions: StillMotion[] = ['push_in', 'pan_right', 'pull_out', 'pan_left'];
 
@@ -374,17 +375,19 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     for (const s of scenes) {
         if (s.source !== 'ai_presenter') continue;
         const i = scenes.indexOf(s) + 1;
-        if (!presenter) { s.source = 'stock_video'; if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' '); changes.push(`Scene ${i}: this video has no presenter, so stock footage is used.`); continue; }
-        if (!s.voiceover.trim()) { s.source = 'stock_video'; if (!s.keywords) s.keywords = 'business'; changes.push(`Scene ${i}: the presenter needs words to say, so stock footage is used.`); continue; }
+        if (!presenter) { s.source = 'stock_video'; delete s.cover; if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' '); changes.push(`Scene ${i}: this video has no presenter, so stock footage is used.`); continue; }
+        if (!s.voiceover.trim()) { s.source = 'stock_video'; delete s.cover; if (!s.keywords) s.keywords = 'business'; changes.push(`Scene ${i}: the presenter needs words to say, so stock footage is used.`); continue; }
         presenterScenes++;
         // The call to action (the last scene) keeps them when it uses them, so the others share the remaining places;
         // when it doesn't, the earliest three keep them (review of #721).
         const isLast = s === scenes[scenes.length - 1];
         const lastIsPresenter = scenes[scenes.length - 1].source === 'ai_presenter';
-        // With screen recordings (A3) the presenter guides the whole walkthrough, so the key-moment limit doesn't apply.
-        const walkthrough = !!brief.screenAssetIds?.length;
+        // With screen recordings (A3) the presenter guides the whole walkthrough, so the key-moment limit doesn't apply —
+        // counting only screens that can be laid out (measured), never ones that were dropped (review of #725).
+        const walkthrough = [...(brief.screenAssetIds ?? [])].some((id) => screenLens.has(id));
         if (!presenter.throughout && !walkthrough && !isLast && presenterScenes > PRESENTER_KEY_SCENES - (lastIsPresenter ? 1 : 0)) {
             s.source = 'stock_video';
+            delete s.cover;   // a screen beside the presenter means nothing on a stock scene (review of #725)
             if (!s.keywords) s.keywords = clip(s.voiceover, 60).split(' ').slice(0, 4).join(' ');
             changes.push(`The presenter appears in at most ${PRESENTER_KEY_SCENES} scenes — scene ${i} uses stock footage.`);
         }
