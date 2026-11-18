@@ -280,7 +280,7 @@ export default withLambda(async (event) => {
             // its records really hold, all time. The cards these replace ("Cash Recovered", "Time Saved",
             // "Avg Resolution Time", "Data Accuracy") read the SOCIAL stats endpoint and said "nothing
             // published" for ever — and nothing in the platform measures any of them. `actionItems` is
-            // the Minute Taker's extra: the action items its meeting write-ups carry.
+            // the Note Taker's extra: the action items its meeting write-ups carry.
             if (event.queryStringParameters?.metrics) {
                 if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
                 const [m] = await db.select({
@@ -303,7 +303,7 @@ export default withLambda(async (event) => {
             }
 
             // Dated-records feed for the assistant Calendar tab (record-calendar-dates.ts): invoices on
-            // their due date, meetings on their own date. The AR Clerk's and Minute Taker's calendars
+            // their due date, meetings on their own date. The AR Clerk's and Note Taker's calendars
             // showed only completed runs before this — never an invoice, never a meeting. Rejected
             // records are left off (the user turned them down); `data` is read server-side and never
             // shipped, like the scheduled feed below.

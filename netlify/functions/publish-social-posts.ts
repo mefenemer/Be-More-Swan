@@ -16,7 +16,8 @@ import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishLinkedInDocument, isLinkedInDocument, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { linkedInDocumentTitle } from '../../src/utils/top-lists';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { markPostMediaPosted } from '../../src/utils/release-post-media';
@@ -33,6 +34,12 @@ const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', 
 const STALE_PUBLISHING_MINS = 10;
 // YouTube's upload lives in a background function that holds the row far longer — see the sweep below.
 const STALE_YOUTUBE_MINS = 30;
+/** Why a stranded LinkedIn Document carousel is in Needs attention (see the sweep below). JSON for failure_reason. */
+const LI_DOCUMENT_STRANDED_REASON = JSON.stringify({
+    httpStatus: null,
+    errorMessage: 'Publishing this LinkedIn carousel was interrupted, so it may already be on LinkedIn. Check your LinkedIn profile first — use Try again only if it is not there.',
+    isRetryable: false,
+}).replace(/'/g, "''");
 
 // errorCode/errorSubcode are the PLATFORM's own numbers, not the HTTP status, and they are what
 // post-failure-diagnosis.ts branches on. Optional: only the Meta family reports them.
@@ -48,6 +55,7 @@ type PostRow = {
     hashtags: string | null; connection_id: number | null; attempt_count: number;
     publish_date: string; platform: string; content_asset_ids: unknown;
     assistant_id: number | null; link_url: string | null; cta_text: string | null;
+    format_key: string | null;
 };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
@@ -58,6 +66,31 @@ export default withLambda(async () => {
     const tickStart = Date.now();
     const now = new Date();
     let processed = 0, succeeded = 0, failed = 0;
+
+    // A LinkedIn Document carousel stranded in 'publishing' is NOT retried on its own. It may already be
+    // on LinkedIn: the run could have been cut off after LinkedIn accepted the post but before the row was
+    // marked published, and our LinkedIn access cannot read a post back to check (GET /rest/posts is 403
+    // with w_member_social — plan §4a). The building and uploading of the PDF make this row the slowest in
+    // the batch, so it is the one most likely to be cut off. Silently re-queueing it could post the same
+    // carousel publicly again every 10 minutes (#712 review 3). It goes to Needs attention instead, saying
+    // to check LinkedIn first; "Try again" there re-queues it as usual.
+    const stranded = await db.execute(
+        `UPDATE scheduled_posts
+            SET status = 'failed', retry_at = NULL, updated_at = now(),
+                failure_reason = '${LI_DOCUMENT_STRANDED_REASON}'::jsonb
+          WHERE status = 'publishing' AND platform = 'linkedin' AND format_key = 'li_document'
+            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'
+          RETURNING id, user_id, assistant_id`
+    ) as unknown as Array<{ id: number; user_id: number; assistant_id: number | null }>;
+    // Told like any failed post (handleFailure), so the customer knows to check LinkedIn (#712 review 4).
+    for (const row of stranded ?? []) {
+        const reason = JSON.parse(LI_DOCUMENT_STRANDED_REASON.replace(/''/g, "'"));
+        await createNotification(db, 'post_publish_failed', {
+            userId: row.user_id,
+            context: { platform: { label: LABEL.linkedin }, failure: { reason: reason.errorMessage } },
+            metadata: { postId: row.id, platform: 'linkedin', reason, assistantId: row.assistant_id },
+        }).catch((err: unknown) => console.warn(`[publish-social-posts] stranded-carousel notice failed for post ${row.id}:`, (err as Error)?.message || err));
+    }
 
     // Self-heal: reclaim posts stranded in 'publishing' by an earlier timed-out tick so they
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').
@@ -125,7 +158,7 @@ export default withLambda(async () => {
            FOR UPDATE SKIP LOCKED)
          RETURNING id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id,
-                link_url, cta_text`
+                link_url, cta_text, format_key`
     );
 
     if (!posts.length) {
@@ -244,7 +277,11 @@ export default withLambda(async () => {
                     return;
                 }
             } else if (post.platform === 'linkedin') {
-                result = await publishLinkedIn(text, token, creds.externalUserId, image);
+                // A Document carousel (li_document) goes out as one PDF of its slides through LinkedIn's
+                // Posts API; every other LinkedIn post stays on ugcPosts (docs/linkedin-document-carousel-plan.md).
+                result = isLinkedInDocument(post.format_key)
+                    ? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))
+                    : await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {
                 result = await publishThreads(text, token, creds.externalUserId, image);
             } else {

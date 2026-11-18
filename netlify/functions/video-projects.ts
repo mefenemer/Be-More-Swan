@@ -60,6 +60,7 @@ import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { AI_PRESENTER_FLAG, briefForWorkspace } from '../../src/lib/presenters';
 import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -196,6 +197,9 @@ export default withLambda(async (event) => {
             clipSound: Object.fromEntries(CLIP_STYLES.map((st) => [st, clipSoundAvailable(i2vModel(new Date(), st))])),
             // The languages captions can be translated into (youtube-extras.ts), for the Translate picker.
             captionLanguages: CAPTION_LANGUAGES,
+            // Whether this workspace may choose an AI presenter (feature flag; off for customers until the
+            // Terms notice for its per-second price has run — docs/video-producer-screen-walkthrough-plan.md §11.5).
+            aiPresenter: await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false),
         });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -245,7 +249,11 @@ export default withLambda(async (event) => {
         if (!a) return json(404, { error: 'Assistant not found.' });
         // What the brief leaves out comes from the assistant's setup (assistant-onboarding-schemas.js
         // video_producer) — a chat card that names no voice gets the voice the owner chose at hire.
-        const parsed = readBrief(withSetupDefaults(body.brief, a.onboardingContext));
+        // An AI presenter only where the ai_presenter flag is on: otherwise the brief is read without one
+        // (and so with the voice chosen, not the presenter's) — never a priced feature by the back door.
+        const hasPresenter = !!(body.brief && typeof body.brief === 'object' && (body.brief as Record<string, unknown>).presenter);
+        const rawBrief = briefForWorkspace(body.brief, !hasPresenter || await isFeatureEnabled(orgId, AI_PRESENTER_FLAG).catch(() => false));
+        const parsed = readBrief(withSetupDefaults(rawBrief, a.onboardingContext));
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
@@ -261,7 +269,7 @@ export default withLambda(async (event) => {
             if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: (await getTaskCosts()).weights.footage_review, message: TASK_LIMIT_MESSAGE });
         }
         const started = await startProject(db, {
-            organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,
+            organisationId: orgId, assistantId, createdBy: userId, brief: rawBrief, onboardingContext: a.onboardingContext, origin: 'user', headers,
         });
         if (!started.ok) return json(400, { error: started.error });
         return json(202, { project: await projectView(db, orgId, started.row) });
@@ -465,6 +473,9 @@ export default withLambda(async (event) => {
         // AI voice or the owner's own (never both in one video). Switching drops the voice the video had:
         // an AI voiceover is made again (shown on "Make the video"); own recordings are asked for line by line.
         let voiceReset: Record<string, unknown> = {};
+        // A presenter speaks in their own (AI) voice: the owner's recording would be lip-synced onto a made-up
+        // face, or leave every presenter scene with nothing to say (review of #721).
+        if (body.voiceMode === 'own' && brief.presenter) return json(409, { error: 'This video has an AI presenter, who speaks in their own voice. Make a video without a presenter to record it yourself.' });
         if ((body.voiceMode === 'own' || body.voiceMode === 'ai') && brief.voiceover !== false && (body.voiceMode === 'own') !== (brief.ownVoice === true)) {
             if (body.voiceMode === 'own') brief.ownVoice = true; else delete brief.ownVoice;
             sb.scenes = sb.scenes.map(({ voiceAssetId: _a, voiceS: _s, ...rest }) => rest);
@@ -476,6 +487,9 @@ export default withLambda(async (event) => {
     }
 
     // ── The owner's own voice (own-voice.ts): one scene's line, or one recording of the whole script ──
+    if ((action === 'set_line_voice' || action === 'set_voice_file') && (row.brief as VideoBrief | null)?.presenter) {
+        return json(409, { error: 'This video has an AI presenter, who speaks in their own voice.' });
+    }
     if (action === 'set_line_voice' || action === 'set_voice_file') {
         if (!['planned', 'failed', 'render_failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
         const brief = row.brief as VideoBrief;

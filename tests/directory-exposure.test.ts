@@ -52,6 +52,7 @@ const PUBLIC_DIRS: Record<string, string> = {
     locales: 'i18n bundles fetched by src/i18n.js',
     'site-fonts': 'open-licence fonts for Website Assistant sites, loaded by the editor\'s preview (site-render.ts FONT_PAIRS); live sites serve their own copy from sites-host/public',
     audio: 'voice picker samples, one short line per voice (scripts/make-voice-samples.mjs, voice-picker.js)',
+    presenters: 'AI presenter faces, thumbnails and 5-second samples (scripts/make-presenters.mjs); the picker shows them and the avatar model is given the face (presenter-picker.js, src/lib/presenters.ts)',
     videos: 'assistant overview videos + posters played on assistant.html (rendered by scripts/render-assistant-videos.mjs)',
     src: 'MIXED — see PUBLIC_SRC_DIRS; the rest is blocked per-subdirectory',
 };

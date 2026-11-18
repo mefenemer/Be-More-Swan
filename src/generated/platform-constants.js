@@ -39,7 +39,7 @@
     {"k":"th_poll","p":"threads","n":"Poll","d":"Interactive vote with up to four options.","m":"none","ar":"","min":0,"max":0,"cl":500,"a":"planned","why":"Polls need their own options editor and a different API call — not built yet."},
     {"k":"li_feed","p":"linkedin","n":"Feed post","d":"Text, an image, or an outbound link.","m":"image","ar":"1:1","min":0,"max":1,"cl":3000,"a":"live"},
     {"k":"li_video","p":"linkedin","n":"Native video","d":"Video uploaded straight to the feed.","m":"video","ar":"16:9","min":1,"max":1,"cl":3000,"a":"live"},
-    {"k":"li_document","p":"linkedin","n":"Document carousel","d":"A PDF that reads as swipeable slides — LinkedIn’s strongest format.","m":"document","ar":"","min":1,"max":1,"cl":3000,"a":"planned","why":"Needs PDF upload and LinkedIn’s document endpoint; the content library doesn’t accept documents yet."},
+    {"k":"li_document","p":"linkedin","n":"Document carousel","d":"A PDF that reads as swipeable slides — LinkedIn’s strongest format.","m":"image","ar":"4:5","min":2,"max":20,"cl":3000,"a":"live","ap":false},
     {"k":"li_article","p":"linkedin","n":"Article / newsletter","d":"Long-form writing with subscribers.","m":"none","ar":"","min":0,"max":1,"cl":110000,"a":"blocked","why":"Long-form belongs to the Blog Writer, not the social post editor — draft it there and publish to LinkedIn from its destinations."},
     {"k":"li_audio","p":"linkedin","n":"Audio event / Live","d":"Drop-in audio room or live stream.","m":"none","ar":"","min":0,"max":0,"cl":0,"a":"blocked","why":"A live event is not a post — it can’t be drafted and queued like one."},
     {"k":"x_text","p":"x","n":"Post","d":"Short-form text, and the start of a thread.","m":"image","ar":"16:9","min":0,"max":1,"cl":280,"a":"live"},

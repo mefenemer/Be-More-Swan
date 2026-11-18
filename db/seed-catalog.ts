@@ -333,7 +333,7 @@ const CATALOG = [
     },
     {
         roleKey: 'meeting_note_taker',
-        name: 'Minute Taker',
+        name: 'Note Taker',
         description: 'Turns the meeting transcripts and notes you paste in into clear minutes: a summary, the decisions made, and every action item with its owner, ready to send to Slack, Notion or Jira.',
         category: 'Project Management',
         iconKey: 'document',

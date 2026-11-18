@@ -143,7 +143,7 @@ export function normaliseMinutesCard(ui: unknown): MinutesCard | null {
 
 export interface MeetingHubRecord { recordType: 'meeting'; title: string; status: string; data: unknown }
 
-/** The meeting record a card is filed as (Inbox / Meeting Notes). Same title = same record, updated. */
+/** The meeting record a card is filed as (Inbox / Meeting Notes). How a same-titled meeting is filed: hub-records.ts. */
 export function meetingHubRecord(ui: Record<string, unknown>, today: Date = new Date()): MeetingHubRecord {
     const title = str(ui.meetingTitle, 300) || `Meeting notes — ${today.toISOString().slice(0, 10)}`;
     const open = Array.isArray(ui.tasks) ? ui.tasks.length : 0;

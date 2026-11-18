@@ -86,7 +86,7 @@ const NOT_NOW: Record<PostAction, string> = {
     captions: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     time_text: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     restore: 'Only a post that was removed or rejected can be brought back, and this one wasn’t.',
-    carousel: 'This post can’t become a carousel now: it has already gone out, is publishing, or was removed or rejected — or it isn’t on Instagram or Threads.',
+    carousel: 'This post can’t become a carousel now: it has already gone out, is publishing, or was removed or rejected — or it isn’t on Instagram, Threads or LinkedIn.',
 };
 
 const TEXT_MAX = 200;

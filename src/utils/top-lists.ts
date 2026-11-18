@@ -63,14 +63,16 @@ export function countArticleItems(markdown: string): number {
 export const CAROUSEL_FORMAT_BY_PLATFORM: Readonly<Record<string, string>> = {
     instagram: 'ig_carousel',
     threads: 'th_carousel',
+    // LinkedIn's carousel is a document: the same slides, sent as one PDF (docs/linkedin-document-carousel-plan.md).
+    linkedin: 'li_document',
 };
 
-/** The carousel format for a platform, or null where carousels are not live yet (LinkedIn: li_document is planned). */
+/** The carousel format for a platform, or null where carousels are not live (Facebook, X…). */
 export function carouselFormatFor(platform: string | null | undefined): string | null {
     return CAROUSEL_FORMAT_BY_PLATFORM[String(platform ?? '').toLowerCase()] ?? null;
 }
 
-/** The most slides either live carousel format takes (ig_carousel / th_carousel maxItems). */
+/** The most slides a live carousel format takes (ig_carousel / th_carousel / li_document maxItems). */
 export const CAROUSEL_MAX_SLIDES = 20;
 
 /** The longest text a slide shows. A brand card is a headline, not a paragraph. */
@@ -129,8 +131,18 @@ export function carouselSlideTexts(caption: string, fallbackTitle?: string | nul
     const firstLine = fixed.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? '';
     const coverSource = ITEM_LINE.test(firstLine) ? String(fallbackTitle ?? '').trim() : firstLine;
     const cover = clip(fixListCount(coverSource || `${items.length} things worth knowing`, items.length), SLIDE_TEXT_MAX);
-    // Instagram and Threads take at most 20 slides: the cover plus the first 19 items.
+    // Every carousel format takes at most 20 slides: the cover plus the first 19 items.
     return { cover, items: items.slice(0, CAROUSEL_MAX_SLIDES - 1).map((item, i) => slideTextForItem(i + 1, item)) };
+}
+
+/**
+ * The title LinkedIn shows above a document carousel: the cover slide's words (the same line the cover
+ * card shows), else the caption's first line, else "Carousel". At most 200 characters. Pure.
+ */
+export function linkedInDocumentTitle(caption: string | null | undefined): string {
+    const texts = carouselSlideTexts(String(caption ?? ''));
+    const first = String(caption ?? '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? '';
+    return (texts?.cover || first || 'Carousel').slice(0, 200);
 }
 
 // ── Phase 3: Email "Top 5", Video countdown, Mentor suggestion (plan §3, §6) ──────────────────────

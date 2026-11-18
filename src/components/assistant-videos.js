@@ -28,6 +28,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   const SOURCE = {
     stock_video: 'Stock footage', stock_photo: 'Stock photo', product_photo: 'Your picture',
     brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip', own_video: 'Your video',
+    ai_presenter: 'AI presenter',
   };
   const FOOTAGE_API = '/.netlify/functions/footage';
   /** What one footage review costs when a video is new to it: the live figure from Admin → Money → Task costs
@@ -51,7 +52,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   const TEXT_STYLE = [['dark', 'Dark box'], ['plain', 'Plain (light backing)'], ['brand', 'Brand-colour box']];
   const TEXT_ANIM = [['rise', 'Rise'], ['fade', 'Fade'], ['pop', 'Pop'], ['none', 'Cut']];
   const TEXT_Y = { top: 20, middle: 50, bottom: 70 };
-  const MOVING = ['stock_video', 'ai_video', 'own_video'];
+  const MOVING = ['stock_video', 'ai_video', 'own_video', 'ai_presenter'];
   // An AI clip on its own (src/lib/ai-clip.ts — the same keys and labels).
   const CLIP_STYLES = [['realistic', 'Realistic', 'People, places and everyday scenes — made-up people only'], ['cinematic', 'Cinematic', 'Landscapes, atmosphere, openers'], ['animated3d', '3D animated', 'Friendly explainers and mascots'], ['cartoon2d', '2D cartoon', 'Playful, illustrated brands'], ['product', 'Product close-up', 'Textures, food and materials — never your own product']];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
@@ -180,6 +181,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (data.brand) state.brand = data.brand;
       if (data.clipSound) state.clipSound = data.clipSound;
       if (data.captionLanguages) state.captionLanguages = data.captionLanguages;
+      // Whether this workspace may choose an AI presenter (video-projects GET, feature flag ai_presenter).
+      state.aiPresenter = data.aiPresenter === true;
       state.loadError = null;
       // A note about work in progress ("Making the video…") is stale once the video has finished,
       // one way or the other; errors stay until the next action.
@@ -289,6 +292,27 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <p class="text-[11px] text-gray-500 mt-1">The finished video is saved to My Content. Download it, or use it from My Content.</p></fieldset>`;
   }
 
+  // The AI presenter (docs/video-producer-screen-walkthrough-plan.md §11, A2) — only where the workspace has the
+  // ai_presenter flag. The picker is src/components/presenter-picker.js; the price is per second on screen.
+  function presenterFieldHtml() {
+    if (!state.aiPresenter || !window.PresenterPicker) return '';
+    return `<div class="sm:col-span-2 border border-gray-200 rounded-lg p-3 space-y-1.5">
+        <span class="block text-xs font-bold text-gray-600">AI presenter (optional)</span>
+        ${window.PresenterPicker.fieldHtml({ attrs: 'name="presenterId"', value: '' })}
+        <label class="flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="presenterThroughout" class="mt-0.5"> <span>Show them throughout <span class="text-gray-500">— by default they open, close and speak at one key moment</span></span></label>
+        <p class="text-[11px] text-gray-500">A made-up person speaks your script to camera, in their own voice for its language. Uses <span data-task-cost="ai_presenter">2 tasks a second</span> they're on screen, shown before anything is made. The video is labelled as made with AI.</p>
+      </div>`;
+  }
+  /** A presenter speaks in their own voice: the voice choices step aside while one is chosen. */
+  function paintPresenterChoice(form) {
+    const on = !!(form.elements.presenterId && form.elements.presenterId.value);
+    const block = form.querySelector('[data-vid-voice-block]');
+    if (!block) return;
+    block.classList.toggle('opacity-60', on);
+    ['noVoice', 'ownVoice'].forEach((n) => { const el = form.elements[n]; if (el) { if (on) el.checked = false; el.disabled = on; } });
+    form.querySelector('[data-vid-presenter-voice]')?.classList.toggle('hidden', !on);
+  }
+
   function formHtml() {
     if (!state.form) return '';
     const d = setupDefaults();
@@ -302,7 +326,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${['15', '30', '60'].map((n) => `<option value="${n}"${sel(d.lengthS === n)}>${n} seconds</option>`).join('')}</select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Call to action (optional)</span>
             <input name="cta" maxlength="200" value="${esc(d.cta)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Pop in this week"></label>
-          <div class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Voice</span>
+          ${presenterFieldHtml()}
+          <div class="block" data-vid-voice-block><span class="block text-xs font-bold text-gray-600 mb-1">Voice</span>
             <input type="hidden" name="voice" value="${esc(d.voice)}">
             <div class="flex items-center gap-2 border border-gray-300 rounded-lg px-2 py-2">
               <span data-vid-voice-name class="flex-1 min-w-0 text-sm text-gray-800 truncate">${esc(window.VoicePicker?.describe(d.voice) || d.voice)}</span>
@@ -311,7 +336,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             </div>
             <label class="mt-1 inline-flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" name="noVoice"> No voiceover — on-screen text only</label>
             <label class="mt-0.5 flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="ownVoice" class="mt-0.5"> <span>I’ll record it in my own voice <span class="text-gray-500">— you record each line once the script is approved, and no voiceover is charged</span></span></label>
-            <p class="text-[11px] text-gray-500 mt-0.5">The script is written in your voice's language.</p></div>
+            <p class="text-[11px] text-gray-500 mt-0.5">The script is written in your voice's language.</p>
+            <p data-vid-presenter-voice class="hidden text-[11px] font-semibold text-gray-700 mt-0.5">Your presenter speaks the script in their own voice, so the voice above isn't used.</p></div>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Pictures from</span>
             <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai"${sel(d.allowAi === 'stock_and_ai')}>Stock first, AI where it fits</option><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock and my own pictures only</option><option value="ai_first"${sel(d.allowAi === 'ai_first')}>Lean on AI</option></select></label>
         </div>
@@ -773,7 +799,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   function sceneHtml(v, s, i) {
     const editable = v.status === 'planned' || v.status === 'failed';
     const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
-    const isVideo = s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'own_video';
+    const isVideo = s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'own_video' || s.source === 'ai_presenter';
     const at = s.source === 'own_video' && s.inS != null ? `#t=${Number(s.inS)}` : '';
     const media = thumb
       ? (isVideo ? `<video src="${esc(thumb)}${at}"${s.source === 'own_video' && s.assetId ? ` poster="${esc(footagePosterUrl(s.assetId, s.inS))}"` : ''} muted playsinline loop preload="metadata" data-vid-hoverplay title="Moving footage — point at it, or tap, to play" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0 cursor-pointer"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
@@ -789,7 +815,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             ${textGroupHtml(v, s, thumb, isVideo)}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Picture from</span>
-                <select name="source" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${Object.entries(SOURCE).filter(([k]) => (k !== 'product_photo' || s.source === 'product_photo') && (k !== 'own_video' || s.source === 'own_video')).map(([k, l]) => `<option value="${k}" ${k === s.source ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+                <select name="source" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${Object.entries(SOURCE).filter(([k]) => (k !== 'product_photo' || s.source === 'product_photo') && (k !== 'own_video' || s.source === 'own_video') && (k !== 'ai_presenter' || s.source === 'ai_presenter' || !!(v.brief && v.brief.presenter))).map(([k, l]) => `<option value="${k}" ${k === s.source ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Search words / what to picture</span>
                 <input name="keywords" maxlength="120" value="${esc(s.keywords || s.prompt || '')}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
             </div>
@@ -942,6 +968,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   /** Who speaks, and the switch to the other (never both in one video). */
   function voiceLineHtml(v) {
     if (!(v.brief && v.brief.voiceover)) return '';
+    // An AI presenter speaks in their own voice: no switch to the owner's (review of #721).
+    if (v.brief.presenter) return `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Presenter:</span> ${esc(window.PresenterPicker?.describe(v.brief.presenter.id) || v.brief.presenter.id)}, made by AI, speaking in ${esc(window.VoicePicker?.describe(v.brief.voice) || 'their own voice')}.</p>`;
     const busy = state.busy.has(v.id) ? 'disabled' : '';
     return isOwn(v)
       ? `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> your own. <button type="button" data-vid-act="voice-mode" data-mode="ai" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Use an AI voice instead</button></p>`
@@ -1904,6 +1932,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (vid && host() && host().contains(vid)) { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }
   });
 
+  // Choosing an AI presenter on the New video form (presenter-picker.js dispatches a change on its hidden input).
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t && t.name === 'presenterId' && host() && host().contains(t) && t.form) paintPresenterChoice(t.form);
+  });
+
   document.addEventListener('change', (e) => {
     const t = e.target;
     // The clip form: "With sound" only for styles whose model can make it.
@@ -1980,6 +2014,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         ...(voice && fd.get('ownVoice') ? { ownVoice: true } : {}),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         shape: String(fd.get('shape') || '9:16'), ...briefExtras(fd),
+        // An AI presenter (A2): they speak in their own voice, so the voiceover is on whatever the voice row says.
+        ...(fd.get('presenterId') ? { presenter: { id: String(fd.get('presenterId')), ...(fd.get('presenterThroughout') ? { throughout: true } : {}) }, voiceover: true } : {}),
       };
       const msg = f.querySelector('[data-vid-form-msg]');
       f.querySelectorAll('button').forEach((x) => { x.disabled = true; });

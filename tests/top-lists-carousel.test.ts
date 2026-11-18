@@ -82,11 +82,12 @@ check('never more than 20 slides: the cover plus at most 19 items', () => {
     assert.strictEqual(1 + t.items.length, CAROUSEL_MAX_SLIDES);
 });
 
-check('carousels only where the format is live: Instagram and Threads', () => {
+check('carousels only where the format is live: Instagram, Threads and LinkedIn (document)', () => {
     assert.strictEqual(carouselFormatFor('instagram'), 'ig_carousel');
     assert.strictEqual(carouselFormatFor('Threads'), 'th_carousel');
-    for (const p of ['linkedin', 'facebook', 'x', 'youtube', '', null]) assert.strictEqual(carouselFormatFor(p), null, String(p));
-    for (const key of ['ig_carousel', 'th_carousel']) {
+    assert.strictEqual(carouselFormatFor('linkedin'), 'li_document');
+    for (const p of ['facebook', 'x', 'youtube', '', null]) assert.strictEqual(carouselFormatFor(p), null, String(p));
+    for (const key of ['ig_carousel', 'th_carousel', 'li_document']) {
         const spec = postFormatSpec(key)!;
         assert.strictEqual(spec.availability, 'live', key);
         assert.ok(spec.maxItems >= CAROUSEL_MAX_SLIDES, `${key} takes ${CAROUSEL_MAX_SLIDES}`);
@@ -119,7 +120,7 @@ check('set-post-slides and make-carousel share one slide writer (junction + lega
     assert.match(util, /contentAssetIds: \[\.\.\.assetIds\]/);
 });
 
-check('chat: a `carousel` post action, offered for Instagram / Threads lists, confirmed on a card', () => {
+check('chat: a `carousel` post action, offered for Instagram / Threads / LinkedIn lists, confirmed on a card', () => {
     assert.ok((POST_ACTIONS as readonly string[]).includes('carousel'));
     const req = postActionFromUiElement({ type: 'post_action_proposal', action: 'carousel', postId: '#202' });
     assert.deepStrictEqual(req && { action: req.action, postId: req.postId }, { action: 'carousel', postId: 202 });
@@ -128,7 +129,7 @@ check('chat: a `carousel` post action, offered for Instagram / Threads lists, co
     assert.match(pa, /req\.action === 'carousel' && rows\.length && !carouselSlideTexts\(/);
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.match(orch, /"time_text" \| "carousel"/);
-    assert.match(orch, /action "carousel" — only for a post on Instagram or Threads/);
+    assert.match(orch, /action "carousel" — only for a post on Instagram, Threads or LinkedIn/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /carousel: \{ head: 'Make it a carousel'/);
     assert.match(read('src/components/chat-session.js'), /postActionCall\('make-carousel', \{ postId: d\.postId \}\)/);
 });
