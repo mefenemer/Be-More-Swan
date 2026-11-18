@@ -6,7 +6,8 @@
 --
 -- APPEND to "Creating and Editing a Post", guarded by its new heading: a no-op when already applied, safe to
 -- re-run. Body dollar-quoted (apostrophes NOT doubled), title single-quoted. No semicolons in the body. No schema
--- change. Apply to BOTH databases.
+-- change. Apply to BOTH databases. The cost is the {{tasks.carousel}} token (db/help-articles-task-cost-tokens-2026-11-11.sql),
+-- filled from Admin → Money → Task costs when the article is read.
 
 BEGIN;
 
@@ -18,10 +19,10 @@ UPDATE help_articles
 When a post's caption has a numbered list (at least two items, like "1. …", "2. …"), press **Make it a carousel** in the post editor, or ask your Social Media Assistant in chat. It makes a cover slide and one branded slide per item, using the words already in your caption, so a slide never says something the post doesn't. The caption stays as it is.
 
 - **Instagram and Threads:** the post switches to the Carousel format, with up to 20 slides.
-- **LinkedIn:** the post switches to the **Document carousel** format. When it publishes, the slides go out as one PDF, which LinkedIn shows as a swipeable document with your cover line as its title. Slides must be PNG or JPEG pictures. Document carousels post to your personal LinkedIn feed.
+- **LinkedIn:** the post switches to the **Document carousel** format. When it publishes, the slides go out as one PDF, which LinkedIn shows as a swipeable document titled with your caption's opening line. Slides must be PNG or JPEG pictures. Document carousels post to your personal LinkedIn feed.
 - **Facebook and X** don't have a carousel format here, so those versions of the post are left alone.
 
-Making a carousel uses one task, however many slides or platforms it covers. You can reorder or remove slides in the editor before you approve, and what you see is what goes out.$$,
+Making a carousel uses {{tasks.carousel}}, however many slides or platforms it covers. You can reorder or remove slides in the editor before you approve, and the slides you see are the ones that go out.$$,
        updated_at = now()
  WHERE title = 'Creating and Editing a Post'
    AND content_md NOT LIKE '%## Make it a carousel%';
