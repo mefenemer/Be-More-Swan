@@ -21,9 +21,9 @@
  * Nothing here spends. Reading a library video downloads it once into this tab.
  */
 (function () {
-  const MAX_FRAMES = 40;
+  const MAX_FRAMES = 60;   // = MAX_FRAMES in src/lib/footage.ts
   const FRAME_EVERY_S = 2;
-  const MAX_S = 5 * 60;
+  const MAX_S = 10 * 60;   // = MAX_FOOTAGE_S in src/lib/footage.ts (10 minutes since Phase 4b)
   const MAX_BYTES = 500 * 1024 * 1024;
   const FRAME_PX = 512;
   const RATE = 16000;
@@ -159,7 +159,7 @@
       const v = await openVideo(src);
       const durationS = v.duration;
       if (!(durationS > 0.5)) throw new Error('That video is too short to use.');
-      if (durationS > MAX_S + 1) throw new Error('That video is longer than 5 minutes. Trim it first, or pick the part you want.');
+      if (durationS > MAX_S + 1) throw new Error('That video is longer than 10 minutes. Trim it first, or pick the part you want.');
       const frames = await grabFrames(v, onProgress);
       const width = v.videoWidth || null, height = v.videoHeight || null;
       v.removeAttribute('src'); v.load();

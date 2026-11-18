@@ -175,13 +175,14 @@ check('silentWav is a valid 8-bit mono WAV of silence', () => {
 
 // ── Phase 2–3: frames, shot lists, the review ───────────────────────────────────────────────────
 
-check('frameTimes: about every 2 s, at most 40, all inside the video — and the browser uses the same rule', () => {
+check('frameTimes: about every 2 s, at most 60 (a 10-minute video, Phase 4b), all inside the video — and the browser uses the same rule', () => {
     assert.strictEqual(frameTimes(10).length, 5);
-    assert.strictEqual(frameTimes(300).length, MAX_FRAMES);
-    assert.ok(frameTimes(300).every((t) => t > 0 && t < 300));
+    assert.strictEqual(MAX_FRAMES, 60);
+    assert.strictEqual(frameTimes(600).length, MAX_FRAMES);
+    assert.ok(frameTimes(600).every((t) => t > 0 && t < 600));
     assert.deepStrictEqual(frameTimes(0), []);
     const js = read('src/components/footage-reader.js');
-    assert.ok(js.includes('const MAX_FRAMES = 40;') && js.includes('const FRAME_EVERY_S = 2;'));
+    assert.ok(js.includes('const MAX_FRAMES = 60;') && js.includes('const FRAME_EVERY_S = 2;'));
 });
 
 const words = [{ word: 'Welcome', start: 1, end: 1.4 }, { word: 'to', start: 1.4, end: 1.5 }, { word: 'the', start: 1.5, end: 1.6 }, { word: 'cafe!', start: 1.6, end: 2 }];

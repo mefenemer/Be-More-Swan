@@ -131,7 +131,7 @@ export async function prepareFootage(db: Db, orgId: number, input: PrepareInput)
     if ((asset.fileSize ?? 0) > MAX_FOOTAGE_BYTES) return { ok: false, status: 413, error: 'That video is larger than 500 MB. Trim it first, or pick the part you want.' };
     const durationS = Number(input.durationS);
     if (!(durationS > 0.5)) return { ok: false, status: 422, error: 'That video couldn’t be read. Try uploading it again as an MP4.' };
-    if (durationS > MAX_FOOTAGE_S + 1) return { ok: false, status: 413, error: 'That video is longer than 5 minutes. Trim it first, or pick the part you want.' };
+    if (durationS > MAX_FOOTAGE_S + 1) return { ok: false, status: 413, error: 'That video is longer than 10 minutes. Trim it first, or pick the part you want.' };
     const frames = (Array.isArray(input.frames) ? input.frames : [])
         .filter((f) => f && Number.isFinite(Number(f.t)) && typeof f.data === 'string' && f.data.length > 100 && f.data.length <= MAX_FRAME_B64 && /^[A-Za-z0-9+/=]+$/.test(f.data))
         .slice(0, MAX_FRAMES)

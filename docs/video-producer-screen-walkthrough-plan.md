@@ -453,9 +453,26 @@ of memory growth, instead of holding all of it.
 AI voiceover. Recommendation: **don't charge tasks for rendering**, at any length.
 
 **Found for 4b:**
-- **iPhone HEVC 10-bit footage** (`IMG_1935.MOV`) rendered under 3 frames a second and failed with Remotion's
-  "No frame found" error. Long own-footage videos need uploads converted to H.264 first, or a check that refuses
-  them with a clear message.
+- ~~iPhone HEVC 10-bit footage needs converting~~ **Corrected (4b, same day):** a 150 s HEVC 10-bit 1080p take
+  played straight through rendered fine at the new sizing (2 min in 168 s, $0.050, the same as H.264). The
+  earlier failures came from the test looping one short clip and from 900 frames per renderer, not from HEVC.
 - **Looping one short clip** dozens of times (jumping back to its start in every chunk) also triggered
   "No frame found". `loopToLength` should keep its 4-piece cap, and long scenes should pick longer stock.
 - **File size:** a 10-minute video is about 640 MB in My Content. Storage limits and downloads need checking.
+
+### 4b as built (2026-11-18)
+
+- **Lengths:** `LONG_VIDEO_LENGTHS` 120/300/600, allowed only by `allowsLongLength` (own footage, own sound, no
+  presenter). `readBrief` makes any other long brief 60 s; setup defaults, autopilot and campaign orders stay short.
+- **Scenes:** `maxScenesFor` gives 20 for a long video. The planner is told to work in chapters (split a long take at
+  sentence boundaries, keep the best takes), with 8000 tokens and 4 minutes to write.
+- **Ceiling:** `capTotalLength` keeps every plan, and every tightened plan, at 600 s or less. It drops scenes just before
+  the call to action, then shortens the last own clip, and adds a note.
+- **Footage:** up to 10 minutes on the server and in the browser; 60 frames (one per 10 s at 10 minutes); the review
+  transcript up to 16,000 characters; "Edit the words" up to 2000 words a scene and 1500 struck.
+- **Pieces:** `MAX_PROJECT_CLIPS` 200 for Video Producer tightening (the post editor keeps 40).
+- **Music:** `musicTracks` loops a track shorter than the video, with a 2 s crossfade and duck windows moved onto each
+  pass. Made tracks stay at 190 s, so the Stability cost is unchanged.
+- **Form and chat:** the footage form offers 2, 5 and 10 minutes, closed unless "Keep the sound in my videos" is chosen.
+  The chat footage card and chat wording follow. Help SQL `db/help-articles-2026-12zzz…-video-long-own-footage.sql`;
+  FAQ; showcase.

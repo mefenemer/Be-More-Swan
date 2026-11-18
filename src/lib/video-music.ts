@@ -155,5 +155,42 @@ export function musicTrack(args: { assetId: number; title: string; durationS: nu
     };
 }
 
+/** The overlap between one pass of a looped track and the next, faded across. */
+export const MUSIC_LOOP_XFADE_S = 2;
+
+/**
+ * The music for a video, looped when the track is shorter than the video (Phase 4b: a 10-minute video, and
+ * made tracks are at most 190 s). One pass is one overlay, each the next starting MUSIC_LOOP_XFADE_S before
+ * the last ends, faded across; the duck windows are moved onto each pass's own clock (audioGainAt measures a
+ * track from its own start). A track as long as the video, or of unknown length, is one overlay as before. Pure.
+ */
+export function musicTracks(args: Parameters<typeof musicTrack>[0] & { trackS?: number | null }): AudioOverlay[] {
+    const one = musicTrack(args);
+    const L = Number(args.trackS);
+    const total = Math.max(1, args.durationS);
+    if (!Number.isFinite(L) || L < MUSIC_LOOP_XFADE_S * 4 || L >= total - 0.05) return [one];
+    const step = L - MUSIC_LOOP_XFADE_S;
+    const out: AudioOverlay[] = [];
+    for (let k = 0, start = 0; start < total - 0.05 && k < 100; k++, start = k * step) {
+        const end = Math.min(total, start + L);
+        const last = end >= total - 0.05;
+        const windows = args.windows
+            .map((w) => ({ startS: r2(w.startS - start), endS: r2(w.endS - start) }))
+            .filter((w) => w.endS > 0 && w.startS < end - start)
+            .map((w) => ({ startS: Math.max(0, w.startS), endS: Math.min(r2(end - start), w.endS) }));
+        const pass = musicTrack({ ...args, durationS: end - start, windows });
+        out.push({
+            ...pass,
+            id: k === 0 ? one.id : `${one.id}_${k + 1}`,
+            startS: r2(start),
+            endS: r2(end),
+            fadeInS: k === 0 ? one.fadeInS : MUSIC_LOOP_XFADE_S,
+            fadeOutS: last ? one.fadeOutS : MUSIC_LOOP_XFADE_S,
+        });
+        if (last) break;
+    }
+    return out;
+}
+
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;

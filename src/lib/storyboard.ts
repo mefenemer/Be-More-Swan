@@ -30,11 +30,11 @@ export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_imag
 export type SceneSource = typeof SCENE_SOURCES[number];
 export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
 
-/** The owner's struck-out words, kept to the segment, at most 400, rounded to 0.01 s. Pure. */
+/** The owner's struck-out words, kept to the segment, at most 2000 (every word "Edit the words" shows; 400 before Phase 4b), rounded to 0.01 s. Pure. */
 export function readCutWords(raw: unknown, inS: number, outS: number): Array<{ start: number; end: number }> {
     if (!Array.isArray(raw)) return [];
     const out: Array<{ start: number; end: number }> = [];
-    for (const w of raw.slice(0, 400)) {
+    for (const w of raw.slice(0, 2000)) {
         const start = Number((w as { start?: unknown })?.start), end = Number((w as { end?: unknown })?.end);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || start < inS - 0.05 || end > outS + 0.05) continue;
         out.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100 });
@@ -44,6 +44,17 @@ export function readCutWords(raw: unknown, inS: number, outS: number): Array<{ s
 export type Beat = typeof BEATS[number];
 
 export const VIDEO_LENGTHS = [15, 30, 60] as const;
+/**
+ * Long lengths (Phase 4b, docs/video-producer-screen-walkthrough-plan.md §12): 2, 5 and 10 minutes, ONLY for a
+ * video in its own footage's sound (allowsLongLength). Stock/AI videos, setup defaults, autopilot and campaign
+ * orders stay short. 600 s is also the render's ceiling (MAX_VIDEO_S).
+ */
+export const LONG_VIDEO_LENGTHS = [120, 300, 600] as const;
+export const MAX_VIDEO_S = 600;
+/** Scenes in a long video: a scene is about a chapter. */
+export const MAX_LONG_SCENES = 20;
+/** A scene that isn't the owner's footage (a card, stock, a picture) in a long own-sound video: at most this long. */
+export const MAX_LONG_FREE_SCENE_S = 15;
 
 /**
  * The shape of the finished video (owner decision D-S2, 2026-11-09): the Video Producer makes a video
@@ -64,7 +75,7 @@ export function shapeFrame(shape: VideoShape | null | undefined): { width: numbe
 export function shapeOrientation(shape: VideoShape | null | undefined): 'portrait' | 'landscape' | 'square' {
     return shape === '1:1' ? 'square' : shape === '16:9' ? 'landscape' : 'portrait';
 }
-export type VideoLength = typeof VIDEO_LENGTHS[number];
+export type VideoLength = typeof VIDEO_LENGTHS[number] | typeof LONG_VIDEO_LENGTHS[number];
 export type AiAllowance = 'stock_only' | 'stock_and_ai' | 'ai_first';
 
 export const MIN_SCENES = 3;
@@ -257,7 +268,30 @@ const clip = (s: unknown, n: number) => String(typeof s === 'string' ? s : '').r
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export function isVideoLength(v: unknown): v is VideoLength {
-    return (VIDEO_LENGTHS as readonly number[]).includes(Number(v));
+    return (VIDEO_LENGTHS as readonly number[]).includes(Number(v)) || (LONG_VIDEO_LENGTHS as readonly number[]).includes(Number(v));
+}
+
+/** Is this one of the long lengths (2, 5 or 10 minutes)? Pure. */
+export function isLongLength(v: unknown): boolean {
+    return (LONG_VIDEO_LENGTHS as readonly number[]).includes(Number(v));
+}
+
+/**
+ * May this brief be long? Only a video in its own footage's sound with no AI presenter (4b): it needs no AI
+ * voice, whose making and timing stop well short of 10 minutes (4c). Pure.
+ */
+export function allowsLongLength(brief: Pick<VideoBrief, 'voiceover' | 'footageAssetIds' | 'presenter'>): boolean {
+    return keepsOwnSound(brief) && !brief.presenter;
+}
+
+/** The most scenes this brief may have: 20 for a long video, 8 otherwise. Pure. */
+export function maxScenesFor(brief: Pick<VideoBrief, 'lengthS'>): number {
+    return isLongLength(brief.lengthS) ? MAX_LONG_SCENES : MAX_SCENES;
+}
+
+/** A length in words: "30 seconds", "2 minutes", "10 minutes". Pure. */
+export function lengthLabel(lengthS: number): string {
+    return lengthS >= 120 && lengthS % 60 === 0 ? `${lengthS / 60} minutes` : `${lengthS} seconds`;
 }
 
 /** Is this a still (picture) scene? Stills get a hold time and a movement; clips get trimmed. */
@@ -290,7 +324,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     const ownSound = keepsOwnSound(brief);
     const motions: StillMotion[] = ['push_in', 'pan_right', 'pull_out', 'pan_left'];
 
-    let scenes: Scene[] = (Array.isArray(r.scenes) ? r.scenes : []).slice(0, MAX_SCENES).map((s, i) => {
+    let scenes: Scene[] = (Array.isArray(r.scenes) ? r.scenes : []).slice(0, maxScenesFor(brief)).map((s, i) => {
         const o = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
         let source: SceneSource = (SCENE_SOURCES as readonly string[]).includes(String(o.source)) ? o.source as SceneSource : 'stock_video';
         const assetId = Number(o.assetId);
@@ -422,6 +456,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
 
     // A video in its own sound: a scene with no voiceover line is fine — the footage speaks.
     scenes = fitLength(scenes, brief.lengthS, changes, ownSound ? (s) => s.source === 'own_video' : undefined);
+    scenes = capTotalLength(scenes, changes);
 
     const music = r.music && typeof r.music === 'object' ? r.music as Record<string, unknown> : null;
     return {
@@ -486,9 +521,16 @@ export function fixCountdown(scenes: Scene[], changes: string[] = []): Scene[] {
 export function fitLength(scenes: Scene[], lengthS: number, changes: string[] = [], fixed?: (s: Scene) => boolean): Scene[] {
     if (!scenes.length) return scenes;
     const isFixed = (s: Scene) => !!fixed && fixed(s);
-    const total = scenes.reduce((a, s) => a + s.targetS, 0);
-    const lo = lengthS * 0.9, hi = lengthS * 1.1;
     let out = scenes.map((s) => ({ ...s }));
+    // A long video from own footage (Phase 4b): the length is a CEILING, not a target. The footage decides how long
+    // it is; the cards and stock between never stretch to fill the rest (review of #749: a 20 s take in a 10-minute
+    // brief left a 580 s branded card), and each stays a short scene.
+    const ceilingOnly = isLongLength(lengthS) && !!fixed;
+    if (ceilingOnly) {
+        for (const s of out) if (!isFixed(s) && s.targetS > MAX_LONG_FREE_SCENE_S) s.targetS = MAX_LONG_FREE_SCENE_S;
+    }
+    const total = out.reduce((a, s) => a + s.targetS, 0);
+    const lo = ceilingOnly ? 0 : lengthS * 0.9, hi = ceilingOnly ? lengthS : lengthS * 1.1;
     if (total < lo || total > hi) {
         const fixedTotal = out.filter(isFixed).reduce((a, s) => a + s.targetS, 0);
         const free = total - fixedTotal;
@@ -511,6 +553,46 @@ export function fitLength(scenes: Scene[], lengthS: number, changes: string[] = 
         }
     }
     return out.map((s) => ({ ...s, targetS: round1(s.targetS) }));
+}
+
+/**
+ * Keep the whole video inside the render's ceiling (MAX_VIDEO_S): scenes past it would be cut off mid-sentence
+ * by the render. Drops whole scenes from just before the last (the call to action stays), then, if one scene
+ * alone is still too long, shortens the last own-footage scene from its end. Pure.
+ */
+export function capTotalLength(scenes: Scene[], changes: string[] = [], maxS: number = MAX_VIDEO_S): Scene[] {
+    const total = (xs: Scene[]) => xs.reduce((a, s) => a + s.targetS, 0);
+    if (total(scenes) <= maxS + 0.05) return scenes;
+    let out = scenes.map((s) => ({ ...s }));
+    let dropped = 0;
+    while (out.length > 2 && total(out) > maxS + 0.05) { out.splice(out.length - 2, 1); dropped++; }
+    if (total(out) > maxS + 0.05) {
+        const over = total(out) - maxS;
+        const k = [...out.keys()].reverse().find((i) => out[i].source === 'own_video' && out[i].inS != null && out[i].outS != null && out[i].targetS - over >= MIN_SCENE_S);
+        if (k != null) {
+            const sc = out[k];
+            const keep = sc.targetS - over;
+            if (sc.cuts?.length) {
+                // Keep the pieces that fit, the last one shortened.
+                const cuts: Array<{ inS: number; outS: number }> = [];
+                let left = keep;
+                for (const p of sc.cuts) {
+                    if (left <= 0.05) break;
+                    const len = p.outS - p.inS;
+                    cuts.push(len <= left ? p : { inS: p.inS, outS: round1(p.inS + left) });
+                    left -= Math.min(len, left);
+                }
+                sc.cuts = cuts;
+            }
+            sc.outS = sc.cuts?.length ? sc.cuts[sc.cuts.length - 1].outS : round1(sc.inS! + keep);
+            sc.targetS = round1(keep);
+        }
+    }
+    const mins = Math.round(maxS / 60);
+    changes.push(dropped
+        ? `A video can be at most ${mins} minutes, so ${dropped} scene${dropped === 1 ? '' : 's'} before the end ${dropped === 1 ? 'was' : 'were'} left out.`
+        : `A video can be at most ${mins} minutes, so the end of a clip was cut.`);
+    return out;
 }
 
 /** The whole voiceover, scene by scene, as one script (one voiceover track per video). Pure. */
@@ -624,6 +706,7 @@ export function storyboardSystemPrompt(): string {
 
 Rules:
 - One idea per video. Open with a hook that lands in under 3 seconds. End with the call to action.
+- A LONG video (2, 5 or 10 minutes; only from the business's own footage) follows the chapter rules in the VIDEO line instead of the short-video pace.
 - Write the voiceover to be SPOKEN: short sentences, about ${WORDS_PER_SECOND} words per second of scene. No URLs, no hashtags, no emoji.
 - On-screen text is optional and short (under 8 words). The voiceover is captioned automatically, so do not repeat it on screen.
 - Where on-screen text goes (optional; leave all four out and it sits clear of the captions for the whole scene): "textPos" top | middle | bottom — never where the captions are (the brief says where); "textWhen" scene | first | last | words (the whole scene, its first or last 3 seconds, or only while that scene's line is spoken — good for a key phrase or the call to action); "textStyle" dark | plain | brand (a brand-colour box suits the call to action); "textAnim" rise | fade | pop | none. Use them sparingly: most scenes need none.
@@ -671,7 +754,9 @@ export function storyboardUserPrompt(args: {
         `BUSINESS: ${args.businessName}`,
         args.businessFacts ? `BUSINESS INFORMATION:\n${args.businessFacts}` : '',
         brief.footageAssetIds?.length
-            ? `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
+            ? isLongLength(brief.lengthS)
+                ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most, never more), 2–${MAX_LONG_SCENES} scenes. A long video is told in CHAPTERS: each scene is one topic or step, and becomes a chapter. Split a long take into several own_video scenes at the start of a new topic — consecutive scenes may continue in the same video (the next scene's inS where the last one's outS was), always at a sentence boundary, never mid-sentence. Keep the best takes; leave out repeats, false starts and off-topic stretches. The opening scene still gets to the point fast; a closing branded card is its own scene.`
+                : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
             : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',

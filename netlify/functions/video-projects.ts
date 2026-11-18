@@ -158,7 +158,8 @@ export default withLambda(async (event) => {
             const [video] = await loadFootage(db, orgId, [scene.assetId]);
             const struck = scene.cutWords ?? [];
             const words = (video?.words ?? []).filter((w) => w.start >= scene.inS! - 0.02 && w.end <= scene.outS! + 0.02 && w.end > w.start)
-                .slice(0, 600)
+                // A scene of a long video can be 10 minutes of speech, about 1500 words (Phase 4b); 600 cut it short.
+                .slice(0, 2000)
                 .map((w) => ({ word: w.word, start: w.start, end: w.end, cut: struck.some((c) => Math.abs(c.start - w.start) < 0.03 && Math.abs(c.end - w.end) < 0.03) }));
             return json(200, { words, inS: scene.inS, outS: scene.outS });
         }
