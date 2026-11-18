@@ -301,6 +301,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         ${window.PresenterPicker.fieldHtml({ attrs: 'name="presenterId"', value: '' })}
         <label class="flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="presenterThroughout" class="mt-0.5"> <span>Show them throughout <span class="text-gray-500">— by default they open, close and speak at one key moment</span></span></label>
         <p class="text-[11px] text-gray-500">A made-up person speaks your script to camera, in their own voice for its language. Uses <span data-task-cost="ai_presenter">2 tasks a second</span> they're on screen, shown before anything is made. The video is labelled as made with AI.</p>
+        <div data-vid-screens class="hidden space-y-1.5 border-t border-gray-100 pt-2">
+          <span class="block text-[11px] font-bold text-gray-600">Screen recordings (optional)</span>
+          <p class="text-[11px] text-gray-500">Your presenter walks viewers through them from a round bubble in the corner, so they're in every scene.</p>
+          <div data-vid-screens-list class="space-y-1 text-xs text-gray-500">Loading your videos…</div>
+          <label class="flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="screenConsent" class="mt-0.5"> <span>I have permission to use the people and music in these videos</span></label>
+        </div>
       </div>`;
   }
   /** A presenter speaks in their own voice: the voice choices step aside while one is chosen. */
@@ -311,6 +317,21 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     block.classList.toggle('opacity-60', on);
     ['noVoice', 'ownVoice'].forEach((n) => { const el = form.elements[n]; if (el) { if (on) el.checked = false; el.disabled = on; } });
     form.querySelector('[data-vid-presenter-voice]')?.classList.toggle('hidden', !on);
+    // Screen recordings beside the presenter (A3): the workspace's own uploads, listed once a presenter is chosen.
+    const screens = form.querySelector('[data-vid-screens]');
+    if (!screens) return;
+    screens.classList.toggle('hidden', !on);
+    const list = screens.querySelector('[data-vid-screens-list]');
+    if (on && list && !list.dataset.loaded) {
+      list.dataset.loaded = '1';
+      fetch(`${FOOTAGE_API}?list=1`, { credentials: 'same-origin' }).then((r) => r.json()).then((j) => {
+        // Only measured recordings: a screen needs its length to be laid out (review of #725).
+        const vids = ((j && j.videos) || []).filter((x) => Number(x.durationS) > 0);
+        list.innerHTML = vids.length
+          ? vids.map((x) => `<label class="flex items-center gap-1.5"><input type="checkbox" name="screenIds" value="${esc(x.id)}"> <span class="truncate">${esc(x.name || `Video ${x.id}`)}</span>${x.durationS ? ` <span class="text-gray-400">${esc(mmss(x.durationS))}</span>` : ''}</label>`).join('')
+          : 'No videos of your own yet. Upload a screen recording to My Content, or use “Use my own footage”.';
+      }).catch(() => { list.textContent = 'Your videos couldn’t be loaded.'; delete list.dataset.loaded; });
+    }
   }
 
   function formHtml() {
@@ -631,10 +652,21 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     cover: 'The screen fills the frame. You’re heard but not seen.',
     window: 'You fill the frame, with the screen in a small window in a corner.',
   };
+  // The same choices on an AI presenter's scene (A3), about the presenter, not the owner.
+  const COVER_HINT_PRESENTER = {
+    presenter: 'The presenter, full frame.',
+    bubble: 'The screen fills the frame and the presenter appears in a round bubble in a corner, still talking.',
+    window: 'The presenter fills the frame, with the screen in a small window in a corner.',
+  };
+  const hintFor = (source, layout) => (source === 'ai_presenter' ? COVER_HINT_PRESENTER : COVER_HINT)[layout] || '';
   const CORNER = [['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']];
   const coverLayoutOf = (s) => (s.cover && s.cover.layout) || 'presenter';
   const coverCornerOf = (c) => (c && c.corner) || (c && c.layout === 'window' ? 'bl' : 'br');
-  const ownVideosOf = (v) => ((v.brief && v.brief.footageAssetIds) || []).map((id) => ({ id, name: ownName(v, id) || `Video ${id}` }));
+  // The brief's own videos a screen can be: its footage, and (with a presenter) its screen recordings (A3).
+  const ownVideosOf = (v) => [
+    ...((v.brief && v.brief.footageAssetIds) || []).map((id) => ({ id, name: ownName(v, id) || `Video ${id}` })),
+    ...(v.screens || []).map((x) => ({ id: x.id, name: `“${x.name}”` })),
+  ];
   function coverScreenValue(c) {
     if (!c) return '';
     return c.source === 'own_video' ? `own:${c.assetId}` : c.source === 'product_photo' ? `pic:${c.assetId}` : c.source;
@@ -664,7 +696,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return `<div data-vid-cover-preview class="relative w-40 max-w-full shrink-0 rounded-md overflow-hidden border border-gray-200 self-start" style="aspect-ratio:${ratio}" role="img" aria-label="Sketch of the layout: ${esc(labelOf(COVER_LAYOUT, o.layout))}">${inner}</div>`;
   }
   function coverGroupHtml(v, s) {
-    if (s.source !== 'own_video') return '';
+    if (s.source !== 'own_video' && s.source !== 'ai_presenter') return '';
+    // A presenter is never hidden behind a screen (paid by the second, never shown): no "Screen only" for them (A3).
+    const layouts = s.source === 'ai_presenter' ? COVER_LAYOUT.filter(([k]) => k !== 'cover') : COVER_LAYOUT;
     const c = s.cover || null;
     const layout = coverLayoutOf(s);
     const own = ownVideosOf(v);
@@ -679,8 +713,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <legend class="px-1 text-[11px] font-bold text-gray-600">Layout</legend>
         <div class="flex flex-col sm:flex-row gap-3">
           <div class="flex-1 min-w-0 space-y-2">
-            <label class="block"><span class="block text-[11px] font-bold text-gray-600">What people see while you talk</span>${sel('coverLayout', COVER_LAYOUT, layout)}</label>
-            <p data-vid-cover-hint class="text-[11px] text-gray-500">${esc(COVER_HINT[layout])}</p>
+            <label class="block"><span class="block text-[11px] font-bold text-gray-600">${s.source === 'ai_presenter' ? 'What people see while the presenter talks' : 'What people see while you talk'}</span>${sel('coverLayout', layouts, layout)}</label>
+            <p data-vid-cover-hint class="text-[11px] text-gray-500">${esc(hintFor(s.source, layout))}</p>
             <div data-vid-cover-more class="space-y-2${off}">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">On the screen</span>${sel('coverScreen', screens, screen)}</label>
               <div class="grid grid-cols-2 gap-2">
@@ -708,7 +742,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const v = state.videos.find((x) => x.id === Number(f.dataset.id));
     const layout = f.elements.coverLayout.value;
     const screen = f.elements.coverScreen.value;
-    f.querySelector('[data-vid-cover-hint]').textContent = COVER_HINT[layout] || '';
+    f.querySelector('[data-vid-cover-hint]').textContent = hintFor(f.elements.source ? f.elements.source.value : '', layout);
     f.querySelector('[data-vid-cover-more]').classList.toggle('hidden', layout === 'presenter');
     f.querySelector('[data-vid-cover-own]').classList.toggle('hidden', !screen.startsWith('own:'));
     f.querySelector('[data-vid-cover-stock]').classList.toggle('hidden', !(screen === 'stock_video' || screen === 'stock_photo'));
@@ -2016,6 +2050,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         shape: String(fd.get('shape') || '9:16'), ...briefExtras(fd),
         // An AI presenter (A2): they speak in their own voice, so the voiceover is on whatever the voice row says.
         ...(fd.get('presenterId') ? { presenter: { id: String(fd.get('presenterId')), ...(fd.get('presenterThroughout') ? { throughout: true } : {}) }, voiceover: true } : {}),
+        // Screen recordings beside the presenter (A3), with the same permission tick as footage.
+        ...(fd.get('presenterId') && fd.getAll('screenIds').length ? { screenAssetIds: fd.getAll('screenIds').map(Number), footageConsent: !!fd.get('screenConsent') } : {}),
       };
       const msg = f.querySelector('[data-vid-form-msg]');
       f.querySelectorAll('button').forEach((x) => { x.disabled = true; });
@@ -2054,7 +2090,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         nameCaption: String(fd.get('ncName') || '').trim() ? { name: String(fd.get('ncName')), role: String(fd.get('ncRole') || '') } : null,
         // A branded card draws its words into the picture: only the words apply there.
         ...textPatch(f, fd),
-        ...(source === 'own_video' ? coverPatch(fd) : {}),
+        ...(source === 'own_video' || source === 'ai_presenter' ? coverPatch(fd) : {}),
       };
       const id = Number(f.dataset.id);
       state.editing = null;

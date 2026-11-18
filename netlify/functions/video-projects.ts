@@ -60,7 +60,7 @@ import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
-import { AI_PRESENTER_FLAG, briefForWorkspace } from '../../src/lib/presenters';
+import { AI_PRESENTER_FLAG, briefForWorkspace, screenRefusal } from '../../src/lib/presenters';
 import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -76,7 +76,7 @@ import { isOwnVoice, keepRecordings, linesToRecord, MAX_LINE_S, MAX_WHOLE_S, pre
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
-import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
+import { asOwnVideos, canAffordReview, footageStatus, loadFootage, ownVideos } from '../../src/utils/footage-review';
 import { getTaskCosts } from '../../src/utils/task-costs';
 import { findPhrase, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -257,6 +257,12 @@ export default withLambda(async (event) => {
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
+        // Screen recordings beside a presenter (A3): the workspace's own uploads, with the same permission tick as footage.
+        const screenIds = parsed.brief.screenAssetIds ?? [];
+        if (screenIds.length) {
+            const refused = screenRefusal(screenIds, (body.brief as Record<string, unknown> | undefined)?.footageConsent === true, await ownVideos(db, orgId, screenIds));
+            if (refused) return json(refused.status, { error: refused.error });
+        }
         const footage = parsed.brief.footageAssetIds ?? [];
         if (footage.length) {
             // The owner says the people and music in their videos may be used (plan §6) — every review.
@@ -616,7 +622,9 @@ export default withLambda(async (event) => {
             if (!hit.length) return json(400, { error: 'Those words aren’t said in that scene. Use “Edit the words” on the Videos tab to pick them.' });
             scene.cutWords = readCutWords([...(scene.cutWords ?? []), ...hit.map((w) => ({ start: w.start, end: w.end }))], scene.inS, scene.outS);
         }
-        const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
+        // Screen recordings beside a presenter (A3) are covers' videos too, never footage.
+        const screens = asOwnVideos(await loadFootage(db, orgId, brief.screenAssetIds ?? []));
+        const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), [...asOwnVideos(footage), ...screens]);
         // A changed cut, or "Keep as filmed", is tightened again from the review's words.
         const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };
         // A scene keeps the owner's recording of its line while the words stay the same.

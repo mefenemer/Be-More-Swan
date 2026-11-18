@@ -245,7 +245,7 @@ check('the composition draws covers behind, windows in front, the bubble, and a 
 
 check('the Change form and edit_scene carry the layout; a new screen is found again', () => {
     const ui = read('src/components/assistant-videos.js');
-    assert.ok(ui.indexOf('${coverGroupHtml(v, s)}') > ui.indexOf('name="outS" type="number"') && ui.includes('${coverGroupHtml(v, s)}') && ui.includes("...(source === 'own_video' ? coverPatch(fd) : {}),"));
+    assert.ok(ui.indexOf('${coverGroupHtml(v, s)}') > ui.indexOf('name="outS" type="number"') && ui.includes('${coverGroupHtml(v, s)}') && ui.includes("...(source === 'own_video' || source === 'ai_presenter' ? coverPatch(fd) : {}),"), 'own footage and (A3) AI presenter scenes');
     assert.ok(ui.includes("['bubble', 'Screen + bubble'], ['cover', 'Screen only'], ['window', 'Presenter + window']"));
     const fn = read('netlify/functions/video-projects.ts');
     assert.ok(fn.includes("if ('cover' in patch) {") && fn.includes('delete assets[`${scene.id}~cover`]'));
