@@ -42,7 +42,7 @@ const conn = (over: Partial<AdsConnection> = {}): AdsConnection => ({
     adAccounts: [{ urn: 'urn:li:sponsoredAccount:1', name: 'Acme', currency: 'GBP' }],
     selectedAccountUrn: 'urn:li:sponsoredAccount:1',
     selectedCurrency: 'GBP',
-    scopes: 'rw_ads r_ads_reporting',
+    scopes: 'rw_ads r_ads_reporting w_organization_social',
     status: 'active',
     ...over,
 });

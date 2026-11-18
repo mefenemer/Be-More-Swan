@@ -21,6 +21,7 @@ import { landmark } from './landmark';
 import { LINKEDIN_ADS_SCOPES, adsCsrfKey } from '../netlify/functions/linkedin-ads-oauth-init';
 import { ADS_SERVICE_NAME } from '../netlify/functions/linkedin-ads-oauth-callback';
 import { linkedInAdsClient } from '../src/config/linkedin-capabilities';
+import { ADS_REQUIRED_SCOPES, assessAdsReadiness } from '../src/utils/linkedin-ads-connection';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -47,9 +48,26 @@ check('social-oauth-init still requests ONLY the approved member scopes', () => 
     }
 });
 
-check('the ads flow requests exactly the two spend scopes, space-delimited', () => {
+check('the ads flow requests exactly the spend scopes + company posting, space-delimited', () => {
     // Space-delimited per RFC 6749 §3.3 — a comma-joined list is rejected outright.
-    assert.equal(LINKEDIN_ADS_SCOPES, 'rw_ads r_ads_reporting');
+    // w_organization_social: the ad image is owned by, and the ad posted as, the company.
+    assert.equal(LINKEDIN_ADS_SCOPES, 'rw_ads r_ads_reporting w_organization_social');
+});
+
+check('readiness requires exactly the scopes the flow requests', () => {
+    assert.deepEqual(ADS_REQUIRED_SCOPES, LINKEDIN_ADS_SCOPES.split(' '));
+});
+
+check('an ads connection made before w_organization_social asks to reconnect', () => {
+    const base = {
+        connectionId: 1, status: 'active',
+        adAccounts: [{ urn: 'urn:li:sponsoredAccount:1', name: 'Acme', currency: 'GBP' }],
+        selectedAccountUrn: 'urn:li:sponsoredAccount:1', selectedCurrency: 'GBP',
+    } as const;
+    const old = assessAdsReadiness({ ...base, scopes: 'rw_ads r_ads_reporting' } as never);
+    assert.equal(old.ready, false);
+    assert.match((old as { reason: string }).reason, /Reconnect/);
+    assert.equal(assessAdsReadiness({ ...base, scopes: LINKEDIN_ADS_SCOPES } as never).ready, true);
 });
 
 check('the two flows are separate functions, not a shared one with a branch', () => {

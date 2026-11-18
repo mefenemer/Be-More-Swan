@@ -14,7 +14,7 @@
 //     Development tier, which only reaches Pages the signing-in member administers.
 //
 //   · "Be More Swan Adverts" (LINKEDIN_ADS_CLIENT_ID, client 77ji7h15dgy32l) — Advertising API
-//     only, scopes `rw_ads r_ads_reporting`. Created + Development Tier requested 2026-11-18 (Platform;
+//     only, scopes `rw_ads r_ads_reporting w_organization_social`. Created + Development Tier requested 2026-11-18 (Platform;
 //     Campaign Management + Reporting and ROI). Used ONLY by linkedin-ads-oauth-{init,callback};
 //     its connection is a separate row (service_name 'linkedin_ads'). Never falls back to the main
 //     app's keys: that app holds no ads product, so LinkedIn would refuse the whole authorization.
