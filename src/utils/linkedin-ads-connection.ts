@@ -129,3 +129,32 @@ export function assessAdsReadiness(connection: AdsConnection | null): AdsReadine
     }
     return { ready: true, connection };
 }
+
+/** Must match LINKEDIN_ADS_SCOPES in netlify/functions/linkedin-ads-oauth-init.ts (a test pins it). */
+export const ADS_REQUIRED_SCOPES = ['rw_ads', 'r_ads_reporting', 'w_organization_social'];
+
+/**
+ * A reason to reconnect before CREATING anything, or null.
+ *
+ * A connection made before w_organization_social was requested (2026-11-18) cannot upload an ad
+ * image or publish the ad as the company. Asked for here so the user reads "reconnect", not
+ * LinkedIn's opaque 400.
+ *
+ * ⚠️ DELIBERATELY NOT PART OF assessAdsReadiness. The paid optimiser treats "not ready" as "halt
+ * without the adapter", which marks a campaign paused here while it keeps spending on LinkedIn.
+ * `rw_ads` alone can still pause, so an old connection must stay usable for stopping spend. Only
+ * the create paths (media upload, stage_paid) and the UI call this.
+ */
+export function adsScopeProblem(connection: AdsConnection | null): string | null {
+    if (!connection || connection.scopes === null) return null;
+    const held = new Set(connection.scopes.split(/[\s,]+/).filter(Boolean));
+    return ADS_REQUIRED_SCOPES.some((s) => !held.has(s))
+        ? 'Reconnect LinkedIn advertising so your adverts can be published as your company.'
+        : null;
+}
+
+/** True when the fix is the OAuth flow again (the UI shows the connect link for these). */
+export function adsNeedsReconnect(connection: AdsConnection | null): boolean {
+    if (!connection) return false;
+    return connection.status !== 'active' || connection.adAccounts === null || adsScopeProblem(connection) !== null;
+}

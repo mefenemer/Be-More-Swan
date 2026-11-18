@@ -22,7 +22,7 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
-import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
+import { adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import {
     ALLOWED_IMAGE_TYPES, MAX_IMAGE_PIXELS, fetchAccountOrganization, uploadImage,
 } from '../../src/utils/ad-networks/linkedin';
@@ -67,8 +67,12 @@ export default withLambda(async (event) => {
     const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
     if (!imageUrl) return json(400, { error: 'Which image should this advert use?' });
 
-    const readiness = assessAdsReadiness(await getAdsConnection(db, orgId));
+    const adsConnection = await getAdsConnection(db, orgId);
+    const readiness = assessAdsReadiness(adsConnection);
     if (!readiness.ready) return json(400, { error: readiness.reason });
+    // The image is owned by the company, which needs w_organization_social (adsScopeProblem).
+    const scopeProblem = adsScopeProblem(adsConnection);
+    if (scopeProblem) return json(400, { error: scopeProblem, code: 'ads_reconnect' });
     const token = await getAdsToken(db, orgId);
     if (!token) return json(400, { error: 'The LinkedIn advertising connection needs reconnecting.' });
 

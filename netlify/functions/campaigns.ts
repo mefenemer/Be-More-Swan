@@ -86,7 +86,7 @@ import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { anyNetworkAvailable, linkedInAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
-import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
+import { adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
 import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
 import {
@@ -404,15 +404,19 @@ export default withLambda(async (event) => {
         //   networks       — platform:   we have no reachable ad network (each names its own reason)
         //   adsReason      — workspace:  connect an account, or pick one
         const featureEnabled = await hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE);
-        const adsReadiness = featureEnabled
-            ? assessAdsReadiness(await getAdsConnection(db, orgId))
-            : null;
+        const adsConnection = featureEnabled ? await getAdsConnection(db, orgId) : null;
+        const adsReadiness = featureEnabled ? assessAdsReadiness(adsConnection) : null;
+        // Creating needs w_organization_social; an older connection must reconnect first. Shown as
+        // not-ready on the surface only — the optimiser keeps using assessAdsReadiness alone.
+        const adsScope = adsReadiness?.ready ? adsScopeProblem(adsConnection) : null;
         const paid = {
             featureEnabled,
             networks: networkAvailability(),
             anyNetwork: anyNetworkAvailable(),
-            adsReady: adsReadiness?.ready ?? false,
-            adsReason: adsReadiness && !adsReadiness.ready ? adsReadiness.reason : null,
+            adsReady: (adsReadiness?.ready ?? false) && !adsScope,
+            adsReason: adsReadiness && !adsReadiness.ready ? adsReadiness.reason : adsScope,
+            // The fix is the OAuth flow again, so the surface offers the connect link.
+            needsReconnect: adsNeedsReconnect(adsConnection),
             selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
         };
 
@@ -1321,8 +1325,11 @@ export default withLambda(async (event) => {
         }
 
         // Gate 2 — a connected ad account the user has actually chosen.
-        const readiness = assessAdsReadiness(await getAdsConnection(db, orgId));
+        const stageConnection = await getAdsConnection(db, orgId);
+        const readiness = assessAdsReadiness(stageConnection);
         if (!readiness.ready) return json(400, { error: readiness.reason });
+        const stageScopeProblem = adsScopeProblem(stageConnection);
+        if (stageScopeProblem) return json(400, { error: stageScopeProblem, code: 'ads_reconnect' });
         const conn = readiness.connection;
 
         // ⚠️ GBP ONLY, for now, and refused rather than converted. `campaign_budgets.max_spend_gbp`

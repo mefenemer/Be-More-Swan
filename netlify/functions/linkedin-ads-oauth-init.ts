@@ -37,8 +37,15 @@ const CSRF_TTL_MS = 10 * 60 * 1000;
  * ⚠️ SPEND SCOPES. `rw_ads` can create and activate campaigns that cost real money;
  * `r_ads_reporting` reads their performance. Never add either to any other connector's scope
  * string — see the header.
+ *
+ * `w_organization_social`: a Sponsored Content ad is a post AUTHORED BY THE COMPANY, and its image
+ * is uploaded with the company as `owner`. With rw_ads alone LinkedIn refuses the upload — "Organization
+ * permissions must be used when using organization as owner" (first live run, staging 2026-11-18).
+ * The "Be More Swan Adverts" app holds it (Auth tab, 2026-11-18); requesting a scope the app does not
+ * hold would fail the WHOLE authorization, so check that tab before adding anything else here.
  */
-export const LINKEDIN_ADS_SCOPES = 'rw_ads r_ads_reporting';
+export const LINKEDIN_ADS_SCOPES = 'rw_ads r_ads_reporting w_organization_social';
+
 
 /** The vault key holding this user's in-flight CSRF value. Namespaced away from the social flow. */
 export const adsCsrfKey = (userId: number) => `oauth_csrf:${userId}:linkedin_ads`;
