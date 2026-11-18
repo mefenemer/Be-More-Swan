@@ -25,6 +25,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { LINKEDIN_ADS_SCOPES, adsCsrfKey } from './linkedin-ads-oauth-init';
 import { LINKEDIN_API_VERSION } from '../../src/utils/ad-networks/linkedin';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { linkedInAdsClient } from '../../src/config/linkedin-capabilities';
 
 /** ⚠️ The ads connection's own service name. NEVER 'linkedin' — that is the posting connection. */
 export const ADS_SERVICE_NAME = 'linkedin_ads';
@@ -104,8 +105,8 @@ export default withLambda(async (event) => {
     // One-time use: burn it before the exchange, so a replayed callback cannot mint a second token.
     await deleteSecret(db, adsCsrfKey(userId));
 
-    const clientId = process.env.LINKEDIN_CLIENT_ID;
-    const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+    // Must be the same app init sent the user to, or the exchange is refused.
+    const { clientId, clientSecret } = linkedInAdsClient();
     if (!clientId || !clientSecret) return redirect('/integrations.html?ads_error=not_configured');
 
     // The redirect_uri here must be byte-identical to the one sent at init, or LinkedIn rejects
