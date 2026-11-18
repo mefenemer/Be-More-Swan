@@ -515,6 +515,11 @@ export function sceneTimingsFromWords(
     const starts: number[] = [];
     let idx = 0;
     for (let i = 0; i < counts.length; i++) {
+        // A scene is whole sentences, so its first word follows a pause. The count estimate drifts when the
+        // transcription spells words differently ("fifteen minute" heard as "15-minute": an AI presenter's last
+        // clip started on "online", missing "Book", staging 2026-11-18). So the cut moves to the word after the
+        // longest pause within SNAP_WORDS of the estimate — never back past the previous scene's first word.
+        if (i > 0 && idx > 0 && idx < words.length) idx = snapToPause(words, idx, starts.length ? wordIndexAt(words, starts[starts.length - 1]) + 1 : 1);
         starts.push(idx < words.length ? words[Math.min(idx, words.length - 1)].start : words[words.length - 1].end);
         idx += Math.round(counts[i] * k);
     }
@@ -525,6 +530,30 @@ export function sceneTimingsFromWords(
         const spoken = Math.max(0, to - from);
         return round1(Math.max(spoken, counts[i] ? MIN_SCENE_S : s.targetS));
     });
+}
+
+/** How far (in words) a scene cut may move to land in a pause. */
+export const SNAP_WORDS = 3;
+
+/** The index of the word starting at `t` (or the last one before it). Pure. */
+function wordIndexAt(words: Array<{ start: number }>, t: number): number {
+    let i = 0;
+    while (i + 1 < words.length && words[i + 1].start <= t + 1e-6) i++;
+    return i;
+}
+
+/**
+ * The word index nearest `idx` (within SNAP_WORDS, never below `min`) that follows the longest pause — where a
+ * new sentence, and so a new scene, starts. Ties keep the estimate. A pause under 0.12 s isn't one: the estimate
+ * stands. Pure.
+ */
+export function snapToPause(words: Array<{ start: number; end: number }>, idx: number, min: number): number {
+    const gap = (j: number) => (j > 0 && j < words.length ? words[j].start - words[j - 1].end : -1);
+    let best = idx, bestGap = gap(idx);
+    for (let j = Math.max(min, idx - SNAP_WORDS); j <= Math.min(words.length - 1, idx + SNAP_WORDS); j++) {
+        if (gap(j) > bestGap + 1e-6) { best = j; bestGap = gap(j); }
+    }
+    return bestGap >= 0.12 ? best : idx;
 }
 
 /** Credits a storyboard will cost before anything is made (shown on the button). Pure. */
