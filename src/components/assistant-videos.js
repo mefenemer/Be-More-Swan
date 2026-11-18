@@ -314,6 +314,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   const LONG_LENGTHS = ['120', '300', '600'];
   const FOOTAGE_LENGTHS = ['15', '30', '60', ...LONG_LENGTHS];
   const lengthLabel = (n) => (Number(n) >= 120 ? `${Number(n) / 60} minutes` : `${n} seconds`);
+  /** "30s" in the list, "10 min" for a long video. */
+  const lengthShort = (n) => (Number(n) >= 120 ? `${Number(n) / 60} min` : `${n}s`);
   /** The long lengths are open only while "Keep the sound in my videos" is chosen. */
   function paintLongLengths(form) {
     const select = form.querySelector('[data-vid-footage-length]');
@@ -1328,7 +1330,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
             ${v.brief && v.brief.clip ? `<p class="text-xs text-gray-600 mt-0.5">AI clip · ${esc(v.brief.clip.lengthS)}s · ${esc(clipStatus(v))}</p>` : ''}
-            <p class="text-xs text-gray-600 mt-0.5${v.brief && v.brief.clip ? ' hidden' : ''}">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5${v.brief && v.brief.clip ? ' hidden' : ''}">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc(lengthShort((v.brief && v.brief.lengthS) || ''))} · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${v.screenNote && ['ready', 'rendering', 'render_failed'].includes(v.status) ? `<p class="text-xs text-amber-800 bg-amber-50 border-amber-200 border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.screenNote)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}

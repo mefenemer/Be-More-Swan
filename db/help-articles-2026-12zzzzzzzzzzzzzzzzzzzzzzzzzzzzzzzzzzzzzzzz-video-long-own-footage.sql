@@ -1,9 +1,10 @@
--- db/help-articles-2026-11-18-long-own-footage-videos.sql — Help Centre: long videos from your own footage (Phase 4b)
+-- db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-video-long-own-footage.sql — Help Centre: long videos from your own footage (Phase 4b)
 --
 -- docs/video-producer-screen-walkthrough-plan.md §12. A video in its own footage's sound can now be 2, 5 or 10 minutes,
 -- in up to 20 scenes (chapters), from recordings of up to 10 minutes. Three lines said otherwise; this changes them and
 -- appends a section. Each edit is guarded (a no-op once applied) and safe to re-run. No schema change.
--- Apply to BOTH databases AFTER the release that carries Phase 4b reaches them.
+-- Apply to BOTH databases AFTER the release that carries Phase 4b reaches them. Named to sort AFTER the 2026-12z… video
+-- articles whose lines it replaces (review of #749), so a fresh database applied in order gets the edits.
 -- Bodies dollar-quoted (apostrophes NOT doubled), titles single-quoted. No semicolons inside the bodies.
 
 BEGIN;

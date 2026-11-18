@@ -6,7 +6,7 @@
 // Run:  npx tsx tests/video-long-footage.test.ts
 
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -77,6 +77,44 @@ check('never past 10 minutes: scenes before the last are dropped first, then the
     // Inside the limit: untouched.
     const fine = [s(300), s(200)];
     assert.strictEqual(capTotalLength(fine, []), fine);
+});
+
+check('a long length is a ceiling: less footage than the length never stretches a card or stock scene (review of #749)', () => {
+    const card = { beat: 'cta', voiceover: '', source: 'brand_card', targetS: 5 };
+    const footage = [{ id: 7, name: 'take', durationS: 600 }];
+    for (const [lengthS, scenes] of [
+        [600, [own({ inS: 0, outS: 120, targetS: 120 }), own({ inS: 120, outS: 240, targetS: 120 }), card]],
+        [600, [own({ inS: 0, outS: 20, targetS: 20 }), card]],
+        [120, [own({ inS: 0, outS: 20, targetS: 20 }), card]],
+    ] as const) {
+        const sb = enforceStoryboard({ title: 'T', caption: 'C', scenes }, brief({ lengthS: lengthS as never }), [], footage).storyboard;
+        const last = sb.scenes[sb.scenes.length - 1];
+        assert.strictEqual(last.source, 'brand_card');
+        assert.ok(last.targetS <= 15, `${lengthS} s brief: the card came back at ${last.targetS} s`);
+    }
+    // A card the planner made too long is brought down to 15 s.
+    const sb = enforceStoryboard({ title: 'T', caption: 'C', scenes: [own({ inS: 0, outS: 300, targetS: 300 }), { ...card, targetS: 90 }] }, brief(), [], footage).storyboard;
+    assert.strictEqual(sb.scenes[1].targetS, 15);
+    // Short videos keep filling their length as before.
+    const short = enforceStoryboard({ title: 'T', caption: 'C', scenes: [own({ inS: 0, outS: 20, targetS: 20 }), card] }, brief({ lengthS: 30 }), [], footage).storyboard;
+    assert.ok(short.scenes[1].targetS > 5);
+});
+
+check('long videos read "10 min", not "600s"; every word Edit the words shows can be struck', () => {
+    assert.match(read('src/components/assistant-videos.js'), /const lengthShort = \(n\) => \(Number\(n\) >= 120 \? `\$\{Number\(n\) \/ 60\} min` : `\$\{n\}s`\);/);
+    assert.match(read('src/utils/video-producer.ts'), /brief\.lengthS >= 120 \? `\$\{brief\.lengthS \/ 60\} min`/);
+    assert.match(read('src/lib/storyboard.ts'), /for \(const w of raw\.slice\(0, 2000\)\)/);
+    assert.match(read('netlify/functions/video-projects.ts'), /\.slice\(0, 2000\)/);
+});
+
+check('the help SQL sorts after the video articles whose lines it replaces (review of #749)', () => {
+    const files = readdirSync(join(root, 'db')).filter((f) => f.startsWith('help-articles-')).sort();
+    const mine = files.findIndex((f) => f.endsWith('-video-long-own-footage.sql'));
+    assert.ok(mine >= 0);
+    for (const dep of ['-video-producer.sql', '-video-screen-recordings.sql']) {
+        const i = files.findIndex((f) => f.endsWith(dep));
+        assert.ok(i >= 0 && i < mine, `${dep} must come first`);
+    }
 });
 
 check('the planner is told a long video is in chapters, and is given room to write 20 scenes', () => {

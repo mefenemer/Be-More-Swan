@@ -474,5 +474,5 @@ AI voiceover. Recommendation: **don't charge tasks for rendering**, at any lengt
 - **Music:** `musicTracks` loops a track shorter than the video, with a 2 s crossfade and duck windows moved onto each
   pass. Made tracks stay at 190 s, so the Stability cost is unchanged.
 - **Form and chat:** the footage form offers 2, 5 and 10 minutes, closed unless "Keep the sound in my videos" is chosen.
-  The chat footage card and chat wording follow. Help SQL `db/help-articles-2026-11-18-long-own-footage-videos.sql`;
+  The chat footage card and chat wording follow. Help SQL `db/help-articles-2026-12zzz…-video-long-own-footage.sql`;
   FAQ; showcase.

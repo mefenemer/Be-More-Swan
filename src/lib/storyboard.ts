@@ -30,11 +30,11 @@ export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_imag
 export type SceneSource = typeof SCENE_SOURCES[number];
 export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
 
-/** The owner's struck-out words, kept to the segment, at most 1500 (a long scene; 400 before Phase 4b), rounded to 0.01 s. Pure. */
+/** The owner's struck-out words, kept to the segment, at most 2000 (every word "Edit the words" shows; 400 before Phase 4b), rounded to 0.01 s. Pure. */
 export function readCutWords(raw: unknown, inS: number, outS: number): Array<{ start: number; end: number }> {
     if (!Array.isArray(raw)) return [];
     const out: Array<{ start: number; end: number }> = [];
-    for (const w of raw.slice(0, 1500)) {
+    for (const w of raw.slice(0, 2000)) {
         const start = Number((w as { start?: unknown })?.start), end = Number((w as { end?: unknown })?.end);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || start < inS - 0.05 || end > outS + 0.05) continue;
         out.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100 });
@@ -53,6 +53,8 @@ export const LONG_VIDEO_LENGTHS = [120, 300, 600] as const;
 export const MAX_VIDEO_S = 600;
 /** Scenes in a long video: a scene is about a chapter. */
 export const MAX_LONG_SCENES = 20;
+/** A scene that isn't the owner's footage (a card, stock, a picture) in a long own-sound video: at most this long. */
+export const MAX_LONG_FREE_SCENE_S = 15;
 
 /**
  * The shape of the finished video (owner decision D-S2, 2026-11-09): the Video Producer makes a video
@@ -519,9 +521,16 @@ export function fixCountdown(scenes: Scene[], changes: string[] = []): Scene[] {
 export function fitLength(scenes: Scene[], lengthS: number, changes: string[] = [], fixed?: (s: Scene) => boolean): Scene[] {
     if (!scenes.length) return scenes;
     const isFixed = (s: Scene) => !!fixed && fixed(s);
-    const total = scenes.reduce((a, s) => a + s.targetS, 0);
-    const lo = lengthS * 0.9, hi = lengthS * 1.1;
     let out = scenes.map((s) => ({ ...s }));
+    // A long video from own footage (Phase 4b): the length is a CEILING, not a target. The footage decides how long
+    // it is; the cards and stock between never stretch to fill the rest (review of #749: a 20 s take in a 10-minute
+    // brief left a 580 s branded card), and each stays a short scene.
+    const ceilingOnly = isLongLength(lengthS) && !!fixed;
+    if (ceilingOnly) {
+        for (const s of out) if (!isFixed(s) && s.targetS > MAX_LONG_FREE_SCENE_S) s.targetS = MAX_LONG_FREE_SCENE_S;
+    }
+    const total = out.reduce((a, s) => a + s.targetS, 0);
+    const lo = ceilingOnly ? 0 : lengthS * 0.9, hi = ceilingOnly ? lengthS : lengthS * 1.1;
     if (total < lo || total > hi) {
         const fixedTotal = out.filter(isFixed).reduce((a, s) => a + s.targetS, 0);
         const free = total - fixedTotal;

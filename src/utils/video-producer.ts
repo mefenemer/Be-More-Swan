@@ -1669,7 +1669,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const ytLine = yt
             ? `\n    on YouTube (checked ${yt.at.slice(0, 10)}): ${ytViews} views${yt.averageViewS != null ? `, watched ${Math.round(yt.averageViewS)} s on average` : ''}${ytDrop ? `; most viewers leave at ${mmss(ytDrop.atS)} (${ytDrop.lostPct}% of those still watching)` : ''}`
             : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}${chapterLines}${captionLine}${ytLine}`;
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS >= 120 ? `${brief.lengthS / 60} min` : `${brief.lengthS}s`}${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}${chapterLines}${captionLine}${ytLine}`;
     }), '', footage].join('\n');
 }
 
