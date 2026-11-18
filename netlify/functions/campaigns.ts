@@ -85,6 +85,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { anyNetworkAvailable, linkedInAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
+import { linkedInErrorDetail } from '../../src/utils/ad-networks/linkedin';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
@@ -1462,8 +1463,19 @@ export default withLambda(async (event) => {
                 })),
             });
         } catch (err) {
-            console.error('[campaigns] stage_paid failed at the network', { campaignId: campaign.id }, err);
-            return json(502, { error: 'LinkedIn would not accept the campaign. Nothing has been created and nothing has been spent.' });
+            // ⚠️ LinkedIn's own reason is passed back. The first live run (staging 2026-11-18) failed
+            // here and the reason was nowhere: the error object did not survive into Netlify's log
+            // stream, and the response said only "would not accept". LinkedIn error bodies carry
+            // the field at fault and never a credential (the token is a request header), so the
+            // reason is safe to show and is the only way anyone can act on it.
+            const detail = linkedInErrorDetail(err);
+            console.error(`[campaigns] stage_paid failed at the network (campaign ${campaign.id}): ${detail ?? String(err)}`);
+            return json(502, {
+                // A campaign group may already exist (it is created first, and found again on retry),
+                // so this does not claim that nothing was created — only that nothing can spend.
+                error: 'LinkedIn would not accept the campaign. No advert was created and nothing has been spent.',
+                detail,
+            });
         }
 
         // ⚠️ ORDER MATTERS. campaigns.mode must be 'paid' BEFORE a non-zero budget is written:
