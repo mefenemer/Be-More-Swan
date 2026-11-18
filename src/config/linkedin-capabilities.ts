@@ -39,11 +39,16 @@ export function linkedinPageAccessEnabled(): boolean {
  * Scopes for the Community app. Space-delimited (RFC 6749 §3.3). LinkedIn refuses the WHOLE
  * authorization if any one is not granted to the app, so once Community Management is approved,
  * compare this against the app's Auth tab. LINKEDIN_PAGE_SCOPES overrides it without a deploy.
- *   rw_organization_admin — list the Pages the member administers (organizationAcls), read names
- *   w_organization_social — post, comment and react as the Page
- *   r_organization_social — read the Page's own posts and their engagement (Results tab)
+ *   rw_organization_admin      — list the Pages the member administers (organizationAcls), read names,
+ *                                post statistics + follower total (ingest-linkedin-insights.ts)
+ *   w_organization_social      — post as the Page
+ *   r_organization_social      — read the Page's own posts
+ *   r_organization_social_feed — read the comments on the Page's posts (Comments tab)
+ *   w_organization_social_feed — post an approved reply to a comment, as the Page (Comments tab)
+ * The two _feed scopes are on the Community app's Auth tab (checked 2026-11-18). A Page connected
+ * before they were added must be reconnected before comments can be read or answered.
  */
-export const LINKEDIN_PAGE_DEFAULT_SCOPES = 'rw_organization_admin w_organization_social r_organization_social';
+export const LINKEDIN_PAGE_DEFAULT_SCOPES = 'rw_organization_admin w_organization_social r_organization_social r_organization_social_feed w_organization_social_feed';
 
 export function linkedinPageScopes(): string {
     const override = String(process.env.LINKEDIN_PAGE_SCOPES ?? '').trim().replace(/[\s,]+/g, ' ');

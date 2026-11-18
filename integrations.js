@@ -112,7 +112,7 @@ const PLATFORMS = [
         // linkedinPageAccessEnabled()). The old single note said Community Management access had "not been
         // granted yet" — untrue since 2026-11 (Development Tier), and wrong wherever page posting is on.
         note: 'Posts are published to your personal LinkedIn feed.',
-        notePages: 'Posts go to your personal LinkedIn feed, or to a Company Page you’re an admin of — you choose which when you connect.',
+        notePages: 'Posts go to your personal LinkedIn feed, or to a Company Page you’re an admin of — you choose which when you connect. A Company Page also brings each post’s results and its comments back here, so you can reply as the Page.',
     },
     {
         id: 'X',

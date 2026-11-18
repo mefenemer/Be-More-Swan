@@ -202,13 +202,15 @@ export const GENERATED_CHAT_MANIFEST = {
         },
         "social_media_manager": {
             "flags": [
-                "usesInspo"
+                "usesInspo",
+                "usesPageComments"
             ],
             "contentSnapshot": "posts",
             "offersOwnCards": true,
             "maxTokens": 2048,
             "cards": [
                 "ai_video_label_setting",
+                "comment_action_proposal",
                 "post_action_proposal",
                 "redraft_upcoming_proposal",
                 "share_for_review_proposal",
@@ -296,6 +298,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesKnowledgeBase",
         "usesInspo",
         "usesLeadSnapshot",
+        "usesPageComments",
         "usesCampaignSnapshot",
         "usesBriefsSnapshot",
         "usesVideosSnapshot",
@@ -388,6 +391,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "campaign_task_update",
         "chat_questions",
         "class_sessions",
+        "comment_action_proposal",
         "data_diff_view",
         "design_edit",
         "design_started",
