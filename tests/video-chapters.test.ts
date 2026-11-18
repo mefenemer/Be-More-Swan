@@ -115,4 +115,17 @@ check('wired through: Videos tab, API, YouTube publish, chat card', () => {
     assert.ok(read('src/components/chat-session.js').includes("'add_note', 'rename_chapter', 'remove_translation',"));
 });
 
+check('a long video: every scene is a chapter, even when they share a beat (staging project 48)', () => {
+    const sc = (id: string, beat: string, onScreenText: string) => ({ id, beat, voiceover: '', onScreenText }) as never;
+    const scenes = [sc('s1', 'hook', ''), sc('s2', 'value', '1. The free first call'), sc('s3', 'value', '2. The plan'), sc('s4', 'value', '3. Filming day'), sc('s5', 'cta', 'Book a call')];
+    const times = scenes.map((_, i) => ({ sceneId: `s${i + 1}`, startS: i * 20, endS: i * 20 + 20 }));
+    assert.strictEqual(videoChapters(scenes, times).length, 3, 'short videos still group a beat');
+    const long = videoChapters(scenes, times, null, true);
+    assert.deepStrictEqual(long.map((c) => c.title).slice(1, 4), ['1. The free first call', '2. The plan', '3. Filming day']);
+    const tl = { durationS: 100, sceneTimes: times };
+    const row = (lengthS: number) => ({ timeline: tl, brief: { lengthS, shape: '16:9' }, storyboard: { scenes } });
+    assert.strictEqual(chaptersFor(row(300)).chapters.length, 5, 'chaptersFor: a 5-minute video, a chapter a scene');
+    assert.ok(read('netlify/functions/video-projects.ts').includes('tl.chapterTitles, isLongLength((row.brief as VideoBrief | null)?.lengthS));'), 'renaming uses the same chapters');
+});
+
 console.log(`\nvideo chapters: ${passed} passed`);

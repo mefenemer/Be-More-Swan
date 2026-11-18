@@ -55,7 +55,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
-import { enforceStoryboard, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { enforceStoryboard, isLongLength, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
@@ -391,7 +391,7 @@ export default withLambda(async (event) => {
             if (blocked) return blocked;
         }
         const tl = row.timeline as ProjectTimeline;
-        const chapters = videoChapters((row.storyboard as Storyboard).scenes ?? [], sceneTimes(tl), tl.chapterTitles);
+        const chapters = videoChapters((row.storyboard as Storyboard).scenes ?? [], sceneTimes(tl), tl.chapterTitles, isLongLength((row.brief as VideoBrief | null)?.lengthS));
         const done = renameChapter(chapters, tl.chapterTitles, { n: Number(body.chapter), sceneId: typeof body.sceneId === 'string' ? body.sceneId : undefined }, title);
         if ('error' in done) return json(400, { error: done.error });
         await db.update(videoProjects).set({ timeline: { ...tl, chapterTitles: done.titles }, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
