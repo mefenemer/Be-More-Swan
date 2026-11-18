@@ -73,17 +73,20 @@ check('every generator passes the stored voice; social re-asks once on a never-s
     assert.match(read('assistant-detail.html'), /<input type="hidden" id="edit_voice_json" value="">/);
 });
 
-check('Terms 2.3: a version bump that users can actually accept', () => {
-    // 2.3 (2026-11-02, effective 2026-12-03) superseded 2.2: AI video counts by its length (clause
-    // 5.2). 2.2 made one task allowance; the 2.1 Swan Index clause is unchanged and asserted below.
-    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.3';/);
+check('Terms 2.4: a version bump that users can actually accept', () => {
+    // 2.4 (2026-11-18, effective 2026-12-19): an AI presenter is 2 tasks a second (clause 5.2). 2.3 made AI
+    // video count by its length; 2.2 made one task allowance; the 2.1 Swan Index clause is asserted below.
+    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.4';/);
     assert.match(read('netlify/functions/accept-tos.ts'), /const version = CURRENT_TOS_VERSION;/);
     assert.doesNotMatch(read('workspace.html'), /version: '2\.0'/);
-    assert.match(read('terms_of_service.html'), /Version 2\.3 &middot;/);
+    assert.match(read('terms_of_service.html'), /Version 2\.4 &middot;/);
     assert.match(read('terms_of_service.html'), /Within 5 working days of receiving your request/);
     // A version bump must reach people who accepted an older version — at login, not only in setup.
     assert.match(read('workspace.html'), /if \(d && d\.version && !d\.upToDate\) checkTosAcceptance\(true\);/);
-    assert.match(read('workspace.html'), /What changed in Terms v2\.3/);
+    assert.match(read('workspace.html'), /What changed in Terms v2\.4/);
+    // The presenter's figures are plain text: the live cost is 0 until 19 December, so a data-task-cost span would read "no tasks".
+    assert.match(read('terms_of_service.html'), /an AI presenter \(a made-up person who speaks your video's script to camera\) as 2 tasks for each second the presenter is on screen/);
+    assert.doesNotMatch(read('terms_of_service.html'), /data-task-cost="ai_presenter"/);
     assert.match(read('netlify/functions/check-tos.ts'), /\.orderBy\(desc\(tosAcceptances\.acceptedAt\)\)/);
 });
 

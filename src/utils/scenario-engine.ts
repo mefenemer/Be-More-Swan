@@ -171,6 +171,45 @@ export function buildWebhookPayload(
     };
 }
 
+/** The meeting webhook's recipe (Note Taker → "Send to another app"). */
+export const MEETING_WEBHOOK_RECIPE = 'universal_webhook_meeting';
+
+/**
+ * The meeting webhook's body: one fixed, meeting-shaped event, so there is nothing to map (2026-11-18 webhook test:
+ * the CRM-style mapping sent only the summary text, the title as "company", and the event "lead.status_changed" —
+ * no action items, decisions, risks or attendees, so a Zap couldn't make a task per action item). Pure.
+ */
+export function buildMeetingWebhookPayload(subject: TriggerSubject, approvedAt: Date): Record<string, unknown> {
+    const f = subject.fields ?? {};
+    const str = (v: unknown, max = 5000): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+    const list = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === 'string' && v.trim() ? [v] : [])
+        .map((x) => str(x, 1000)).filter((x): x is string => !!x);
+    const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v : [])
+        .filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+    return {
+        event: 'meeting.approved',
+        meeting: {
+            id: subject.recordId ?? null,
+            title: str(f.meetingTitle, 300),
+            summary: str(f.meetingSummary),
+            decisions: list(f.decisionsMade),
+            risks: list(f.identifiedRisks),
+            actionItems: rows(f.tasks).map((t) => ({
+                description: str(t.description, 1000),
+                owner: str(t.assignee, 200),
+                due: str(t.dueDate, 100),
+            })).filter((t) => t.description),
+            attendees: rows(f.attendees).map((a) => ({
+                name: str(a.name, 200),
+                email: typeof a.email === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.email.trim()) ? a.email.trim() : null,
+            })).filter((a) => a.name || a.email),
+            meetingTime: str(f.meetingTime, 100),
+            meetingLink: str(f.meetingLink, 1000),
+            approvedAt: approvedAt.toISOString(),
+        },
+    };
+}
+
 // Action handlers whose payload is a meeting summary (summary + action items) rather than a
 // record-update diff. Meeting handoff recipes can target these instead of a CRM.
 const SUMMARY_ACTIONS = new Set(['slack_post_summary', 'notion_create_page']);

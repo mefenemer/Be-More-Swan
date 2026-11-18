@@ -18,7 +18,10 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 // 2.2 (2026-10-17): clauses 5 and 6.5 — one monthly task allowance replaces AI media and X credits
 // (docs/task-metering.md). Bumping this asks every signed-in user to accept again (workspace
 // check-tos modal) — update the modal's "What changed" copy in workspace.html with every bump.
-export const CURRENT_TOS_VERSION = '2.3';
+// 2.3 (2026-11-02): clause 5.2 — an AI video counts by its length from 3 December 2026.
+// 2.4 (2026-11-18): clause 5.2 — an AI presenter is 2 tasks a second from 19 December 2026 (task cost
+// change 3, announced 2026-11-18; docs/ai-presenter-pricing-notice.md).
+export const CURRENT_TOS_VERSION = '2.4';
 
 const jwtSecret = process.env.JWT_SECRET;
 

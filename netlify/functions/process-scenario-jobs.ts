@@ -20,6 +20,8 @@ import {
     getMatchingOutboundScenarios,
     buildActionPayload,
     buildWebhookPayload,
+    buildMeetingWebhookPayload,
+    MEETING_WEBHOOK_RECIPE,
     type TriggerSubject,
 } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
@@ -100,7 +102,10 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
                 const sent = await sendWebhookOnce(webhookLedger(db, job, scenario.scenarioKey), () => fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(buildWebhookPayload(subject, mappings)),
+                    // The meeting webhook sends one fixed meeting event; the lead webhook keeps its field map.
+                    body: JSON.stringify(scenario.scenarioKey === MEETING_WEBHOOK_RECIPE
+                        ? buildMeetingWebhookPayload(subject, new Date())
+                        : buildWebhookPayload(subject, mappings)),
                 }));
                 if (sent.outcome === 'already_sent') {
                     console.log(`[process-scenario-jobs] ${scenario.scenarioKey} already POSTed for ${subject.recordType} ${subject.recordId}; not sent again`);

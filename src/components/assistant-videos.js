@@ -300,7 +300,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <span class="block text-xs font-bold text-gray-600">AI presenter (optional)</span>
         ${window.PresenterPicker.fieldHtml({ attrs: 'name="presenterId"', value: '' })}
         <label class="flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="presenterThroughout" class="mt-0.5"> <span>Show them throughout <span class="text-gray-500">— by default they open, close and speak at one key moment</span></span></label>
-        <p class="text-[11px] text-gray-500">A made-up person speaks your script to camera, in their own voice for its language. Uses <span data-task-cost="ai_presenter">2 tasks a second</span> they're on screen, shown before anything is made. The video is labelled as made with AI.</p>
+        <p class="text-[11px] text-gray-500">A made-up person speaks your script to camera, in their own voice for its language. Price: <span data-task-cost="ai_presenter" data-task-cost-next>2 tasks a second</span> while they're on screen, shown before anything is made. The video is labelled as made with AI.</p>
         <div data-vid-screens class="hidden space-y-1.5 border-t border-gray-100 pt-2">
           <span class="block text-[11px] font-bold text-gray-600">Screen recordings (optional)</span>
           <p class="text-[11px] text-gray-500">Your presenter walks viewers through them from a round bubble in the corner, so they're in every scene.</p>
@@ -1443,6 +1443,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           : `<div class="text-center py-10 text-sm text-gray-500">${empty}</div>`}
         </div>
       </div>`;
+    // Live task figures on the form (the presenter's price, and any announced change to it): this tab draws after
+    // /task-costs.js has run its first pass, so it fills its own spans, again once the figures arrive.
+    if (window.TaskCosts) { window.TaskCosts.apply(el); window.TaskCosts.ready.then(() => { if (el.isConnected) window.TaskCosts.apply(el); }); }
   }
 
   // ── Full screen (as on the Briefs and Website tabs) ─────────────────────────────────────────────

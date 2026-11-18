@@ -31,6 +31,7 @@ import {
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
 import { listAsanaProjects, listJiraProjects } from '../../src/utils/pm-tickets';
 import { listSlackChannels } from '../../src/utils/slack-channels';
+import { MEETING_WEBHOOK_RECIPE } from '../../src/utils/scenario-engine';
 import { MAILBOX_RECIPE_PROVIDER, NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
 
 function json(statusCode: number, body: unknown) {
@@ -108,6 +109,9 @@ export default withLambda(async (event) => {
                     // Code-defined settings (pickers) and wording for the recipes the code reads them from.
                     description: RECIPE_DESCRIPTIONS[scenario.scenarioKey] ?? scenario.description,
                     settings: RECIPE_SETTINGS[scenario.scenarioKey] ?? null,
+                    // The meeting webhook sends a fixed meeting event (scenario-engine buildMeetingWebhookPayload):
+                    // nothing to map, so its form asks only for the web address.
+                    ...(scenario.scenarioKey === MEETING_WEBHOOK_RECIPE ? { fieldSchema: [] } : {}),
                     taskTool: TASK_TOOL_RECIPES.includes(scenario.scenarioKey),
                     providerName: provider?.displayName ?? scenario.providerKey,
                     providerCategory: provider?.category ?? null,

@@ -26,6 +26,23 @@
     return kind === 'ai_presenter' ? plural(n) + ' a second' : plural(n);
   }
 
+  // The same wording for a figure that isn't in force yet (an announced change).
+  function unitsLabel(kind, n) {
+    if (n === 0) return 'no tasks';
+    return kind === 'ai_presenter' || kind === 'ai_video_per_second' ? plural(n) + ' a second' : plural(n);
+  }
+  function longDate(iso) {
+    try { return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }); }
+    catch (e) { return iso; }
+  }
+  // <span data-task-cost="ai_presenter" data-task-cost-next>…</span>: today's figure, then any announced change,
+  // e.g. "no tasks until 19 December 2026, then 2 tasks a second".
+  function withNext(kind, text) {
+    var up = figures && figures.upcoming && figures.upcoming[kind];
+    if (!up || typeof up.units !== 'number' || !up.from) return text;
+    return text + ' until ' + longDate(up.from) + ', then ' + unitsLabel(kind, up.units);
+  }
+
   function apply(root) {
     if (!figures) return;
     // Hand-written JSON-LD says {{tasks.<key>}} (it can hold no span). The deploy build fills it
@@ -40,6 +57,7 @@
       var text = secs > 0 && typeof figures.videoTasksPerSecond === 'number'
         ? plural(Math.ceil(secs) * figures.videoTasksPerSecond)
         : label(el.getAttribute('data-task-cost'), el.textContent);
+      if (el.hasAttribute('data-task-cost-next') && !(secs > 0)) text = withNext(el.getAttribute('data-task-cost'), text);
       if (el.textContent !== text) el.textContent = text;
     });
   }

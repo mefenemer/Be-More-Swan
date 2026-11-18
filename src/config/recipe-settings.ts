@@ -44,6 +44,7 @@ export const RECIPE_DESCRIPTIONS: Record<string, string> = {
     jira_create_tasks: 'When you approve a meeting, each action item becomes a Jira task (issue type: Task) in the project you choose, with its owner and due date.',
     asana_create_tasks: 'When you approve a meeting, each action item becomes an Asana task in the project you choose, with its owner and due date.',
     slack_meeting_summary: 'When you approve a meeting, its summary and action items are posted to the Slack channel you choose.',
+    universal_webhook_meeting: 'When you approve a meeting, it is sent to your web address as one JSON event (meeting.approved): the title, summary, decisions, risks, every action item with its owner and due date, and the attendees. Use it with Zapier, Make or your own system.',
     email_meeting_followup: 'When you approve a meeting, the follow-up email goes to every attendee from your own Gmail or Outlook. Connect one of them first — follow-ups are never sent from anyone else’s address.',
     notion_create_page: 'When you approve a meeting, its notes are saved as a page in Notion, under the page you shared when you connected.',
 };
