@@ -60,7 +60,7 @@ import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
-import { AI_PRESENTER_FLAG, briefForWorkspace } from '../../src/lib/presenters';
+import { AI_PRESENTER_FLAG, briefForWorkspace, screenRefusal } from '../../src/lib/presenters';
 import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -260,13 +260,8 @@ export default withLambda(async (event) => {
         // Screen recordings beside a presenter (A3): the workspace's own uploads, with the same permission tick as footage.
         const screenIds = parsed.brief.screenAssetIds ?? [];
         if (screenIds.length) {
-            if ((body.brief as Record<string, unknown> | undefined)?.footageConsent !== true) {
-                return json(400, { error: 'Tick “I have permission to use the people and music in these videos” first.' });
-            }
-            const owned = await ownVideos(db, orgId, screenIds);
-            if (owned.length !== screenIds.length) return json(404, { error: 'One of those screen recordings isn’t one of your own uploads.' });
-            // A screen is laid out by its length; one never measured would be dropped from the plan (review of #725).
-            if (owned.some((v) => !(Number(v.durationS) > 0))) return json(409, { error: 'One of those screen recordings has no length yet. Upload it again, or use it once with “Use my own footage”, then choose it.' });
+            const refused = screenRefusal(screenIds, (body.brief as Record<string, unknown> | undefined)?.footageConsent === true, await ownVideos(db, orgId, screenIds));
+            if (refused) return json(refused.status, { error: refused.error });
         }
         const footage = parsed.brief.footageAssetIds ?? [];
         if (footage.length) {

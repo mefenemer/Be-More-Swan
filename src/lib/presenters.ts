@@ -110,3 +110,17 @@ export function presenterAudioWindow(startS: number, endS: number, voiceS: numbe
     const b = Math.max(a, Math.min(endS + PRESENTER_AUDIO_TAIL_S, voiceS));
     return { startS: Math.round(a * 1000) / 1000, endS: Math.round(b * 1000) / 1000 };
 }
+
+/**
+ * Why a brief's screen recordings can't be used (A3), or null when they can: the owner's permission tick, every one
+ * the workspace's own upload (`owned` = what an ownership query of those ids returned), and every one measured (a
+ * screen is laid out by its length). Status and message for the create response. Pure (review of #725).
+ */
+export function screenRefusal(screenIds: number[], consent: boolean, owned: Array<{ id: number; durationS: number | null }>): { status: number; error: string } | null {
+    if (!screenIds.length) return null;
+    if (!consent) return { status: 400, error: 'Tick “I have permission to use the people and music in these videos” first.' };
+    const mine = new Map(owned.map((v) => [v.id, v]));
+    if (screenIds.some((id) => !mine.has(id))) return { status: 404, error: 'One of those screen recordings isn’t one of your own uploads.' };
+    if (screenIds.some((id) => !(Number(mine.get(id)!.durationS) > 0))) return { status: 409, error: 'One of those screen recordings has no length yet. Upload it again, or use it once with “Use my own footage”, then choose it.' };
+    return null;
+}

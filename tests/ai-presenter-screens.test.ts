@@ -11,6 +11,7 @@ import { readBrief, timelineCovers, timesOf } from '../src/utils/video-producer'
 import { enforceStoryboard, presenterBlock, type Scene, type VideoBrief } from '../src/lib/storyboard';
 import { applyCovers } from '../src/lib/scene-cover';
 import { videoSceneCard, videoSceneRequestFromUiElement } from '../src/utils/chat-video-scene';
+import { screenRefusal } from '../src/lib/presenters';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -72,7 +73,14 @@ check('the build and timeline: a presenter clip splits at the screen\'s edges an
 
 check('create checks screens are their own and asks for the same permission tick', () => {
     const fn = read('netlify/functions/video-projects.ts');
-    assert.ok(fn.includes("const screenIds = parsed.brief.screenAssetIds ?? [];") && fn.includes('const owned = await ownVideos(db, orgId, screenIds);'));
+    // The rules themselves, called (review of #725): permission, their own uploads, measured.
+    const mine = [{ id: 21, durationS: 90 }, { id: 22, durationS: null }];
+    assert.strictEqual(screenRefusal([], false, []), null, 'no screens, nothing to check');
+    assert.strictEqual(screenRefusal([21], false, mine)?.status, 400, 'no permission tick');
+    assert.strictEqual(screenRefusal([21, 77], true, mine)?.status, 404, 'a video that isn\'t theirs (another workspace\'s, or gone)');
+    assert.strictEqual(screenRefusal([22], true, mine)?.status, 409, 'never measured');
+    assert.strictEqual(screenRefusal([21], true, mine), null);
+    assert.ok(fn.includes("const refused = screenRefusal(screenIds, (body.brief as Record<string, unknown> | undefined)?.footageConsent === true, await ownVideos(db, orgId, screenIds));"));
     assert.ok(fn.includes('const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), [...asOwnVideos(footage), ...screens]);'), 'edit_scene keeps a presenter\'s screen');
 });
 
@@ -94,7 +102,7 @@ check('review of #725: unmeasured screens are refused and never lift the limit; 
     assert.strictEqual(r.storyboard.scenes.filter((s) => s.source === 'ai_presenter').length, 3, 'no measured screen: the 3-scene limit applies');
     assert.ok(r.storyboard.scenes.filter((s) => s.source === 'stock_video').every((s) => !s.cover), 'a scene switched to stock keeps no screen');
     const fn = read('netlify/functions/video-projects.ts');
-    assert.ok(fn.includes("if (owned.some((v) => !(Number(v.durationS) > 0))) return json(409,"));
+    assert.strictEqual(screenRefusal([22], true, [{ id: 22, durationS: 0 }])?.status, 409);
     const ui = read('src/components/assistant-videos.js');
     assert.ok(ui.includes(".filter((x) => Number(x.durationS) > 0);"), 'the form lists only measured recordings');
     assert.ok(ui.includes("bubble: 'The screen fills the frame and the presenter appears in a round bubble in a corner, still talking.'"));
