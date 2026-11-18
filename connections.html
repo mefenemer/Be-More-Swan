@@ -142,8 +142,8 @@
      An assistant that is itself comingSoon in master_assistants cannot have a Live connection, however
      finished the recipe is. The Note Taker went live 2026-11-18 (finish plan step 9) after its real-account
      run (docs/meeting-note-taker-real-account-run.md): Slack, Notion, Jira, Asana and the follow-up email
-     (Gmail or Outlook only — never a Be More Swan address) are Live. Its webhook (Zapier / Make) stays
-     Coming soon — not covered by that run; HubSpot (owner's call) and Zoom (no recordings) too. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
+     (Gmail or Outlook only — never a Be More Swan address) are Live. Coming soon on its section (owner,
+     2026-11-18): Google Meet, Microsoft Teams and Zoom — meetings picked up automatically, not built yet. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
      YouTube: Coming soon 2026-11-04 while the Google project was in Testing; Live again 2026-11-05 once
      Google approved its verification (project In production, a real upload already landed public).
      Assistant names mirror master_assistants — rename both. -->
@@ -523,7 +523,7 @@
                     <h3>Note Taker</h3>
                     <p>Turns the meeting transcripts and notes you paste or attach into minutes: a summary, the decisions, and every action item with its owner. Nothing goes anywhere until you approve it.</p>
                 </div>
-                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">N</span><span class="cx-badge cx-badge-sm" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><span class="cx-badge cx-badge-sm" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><span class="cx-badge cx-badge-sm" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span><span class="cx-badge cx-badge-sm" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><span class="cx-badge cx-badge-sm" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span></div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">N</span><span class="cx-badge cx-badge-sm" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><span class="cx-badge cx-badge-sm" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span><span class="cx-badge cx-badge-sm" style="background:#00897B;color:#fff" aria-hidden="true">G</span><span class="cx-badge cx-badge-sm" style="background:#5059C9;color:#fff" aria-hidden="true">T</span><span class="cx-badge cx-badge-sm" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span></div>
                 <span class="cx-count">5 live · 3 coming soon</span>
             </div>
             <div class="cx-grid">
@@ -568,26 +568,26 @@
                 <p class="cx-why"><strong>Why:</strong> The follow-up is sent while the meeting is still fresh.</p>
             </article>
             <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><h4>Zapier / Make</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00897B;color:#fff" aria-hidden="true">G</span><h4>Google Meet</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
-                    <li><span class="cx-step">When</span>You approve the minutes</li>
-                    <li><span class="cx-step">It</span>Sends them to a webhook for any other app</li>
+                    <li><span class="cx-step">When</span>A Google Meet call ends</li>
+                    <li><span class="cx-step">It</span>Picks up the meeting automatically, so there is nothing to paste</li>
                 </ol>
-                <p class="cx-why"><strong>Why:</strong> Use any tool, even if we haven’t built a direct link to it.</p>
+                <p class="cx-why"><strong>Why:</strong> Minutes with no copying and pasting.</p>
             </article>
             <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><h4>HubSpot</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <header class="cx-card-head"><span class="cx-badge" style="background:#5059C9;color:#fff" aria-hidden="true">T</span><h4>Microsoft Teams</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
-                    <li><span class="cx-step">When</span>You approve the minutes of a client call</li>
-                    <li><span class="cx-step">It</span>Logs the meeting and its summary on the contact</li>
+                    <li><span class="cx-step">When</span>A Teams meeting ends</li>
+                    <li><span class="cx-step">It</span>Picks up the meeting automatically, so there is nothing to paste</li>
                 </ol>
-                <p class="cx-why"><strong>Why:</strong> Your CRM remembers every conversation.</p>
+                <p class="cx-why"><strong>Why:</strong> Minutes with no copying and pasting.</p>
             </article>
             <article class="cx-card is-soon" data-live="0">
                 <header class="cx-card-head"><span class="cx-badge" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span><h4>Zoom</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
-                    <li><span class="cx-step">When</span>A meeting ends</li>
-                    <li><span class="cx-step">It</span>Picks up the recording automatically, so there is nothing to paste</li>
+                    <li><span class="cx-step">When</span>A Zoom meeting ends</li>
+                    <li><span class="cx-step">It</span>Picks up the meeting automatically, so there is nothing to paste</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Minutes with no copying and pasting.</p>
             </article>

@@ -62,14 +62,17 @@ check('connectors named as working are Live on connections.html, and the Coming-
     assert.strictEqual((conn.match(/<h4>YouTube<\/h4><span class="cx-pill cx-live">/g) || []).length, 1, 'the YouTube card is Live');
     assert.ok(!/<h4>YouTube<\/h4><span class="cx-pill cx-soon">/.test(conn), 'no YouTube card is Coming soon');
     // Slack, Notion, Jira and Asana run for the Note Taker, live since 2026-11-18 (finish plan step 9, after
-    // the real-account run). Its webhook card stays Coming soon: that run did not cover it.
+    // the real-account run).
     for (const name of ['Slack', 'Notion', 'Jira', 'Asana']) {
         assert.ok(live(name), `${name} is Live on connections.html`);
         assert.ok(faq.includes(name), `${name} is named as working in the homepage FAQ`);
     }
     const meetings = conn.slice(conn.indexOf('<section id="meetings"'), conn.indexOf('</section>', conn.indexOf('<section id="meetings"')));
     assert.ok(meetings.includes('<span class="cx-count">5 live · 3 coming soon</span>'));
-    for (const name of ['Zapier / Make', 'HubSpot', 'Zoom']) assert.ok(meetings.includes(`<h4>${name}</h4><span class="cx-pill cx-soon">`), `the Note Taker's ${name} card stays Coming soon`);
+    // Owner 2026-11-18: its Coming-soon cards are the meeting apps it will pick meetings up from automatically.
+    for (const name of ['Google Meet', 'Microsoft Teams', 'Zoom']) assert.ok(meetings.includes(`<h4>${name}</h4><span class="cx-pill cx-soon">`), `the Note Taker's ${name} card is Coming soon`);
+    for (const name of ['Zapier / Make', 'HubSpot']) assert.ok(!meetings.includes(`<h4>${name}</h4>`), `no ${name} card on the Note Taker`);
+    assert.ok(!/recording/i.test(meetings), 'no card promises recordings');
     assert.ok(meetings.includes('from your own Gmail or Outlook') && !/Be More Swan(’|')s address/.test(meetings), 'the follow-up goes from the customer\'s own mailbox only');
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
     // Nor anywhere else on the homepage: Cat's customer story used to say she used "a connected Notion pad".
