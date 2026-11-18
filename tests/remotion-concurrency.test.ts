@@ -11,7 +11,7 @@
 // Run:  npx tsx tests/remotion-concurrency.test.ts
 
 import assert from 'node:assert';
-import { isConcurrencyError, planConcurrency, LONG_FRAMES_PER_LAMBDA } from '../src/lib/remotion-lambda';
+import { isConcurrencyError, planConcurrency, FRAMES_PER_LAMBDA } from '../src/lib/remotion-lambda';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -20,26 +20,26 @@ function check(name: string, fn: () => void): void {
 }
 
 // The defaults, with REMOTION_MAX_LAMBDAS unset. The account quota was 10 when this guard was written
-// (2026-08-02) and is 1000 since (checked 2026-11-18): a short render still uses 3, a long one (Phase 4,
-// up to 10 minutes) about one renderer per 30 s of video, capped at 40.
+// (2026-08-02) and is 1000 since (checked 2026-11-18). Measured then: ~0.73 s a frame per renderer with a
+// screen cover, so a renderer gets about 200 frames (≈150 s of its 300 s chunk timeout), never fewer than 3.
 const SHORT = 3;
-const CAP = 40;
+const CAP = 120;
 
 check('the weekly Short still uses 3, as it always has', () => {
     // 10s at 30fps. Remotion's own default would chunk this at 20 frames => 15 renderer Lambdas.
     assert.equal(planConcurrency(300), SHORT);
-    assert.equal(planConcurrency(900), SHORT);   // 30 s
-    assert.equal(planConcurrency(1800), SHORT);  // 60 s: unchanged for every short length
+    assert.equal(planConcurrency(600), SHORT);   // 20 s
 });
 
-check('a long video spreads its frames: no renderer gets more than 900 (30 s), within the cap', () => {
-    for (const [frames, want] of [[3600, 4], [9000, 10], [18000, 20]] as const) {
+check('every render is sized so no renderer gets more than 200 frames, within the cap', () => {
+    // 60 s at 3 Lambdas was 600 frames each: ≈430 s with a cover, past the 300 s chunk timeout.
+    for (const [frames, want] of [[900, 5], [1800, 9], [3600, 18], [9000, 45], [18000, 90]] as const) {
         assert.equal(planConcurrency(frames), want, `${frames} frames`);
-        assert.ok(frames / planConcurrency(frames) <= LONG_FRAMES_PER_LAMBDA);
+        assert.ok(frames / planConcurrency(frames) <= FRAMES_PER_LAMBDA);
     }
     assert.equal(planConcurrency(18000 * 10), CAP, 'never past the cap');
-    // Two 10-minute renders at once, launch functions included, are a sliver of the 1000 quota.
-    assert.ok(2 * (1 + planConcurrency(18000)) <= 100);
+    // Two 10-minute renders at once, launch functions included, stay far inside the 1000 quota.
+    assert.ok(2 * (1 + planConcurrency(18000)) <= 200);
 });
 
 check('a very short clip does not spend budget it cannot use', () => {

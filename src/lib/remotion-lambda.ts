@@ -51,38 +51,40 @@ const COMPOSITION_ID = 'PostOverlay';
 // inside a limit of 10.
 //
 // ⚠️ The quota has since been RAISED to 1000 (`npx remotion lambda quotas`, eu-west-2, checked 2026-11-18),
-// and both environments run the 300 s function (remotion-render-…-300sec). So a SHORT video keeps the 3
-// Lambdas it always had, and a LONG one (Phase 4: up to 10 minutes, 18,000 frames) spreads its frames so
-// no renderer gets more than about LONG_FRAMES_PER_LAMBDA: at 3 Lambdas a 10-minute video was 6000 frames
-// each, far past any chunk timeout.
+// and both environments run the 300 s function (remotion-render-…-300sec). Measured the same day on the
+// staging site (Phase 4a, docs/video-producer-screen-walkthrough-plan.md §12): a 2048 MB renderer does about
+// 2.6 frames a second on plain 1080p and about 1.4 with a screen cover (two videos decoding). So 3 Lambdas
+// was already too few for a 60 s 1080p video with a cover (600 frames each ≈ 430 s, past the 300 s chunk
+// timeout), and hopeless for 10 minutes. Size by frames instead: about FRAMES_PER_LAMBDA each, never fewer
+// than the 3 a short video always had.
 //
-// REMOTION_MAX_LAMBDAS caps a single render (default 40: two 10-minute renders at once are 2 × (1 + 20) = 42,
-// a sliver of the quota). Lower it only if the quota ever drops back.
-const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 40);
+// REMOTION_MAX_LAMBDAS caps a single render (default 120: a 10-minute video is 90; two at once, launch
+// functions included, are about 182 of the 1000). Lower it only if the quota ever drops back.
+const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 120);
 
-/** What a short render always used: 3 Lambdas (the old cap, still right for 15–60 s). */
+/** What a short render always used: 3 Lambdas. */
 const SHORT_RENDER_LAMBDAS = 3;
 
 // Below about a second of output per Lambda the ~10s cold start dominates the work, so splitting
-// further buys nothing and spends budget we do not have.
+// further buys nothing.
 const MIN_FRAMES_PER_LAMBDA = 30;
 
-/** At most this many frames (30 s at 30 fps) per renderer on a long video, well inside the 300 s chunk timeout. */
-export const LONG_FRAMES_PER_LAMBDA = 900;
+/** Frames per renderer: at ~0.73 s a frame with a cover, about 150 s of the 300 s chunk timeout. */
+export const FRAMES_PER_LAMBDA = 200;
 
 /**
- * How many renderer Lambdas to spend on a render of `durationInFrames`: up to 3 for a short video, as
- * always; then one more per LONG_FRAMES_PER_LAMBDA, capped at MAX_RENDER_LAMBDAS.
+ * How many renderer Lambdas to spend on a render of `durationInFrames`: about one per FRAMES_PER_LAMBDA,
+ * at least 3 for anything a second or more (as always), capped at MAX_RENDER_LAMBDAS.
  *
  * Exported for the tests: this is the whole fix, and it is pure.
  */
 export function planConcurrency(durationInFrames: number): number {
     const raw = Math.floor(Number(durationInFrames));
-    // Junk (NaN, Infinity, ≤ 0) is one frame: never a NaN, a fraction or a 40-Lambda guess.
+    // Junk (NaN, Infinity, ≤ 0) is one frame: never a NaN, a fraction or a big guess.
     const frames = Number.isFinite(raw) && raw > 0 ? raw : 1;
     const short = Math.min(SHORT_RENDER_LAMBDAS, Math.ceil(frames / MIN_FRAMES_PER_LAMBDA));
-    const long = Math.ceil(frames / LONG_FRAMES_PER_LAMBDA);
-    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.max(short, long)));
+    const sized = Math.ceil(frames / FRAMES_PER_LAMBDA);
+    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.max(short, sized)));
 }
 
 // Remotion turns the underlying TooManyRequestsException / ConcurrentInvocationLimitExceeded into a
