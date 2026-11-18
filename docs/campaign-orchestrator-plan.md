@@ -658,7 +658,9 @@ Found while staging a paused test campaign on staging (Marmalade, ad account 561
 4. **A failed creative leaves an orphan PAUSED campaign**, and a retry creates another — campaign
    creation does not search first, unlike the group. Nothing can spend.
 5. **Reconnecting clears the chosen ad account**, so the user has to pick it again.
-6. **The paid surface is unreachable everywhere** while `ADAPTERS` is empty (`anyNetworkAvailable()`),
+6. **Ads are declared en_US.** LinkedIn's only supported English interface locale; en_GB was
+   refused. UK-only delivery comes from the location facet, not the locale.
+7. **The paid surface is unreachable everywhere** while `ADAPTERS` is empty (`anyNetworkAvailable()`),
    including staging. The live run drove the endpoints directly.
 
 ## 10. Brand Designer (proposed 2026-10-08)

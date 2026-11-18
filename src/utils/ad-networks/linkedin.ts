@@ -121,7 +121,11 @@ export function campaignCreateBody(input: {
 
         // Amount is a STRING in this API, and currency travels with it. Never a bare number.
         dailyBudget: { amount: input.dailyBudgetAmount, currencyCode: input.currencyCode },
-        locale: { country: 'GB', language: 'en' },
+        // ⚠️ en_US, NOT en_GB. This is the language OF THE AD, not where it runs (that is the
+        // location facet in targetingCriteria). LinkedIn turns it into an interface-locale
+        // targeting facet and supports only en_US for English: en_GB was refused live with
+        // "Interface locale urn:li:locale:en_GB is not supported in Targeting Criteria" (2026-11-18).
+        locale: { country: 'US', language: 'en' },
         runSchedule: input.endMs ? { start: input.startMs, end: input.endMs } : { start: input.startMs },
         targetingCriteria: input.targeting,
         status: 'PAUSED',
@@ -497,8 +501,10 @@ export async function searchTargeting(
         query,
         facet: TARGETING_FACETS[facet],
         queryVersion: 'QUERY_USES_URNS',
+        // Display language for entity names. en_US for the same reason as the campaign locale:
+        // it is LinkedIn's supported English locale (en_GB was refused on campaigns, 2026-11-18).
         'locale.language': 'en',
-        'locale.country': 'GB',
+        'locale.country': 'US',
         lixEntity: accountUrn,
     });
     const res = await call(`${BASE}/adTargetingEntities?${params.toString()}`, {
