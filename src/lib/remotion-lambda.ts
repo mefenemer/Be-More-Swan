@@ -50,23 +50,39 @@ const COMPOSITION_ID = 'PostOverlay';
 // weekly Short drafts — so the default of 3 keeps two entire renders (2 launch + 6 renderers = 8)
 // inside a limit of 10.
 //
-// Raise REMOTION_MAX_LAMBDAS after the AWS quota goes up. It is the throughput knob in both
-// directions: fewer Lambdas means MORE frames each, and each renderer is bounded by the deployed
-// function's 120s timeout, so this number is also the practical ceiling on clip length.
-const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 3);
+// ⚠️ The quota has since been RAISED to 1000 (`npx remotion lambda quotas`, eu-west-2, checked 2026-11-18),
+// and both environments run the 300 s function (remotion-render-…-300sec). So a SHORT video keeps the 3
+// Lambdas it always had, and a LONG one (Phase 4: up to 10 minutes, 18,000 frames) spreads its frames so
+// no renderer gets more than about LONG_FRAMES_PER_LAMBDA: at 3 Lambdas a 10-minute video was 6000 frames
+// each, far past any chunk timeout.
+//
+// REMOTION_MAX_LAMBDAS caps a single render (default 40: two 10-minute renders at once are 2 × (1 + 20) = 42,
+// a sliver of the quota). Lower it only if the quota ever drops back.
+const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 40);
+
+/** What a short render always used: 3 Lambdas (the old cap, still right for 15–60 s). */
+const SHORT_RENDER_LAMBDAS = 3;
 
 // Below about a second of output per Lambda the ~10s cold start dominates the work, so splitting
 // further buys nothing and spends budget we do not have.
 const MIN_FRAMES_PER_LAMBDA = 30;
 
+/** At most this many frames (30 s at 30 fps) per renderer on a long video, well inside the 300 s chunk timeout. */
+export const LONG_FRAMES_PER_LAMBDA = 900;
+
 /**
- * How many renderer Lambdas to spend on a render of `durationInFrames`.
+ * How many renderer Lambdas to spend on a render of `durationInFrames`: up to 3 for a short video, as
+ * always; then one more per LONG_FRAMES_PER_LAMBDA, capped at MAX_RENDER_LAMBDAS.
  *
  * Exported for the tests: this is the whole fix, and it is pure.
  */
 export function planConcurrency(durationInFrames: number): number {
-    const frames = Math.max(1, Math.floor(Number(durationInFrames)) || 1);
-    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.ceil(frames / MIN_FRAMES_PER_LAMBDA)));
+    const raw = Math.floor(Number(durationInFrames));
+    // Junk (NaN, Infinity, ≤ 0) is one frame: never a NaN, a fraction or a 40-Lambda guess.
+    const frames = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    const short = Math.min(SHORT_RENDER_LAMBDAS, Math.ceil(frames / MIN_FRAMES_PER_LAMBDA));
+    const long = Math.ceil(frames / LONG_FRAMES_PER_LAMBDA);
+    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.max(short, long)));
 }
 
 // Remotion turns the underlying TooManyRequestsException / ConcurrentInvocationLimitExceeded into a
