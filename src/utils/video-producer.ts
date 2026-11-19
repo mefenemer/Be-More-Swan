@@ -394,11 +394,16 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         // A LONG voiced video the other way: the voiceover sets the length, so a thin script makes a short video — a
         // "2-minute" walkthrough came back at 1022 characters and played 54 s (staging project 50, 2026-11-19). Under
         // three quarters of the words → plan once more, told how many it needs. Still free; never a third attempt.
+        // Only a fresh plan is asked again, and only if it wasn't just re-planned for running long: never a third call, and
+        // never "write fuller" back to an owner who asked for shorter words (review of #763). Otherwise just the note.
         const under = scriptUnderBudget(storyboard, brief);
-        if (under) {
+        if (under && !over && !mode) {
             const again = await ask([opts.feedback, `The voiceover is only ${under.words} words; a ${lengthLabel(brief.lengthS)} video needs about ${under.budget}. Write every chapter fuller to reach about ${under.budget} words in all, at most 1200 characters a scene, or add chapters — more useful detail from what the business offers and what the screen recording shows, never padding.`].filter(Boolean).join(' '));
             const wordsOf = (sb: Storyboard) => scriptOf(sb).split(/\s+/).filter(Boolean).length;
-            if (again.storyboard.scenes.length >= minScenesFor(brief) && wordsOf(again.storyboard) > under.words) ({ storyboard, changes } = again);
+            // Kept only if it's fuller AND doesn't now run past the length (review of #763).
+            if (again.storyboard.scenes.length >= minScenesFor(brief) && wordsOf(again.storyboard) > under.words && !scriptOverBudget(again.storyboard, brief)) ({ storyboard, changes } = again);
+        }
+        if (under) {
             const still = scriptUnderBudget(storyboard, brief);
             if (still) changes = [...changes, `The script is about ${Math.round(still.words / WORDS_PER_SECOND)} seconds of speech, shorter than the ${lengthLabel(brief.lengthS)} you chose — the video is as long as what is said. Add to some lines, or ask for more chapters, to fill it.`];
         }
@@ -449,10 +454,6 @@ export function sceneLooks(s: Scene): string {
 }
 
 /**
- * Is the script too long for the brief's length? The budget is WORDS_PER_SECOND × length (the rate
- * the prompt asks for); more than 20% over returns the count and the budget, otherwise null. Pure.
- */
-/**
  * A long voiced video's script well short of its length (Phase 4c): under three quarters of the words the length
  * needs. Short videos may run shorter than their length, and own-sound videos have no script to measure. Pure.
  */
@@ -463,6 +464,10 @@ export function scriptUnderBudget(storyboard: Storyboard, brief: VideoBrief): { 
     return words < budget * 0.75 ? { words, budget } : null;
 }
 
+/**
+ * Is the script too long for the brief's length? The budget is WORDS_PER_SECOND × length (the rate
+ * the prompt asks for); more than 20% over returns the count and the budget, otherwise null. Pure.
+ */
 export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
     if (!brief.voiceover) return null;
     const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;

@@ -92,6 +92,8 @@ check('a long voiced script well short of its length is planned once more, then 
     assert.strictEqual(scriptUnderBudget(sb(20), { ...brief, voiceover: false }), null, 'own sound: nothing to measure');
     const vp = read('src/utils/video-producer.ts');
     assert.match(vp, /const under = scriptUnderBudget\(storyboard, brief\);/);
+    assert.match(vp, /if \(under && !over && !mode\) \{/, 'never a third call, never on a words-only change (review of #763)');
+    assert.match(vp, /wordsOf\(again\.storyboard\) > under\.words && !scriptOverBudget\(again\.storyboard, brief\)\)/, 'a fuller plan that now runs too long is not kept');
     assert.match(vp, /shorter than the \$\{lengthLabel\(brief\.lengthS\)\} you chose — the video is as long as what is said/);
     const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
     assert.match(p, /the whole voiceover about 300 words in all, because the voice sets the video's length/);
