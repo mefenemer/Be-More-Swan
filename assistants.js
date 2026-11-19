@@ -11253,6 +11253,7 @@ function _kickoffFixLink(key) {
 // working. Clicking it activates the assistant via manage-assistant (resume).
 // ─────────────────────────────────────────────────────────────────
 async function _renderKickOff(assistantId) {
+    const stale = _detailTicket();
     const card      = document.getElementById('kickoff-card');
     const listEl    = document.getElementById('kickoff-checklist');
     const btn       = document.getElementById('btn-kick-off');
@@ -11287,7 +11288,8 @@ async function _renderKickOff(assistantId) {
         const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
         if (!res.ok) { card.classList.add('hidden'); return; }
         data = await res.json();
-    } catch { card.classList.add('hidden'); return; }
+    } catch { if (!stale()) card.classList.add('hidden'); return; }
+    if (stale()) return;
 
     // US5 AC5.2: system_paused → red "Attention Required" diagnostic + targeted fix CTA,
     // replacing the normal kick-off flow (the kick-off endpoint also 409s on system_paused).
@@ -11676,6 +11678,7 @@ function _setMetricsEmptyState(mode, info) {
 //     delivery failure when the truth is that nobody is telling us — see deliveryUnknown.
 //   • Unsubscribe rate, before the first issue has gone out. A rate over zero recipients is not 0%.
 async function _loadNewsletterMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11695,8 +11698,10 @@ async function _loadNewsletterMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-newsletter-performance?assistantId=${encodeURIComponent(assistantId)}`);
+        if (stale()) return;
         if (!res.ok) throw new Error(`performance ${res.status}`);
         const d = await res.json();
+        if (stale()) return;
 
         if (d.needsSetup) {
             _setMetricsEmptyState('cards');
@@ -11752,6 +11757,7 @@ async function _loadNewsletterMetrics(assistantId) {
         setDot('value', d.clickRate === null ? 'flat' : d.clickRate >= 0.02 ? 'up' : 'down');
         _setKpiCard('value', { empty: d.clickRate === null });
     } catch (err) {
+        if (stale()) return;
         console.error('[newsletter metrics]', err);
         _setMetricsEmptyState('cards');
         _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
@@ -11768,6 +11774,7 @@ async function _loadNewsletterMetrics(assistantId) {
 // The window is 90 days, not the social 30: blogs publish weekly at best, and 30 days on a
 // fortnightly cadence reports "2" and makes an ordinary month look like a collapse.
 async function _loadBlogMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11829,8 +11836,10 @@ async function _loadBlogMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-blog-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         _renderBlogReaders(data.readers);
 
         if (!data.hasData) { _setMetricsEmptyState('blog-no-data'); return; }
@@ -11884,6 +11893,7 @@ async function _loadBlogMetrics(assistantId) {
             if (hasRead) setDot('value', secs >= 120 ? 'up' : 'none');
         }
     } catch (err) {
+        if (stale()) return;
         console.error('[blog-metrics] load failed:', err);
         _setMetricsEmptyState('error');
     }
@@ -11976,6 +11986,7 @@ function _renderBlogReaders(readers) {
 // "Last 30 days": a 30-day window across a six-week flight cliff-drops at rollover and reports a
 // collapse that is really an artefact of the window.
 async function _loadCampaignMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11987,8 +11998,10 @@ async function _loadCampaignMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-campaign-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
 
         // No campaigns ever run. Four zeroes would read as a campaign that failed rather than one
         // that was never started, so the explanatory panel is the honest answer.
@@ -12040,6 +12053,7 @@ async function _loadCampaignMetrics(assistantId) {
             }
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12049,6 +12063,7 @@ async function _loadCampaignMetrics(assistantId) {
 // ?metrics=1, in the order the registry's `metricKeys` names. All time. "Needs You" (awaiting) is
 // amber like every other role's — a number the user is meant to bring down.
 async function _loadRecordsMetrics(assistantId, roleKey) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12056,8 +12071,10 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
     const keys = window.AssistantDashboardRegistry?.get?.(roleKey)?.metricKeys || ['made', 'approved', 'awaiting', 'turnedDown'];
     try {
         const res = await fetch(`/.netlify/functions/assistant-records?metrics=1&assistantId=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('records-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12073,6 +12090,7 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
             if (key === 'awaiting' && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12082,6 +12100,7 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
 // brand-briefs.ts `performance`, because this assistant publishes nothing and the shared endpoint
 // (post_insights) would report "nothing published" for ever.
 async function _loadBrandMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12092,8 +12111,10 @@ async function _loadBrandMetrics(assistantId) {
             body: JSON.stringify({ action: 'performance', assistantId }),
             bmsRead: true,   // a read: leaves the shared GET cache alone (cached-fetch.js)
         });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('brand-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12122,6 +12143,7 @@ async function _loadBrandMetrics(assistantId) {
             if (trendEl('value')) trendEl('value').textContent = '—';
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12132,13 +12154,16 @@ async function _loadBrandMetrics(assistantId) {
 // — videos made, the share made without changes and average turnaround. Three cards: "Times Used" (in
 // posts and articles) was removed 2026-11-10 — the owner wants nothing here about other assistants' work.
 async function _loadVideoMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch(`/.netlify/functions/video-projects?performance=1&assistantId=${encodeURIComponent(assistantId)}`, { credentials: 'same-origin', bmsRead: true });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('video-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12157,6 +12182,7 @@ async function _loadVideoMetrics(assistantId) {
         const turn = t == null ? '—' : t < 60 ? `${Math.max(1, Math.round(t))} min` : t < 2880 ? `${Math.floor(t / 60)} h${Math.round(t % 60) ? ` ${Math.round(t % 60)} min` : ''}` : `${Math.round(t / 1440)} days`;
         set('ctr', turn, t == null);
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12168,14 +12194,17 @@ async function _loadVideoMetrics(assistantId) {
 // Routed here by `metricsSource: 'shop'`. From shop.ts `get` stats: new orders, orders and money taken in
 // the last 30 days (pounds, less refunds), refunded orders. Workspace-wide (the shop is the workspace's).
 async function _loadShopMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch('/.netlify/functions/shop', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get', assistantId: Number(assistantId) }) });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         const s = data.stats;
         if (!s || !(data.orders || []).length) { _setMetricsEmptyState('shop-no-data'); return; }
         _setMetricsEmptyState('cards');
@@ -12191,19 +12220,23 @@ async function _loadShopMetrics(assistantId) {
             if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
 
 async function _loadMailboxMetrics() {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch('/.netlify/functions/mailboxes', { credentials: 'same-origin' });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.available || !(data.mailboxes || []).length || !data.stats) { _setMetricsEmptyState('records-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12218,6 +12251,7 @@ async function _loadMailboxMetrics() {
             if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12226,6 +12260,7 @@ async function _loadMailboxMetrics() {
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
 async function _loadSiteMetrics(assistantId) {
+    const stale = _detailTicket();
     // Website Assistant: visitors to the LIVE site (counted at the edge, no cookies — site-visits.ts),
     // pages read, and what the site brought in, over the last 30 days; plus Draft / Live.
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
@@ -12236,9 +12271,12 @@ async function _loadSiteMetrics(assistantId) {
     });
     try {
         const [siteRes, visitRes] = await Promise.all([post({ action: 'get', assistantId }), post({ action: 'visits', assistantId })]);
+        if (stale()) return;
         if (!siteRes.ok) { _setMetricsEmptyState('error'); return; }
         const data = await siteRes.json();
+        if (stale()) return;
         const v = visitRes.ok ? await visitRes.json() : null;
+        if (stale()) return;
         _setMetricsEmptyState('cards');
         const live = data.site?.status === 'published';
         const note = document.getElementById('metrics-status-note');
@@ -12270,6 +12308,7 @@ async function _loadSiteMetrics(assistantId) {
         put('value', live ? 'Live' : 'Draft', !live, null, live ? (data.site?.unpublishedChanges ? 'Changes waiting to publish' : 'Up to date') : holes ? `${holes} part${holes === 1 ? '' : 's'} to fill in first` : 'Ready to publish');
         _paintSiteVisitDetail(live && s ? s : null);
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12305,6 +12344,7 @@ function _paintSiteVisitDetail(s) {
 // site-audits.ts `performance` — this assistant publishes nothing, so the shared endpoint
 // (post_insights) would report "nothing published" for ever.
 async function _loadSiteAuditMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12314,8 +12354,10 @@ async function _loadSiteAuditMetrics(assistantId) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: 'performance', assistantId }),
         });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('site-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12348,6 +12390,7 @@ async function _loadSiteAuditMetrics(assistantId) {
             if (trendEl('value')) trendEl('value').textContent = m.competitorCount ? '—' : 'Add competitors on the Website tab';
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12363,6 +12406,7 @@ async function _loadSiteAuditMetrics(assistantId) {
 // `periodDays` rather than left at the markup's "Last 30 days". A lead pipeline read over 30 days
 // reports zero closed deals for a perfectly healthy quarter.
 async function _loadLeadMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12385,8 +12429,10 @@ async function _loadLeadMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-lead-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
 
         // Nothing has happened in the window. Four zeroes would read as an assistant that tried and
         // failed rather than one that has not been given anything to do.
@@ -12446,6 +12492,7 @@ async function _loadLeadMetrics(assistantId) {
             setDot('value', c.won ? 'up' : 'none');
         }
     } catch {
+        if (stale()) return;
         // Network/parse failure. We don't know whether there is data, so say that rather than
         // leaving four "—" cards that read as broken.
         _setMetricsEmptyState('error');

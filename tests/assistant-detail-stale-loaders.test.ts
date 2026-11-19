@@ -88,6 +88,18 @@ const LOADERS: Array<[string, string]> = [
     ['_fetchAndRenderGoals', 'async function _fetchAndRenderGoals(assistantId) {'],
     ['_renderRunbookDirectives', 'window._renderRunbookDirectives = async function(assistantId) {'],
     ['_renderLeadRejectionEvidence', 'window._renderLeadRejectionEvidence = async function(assistantId) {'],
+    // The role-specific KPI loaders _loadAssistantMetrics hands off to (the Note Taker's are records).
+    ['_loadNewsletterMetrics', 'async function _loadNewsletterMetrics(assistantId) {'],
+    ['_loadBlogMetrics', 'async function _loadBlogMetrics(assistantId) {'],
+    ['_loadCampaignMetrics', 'async function _loadCampaignMetrics(assistantId) {'],
+    ['_loadRecordsMetrics', 'async function _loadRecordsMetrics(assistantId, roleKey) {'],
+    ['_loadBrandMetrics', 'async function _loadBrandMetrics(assistantId) {'],
+    ['_loadVideoMetrics', 'async function _loadVideoMetrics(assistantId) {'],
+    ['_loadShopMetrics', 'async function _loadShopMetrics(assistantId) {'],
+    ['_loadMailboxMetrics', 'async function _loadMailboxMetrics() {'],
+    ['_loadSiteMetrics', 'async function _loadSiteMetrics(assistantId) {'],
+    ['_loadSiteAuditMetrics', 'async function _loadSiteAuditMetrics(assistantId) {'],
+    ['_loadLeadMetrics', 'async function _loadLeadMetrics(assistantId) {'],
 ];
 
 for (const [name, header] of LOADERS) {
@@ -100,6 +112,12 @@ for (const [name, header] of LOADERS) {
         assert.strictEqual(why, null, why || '');
     });
 }
+
+check('kick-off card: checked after the readiness read (its click handler is the user acting, left alone)', () => {
+    const b = body(js, 'async function _renderKickOff(assistantId) {');
+    assert.ok(b.split('\n')[1].includes('const stale = _detailTicket();'));
+    assert.ok(b.includes("} catch { if (!stale()) card.classList.add('hidden'); return; }\n    if (stale()) return;"));
+});
 
 check('goals: no global is set from a stale answer', () => {
     const b = body(js, 'async function _fetchAndRenderGoals(assistantId) {');
