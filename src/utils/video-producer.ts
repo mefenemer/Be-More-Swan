@@ -994,7 +994,8 @@ async function finishPresenterPiece(db: Db, args: {
         // A realistic made-up person: the "Made with AI" line and YouTube's synthetic flag apply (ai-disclosure.ts).
         renderParams: { kind: 'ai_presenter', presenterId: p.id, aiStyle: 'realistic' },
     }).returning({ id: contentAssets.id });
-    await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
+    // Done: the claim (errorMessage 'collecting:<run>') is cleared, so a finished piece never reads as an error.
+    await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [asset.id], errorMessage: null, updatedAt: new Date() })
         .where(eq(mediaGenerationJobs.id, args.job.id));
     return asset.id;
 }

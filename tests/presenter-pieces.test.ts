@@ -127,6 +127,7 @@ check('a piece finished at the model is collected before any timeout; collecting
     const timeout = vp.indexOf('> PRESENTER_PIECE_MAX_MS) {');
     assert.ok(status > 0 && timeout > status, 'falStatus is read before the 45-minute timeout');
     assert.match(vp, /\.set\(\{ errorMessage: `collecting:\$\{runStarted\}`, updatedAt: new Date\(\) \}\)/);
+    assert.match(vp, /set\(\{ status: 'completed', resultAssetIds: \[asset\.id\], errorMessage: null, updatedAt: new Date\(\) \}\)/, 'the claim is cleared when the piece is done (staging project 53)');
     assert.match(vp, /if \(already > 0\) \{ done\[scene\.id\] = already; return; \}/, 'another run finished the scene: no second charge');
 });
 
