@@ -117,6 +117,10 @@ check('kick-off card: checked after the readiness read (its click handler is the
     const b = body(js, 'async function _renderKickOff(assistantId) {');
     assert.ok(b.split('\n')[1].includes('const stale = _detailTicket();'));
     assert.ok(b.includes("} catch { if (!stale()) card.classList.add('hidden'); return; }\n    if (stale()) return;"));
+    // The failed-response branch too: a late 500/403 for the previous assistant hid the next one's
+    // Kick-off card until a reload (review of #778).
+    assert.ok(b.includes("if (!res.ok) { if (!stale()) card.classList.add('hidden'); return; }"), 'failed read checks the ticket before hiding');
+    assert.ok(!b.includes("if (!res.ok) { card.classList.add('hidden'); return; }"), 'no unguarded hide on a failed read');
 });
 
 check('goals: no global is set from a stale answer', () => {

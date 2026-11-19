@@ -11286,7 +11286,9 @@ async function _renderKickOff(assistantId) {
     let data;
     try {
         const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
-        if (!res.ok) { card.classList.add('hidden'); return; }
+        // A late failed read for the previous assistant must not hide this one's card (it stayed
+        // gone until a reload): check the ticket here too, as the catch below does.
+        if (!res.ok) { if (!stale()) card.classList.add('hidden'); return; }
         data = await res.json();
     } catch { if (!stale()) card.classList.add('hidden'); return; }
     if (stale()) return;
