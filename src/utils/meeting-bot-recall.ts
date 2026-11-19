@@ -106,19 +106,20 @@ export async function fetchRecallTranscript(region: RecallRegion, botId: string)
 }
 
 /**
- * Takes the bot out of the meeting: a booked bot that hasn't joined is deleted; one in the call is asked to leave.
- * True when Recall agreed (or the bot was already gone).
+ * Takes the bot out of the meeting: a booked bot that hasn't joined is deleted; one that is joining or in the call is
+ * asked to leave. 'deleted' = it will never join (safe to mark cancelled); 'left' = it was on its way in or in the call,
+ * so its own events decide what happens (what it heard is still written up); null = Recall refused.
  */
-export async function removeRecallBot(region: RecallRegion, botId: string, notJoinedYet: boolean): Promise<boolean> {
+export async function removeRecallBot(region: RecallRegion, botId: string, notJoinedYet: boolean): Promise<'deleted' | 'left' | null> {
     const id = encodeURIComponent(botId);
-    const r = notJoinedYet ? await call(region, 'DELETE', `/bot/${id}/`) : await call(region, 'POST', `/bot/${id}/leave_call/`);
-    // 404: already gone. A booked bot that has just started joining refuses the delete: ask it to leave instead.
-    if (r.status === 404 || (r.status >= 200 && r.status < 300)) return true;
+    const ok = (s: number) => s >= 200 && s < 300;
     if (notJoinedYet) {
-        const leave = await call(region, 'POST', `/bot/${id}/leave_call/`);
-        return leave.status === 404 || (leave.status >= 200 && leave.status < 300);
+        const del = await call(region, 'DELETE', `/bot/${id}/`);
+        if (ok(del.status) || del.status === 404) return 'deleted';
+        // It has already started joining, so it refuses the delete: ask it to leave instead.
     }
-    return false;
+    const leave = await call(region, 'POST', `/bot/${id}/leave_call/`);
+    return ok(leave.status) || leave.status === 404 ? 'left' : null;
 }
 
 /** Deletes Recall's copy of the recording and transcript. True when done (or already gone); false while the bot runs. */

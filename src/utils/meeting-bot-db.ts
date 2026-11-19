@@ -8,7 +8,7 @@
 //   pollMeetingBots     — the 15-minute safety net for missed webhooks, plus deleting Recall's media once finished
 //   meetingBotSource    — the engine's MeetingSource for bot meetings; chargeBotMeeting — the charge after filing
 
-import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations } from '../../db/schema';
 import { isFeatureEnabled } from './feature-flags';
@@ -115,11 +115,16 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     const title = typeof i.title === 'string' && i.title.trim() ? i.title.replace(/\s+/g, ' ').trim().slice(0, 200) : null;
     const lengthLimitMinutes = cleanLengthLimit(i.lengthLimitMinutes);
 
-    // Pressing Send twice sends one bot: the same link, still open, sent in the last few hours (or booked for the same time).
+    // Pressing Send twice sends one bot: the same link, still open, sent in the last few hours (or booked for the same
+    // time). "Now" looks back only: a recurring link's FUTURE booking (next week's standup) is a different meeting.
+    // Two presses racing past this check still send one: an immediate join is stored on the minute (immediateJoinAt),
+    // so the second insert hits the unique index below.
     const [open] = await db.select().from(meetingBots).where(and(
         eq(meetingBots.organisationId, i.organisationId), eq(meetingBots.meetingUrl, link.url),
         inArray(meetingBots.status, [...OPEN_BOT_STATUSES]),
-        when.scheduled ? eq(meetingBots.joinAt, when.joinAt) : gt(meetingBots.joinAt, new Date(now.getTime() - 3 * 60 * 60 * 1000)),
+        when.scheduled
+            ? eq(meetingBots.joinAt, when.joinAt)
+            : and(gt(meetingBots.joinAt, new Date(now.getTime() - 3 * 60 * 60 * 1000)), lte(meetingBots.joinAt, now)),
     )).limit(1);
     if (open) return { ok: true, bot: botView(open), alreadySent: true };
 
@@ -144,18 +149,29 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     }
 
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, i.organisationId)).limit(1);
+    let recallBotId: string;
     try {
-        const recallBotId = await createRecallBot(region, recallBotRequest({
+        recallBotId = await createRecallBot(region, recallBotRequest({
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
         }));
-        const [saved] = await db.update(meetingBots).set({ recallBotId, updatedAt: new Date() }).where(eq(meetingBots.id, row.id)).returning();
-        return { ok: true, bot: botView(saved ?? row), alreadySent: false };
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';
         await db.update(meetingBots).set({ status: 'failed', statusReason: reason.slice(0, 160), updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
         console.error('[meeting-bot] send failed', { botId: row.id, region, status: err instanceof RecallError ? err.status : null });
         return fail(502, 'recall_refused', 'The Note Taker couldn\'t be sent to that meeting. Check the link and try again.');
+    }
+    try {
+        const [saved] = await db.update(meetingBots).set({ recallBotId, updatedAt: new Date() }).where(eq(meetingBots.id, row.id)).returning();
+        return { ok: true, bot: botView(saved ?? row), alreadySent: false };
+    } catch (err) {
+        // Recall has the bot but we can't record its id, so its events could never be matched: take it back out rather
+        // than let an untracked bot join (no minutes, no charge, media never deleted). Review of #769.
+        const back = await removeRecallBot(region, recallBotId, true).catch(() => null);
+        await db.update(meetingBots).set({ status: 'failed', statusReason: back ? 'not_saved' : 'not_saved_bot_still_sent', updatedAt: new Date() })
+            .where(eq(meetingBots.id, row.id)).catch(() => undefined);
+        console.error('[meeting-bot] bot sent but its id could not be saved', { botId: row.id, region, withdrawn: back, err: err instanceof Error ? err.message : err });
+        return fail(500, 'not_saved', 'The Note Taker could not be sent. Please try again.');
     }
 }
 
@@ -183,11 +199,14 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     if (!row) return { ok: false, status: 404, error: 'That Note Taker was not found.' };
     if (!OPEN_BOT_STATUSES.includes(row.status as BotStatus) || row.status === 'ended') return { ok: true, bot: botView(row) };
     const notJoinedYet = !row.joinedAt;
+    let how: 'deleted' | 'left' | null = 'deleted';
     if (row.recallBotId) {
-        const gone = await removeRecallBot(row.recallRegion as RecallRegion, row.recallBotId, notJoinedYet).catch(() => false);
-        if (!gone) return { ok: false, status: 502, error: 'The Note Taker couldn\'t be taken out of the call. Please try again, or remove it from the meeting yourself.' };
+        how = await removeRecallBot(row.recallRegion as RecallRegion, row.recallBotId, notJoinedYet).catch(() => null);
+        if (!how) return { ok: false, status: 502, error: 'The Note Taker couldn\'t be taken out of the call. Please try again, or remove it from the meeting yourself.' };
     }
-    if (!notJoinedYet) return { ok: true, bot: botView(row) };
+    // Only a bot Recall deleted is cancelled. One that was already on its way in was asked to LEAVE: it may have heard
+    // part of the call, so its own events decide (review of #769: marking it cancelled lost those minutes).
+    if (how !== 'deleted') return { ok: true, bot: botView(row) };
     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'cancelled_by_user', updatedAt: new Date() })
         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, ['scheduled', 'joining', 'waiting_room']))).returning();
     return { ok: true, bot: botView(saved ?? row) };
@@ -206,7 +225,7 @@ export async function applyBotEvent(
     db: Db, row: BotRow, code: string, subCode: string | null | undefined, at: Date,
     dispatch: (importId: number) => Promise<boolean>,
 ): Promise<BotStatus> {
-    const patch = nextBotState({ status: row.status as BotStatus, joinedAt: row.joinedAt, leftAt: row.leftAt }, code, subCode, at);
+    const patch = nextBotState({ status: row.status as BotStatus, joinedAt: row.joinedAt, leftAt: row.leftAt, statusReason: row.statusReason }, code, subCode, at);
     if (!patch) return row.status as BotStatus;
     // Only from the state this patch was worked out from, so two events racing can't move it backwards.
     const [saved] = await db.update(meetingBots).set({

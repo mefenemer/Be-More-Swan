@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
     ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
-    botName, botPlatformOf, chargeUnits, cleanJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
+    botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
     nextBotState, recallBotRequest, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
 } from '../src/utils/meeting-bot';
@@ -73,6 +73,15 @@ await test('join time: now, under 10 minutes away = now, later = booked, over 60
     assert.ok(!cleanJoinAt('soon-ish', T0).ok);
 });
 
+await test('"join now" is stored on the minute, so two presses racing in the same minute hit the unique index (review of #769)', () => {
+    const t = new Date('2026-11-19T10:07:42.318Z');
+    assert.equal(immediateJoinAt(t).toISOString(), '2026-11-19T10:07:00.000Z');
+    const now = cleanJoinAt(null, t);
+    assert.ok(now.ok && now.joinAt.toISOString() === '2026-11-19T10:07:00.000Z');
+    const soon = cleanJoinAt(new Date(t.getTime() + 60_000).toISOString(), t);
+    assert.ok(soon.ok && !soon.scheduled && soon.joinAt.toISOString() === '2026-11-19T10:07:00.000Z');
+});
+
 await test('length limit: 2 hours by default, at most 4, at least 5 minutes', () => {
     assert.equal(cleanLengthLimit(undefined), 120);
     assert.equal(cleanLengthLimit(999), 240);
@@ -100,7 +109,7 @@ function run(events: [string, string | null, number][], start: BotStatus = 'join
     let row: BotStateRow & { reason?: string | null; minutes?: number | null } = { status: start, joinedAt: null, leftAt: null };
     for (const [code, sub, min] of events) {
         const p = nextBotState(row, code, sub, at(min));
-        if (p) row = { status: p.status, joinedAt: p.joinedAt, leftAt: p.leftAt, reason: p.statusReason, minutes: p.minutesInCall ?? row.minutes };
+        if (p) row = { status: p.status, joinedAt: p.joinedAt, leftAt: p.leftAt, statusReason: p.statusReason, reason: p.statusReason, minutes: p.minutesInCall ?? row.minutes };
     }
     return row;
 }
@@ -137,6 +146,13 @@ await test('events out of order or unknown change nothing; a final state never m
     assert.equal(r.status, 'in_call');
     assert.equal(nextBotState({ status: 'cancelled', joinedAt: null, leftAt: null }, 'in_call_recording', null, at(5)), null);
     assert.equal(nextBotState({ status: 'done', joinedAt: at(1), leftAt: at(9) }, 'done', null, at(10)), null);
+});
+
+await test('removed by the host after joining: still done (what it heard is written up), and the reason is kept through done', () => {
+    const r = run([['in_call_recording', null, 1], ['call_ended', 'bot_kicked_from_call', 21], ['done', null, 22]]);
+    assert.equal(r.status, 'done');
+    assert.equal(r.reason, 'bot_kicked_from_call');
+    assert.equal(r.minutes, 20);
 });
 
 await test('done without call_ended uses Recall\'s time as the leaving time', () => {
@@ -277,6 +293,19 @@ await test('sendMeetingBot checks the flag, the assistant, DPA 1.2, the link and
         assert.ok(pos(before) < recall, `${before} comes before Recall`);
     }
     assert.match(src, /export const BOT_DPA_VERSIONS = \['1\.2'\];/, 'only DPA 1.2 covers meetings the Note Taker joins');
+    // Review of #769: "now" looks back only, so a recurring link's future booking never blocks today's call.
+    assert.ok(fn.includes('lte(meetingBots.joinAt, now)'), 'the immediate duplicate check is bounded by now');
+    // A bot Recall accepted but whose id we couldn't save is withdrawn, not left untracked.
+    assert.ok(fn.indexOf('removeRecallBot(region, recallBotId, true)') > recall, 'withdrawn after a failed save');
+});
+
+await test('cancel marks a bot cancelled only when Recall deleted it; a bot already on its way in is asked to leave and its events decide', () => {
+    const src = read('src/utils/meeting-bot-db.ts');
+    const fn = src.slice(src.indexOf('export async function removeMeetingBot'), src.indexOf('// ── Recall\'s events'));
+    assert.ok(fn.includes("if (how !== 'deleted') return { ok: true, bot: botView(row) };"));
+    assert.ok(fn.indexOf("how !== 'deleted'") < fn.indexOf("status: 'cancelled'"));
+    const rc = read('src/utils/meeting-bot-recall.ts');
+    assert.match(rc, /Promise<'deleted' \| 'left' \| null>/);
 });
 
 await test('the endpoint sends only through sendMeetingBot; the webhook fails closed and verifies before it parses', () => {

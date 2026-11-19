@@ -92,13 +92,21 @@ export function cleanLengthLimit(raw: unknown): number {
 
 export type JoinAtResult = { ok: true; joinAt: Date; scheduled: boolean } | { ok: false; error: string };
 
+/**
+ * "Join now" is stored on the minute, so two presses in the same minute hit the (org, link, join time) unique index and
+ * send one bot even when they race (review of #769). Pure.
+ */
+export function immediateJoinAt(now: Date): Date {
+    return new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+}
+
 /** "Now" (null/empty) or a time: in the past or under 10 minutes away means now. Pure. */
 export function cleanJoinAt(raw: unknown, now: Date): JoinAtResult {
-    if (raw === null || raw === undefined || raw === '' || raw === 'now') return { ok: true, joinAt: now, scheduled: false };
+    if (raw === null || raw === undefined || raw === '' || raw === 'now') return { ok: true, joinAt: immediateJoinAt(now), scheduled: false };
     const t = new Date(String(raw));
     if (Number.isNaN(t.getTime())) return { ok: false, error: 'That time could not be read.' };
     if (t.getTime() - now.getTime() > MAX_SCHEDULE_AHEAD_MS) return { ok: false, error: 'A Note Taker can be booked up to 60 days ahead.' };
-    if (t.getTime() - now.getTime() < SCHEDULE_AHEAD_MS) return { ok: true, joinAt: now, scheduled: false };
+    if (t.getTime() - now.getTime() < SCHEDULE_AHEAD_MS) return { ok: true, joinAt: immediateJoinAt(now), scheduled: false };
     return { ok: true, joinAt: t, scheduled: true };
 }
 
@@ -144,6 +152,8 @@ export interface BotStateRow {
     status: BotStatus;
     joinedAt: Date | null;
     leftAt: Date | null;
+    /** Kept when an event brings no reason of its own (so 'done' doesn't wipe the call_ended reason). */
+    statusReason?: string | null;
 }
 
 export interface BotStatePatch {
@@ -164,7 +174,7 @@ const REMOVED_REASON = /kicked_from_call|removed|call_ended_by_host_removed/i;
  */
 export function nextBotState(row: BotStateRow, code: string, subCode: string | null | undefined, at: Date): BotStatePatch | null {
     const reason = subCode ? String(subCode).slice(0, 120) : null;
-    const base: BotStatePatch = { status: row.status, statusReason: null, joinedAt: row.joinedAt, leftAt: row.leftAt, minutesInCall: null };
+    const base: BotStatePatch = { status: row.status, statusReason: row.statusReason ?? null, joinedAt: row.joinedAt, leftAt: row.leftAt, minutesInCall: null };
     const isFinal = FINAL_BOT_STATUSES.includes(row.status);
     const left = () => base.leftAt ?? at;
 
@@ -185,8 +195,8 @@ export function nextBotState(row: BotStateRow, code: string, subCode: string | n
             return { ...base, status: row.joinedAt ? 'in_call' : row.status, statusReason: 'recording_permission_denied' };
         case 'call_ended': {
             if (isFinal || row.status === 'ended') return null;
-            if (!row.joinedAt) return { ...base, status: WAITING_ROOM_REASON.test(reason ?? '') || row.status === 'waiting_room' ? 'not_admitted' : 'failed', statusReason: reason, leftAt: left() };
-            return { ...base, status: 'ended', statusReason: reason, leftAt: left() };
+            if (!row.joinedAt) return { ...base, status: WAITING_ROOM_REASON.test(reason ?? '') || row.status === 'waiting_room' ? 'not_admitted' : 'failed', statusReason: reason ?? base.statusReason, leftAt: left() };
+            return { ...base, status: 'ended', statusReason: reason ?? base.statusReason, leftAt: left() };
         }
         case 'done': {
             if (row.status === 'done' || row.status === 'cancelled') return null;
@@ -194,9 +204,9 @@ export function nextBotState(row: BotStateRow, code: string, subCode: string | n
                 if (isFinal) return null;
                 return { ...base, status: row.status === 'waiting_room' ? 'not_admitted' : 'failed', statusReason: reason ?? 'never_joined', leftAt: left() };
             }
-            // Removed by the host after joining: what was heard is still written up (plan §6), and the record says so.
+            // Removed by the host after joining: what was heard is still written up (plan §6); the call_ended reason stays.
             const leftAt = left();
-            return { ...base, status: 'done', statusReason: row.status === 'removed' ? 'removed_by_host' : reason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
+            return { ...base, status: 'done', statusReason: reason ?? base.statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
         }
         case 'fatal': {
             if (isFinal && row.status !== 'removed') return null;
