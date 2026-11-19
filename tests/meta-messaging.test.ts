@@ -140,6 +140,11 @@ async function main() {
         assert.ok(!src.includes('scopes: SCOPES'), 'the stored scopes must not claim messaging permissions a person may have unticked');
         assert.ok(src.includes('scopes: BASE_SCOPES'));
     });
+    await check('a reconnect keeps an earlier Page subscription it did not renew, so Disconnect still undoes it', () => {
+        const src = read('netlify/functions/meta-oauth.ts');
+        assert.ok(src.includes("if (prevMessaging?.subscribed === true && (connMetadata.messaging as { subscribed?: boolean } | undefined)?.subscribed !== true) {"));
+        assert.ok(src.indexOf('const prevMessaging') < src.indexOf('let isReconnect = false;'), 'merged before the row is written');
+    });
     await check('filing a message is one transaction', () => {
         assert.ok(read('src/utils/meta-messaging.ts').includes('return db.transaction(async (tx) => storeInTx(tx as unknown as Db, m));'));
     });

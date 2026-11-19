@@ -131,7 +131,7 @@ export function parseMessagingWebhook(body: unknown): ParsedMessage[] {
                 if (recipientId !== accountId) continue;
                 // Postbacks have a mid on Instagram, not always on Messenger: derive a stable one so
                 // a retried delivery still dedupes.
-                const mid = str(ev.postback.mid) ?? `postback:${accountId}:${senderId}:${ts}`;
+                const mid = str(ev.postback.mid) ?? `postback:${accountId}:${senderId}:${sentAt.getTime()}`;
                 out.push({
                     platform, accountId, participantId: senderId, direction: 'in', mid,
                     text: str(ev.postback.title) ?? str(ev.postback.payload),

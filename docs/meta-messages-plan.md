@@ -131,6 +131,8 @@ apply: FB and IG are separate Connect buttons, and the one-workspace-per-account
 
 ## 6. Privacy
 
+⚠️ **Must land before `META_MESSAGING_ENABLED` goes on in prod** (review of #755): the 90-day purge, GDPR erase, SAR + self-serve export and the Meta data-deletion callback must all cover `social_conversations` / `social_messages`. On staging, keep subscribed Pages to our own test accounts until then.
+
 We'd store messages written by **members of the public** to our customers. Needs:
 - Privacy notice: new paragraph (what we store, why, retention). Customer is controller, we're processor — DPA already covers social content; check the wording covers messages.
 - Retention: delete message text after **D6** days; keep counts.

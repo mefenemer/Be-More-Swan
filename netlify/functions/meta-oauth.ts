@@ -157,7 +157,7 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
 
     // Upsert system_connections — update existing if same external id, else create.
     const [existing] = await db
-        .select({ id: systemConnections.id, userId: systemConnections.userId })
+        .select({ id: systemConnections.id, userId: systemConnections.userId, metadata: systemConnections.metadata })
         .from(systemConnections)
         .where(and(
             eq(systemConnections.organisationId, organisationId),
@@ -165,6 +165,15 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
             eq(systemConnections.externalUserId, externalUserId),
         ))
         .limit(1);
+
+    // A Page this row subscribed stays subscribed at Meta until something unsubscribes it, so a
+    // reconnect that didn't (or couldn't) subscribe again must not forget it — Disconnect reads
+    // `messaging.subscribed` to know there is a subscription to undo.
+    const prevMessaging = (existing?.metadata as { messaging?: { subscribed?: boolean } } | null)?.messaging;
+    if (prevMessaging?.subscribed === true && (connMetadata.messaging as { subscribed?: boolean } | undefined)?.subscribed !== true) {
+        const failed = connMetadata.messaging as { error?: string } | undefined;
+        connMetadata.messaging = { ...prevMessaging, ...(failed?.error ? { lastError: failed.error } : {}) };
+    }
 
     let isReconnect = false;
     if (existing) {
