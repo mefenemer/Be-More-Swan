@@ -216,6 +216,8 @@ check('the panel switches network, and stage/upload/approve follow it', () => {
     assert.ok(ui.includes('data-cmp-network="${esc(network)}"'), 'approve does not know its network');
     assert.ok(ui.includes('/.netlify/functions/meta-ads-oauth-init'), 'no Meta connect link');
     assert.ok(ui.includes('data-cmp-meta-save'), 'no Meta account/Page save');
+    assert.ok(ui.includes("if (!p.featureEnabled || !p.anyNetwork) return '';"), 'switch shown without paid ads');
+    assert.ok(/await load\(\);\s*\n(\s*\/\/.*\n)*\s*if \(state\.paid && state\.paid\.meta && state\.paid\.meta\.connected && !state\.paid\.meta\.ready\) loadMetaAds\(\);/.test(ui), 'partial Meta save leaves the box stuck');
 });
 
 // ── A mocked end-to-end stage. Async, so it runs in main() (the runner is CJS: no top-level await).

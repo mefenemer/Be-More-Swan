@@ -1847,7 +1847,10 @@
 
   /** LinkedIn | Meta switch on a not-yet-staged campaign. Only drawn when more than one is offered. */
   function networkChooser(c, network) {
-    const offered = (state.paid && state.paid.offeredNetworks) || [];
+    const p = state.paid || {};
+    // Only for a workspace that can advertise at all — above "not part of your plan" a switch is noise.
+    if (!p.featureEnabled || !p.anyNetwork) return '';
+    const offered = p.offeredNetworks || [];
     if (offered.length < 2) return '';
     return `
       <div class="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Advertise on">
@@ -2757,6 +2760,9 @@
       if (!r.ok) throw new Error(d.error || 'Could not save that.');
       state.metaAds = null;
       await load();
+      // A partial save (an account but no Page yet) leaves Meta not ready: fetch the lists again,
+      // or the box would sit on "Checking…" with no pickers (review on d2a2f13e).
+      if (state.paid && state.paid.meta && state.paid.meta.connected && !state.paid.meta.ready) loadMetaAds();
     } catch (err) {
       say(err.message || 'Could not save that.', 'error');
       metaSave.disabled = false;
