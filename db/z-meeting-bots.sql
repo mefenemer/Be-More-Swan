@@ -42,8 +42,10 @@ CREATE TABLE IF NOT EXISTS meeting_bots (
     created_at            TIMESTAMP NOT NULL DEFAULT now(),
     updated_at            TIMESTAMP NOT NULL DEFAULT now()
 );
--- Pressing Send twice sends one bot.
-CREATE UNIQUE INDEX IF NOT EXISTS meeting_bots_org_url_join_uq ON meeting_bots (organisation_id, meeting_url, join_at);
+-- Pressing Send twice sends one bot. OPEN bots only: a cancelled, refused or finished bot must not block booking the same
+-- meeting again for the same time (review of #769). meeting-bot-db.ts uses the same condition as its conflict target.
+CREATE UNIQUE INDEX IF NOT EXISTS meeting_bots_org_url_join_open_uq ON meeting_bots (organisation_id, meeting_url, join_at)
+    WHERE status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended');
 CREATE UNIQUE INDEX IF NOT EXISTS meeting_bots_recall_uq ON meeting_bots (recall_region, recall_bot_id) WHERE recall_bot_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS meeting_bots_open_idx ON meeting_bots (status, updated_at) WHERE status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended');
 CREATE INDEX IF NOT EXISTS meeting_bots_org_idx ON meeting_bots (organisation_id, join_at DESC);

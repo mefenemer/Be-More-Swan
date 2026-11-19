@@ -7519,7 +7519,9 @@ export const meetingBots = pgTable("meeting_bots", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
-  uniqueIndex("meeting_bots_org_url_join_uq").on(t.organisationId, t.meetingUrl, t.joinAt),
+  // Open bots only (z-meeting-bots.sql): a cancelled or finished bot never blocks re-booking the same time.
+  uniqueIndex("meeting_bots_org_url_join_open_uq").on(t.organisationId, t.meetingUrl, t.joinAt)
+    .where(sql`${t.status} IN ('scheduled','joining','waiting_room','in_call','ended')`),
   check("meeting_bots_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
   check("meeting_bots_region_check", sql`${t.recallRegion} IN ('eu','us')`),
   check("meeting_bots_source_check", sql`${t.source} IN ('link','chat','calendar')`),

@@ -294,7 +294,14 @@ await test('sendMeetingBot checks the flag, the assistant, DPA 1.2, the link and
     }
     assert.match(src, /export const BOT_DPA_VERSIONS = \['1\.2'\];/, 'only DPA 1.2 covers meetings the Note Taker joins');
     // Review of #769: "now" looks back only, so a recurring link's future booking never blocks today's call.
-    assert.ok(fn.includes('lte(meetingBots.joinAt, now)'), 'the immediate duplicate check is bounded by now');
+    assert.ok(fn.includes('lte(meetingBots.joinAt, new Date(now.getTime() + SCHEDULE_AHEAD_MS))'), 'the immediate check sees a booking about to join, not next week\'s');
+    // Review round 2: the index and the conflict target cover OPEN bots only, so a cancelled or refused bot never blocks re-booking.
+    assert.ok(fn.includes('where: OPEN_BOT_SQL })'));
+    assert.match(read('db/z-meeting-bots.sql'), /meeting_bots_org_url_join_open_uq ON meeting_bots \(organisation_id, meeting_url, join_at\)\s+WHERE status IN \('scheduled', 'joining', 'waiting_room', 'in_call', 'ended'\);/);
+    assert.ok(!/meeting_bots_org_url_join_uq\b/.test(read('db/z-meeting-bots.sql')), 'no full (non-partial) index');
+    // The region is the workspace owner's, never the sender's.
+    assert.ok(fn.includes('regionFor(db, i.organisationId)'));
+    assert.match(src, /eq\(userOrganisations\.role, 'owner'\)/);
     // A bot Recall accepted but whose id we couldn't save is withdrawn, not left untracked.
     assert.ok(fn.indexOf('removeRecallBot(region, recallBotId, true)') > recall, 'withdrawn after a failed save');
 });
@@ -306,6 +313,11 @@ await test('cancel marks a bot cancelled only when Recall deleted it; a bot alre
     assert.ok(fn.indexOf("how !== 'deleted'") < fn.indexOf("status: 'cancelled'"));
     const rc = read('src/utils/meeting-bot-recall.ts');
     assert.match(rc, /Promise<'deleted' \| 'left' \| null>/);
+    // A member limited to other assistants can't remove this Note Taker's bots by id (review round 2).
+    assert.ok(fn.includes('canAccessAssistant(access, row.aiAssistantId)'));
+    const ep = read('netlify/functions/meeting-bots.ts');
+    assert.ok(ep.includes('removeMeetingBot(db, organisationId, botId, assistantAccess)'));
+    assert.equal((ep.match(/canAccessAssistant\(assistantAccess, assistantId\)/g) ?? []).length, 2, 'list and send check access too');
 });
 
 await test('the endpoint sends only through sendMeetingBot; the webhook fails closed and verifies before it parses', () => {

@@ -45,7 +45,7 @@ export const RECALL_HOSTS: Record<RecallRegion, string> = { eu: 'eu-central-1.re
 
 /**
  * UK and EU workspaces run in the EU (Frankfurt); US workspaces in the US (docs/note-taker-bot-legal.md §2). Read from
- * the owner's billing country (free text): anything that reads as the United States is 'us', everything else, and no
+ * the workspace OWNER's billing country (free text; meeting-bot-db.ts regionFor): anything that reads as the United States is 'us', everything else, and no
  * country at all, is 'eu' (we are UK first). Pure.
  */
 export function recallRegionFor(country: string | null | undefined): RecallRegion {

@@ -10,10 +10,11 @@
 
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations } from '../../db/schema';
+import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations, userOrganisations } from '../../db/schema';
+import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, OPEN_BOT_STATUSES, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, reserveUnits,
     type BotStatus, type RecallRegion,
 } from './meeting-bot';
@@ -88,12 +89,23 @@ export async function hasAcceptedBotDpa(db: Db, organisationId: number): Promise
     return Boolean(r);
 }
 
-/** The Recall region for a workspace, from the sender's billing country (UK first: no country = EU). */
-async function regionFor(db: Db, userId: number): Promise<RecallRegion> {
-    const [b] = await db.select({ country: billingInformation.country }).from(billingInformation)
-        .where(eq(billingInformation.userId, userId)).limit(1).catch(() => [] as { country: string | null }[]);
+/**
+ * The Recall region for a WORKSPACE, from its owner's billing country (UK first: no country = EU). The owner, not the
+ * sender, so every bot of one workspace runs in one region (review of #769; legal drafts §2).
+ */
+async function regionFor(db: Db, organisationId: number): Promise<RecallRegion> {
+    const [b] = await db.select({ country: billingInformation.country }).from(userOrganisations)
+        .innerJoin(billingInformation, eq(billingInformation.userId, userOrganisations.userId))
+        .where(and(eq(userOrganisations.organisationId, organisationId), eq(userOrganisations.role, 'owner')))
+        .limit(1).catch(() => [] as { country: string | null }[]);
     return recallRegionFor(b?.country ?? null);
 }
+
+/**
+ * The partial unique index's condition (z-meeting-bots.sql), as the insert's ON CONFLICT predicate so Postgres infers that
+ * index. Unqualified on purpose: it must read like the index's own WHERE.
+ */
+const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended')");
 
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
     if (!(await isFeatureEnabled(i.organisationId, MEETING_BOT_FLAG))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
@@ -116,19 +128,19 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     const lengthLimitMinutes = cleanLengthLimit(i.lengthLimitMinutes);
 
     // Pressing Send twice sends one bot: the same link, still open, sent in the last few hours (or booked for the same
-    // time). "Now" looks back only: a recurring link's FUTURE booking (next week's standup) is a different meeting.
-    // Two presses racing past this check still send one: an immediate join is stored on the minute (immediateJoinAt),
-    // so the second insert hits the unique index below.
+    // time). "Now" also sees a bot booked for the next 10 minutes (it is about to join this same call), but not a recurring
+    // link's LATER booking (next week's standup is a different meeting). Two presses racing past this check still send
+    // one: an immediate join is stored on the minute (immediateJoinAt), so the second insert hits the unique index below.
     const [open] = await db.select().from(meetingBots).where(and(
         eq(meetingBots.organisationId, i.organisationId), eq(meetingBots.meetingUrl, link.url),
         inArray(meetingBots.status, [...OPEN_BOT_STATUSES]),
         when.scheduled
             ? eq(meetingBots.joinAt, when.joinAt)
-            : and(gt(meetingBots.joinAt, new Date(now.getTime() - 3 * 60 * 60 * 1000)), lte(meetingBots.joinAt, now)),
+            : and(gt(meetingBots.joinAt, new Date(now.getTime() - 3 * 60 * 60 * 1000)), lte(meetingBots.joinAt, new Date(now.getTime() + SCHEDULE_AHEAD_MS))),
     )).limit(1);
     if (open) return { ok: true, bot: botView(open), alreadySent: true };
 
-    const region = await regionFor(db, i.userId);
+    const region = await regionFor(db, i.organisationId);
     if (!recallKey(region)) return fail(503, 'not_configured', 'The Note Taker can\'t join calls right now. Please try again later.');
 
     // Check before: room in the allowance for the whole length limit (the charge after is by the real minutes).
@@ -140,10 +152,12 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
         organisationId: i.organisationId, aiAssistantId: assistant.id, requestedByUserId: i.userId, source: i.source,
         platform: link.platform, meetingUrl: link.url, title, joinAt: when.joinAt, lengthLimitMinutes, recallRegion: region,
         status: when.scheduled ? 'scheduled' : 'joining', createdAt: now, updatedAt: now,
-    }).onConflictDoNothing({ target: [meetingBots.organisationId, meetingBots.meetingUrl, meetingBots.joinAt] }).returning();
+    }).onConflictDoNothing({ target: [meetingBots.organisationId, meetingBots.meetingUrl, meetingBots.joinAt], where: OPEN_BOT_SQL }).returning();
     if (!row) {
+        // Only an OPEN bot can have collided (the index is partial), so this is the press that raced us.
         const [existing] = await db.select().from(meetingBots).where(and(
-            eq(meetingBots.organisationId, i.organisationId), eq(meetingBots.meetingUrl, link.url), eq(meetingBots.joinAt, when.joinAt))).limit(1);
+            eq(meetingBots.organisationId, i.organisationId), eq(meetingBots.meetingUrl, link.url), eq(meetingBots.joinAt, when.joinAt),
+            inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).limit(1);
         if (existing) return { ok: true, bot: botView(existing), alreadySent: true };
         return fail(500, 'not_saved', 'The Note Taker could not be sent. Please try again.');
     }
@@ -194,9 +208,11 @@ export type RemoveBotResult = { ok: true; bot: MeetingBotView } | { ok: false; s
  * "Cancel" a booked bot or "Remove from call" a live one. A bot already in the call leaves; what it heard is still
  * written up (plan §6), and its state follows from Recall's events.
  */
-export async function removeMeetingBot(db: Db, organisationId: number, botId: number): Promise<RemoveBotResult> {
+export async function removeMeetingBot(db: Db, organisationId: number, botId: number, access: AssistantAccess = null): Promise<RemoveBotResult> {
     const [row] = await db.select().from(meetingBots).where(and(eq(meetingBots.id, botId), eq(meetingBots.organisationId, organisationId))).limit(1);
-    if (!row) return { ok: false, status: 404, error: 'That Note Taker was not found.' };
+    // A member limited to other assistants can't touch this Note Taker's bots (the request names only a bot id, so
+    // requireTenant's assistant check can't see it; review of #769). Same answer as not found: no hint it exists.
+    if (!row || (row.aiAssistantId !== null && !canAccessAssistant(access, row.aiAssistantId))) return { ok: false, status: 404, error: 'That Note Taker was not found.' };
     if (!OPEN_BOT_STATUSES.includes(row.status as BotStatus) || row.status === 'ended') return { ok: true, bot: botView(row) };
     const notJoinedYet = !row.joinedAt;
     let how: 'deleted' | 'left' | null = 'deleted';

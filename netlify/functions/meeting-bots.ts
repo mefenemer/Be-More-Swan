@@ -10,6 +10,7 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
+import { canAccessAssistant } from '../../src/utils/assistant-access';
 import { requireTenant } from '../../src/utils/tenant';
 
 function json(statusCode: number, body: unknown) {
@@ -20,11 +21,12 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { userId, organisationId } = ctx;
+    const { userId, organisationId, assistantAccess } = ctx;
 
     if (event.httpMethod === 'GET') {
         const assistantId = Number(event.queryStringParameters?.assistantId);
         if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
+        if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
         try {
             return json(200, { bots: await listMeetingBots(db, organisationId, assistantId) });
         } catch (err) {
@@ -41,13 +43,15 @@ export default withLambda(async (event) => {
     if (body.action === 'remove') {
         const botId = Number(body.botId);
         if (!Number.isInteger(botId) || botId <= 0) return json(400, { error: 'botId is required.' });
-        const r = await removeMeetingBot(db, organisationId, botId);
+        const r = await removeMeetingBot(db, organisationId, botId, assistantAccess);
         return r.ok ? json(200, { bot: r.bot }) : json(r.status, { error: r.error });
     }
     if (body.action !== 'send') return json(400, { error: 'Unknown action.' });
 
     const assistantId = Number(body.assistantId);
     if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
+    // requireTenant already refuses a named assistant outside a member's list; checked here too, as remove must.
+    if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
     const r = await sendMeetingBot(db, {
         organisationId, userId, assistantId,
         meetingUrl: body.meetingUrl, title: body.title, joinAt: body.joinAt, lengthLimitMinutes: body.lengthLimitMinutes,
