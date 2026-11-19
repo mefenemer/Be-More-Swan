@@ -2,14 +2,18 @@
 // (docs/note-taker-bot-plan.md §4). The GUI dialog and the chat card both come here, so a bot is sent one way only
 // (src/utils/meeting-bot-db.ts sendMeetingBot). Behind the meeting_bot flag and DPA 1.2.
 //
-//   GET  ?assistantId=N                                   → 200 { bots: MeetingBotView[] }
+//   GET  ?assistantId=N                                   → 200 { available, dpaAccepted, tasksPer5Min, bots: MeetingBotView[] }
+//        available = the meeting_bot flag is on for this workspace (the GUI shows nothing otherwise)
 //   POST { action: 'send', assistantId, meetingUrl, title?, joinAt?, lengthLimitMinutes?, source? }
 //                                                         → 200 { bot, alreadySent } | 4xx/5xx { error, code }
 //   POST { action: 'remove', botId }                      → 200 { bot } | 4xx/5xx { error }
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
+import { hasAcceptedBotDpa, listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
+import { MEETING_BOT_FLAG } from '../../src/utils/meeting-bot';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { getTaskCosts } from '../../src/utils/task-costs';
 import { canAccessAssistant } from '../../src/utils/assistant-access';
 import { requireTenant } from '../../src/utils/tenant';
 
@@ -27,12 +31,16 @@ export default withLambda(async (event) => {
         const assistantId = Number(event.queryStringParameters?.assistantId);
         if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
         if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
+        const available = await isFeatureEnabled(organisationId, MEETING_BOT_FLAG).catch(() => false);
+        if (!available) return json(200, { available: false, dpaAccepted: false, tasksPer5Min: 0, bots: [] });
         try {
-            return json(200, { bots: await listMeetingBots(db, organisationId, assistantId) });
+            const [bots, dpaAccepted, costs] = await Promise.all([
+                listMeetingBots(db, organisationId, assistantId), hasAcceptedBotDpa(db, organisationId), getTaskCosts(),
+            ]);
+            return json(200, { available: true, dpaAccepted, tasksPer5Min: costs.weights.meeting_bot_call, bots });
         } catch (err) {
-            // The table may not exist yet (z-meeting-bots.sql not applied): nothing sent, nothing to list.
             console.error('[meeting-bots] list failed', err instanceof Error ? err.message : err);
-            return json(200, { bots: [] });
+            return json(200, { available: true, dpaAccepted: false, tasksPer5Min: 0, bots: [] });
         }
     }
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });

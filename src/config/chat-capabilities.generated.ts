@@ -139,7 +139,8 @@ export const GENERATED_CHAT_MANIFEST = {
             "flags": [
                 "acceptsAttachments",
                 "transcriptAttachments",
-                "usesMeetingsSnapshot"
+                "usesMeetingsSnapshot",
+                "usesMeetingBots"
             ],
             "contentSnapshot": null,
             "offersOwnCards": true,
@@ -311,7 +312,8 @@ export const GENERATED_CHAT_MANIFEST = {
         "transcriptAttachments",
         "contentSnapshot",
         "usesAudienceSnapshot",
-        "usesMeetingsSnapshot"
+        "usesMeetingsSnapshot",
+        "usesMeetingBots"
     ],
     "promptBlocks": [
         "rolePrompt",
@@ -415,6 +417,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "listing_decisions",
         "listings_add",
         "meeting_action_proposal",
+        "meeting_bot_proposal",
         "mentor_break_even",
         "mentor_business_profile",
         "mentor_business_stage",

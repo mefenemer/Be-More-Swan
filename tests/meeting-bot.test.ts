@@ -314,8 +314,8 @@ await test('review round 4: only a real deletion counts; bots go before every wo
     const send = bot.slice(bot.indexOf('export async function sendMeetingBot'), bot.indexOf('// ── Listing and removing'));
     assert.ok(send.includes('.where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();'), 'the id is saved only onto an open row');
     assert.ok(send.indexOf('if (!saved) {') < send.lastIndexOf('removeRecallBot(region, recallBotId, true)'), 'and the bot withdrawn otherwise');
-    assert.match(bot, /export const BOT_POLL_BUDGET_MS = 15_000;/);
-    assert.ok(bot.includes('i < open.length && timeLeft(); i += POLL_BATCH'));
+    assert.match(bot, /export const BOT_POLL_BUDGET_MS = 10_000;/); // 15 → 12 → 10 s with media's and imports' own windows (review of #774)
+    assert.ok(bot.includes('runBatchesWithinBudget(open, POLL_BATCH, budgetMs, POLL_CALL_TIMEOUT_MS, pollOne)'));
 });
 
 // ── Safety order (source scans) ──────────────────────────────────────────────────────────────────

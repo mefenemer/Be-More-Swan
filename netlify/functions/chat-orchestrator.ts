@@ -169,6 +169,7 @@ import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-pl
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { buildMeetingsSnapshot, meetingActionFromUiElement, meetingActionsPromptBlock, resolveMeetingActionProposal } from '../../src/utils/chat-meeting-action';
+import { MEETING_BOT_PROPOSAL_TYPE, buildMeetingBotsSnapshot, meetingBotFromUiElement, meetingBotPromptBlock, resolveMeetingBotProposal } from '../../src/utils/chat-meeting-bot';
 import { MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt, meetingHubRecord, normaliseMinutesCard } from '../../src/utils/meeting-minutes';
 import { chatRevisionTarget, persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
@@ -315,6 +316,9 @@ interface RouteContext {
     /** This Meeting Note Taker's meetings by id — read per turn for routes with usesMeetingsSnapshot.
      *  src/utils/chat-meeting-action.ts. */
     meetingsSnapshot?: string | null;
+    /** The Note Taker's bots in calls, read per turn for routes with usesMeetingBots; null while the meeting_bot flag is
+     *  off (the block is then left out). src/utils/chat-meeting-bot.ts. */
+    meetingBotsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -364,6 +368,8 @@ interface AssistantRoute {
     usesAudienceSnapshot?: boolean;
     /** When true the handler reads this assistant's meetings for this turn (rc.meetingsSnapshot). */
     usesMeetingsSnapshot?: boolean;
+    /** When true the handler reads this Note Taker's bots in calls for this turn (rc.meetingBotsSnapshot). */
+    usesMeetingBots?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -2727,6 +2733,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         acceptsAttachments: true,
         transcriptAttachments: true,
         usesMeetingsSnapshot: true,
+        usesMeetingBots: true,
         // The rules and JSON shape are shared with the "New meeting" form (src/utils/meeting-minutes.ts).
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
@@ -2741,7 +2748,9 @@ ${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}
             }),
             // Chat only: its meetings, and the confirm card that acts on one (finish plan step 6).
             meetingActionsPromptBlock(rc.meetingsSnapshot ?? null),
-        ].join('\n\n'),
+            // Chat only, while the meeting_bot flag is on: send the Note Taker into a call (docs/note-taker-bot-plan.md).
+            meetingBotPromptBlock(rc.meetingBotsSnapshot ?? null),
+        ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
 
@@ -3588,6 +3597,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const audienceSnapshot = route.usesAudienceSnapshot ? await buildAudienceSnapshot(db, orgId) : null;
     // Per turn: a meeting approved or edited in the Inbox a moment ago must not be offered again.
     const meetingsSnapshot = route.usesMeetingsSnapshot ? await buildMeetingsSnapshot(db, orgId, session.aiAssistantId) : null;
+    const meetingBotsSnapshot = route.usesMeetingBots ? await buildMeetingBotsSnapshot(db, orgId, session.aiAssistantId) : null;
 
     // Per turn: an edit made on the Website tab a moment ago must be visible to the next message.
     const siteSnapshot = route.usesSiteSnapshot
@@ -3664,6 +3674,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         shopSnapshot,
         audienceSnapshot,
         meetingsSnapshot,
+        meetingBotsSnapshot,
         mentorSnapshot,
         attachmentsBlock,
     });
@@ -4053,6 +4064,18 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === 'meeting_action_proposal') {
             uiElement = meetingActionReq ? await resolveMeetingActionProposal(db, orgId, session.aiAssistantId, meetingActionReq) : null;
             if (!uiElement) content = 'I couldn’t find that meeting among this assistant’s meetings, so I haven’t set anything up. Which one do you mean? You can also open it on the Inbox tab.';
+        }
+        // Send the Note Taker into a call, or take one out (src/utils/chat-meeting-bot.ts): rebuilt from facts; only the
+        // click acts, through the same server action as the Inbox's "Send to a call".
+        if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === MEETING_BOT_PROPOSAL_TYPE) {
+            const asked = (uiElement as { action?: unknown }).action;
+            const botReq = meetingBotFromUiElement(uiElement);
+            uiElement = botReq ? await resolveMeetingBotProposal(db, orgId, session.aiAssistantId, botReq) : null;
+            if (!uiElement) {
+                content = asked === 'send'
+                    ? 'Which meeting should the Note Taker join? Paste the Google Meet or Microsoft Teams link from the invite.'
+                    : 'I couldn’t find that Note Taker booking, so I haven’t set anything up. Which one do you mean? They’re listed above the Inbox.';
+            }
         }
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;

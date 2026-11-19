@@ -9,6 +9,8 @@ import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 import type { PickupPlatform } from './meeting-pickup';
 
 export const MEETING_BOT_FLAG = 'meeting_bot';
+/** Plan B7: Zoom joins only once our Zoom app passes Zoom's review (OBF). No row needed: absent = off. */
+export const MEETING_BOT_ZOOM_FLAG = 'meeting_bot_zoom';
 
 /**
  * How the minutes writer is told a bot meeting reached it (instead of meeting-pickup.ts PICKUP_CHANNEL_BLOCK). Carries the
@@ -341,4 +343,24 @@ export function verifyRecallSignature(
         if (given.some((g) => g.length === expected.length && timingSafeEqual(g, expected))) return region;
     }
     return null;
+}
+
+// ── Working within a time budget (the 15-minute poll; review of #774) ──────────────────────────────
+
+/**
+ * Runs `fn` over `items` in batches of `batch` at once. The FIRST batch always runs (a step that can never start is the
+ * bug review #774 found: a budget equal to one call's timeout left the media deletion with no time at all); each later
+ * batch only starts if a whole call (`callTimeoutMs`) still fits in `budgetMs`. What is left waits for the next run.
+ * `clock` is for tests. Pure apart from `fn`.
+ */
+export async function runBatchesWithinBudget<T, R>(
+    items: readonly T[], batch: number, budgetMs: number, callTimeoutMs: number, fn: (item: T) => Promise<R>, clock: () => number = Date.now,
+): Promise<R[]> {
+    const started = clock();
+    const out: R[] = [];
+    for (let i = 0; i < items.length; i += batch) {
+        if (i > 0 && clock() - started + callTimeoutMs > budgetMs) break;
+        out.push(...await Promise.all(items.slice(i, i + batch).map(fn)));
+    }
+    return out;
 }

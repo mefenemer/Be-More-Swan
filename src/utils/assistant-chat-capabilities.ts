@@ -135,6 +135,7 @@ export const ROUTE_FLAG_SOURCES: Record<string, ChatSource> = {
     acceptsAttachments: { label: 'Files the user attaches', kind: 'data', sees: 'Pictures and documents attached in this conversation (paperclip, drag or paste).', source: 'src/utils/chat-attachments.ts', applies: (c) => !!c.route?.flags.includes('acceptsAttachments') && !c.route?.flags.includes('transcriptAttachments') },
     transcriptAttachments: { label: 'Meeting transcripts the user attaches', kind: 'data', sees: 'A transcript file attached in this conversation (.txt, .docx, .pdf, or a .vtt/.srt caption file from Zoom, Teams or Google Meet, with timings removed), up to about 2 hours of talk. The newest one in full; earlier ones by name only. No pictures.', source: 'src/utils/meeting-transcript.ts', applies: (c) => !!c.route?.flags.includes('transcriptAttachments') },
     usesMeetingsSnapshot: { label: 'Its meetings', kind: 'data', sees: 'Its latest meetings by id: waiting, approved or rejected, how many action items, which attendees have no email, and the follow-up email of the ones waiting.', source: 'src/utils/chat-meeting-action.ts', applies: (c) => !!c.route?.flags.includes('usesMeetingsSnapshot'), cards: () => ['meeting_action_proposal'] },
+    usesMeetingBots: { label: 'Its Note Taker bookings', kind: 'data', sees: 'While sending the Note Taker into calls is switched on: its booked and live bots by id (platform, name, time, state), the cost, and whether the workspace has accepted DPA 1.2. Never meeting text.', source: 'src/utils/chat-meeting-bot.ts', applies: (c) => !!c.route?.flags.includes('usesMeetingBots'), cards: () => ['meeting_bot_proposal'] },
     contentSnapshot: { label: 'Its own posts / articles / emails', kind: 'data', sees: 'Its own queue column by column (drafts, scheduled, published), with guest review comments on posts.', source: 'src/utils/content-snapshot.ts', applies: (c) => !!c.route?.contentSnapshot },
     usesAudienceSnapshot: { label: 'The Audience', kind: 'data', sees: 'Audience counts, segments, tags, sign-up forms and custom fields. Never individual people.', source: 'src/utils/chat-audience.ts', applies: (c) => !!c.route?.flags.includes('usesAudienceSnapshot') },
 };
@@ -210,6 +211,7 @@ export const CARD_LABELS: Record<string, string> = {
     kb_article_proposal: 'Add a Knowledge Base article',
     lead_action_proposal: 'Approve, reject or contact leads',
     meeting_action_proposal: 'Approve or reject a meeting, add an attendee’s email, change the follow-up email',
+    meeting_bot_proposal: 'Send the Note Taker into a Meet or Teams call, or cancel / remove one (when switched on)',
     lead_scoring_card: 'Score a lead against the ideal customer profile',
     listing_decisions: 'Approve or remove listings',
     listings_add: 'Add listings (events, directory entries)',

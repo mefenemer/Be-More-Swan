@@ -2489,6 +2489,8 @@ function _rqMeetingPickedUp(r) {
     const link = typeof p.link === 'string' && /^https:\/\//i.test(p.link)
         ? ` · <a href="${_rqEsc(p.link)}" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-900">Open the call</a>`
         : '';
+    // The Note Taker joined this one itself (pickedUpFrom.via 'bot'; docs/note-taker-bot-plan.md).
+    if (p.via === 'bot') return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Joined by Note Taker · ${_rqEsc(p.label)}</span> Written from the Note Taker's own transcript${link}</p>`;
     return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Picked up from ${_rqEsc(p.label)}</span> Written from the platform's own transcript${link}</p>`;
 }
 
@@ -7475,6 +7477,10 @@ function _applyDashboardRegistry(data) {
         setText('detail-rq-primary-label', rqNew.label);
         if (rqPrimaryBtn) rqPrimaryBtn.onclick = () => _openRoleForm(rqNew.kind, data);
     }
+    // The Note Taker joins a call itself (docs/note-taker-bot-plan.md step 3): "Send to a call" + the Live & upcoming
+    // strip. The component shows nothing unless the meeting_bot flag is on; every other role clears it.
+    if (data.roleKey === 'meeting_note_taker') window.MeetingBots?.mount({ assistantId: data.id, assistantName: data.name });
+    else window.MeetingBots?.unmount();
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
     // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent

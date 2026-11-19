@@ -14,6 +14,7 @@ import { refreshBlogKeywordCards } from './chat-blog-keywords';
 import { refreshEmailActionCards } from './chat-email-action';
 import { refreshLeadActionCards } from './chat-lead-action';
 import { refreshMeetingActionCards } from './chat-meeting-action';
+import { refreshMeetingBotCards } from './chat-meeting-bot';
 import { refreshAudienceCards } from './chat-audience';
 import { refreshSettingsCards } from './chat-assistant-settings';
 import { refreshRuleCards } from './chat-rules';
@@ -35,6 +36,7 @@ export async function refreshStoredCards<M extends { uiElement: unknown }>(
     out = await refreshEmailActionCards(db, organisationId, aiAssistantId, out);
     out = await refreshLeadActionCards(db, organisationId, aiAssistantId, out);
     out = await refreshMeetingActionCards(db, organisationId, aiAssistantId, out);
+    out = await refreshMeetingBotCards(db, organisationId, aiAssistantId, out);
     out = await refreshAudienceCards(db, organisationId, out);
     out = await refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out);
     out = await refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out);

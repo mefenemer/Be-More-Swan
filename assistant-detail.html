@@ -982,12 +982,18 @@
         <button type="button" id="detail-rq-full-btn" data-tab-full-btn="review-queue" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
           aria-pressed="false" title="Use the whole screen for this list"
           class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap">Full screen</button>
+        <!-- The Note Taker only, while the meeting_bot flag is on: send it into a Meet or Teams call (src/components/meeting-bots.js). -->
+        <button type="button" id="detail-rq-bot-btn" style="display:none"
+          class="hidden btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap">Send to a call</button>
         <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="tab-head-new btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           <span id="detail-rq-primary-label">New post</span>
         </button>
       </div>
     </div>
+
+    <!-- The Note Taker's bots in calls, booked or live (src/components/meeting-bots.js). Empty and hidden otherwise. -->
+    <div id="meeting-bots-strip" class="hidden" style="display:none"></div>
 
     <!-- The Lead Generator's stage strip — To approve → Following up → Replied → Finished → Archived
          (reviewQueue.staged; assistant-lead-outreach.js). Replaces the shared lifecycle columns

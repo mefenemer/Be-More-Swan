@@ -18,11 +18,11 @@ export class RecallError extends Error {
     constructor(message: string, readonly status: number) { super(message); }
 }
 
-async function call<T = Record<string, unknown>>(region: RecallRegion, method: string, path: string, body?: unknown): Promise<{ status: number; json: T }> {
+async function call<T = Record<string, unknown>>(region: RecallRegion, method: string, path: string, body?: unknown, timeoutMs = TIMEOUT_MS): Promise<{ status: number; json: T }> {
     const key = recallKey(region);
     if (!key) throw new RecallError(`Recall ${region} is not configured`, 503);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(`https://${RECALL_HOSTS[region]}/api/v1${path}`, {
             method,
@@ -64,9 +64,10 @@ export interface RecallBotState {
     transcriptStatus: string | null;
 }
 
-export async function getRecallBot(region: RecallRegion, botId: string): Promise<RecallBotState> {
+/** `timeoutMs`: the 15-minute poll passes a short one so a slow Recall can't run the scheduled job past its limit. */
+export async function getRecallBot(region: RecallRegion, botId: string, timeoutMs = TIMEOUT_MS): Promise<RecallBotState> {
     const r = await call<{ status_changes?: { code?: string; sub_code?: string | null; created_at?: string }[]; recordings?: { media_shortcuts?: { transcript?: { status?: { code?: string }; data?: { download_url?: string } } } }[] }>(
-        region, 'GET', `/bot/${encodeURIComponent(botId)}/`);
+        region, 'GET', `/bot/${encodeURIComponent(botId)}/`, undefined, timeoutMs);
     if (r.status !== 200) throw new RecallError(reasonOf(r.json) || `Recall bot read failed (${r.status})`, r.status);
     const changes = Array.isArray(r.json.status_changes) ? r.json.status_changes : [];
     const last = changes[changes.length - 1];
@@ -134,7 +135,7 @@ export async function removeRecallBot(region: RecallRegion, botId: string, notJo
  * gone (404). Anything else, including 400/409 while the bot is still running, is NOT done, so it is tried again
  * (review of #769: counting 409 as done could mark a recording deleted that Recall still held).
  */
-export async function deleteRecallMedia(region: RecallRegion, botId: string): Promise<boolean> {
-    const r = await call(region, 'POST', `/bot/${encodeURIComponent(botId)}/delete_media/`);
+export async function deleteRecallMedia(region: RecallRegion, botId: string, timeoutMs = TIMEOUT_MS): Promise<boolean> {
+    const r = await call(region, 'POST', `/bot/${encodeURIComponent(botId)}/delete_media/`, undefined, timeoutMs);
     return r.status === 404 || (r.status >= 200 && r.status < 300);
 }
