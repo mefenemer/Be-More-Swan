@@ -231,13 +231,16 @@ check('one slow call can’t overrun the budget: each read waits at most the tim
     assert.equal(callTimeoutMs(1_000 + 60_000, 1_000), 10_000);
     assert.equal(callTimeoutMs(1_000, 5_000), 500, 'past the deadline still gets a short try');
     const src = read('src/utils/page-comments.ts');
-    assert.ok(src.includes('fetchPostComments(opts.token, post.platformPostId, opts.deadline)'));
+    assert.ok(src.includes('fetchPostComments(opts.token, post.platformPostId, opts.deadline, (f) => { failure = f; })'));
     assert.ok(src.includes('fetchCommentReplies(opts.token, c.commentUrn, opts.deadline)'));
 });
 
 check('a read cut off by the deadline counts as left for later, never as LinkedIn refusing', async () => {
     const src = read('src/utils/page-comments.ts');
-    assert.ok(src.includes('if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }'));
+    const at = src.indexOf('if (!topLevel) {');
+    assert.ok(at > 0);
+    const block = src.slice(at, at + 400);
+    assert.ok(block.indexOf('{ r.skippedForTime++; continue; }') > 0 && block.indexOf('{ r.skippedForTime++; continue; }') < block.indexOf('r.failedPosts++'), 'past the deadline → deferred, before any failure is counted');
     // Past the deadline, the plain retry is skipped: one call, not two.
     await withFetch(() => json({}, 504), async (calls) => {
         assert.equal(await fetchPostComments('tok', 'urn:li:share:9', Date.now() - 1), null);
@@ -338,22 +341,53 @@ check('only postReply calls LinkedIn’s write endpoint', () => {
     assert.ok(src.indexOf('replyToComment(') > src.indexOf('export async function postReply('));
 });
 
-check('a post published with no connection_id still reaches stats and comments', () => {
-    // Staging 2026-11-19: "Post it now" queues with connection_id NULL; the publisher falls back to the
-    // org's newest active LinkedIn connection and never wrote it back, so loadPagePosts' plain join
-    // found zero Page posts. Both halves of the fix must stay.
+check('Page posts are chosen by the account that WROTE them, not by connection_id', () => {
+    // Staging 2026-11-19: post 202 went out from a personal profile; the same connection row was later
+    // reconnected as the Company Page (social-oauth-callback.ts updates in place), so a connection_id
+    // match claimed the profile's post for the Page. The recorded author is the only safe key.
     const pc = read('src/utils/page-comments.ts');
     const fn = pc.slice(pc.indexOf('export async function loadPagePosts('), pc.indexOf('export async function pageToken('));
     assert.ok(fn.length > 0, 'loadPagePosts found');
-    assert.ok(fn.includes('COALESCE(${scheduledPosts.connectionId}'), 'join falls back when connection_id is NULL');
-    assert.ok(fn.includes("AND sc2.service_name = 'linkedin'") && fn.includes('AND sc2.created_at <= ${scheduledPosts.publishedAt}'), 'counts the LinkedIn connections that existed when it went out, disconnected ones included');
-    assert.ok(fn.includes('eq(systemConnections.isActive, true)'), 'and that one must still be live');
-    assert.ok(fn.includes('HAVING count(*) = 1'), 'a NULL row is attributed only when the org has ONE LinkedIn connection — never guessed between a profile and a Page');
-    assert.ok(!fn.includes('ORDER BY sc2.updated_at'), 'no newest-wins guess: updated_at moves on every token refresh');
-    assert.ok(fn.includes('connectionId: systemConnections.id,'), 'groups by the resolved connection, not the NULL column');
-    assert.ok(!fn.includes('eq(systemConnections.id, scheduledPosts.connectionId)'), 'the plain join is gone');
+    assert.ok(fn.includes('eq(systemConnections.externalUserId, scheduledPosts.platformAuthorUrn)'), 'joined on the recorded author');
+    assert.ok(fn.includes("like(scheduledPosts.platformAuthorUrn, 'urn:li:organization:%')"), 'only posts a Page wrote');
+    assert.ok(fn.includes('eq(systemConnections.organisationId, scheduledPosts.organisationId)'), 'never another workspace\'s connection');
+    assert.ok(!fn.includes('scheduledPosts.connectionId'), 'connection_id plays no part — it can change identity on reconnect');
+    assert.ok(!fn.includes('COALESCE('), 'the NULL-connection guess is gone');
+    assert.ok(fn.includes('if (seen.has(row.id)) continue;'), 'a post is read once even if two connections match');
     const pub = read('netlify/functions/publish-social-posts.ts');
-    assert.ok(pub.includes('connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})'), 'publisher records the account it used');
+    assert.ok(pub.includes("const author = creds.externalUserId ? `, platform_author_urn = '${esc(String(creds.externalUserId))}'` : '';"), 'publisher records the author');
+    assert.ok(pub.includes("${usedConnection}${author} WHERE id = ${post.id}`"), 'in the same statement that marks it published — the two can never disagree');
+    assert.ok(!pub.includes('author not recorded for post'), 'no separate, silently-failing author write');
+    assert.ok(read('db/schema.ts').includes('platformAuthorUrn: text("platform_author_urn"),'));
+    assert.ok(read('db/z-scheduled-posts-author.sql').includes('ADD COLUMN IF NOT EXISTS platform_author_urn TEXT'));
+});
+
+check('a reply goes out AS the Page only under a post the Page wrote', () => {
+    const src = read('src/utils/page-comments.ts');
+    const fn = src.slice(src.indexOf('export async function postReply('));
+    const guard = fn.indexOf("if (!post || post.author !== conn.externalUserId)");
+    assert.ok(guard > 0, 'author checked against the Page connection');
+    assert.ok(guard < fn.indexOf('replyToComment('), 'before anything is posted');
+    assert.ok(guard < fn.indexOf('// Claim the row first'), 'before the row is claimed');
+    assert.ok(fn.includes("code: 'not_page_post'"));
+});
+
+check('a post deleted on LinkedIn (404) is an empty list, not a refused read; other refusals say why', async () => {
+    await withFetch(() => json({ message: 'Not Found' }, 404), async () => {
+        let reported = false;
+        assert.deepEqual(await fetchPostComments('tok', 'urn:li:share:9', undefined, () => { reported = true; }), []);
+        assert.equal(reported, false, 'gone is not a failure');
+    });
+    await withFetch(() => json({ message: 'Not enough permissions to access: GET /socialActions' }, 403), async (calls) => {
+        let got: { status: number; message: string } | null = null;
+        assert.equal(await fetchPostComments('tok', 'urn:li:share:9', undefined, (f) => { got = f; }), null);
+        assert.equal(calls.length, 2, 'name projection, then plain');
+        assert.equal(got!.status, 403);
+        assert.ok(got!.message.includes('Not enough permissions'));
+    });
+    const ingest = read('netlify/functions/ingest-linkedin-insights.ts');
+    assert.ok(ingest.includes('comments.failures.push(f)'), 'the ingest result carries the reasons');
+    assert.ok(ingest.includes('if (!isMissingTable(err)) throw err;'), 'a missing author column skips the tick instead of failing it');
 });
 
 queue.then(() => console.log(`\n${passed} passed`));

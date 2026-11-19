@@ -78,7 +78,11 @@ export default withLambda(async (event) => {
         }
         return json(400, { error: `Unknown action "${action}".` });
     } catch (err) {
-        if (isMissingTable(err)) return json(503, { error: 'Comments aren’t set up on this server yet.', code: 'not_set_up' });
+        if (isMissingTable(err)) {
+            // Logged too: a missing column can also be a real bug in a query, not just SQL not applied yet.
+            console.error('[page-comments] not set up (missing table or column)', { action, assistantId, err: err instanceof Error ? err.message : err });
+            return json(503, { error: 'Comments aren’t set up on this server yet.', code: 'not_set_up' });
+        }
         console.error('[page-comments] failed', { action, assistantId, err });
         return json(500, { error: 'Something went wrong — please try again.' });
     }
