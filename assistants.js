@@ -9072,7 +9072,15 @@ function _endCardLoading(id) {
 // state synchronously (_setMetricsEmptyState('pending')), so there is nothing to wait for. _KPI_KEYS
 // is the surviving list of the same four keys.
 
+// ⚠️ Stale-response guard. Each call takes a ticket; only the newest call may touch the page after
+// an await. Without it, a slow get-assistant-context for one assistant (Orbit Scribe) landed after
+// the user had already opened another (Felix) and repainted Felix's page as Orbit Scribe — name,
+// "New meeting" button, _detailReviewQueue and all. A ticket, not an id compare: A → B → A leaves
+// two calls for A in flight, and only the second may paint.
+let _detailInitSeq = 0;
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
+    const _detailSeq = ++_detailInitSeq;
+    const _detailStale = () => _detailSeq !== _detailInitSeq;
     if (!assistantId) {
         // No assistant to load — don't leave the loading skeleton stuck on screen forever.
         document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
@@ -9329,8 +9337,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     window.bmsCachedFetch?.('/.netlify/functions/get-usage-summary').catch(() => {});
     try {
         const res = await fetch(`/.netlify/functions/get-assistant-context?id=${assistantId}`);
+        if (_detailStale()) return;
         if (res.status === 403) {
             const errBody = await res.json().catch(() => ({}));
+            if (_detailStale()) return;
             if (errBody.code === 'DPA_REQUIRED') {
                 // Show blocking DPA acceptance modal — user cannot view assistant config until accepted
                 const modal = document.getElementById('modal-dpa-required');
@@ -9346,7 +9356,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             throw new Error('Failed to load');
         }
         if (!res.ok) throw new Error('Failed to load');
-        currentData = await res.json();
+        const _ctx = await res.json();
+        // Checked BEFORE anything is written: every line below paints the page or sets a window.* global.
+        if (_detailStale()) return;
+        currentData = _ctx;
         // Read by list cards that name the assistant ("Written by Bella"), outside this closure.
         window._currentAssistantName = currentData.name || '';
 
@@ -9618,10 +9631,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     } finally {
         // Issue #177 follow-up: reveal the real (now role-correct) markup and drop the generic
         // loading skeleton — runs on success, failure, and the DPA-required early return alike,
-        // so the skeleton never gets stuck showing.
-        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
-        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        // so the skeleton never gets stuck showing. Not for a superseded call: the newer call owns
+        // the skeleton, and revealing it here would show its page half-built.
+        if (!_detailStale()) {
+            document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+            document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        }
     }
+    // A superseded call that failed (the catch above) must not go on to start the loaders below.
+    if (_detailStale()) return;
 
     // ── First-run welcome ─────────────────────────────────────────
     // A just-onboarded assistant (arriving with ?welcome=1, lifted onto the flag in
