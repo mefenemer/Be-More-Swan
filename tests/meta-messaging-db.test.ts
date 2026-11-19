@@ -162,7 +162,7 @@ async function main() {
         await check('the same person on a different connection is a separate conversation', async () => {
             await conn(1, 'facebook', 'page-2');
             await storeMessagingEvent(db, msg({ accountId: 'page-2', mid: 'x5' }));
-            const rows = await sql.unsafe(`SELECT connection_id FROM social_conversations WHERE participant_id = $1 ORDER BY id`, [PERSON]) as any[];
+            const rows = await sql.unsafe(`SELECT connection_id FROM social_conversations WHERE participant_id = $1 AND organisation_id = 1 AND platform = 'facebook' ORDER BY id`, [PERSON]) as any[];
             assert.equal(rows.length, 2);
             assert.equal(Number(rows[0].connection_id), fbConn);
         });
