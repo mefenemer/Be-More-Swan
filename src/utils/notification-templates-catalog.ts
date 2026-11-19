@@ -1229,6 +1229,16 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // DPA clause 5 notice: ElevenLabs added as a sub-processor (docs/elevenlabs-sub-processor-notice.md).
+        templateKey: 'subprocessor_elevenlabs_notice',
+        name: 'New sub-processor: ElevenLabs',
+        category: 'Compliance',
+        type: 'subprocessor_elevenlabs_notice',
+        title: 'We have added ElevenLabs to our list of sub-processors',
+        message: 'ElevenLabs (US) speaks the AI voiceovers for your videos and the Read aloud samples, and transcribes the audio you upload so captions line up. It has done this since early November, and we should have told you 14 days before. It acts as our processor under its Data Processing Addendum, with Standard Contractual Clauses and the UK Addendum. If you have a data protection reason to object, email privacy@bemoreswan.com within 14 days. The full list is on our Trust page.',
+        variables: [],
+    },
+    {
         // A change to task costs (Admin → Money → Task costs). Each change has its own `type`
         // (task_cost_change_<id>), the once-each mark, so this one template serves all of them.
         templateKey: 'task_cost_change',
