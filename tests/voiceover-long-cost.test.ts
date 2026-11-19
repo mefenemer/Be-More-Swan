@@ -12,6 +12,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { DEFAULT_TASK_WEIGHTS, COST_KEYS, MEDIA_KINDS, formatCost, isCostRise, voiceoverTasks, VOICEOVER_CHARS_PER_STEP, type TaskCosts } from '../src/config/task-weights';
 import { buildTasks, voiceoverScript } from '../src/utils/video-producer';
+import { formatPlanBlock } from '../src/utils/chat-plan-snapshot';
 import type { VideoBrief } from '../src/lib/storyboard';
 import { VOICEOVER_MAX_CHARS, LONG_VOICEOVER_MAX_CHARS } from '../src/lib/tts';
 
@@ -60,7 +61,8 @@ check('the quote counts the words the build will speak', () => {
 check('the build speaks and charges the same script', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.match(vp, /const script = voiceoverScript\(storyboard, brief\);/);
-    assert.match(vp, /await settle\('voiceover', VOICEOVER_CREDIT_COST, true, voiceoverTasks\(script\.length, await getTaskCosts\(\)\)\);/);
+    assert.match(vp, /const voTasks = voiceoverTasks\(script\.length, await getTaskCosts\(\)\);/);
+    assert.match(vp, /Math\.min\(voTasks, voiceoverTasks\(script\.length, await getTaskCosts\(p\.startedAt\)\)\)/, 'never above the quote when a cost change starts mid-build');
     assert.match(vp, /n \+= voiceoverTasks\(voiceoverScript\(storyboard, brief\)\.length, costs\)/);
 });
 
@@ -72,6 +74,12 @@ check('Admin, notices and SQL: a cost key in the baseline at 0, a rise when rais
     assert.strictEqual(isCostRise('ai_voiceover_long', 0, 1), true, 'raising it needs the 30-day notice');
     assert.match(read('db/z-task-costs.sql'), /\(1, 'ai_voiceover_long', 0\)/);
     assert.match(read('db/z-voiceover-long-cost.sql'), /VALUES \(1, 'ai_voiceover_long', 0\)\s*ON CONFLICT \(change_id, cost_key\) DO NOTHING/);
+});
+
+check('general chat states the long rate only once it is above 0 (review of #781)', () => {
+    const base = { planName: 'Grow', status: 'active' as const, gracePeriodEndsAt: null, monthlyTaskLimit: 500, taskCount: 10, bonusTasks: 0, tasksInFlight: 0, unified: true, now: new Date('2026-11-19T12:00:00Z') };
+    assert.doesNotMatch(formatPlanBlock({ ...base, costs: costsWith(0) }), /long video's voiceover/);
+    assert.match(formatPlanBlock({ ...base, costs: costsWith(1) }), /a long video's voiceover adds 1 task for each further 2,500 characters after the first 2,500/);
 });
 
 console.log(`\n${passed} checks passed`);

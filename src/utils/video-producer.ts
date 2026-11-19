@@ -1094,7 +1094,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                     });
                     voiceoverAssetId = vo.assetId;
                     words = vo.words;
-                    await settle('voiceover', VOICEOVER_CREDIT_COST, true, voiceoverTasks(script.length, await getTaskCosts()));
+                    // Never above the quote: a cost change that starts mid-build doesn't reach it (costs when "Make the video" was pressed).
+                    const voTasks = voiceoverTasks(script.length, await getTaskCosts());
+                    await settle('voiceover', VOICEOVER_CREDIT_COST, true, p.startedAt ? Math.min(voTasks, voiceoverTasks(script.length, await getTaskCosts(p.startedAt))) : voTasks);
                     // Presenter clips kept from before were synced to the OLD voiceover: made again from this one.
                     for (const s of storyboard.scenes) if (s.source === 'ai_presenter') dropPresenterScene(done, s.id);
                 } catch (err) {
