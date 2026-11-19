@@ -18803,6 +18803,7 @@ function _rqReviewRenderActive() {
         noteEl.innerHTML = `<p class="font-semibold">Posted</p>
           <p class="mt-0.5">${when ? `Published ${_rqEsc(when)}.` : 'Published.'}</p>
           ${post.platformPostUrl ? `<a href="${_rqEsc(post.platformPostUrl)}" target="_blank" rel="noopener" class="mt-1 inline-block font-semibold underline">View live post →</a>` : ''}
+          ${_rqResultsHtml(post)}
           ${_rqCopyElsewhereHtml()}`;
         noteEl.classList.remove('hidden');
         _rqCopyReset();
@@ -18960,6 +18961,45 @@ function _rqCopyCandidates() {
     return (window.PlatformConstants?.all || [])
         .filter(p => !wentOutOn.has(p.id))
         .filter(p => rqPlatformConnected(p.id));
+}
+
+// A published post's own results — impressions, reach, reactions, comments, shares — from the numbers the
+// scheduled ingests save (get-social-drafts.ts `results`, src/utils/post-results.ts). Only for platforms
+// with an ingest; before the first one runs it says when to expect them. A metric the platform doesn't
+// give is left out, never shown as 0.
+const _RQ_RESULTS_PLATFORMS = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram' };
+function _rqResultsHtml(post) {
+    const where = _RQ_RESULTS_PLATFORMS[String(post.platform || '').toLowerCase()];
+    if (!where) return '';
+    const r = post.results;
+    if (!r) {
+        // Promise results only when an ingest will actually read this post (get-social-drafts resultsExpected).
+        if (post.resultsExpected === 'pending') {
+            return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="pending"><p class="font-semibold">Results on ${where}</p><p class="mt-0.5">They appear here a few hours after the post goes out.</p></div>`;
+        }
+        if (post.resultsExpected === 'personal_profile') {
+            return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="none"><p class="mt-0.5">LinkedIn doesn't share results for posts on a personal profile. Post to your Company Page to see them here.</p></div>`;
+        }
+        return '';
+    }
+    const one = (v, singular, plural) => (v == null ? null : `<span class="whitespace-nowrap"><strong>${Number(v).toLocaleString('en-GB')}</strong> ${v === 1 ? singular : plural}</span>`);
+    const parts = [
+        one(r.impressions, 'impression', 'impressions'),
+        one(r.reach, 'person reached', 'people reached'),
+        one(r.videoViews, 'video view', 'video views'),
+        one(r.reactions, 'reaction', 'reactions'),
+        one(r.comments, 'comment', 'comments'),
+        one(r.shares, 'share', 'shares'),
+    ].filter(Boolean);
+    const at = r.fetchedAt ? new Date(r.fetchedAt) : null;
+    const ago = at && !isNaN(at) ? (() => {
+        const mins = Math.max(0, Math.round((Date.now() - at.getTime()) / 60000));
+        return mins < 60 ? `${mins} min ago` : mins < 2880 ? `${Math.round(mins / 60)} h ago` : at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    })() : null;
+    return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="shown">
+      <p class="font-semibold">Results on ${where}${ago ? ` <span class="font-normal opacity-80">· updated ${_rqEsc(ago)}</span>` : ''}</p>
+      <p class="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">${parts.length ? parts.join('') : `${where} hasn't reported any numbers for this post yet.`}</p>
+    </div>`;
 }
 
 function _rqCopyElsewhereHtml() {
