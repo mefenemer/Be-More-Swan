@@ -20,22 +20,33 @@
 import { getDb } from '../../db/client';
 import { postInsights } from '../../db/schema';
 import { fetchPostStatistics } from '../../src/utils/linkedin-page-api';
-import { INGEST_COMMENTS_BUDGET_MS, isMissingTable, loadPagePosts, pageToken, syncCommentsForConnection } from '../../src/utils/page-comments';
+import { INGEST_COMMENTS_BUDGET_MS, MAX_REPORTED_FAILURES, isMissingTable, loadPagePosts, pageToken, syncCommentsForConnection, type SyncResult } from '../../src/utils/page-comments';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export type LinkedInIngestResult = {
     connections: number; processed: number; updated: number; failed: number;
-    comments: { added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number } | { skipped: string };
+    comments: { added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number; failures: NonNullable<SyncResult['failures']> } | { skipped: string };
+    skipped?: string;
     durationMs: number;
 };
 
 export async function ingestLinkedInInsights(): Promise<LinkedInIngestResult> {
     const db = getDb();
     const tickStart = Date.now();
-    const groups = await loadPagePosts(db);
+    let groups: Awaited<ReturnType<typeof loadPagePosts>>;
+    try {
+        groups = await loadPagePosts(db);
+    } catch (err) {
+        // Page posts are picked by their recorded author (db/z-scheduled-posts-author.sql). Until that
+        // column exists there is nothing safe to read — skip the whole tick, don't 500 the schedule.
+        if (!isMissingTable(err)) throw err;
+        const skipped = 'scheduled_posts.platform_author_urn missing — apply db/z-scheduled-posts-author.sql';
+        console.warn(`[ingest-linkedin-insights] ${skipped}`);
+        return { connections: 0, processed: 0, updated: 0, failed: 0, comments: { skipped }, skipped, durationMs: Date.now() - tickStart };
+    }
 
     let processed = 0, updated = 0, failed = 0;
-    let comments: LinkedInIngestResult['comments'] = { added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
+    let comments: LinkedInIngestResult['comments'] = { added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0, failures: [] };
     // Comments make one call per post plus reply lookups; statistics are one call per 20 posts. So the
     // comments half carries the time budget — a busy tick defers comments to the next run, never stats.
     const commentsDeadline = tickStart + INGEST_COMMENTS_BUDGET_MS;
@@ -90,6 +101,7 @@ export async function ingestLinkedInInsights(): Promise<LinkedInIngestResult> {
             comments.added += r.added;
             comments.repliedOnLinkedIn += r.repliedOnLinkedIn;
             comments.failedPosts += r.failedPosts;
+            for (const f of r.failures ?? []) if (comments.failures.length < MAX_REPORTED_FAILURES) comments.failures.push(f);
         } catch (err) {
             if (isMissingTable(err)) { comments = { skipped: 'page_comments table missing — apply db/z-page-comments.sql' }; continue; }
             console.error(`[ingest-linkedin-insights] conn ${connectionId} comments:`, err instanceof Error ? err.message : err);

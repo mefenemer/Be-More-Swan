@@ -22,7 +22,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from 'drizz
 import type { getDb } from '../../db/client';
 import { aiAssistants, pageComments, scheduledPosts, systemConnections } from '../../db/schema';
 import {
-    fetchCommentReplies, fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment,
+    fetchCommentReplies, fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment, type ReadFailure,
 } from './linkedin-page-api';
 import { notArchivedAssistant } from './archived-assistant-drafts';
 import { isLinkedInPageUrn } from './linkedin-page';
@@ -64,9 +64,12 @@ const SYNC_MIN_GAP_MS = 60_000;
 const lastSync = new Map<number, number>();
 
 /** A missing table (db/z-page-comments.sql not applied yet). */
+/** A missing table (42P01) or column (42703) — a manual SQL file (db/z-page-comments.sql,
+ *  db/z-scheduled-posts-author.sql) hasn't been applied on this database yet. */
 export function isMissingTable(err: unknown): boolean {
     const e = err as { code?: string; cause?: { code?: string } } | null;
-    return e?.code === '42P01' || e?.cause?.code === '42P01';
+    const code = e?.code ?? e?.cause?.code;
+    return code === '42P01' || code === '42703';
 }
 
 function toIso(v: Date | string | null | undefined): string | null {
@@ -84,7 +87,13 @@ export interface PagePost {
     platformPostId: string;
 }
 
-export interface SyncResult { posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number }
+export interface SyncResult {
+    posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number;
+    /** What LinkedIn said for each refused post (first MAX_REPORTED_FAILURES) — the only place the
+     *  reason survives, since Netlify's function log drops the warnings. */
+    failures?: { postId: number; postUrn: string; status: number; message: string }[];
+}
+export const MAX_REPORTED_FAILURES = 10;
 
 /**
  * Decide what one post's comment list means for our rows. Pure, so tests can feed it LinkedIn's
@@ -124,10 +133,17 @@ export async function syncCommentsForConnection(
     const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
     for (const post of opts.posts) {
         if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
-        const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline);
+        let failure: ReadFailure | null = null;
+        const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline, (f) => { failure = f; });
         // A read that came back empty-handed AFTER the deadline was most likely cut off by it, not refused:
         // count it as left for later, so a slow LinkedIn never reads as "reconnect your Company Page".
-        if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }
+        if (!topLevel) {
+            if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
+            r.failedPosts++;
+            const f = failure as ReadFailure | null;
+            if (f && (r.failures ??= []).length < MAX_REPORTED_FAILURES) r.failures.push({ postId: post.id, postUrn: post.platformPostId, status: f.status, message: f.message });
+            continue;
+        }
         r.fetched += topLevel.length;
         // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them only on
         // comments still waiting on our side (new, not stored yet, or a reply LinkedIn never confirmed)
@@ -189,27 +205,24 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
         externalUserId: systemConnections.externalUserId,
     })
         .from(scheduledPosts)
-        // The account the post went out on. publish-social-posts.ts now records it, but a post queued
-        // without one was published through resolveSocialCredentials' (organisation, platform)
-        // fallback, and older rows still carry NULL — invisible to stats and comments until this
-        // (seen on staging, 2026-11-19). Such a row is attributed ONLY when the organisation had
-        // exactly one LinkedIn connection when the post went out — counting ones disconnected since,
-        // and the active filter below then requires that one to still be live. With a personal
-        // profile AND a Page connected we can't tell which one it went out on ("newest" moves with
-        // every token refresh), and a wrong guess would show a personal post's comments on the
-        // Page's tab and reply AS the Page. Left out is the safe answer.
-        .innerJoin(systemConnections, sql`${systemConnections.id} = COALESCE(${scheduledPosts.connectionId}, (
-            SELECT min(sc2.id) FROM system_connections sc2
-            WHERE sc2.organisation_id = ${scheduledPosts.organisationId}
-              AND sc2.service_name = 'linkedin'
-              AND sc2.created_at <= ${scheduledPosts.publishedAt}
-            HAVING count(*) = 1))`)
+        // The Page connection that WROTE the post — matched on the author the publisher recorded
+        // (platform_author_urn), never on connection_id alone: reconnecting updates a connection row
+        // in place, so a connection that posted as a personal profile can point at a Page later, and
+        // connection_id would then claim the profile's posts for the Page — their comments on the
+        // Page's tab, replies sent AS the Page (seen on staging 2026-11-19, post 202). A post with no
+        // recorded author (published before db/z-scheduled-posts-author.sql) is left out: Page
+        // posting had only run on staging by then.
+        .innerJoin(systemConnections, and(
+            eq(systemConnections.organisationId, scheduledPosts.organisationId),
+            eq(systemConnections.serviceName, 'linkedin'),
+            eq(systemConnections.externalUserId, scheduledPosts.platformAuthorUrn),
+        ))
         .where(and(
             eq(scheduledPosts.platform, 'linkedin'),
             eq(scheduledPosts.status, 'published'),
             isNotNull(scheduledPosts.platformPostId),
             gte(scheduledPosts.publishedAt, since),
-            like(systemConnections.externalUserId, 'urn:li:organization:%'),
+            like(scheduledPosts.platformAuthorUrn, 'urn:li:organization:%'),
             eq(systemConnections.isActive, true),
             // An archived assistant's posts gather no new comments to answer (archived-assistant-drafts.ts).
             notArchivedAssistant(scheduledPosts.assistantId),
@@ -222,8 +235,12 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
         console.warn(`[page-comments] loadPagePosts hit its cap of ${MAX_PAGE_POSTS} posts — the oldest LinkedIn Page posts in the ${COMMENT_WINDOW_DAYS}-day window were skipped this tick. Page through them before this grows further.`);
     }
     const byConnection = new Map<number, { orgUrn: string; organisationId: number; posts: (PagePost & { publishedAt: Date | null })[] }>();
+    const seen = new Set<number>();
     for (const row of rows) {
         if (!row.connectionId || !row.platformPostId || !isLinkedInPageUrn(row.externalUserId) || row.organisationId == null) continue;
+        // Two live connections for the same Page in one workspace would join a post twice. Read it once.
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
         const g = byConnection.get(row.connectionId) ?? { orgUrn: row.externalUserId!, organisationId: row.organisationId, posts: [] };
         g.posts.push({ id: row.id, organisationId: row.organisationId, assistantId: row.assistantId, platformPostId: row.platformPostId, publishedAt: row.publishedAt });
         byConnection.set(row.connectionId, g);
@@ -256,7 +273,8 @@ export async function syncAssistantComments(db: Db, organisationId: number, assi
         const token = await pageToken(db, organisationId, connectionId);
         if (!token) { total.posts += g.posts.length; total.failedPosts += g.posts.length; continue; }
         const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts, deadline });
-        for (const k of Object.keys(total) as (keyof SyncResult)[]) total[k] += r[k];
+        for (const k of ['posts', 'fetched', 'added', 'repliedOnLinkedIn', 'failedPosts', 'skippedForTime'] as const) total[k] += r[k];
+        for (const f of r.failures ?? []) if ((total.failures ??= []).length < MAX_REPORTED_FAILURES) total.failures.push(f);
     }
     if (total.failedPosts && total.failedPosts === total.posts - total.skippedForTime) {
         return { ok: false, status: 502, error: 'LinkedIn wouldn’t share the comments just now. If this keeps happening, reconnect your Company Page in Connections.', code: 'linkedin_refused' };

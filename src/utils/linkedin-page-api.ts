@@ -189,18 +189,28 @@ export function parseCommentsResponse(body: unknown): LinkedInComment[] {
 const NAME_PROJECTION = 'projection=(elements*(*,actor~(localizedFirstName,localizedLastName,localizedName)))';
 const COMMENTS_PAGE = 50;
 
+/** Why a comments read came back empty-handed — the caller reports it (the ingest's result carries
+ *  these, since Netlify's function log drops the warnings). status 0 = network error or time-out. */
+export type ReadFailure = { status: number; message: string };
+
 /**
  * The newest comments on one Page post (up to 50). Null when LinkedIn refused the call — the
- * caller must not read null as "no comments". Never throws.
+ * caller must not read null as "no comments" — and `onFail` then says why. A 404 means the post is
+ * gone (deleted on LinkedIn): that is an empty list, not a failure, so a deleted post doesn't keep
+ * the tab warning about a refused read. Never throws.
  */
-export async function fetchPostComments(token: string, postUrn: string, deadline?: number): Promise<LinkedInComment[] | null> {
+export async function fetchPostComments(token: string, postUrn: string, deadline?: number, onFail?: (f: ReadFailure) => void): Promise<LinkedInComment[] | null> {
     const base = `${API}/socialActions/${restliEncode(postUrn)}/comments?start=0&count=${COMMENTS_PAGE}`;
-    const named = await getJson(token, `${base}&${NAME_PROJECTION}`, deadline);
-    if (named) return parseCommentsResponse(named);
+    const named = await getJsonResult(token, `${base}&${NAME_PROJECTION}`, deadline);
+    if (named.ok) return parseCommentsResponse(named.body);
+    if (named.status === 404) return [];
     // Past the deadline, a half-second retry would rarely land — give up and let the caller defer the post.
-    if (deadline && Date.now() > deadline) return null;
-    const plain = await getJson(token, base, deadline);
-    return plain ? parseCommentsResponse(plain) : null;
+    if (deadline && Date.now() > deadline) { onFail?.({ status: named.status, message: named.message }); return null; }
+    const plain = await getJsonResult(token, base, deadline);
+    if (plain.ok) return parseCommentsResponse(plain.body);
+    if (plain.status === 404) return [];
+    onFail?.({ status: plain.status, message: plain.message });
+    return null;
 }
 
 /**
@@ -299,17 +309,23 @@ export function callTimeoutMs(deadline: number | undefined, now = Date.now()): n
     return Math.min(CALL_TIMEOUT_MS, Math.max(MIN_CALL_MS, deadline - now));
 }
 
-async function getJson(token: string, url: string, deadline?: number): Promise<unknown | null> {
+type JsonResult = { ok: true; body: unknown } | { ok: false; status: number; message: string };
+async function getJsonResult(token: string, url: string, deadline?: number): Promise<JsonResult> {
     try {
         const res = await fetch(url, { headers: headers(token), signal: AbortSignal.timeout(callTimeoutMs(deadline)) });
         if (!res.ok) {
-            const msg = await res.text().catch(() => '');
-            console.warn(`[linkedin-page-api] ${res.status} ${url.split('?')[0]} ${msg.slice(0, 200)}`);
-            return null;
+            const msg = (await res.text().catch(() => '')).slice(0, 200);
+            console.warn(`[linkedin-page-api] ${res.status} ${url.split('?')[0]} ${msg}`);
+            return { ok: false, status: res.status, message: msg };
         }
-        return await res.json();
+        return { ok: true, body: await res.json() };
     } catch (err) {
-        console.warn('[linkedin-page-api] fetch failed', url.split('?')[0], err instanceof Error ? err.message : err);
-        return null;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[linkedin-page-api] fetch failed', url.split('?')[0], msg);
+        return { ok: false, status: 0, message: msg.slice(0, 200) };
     }
+}
+async function getJson(token: string, url: string, deadline?: number): Promise<unknown | null> {
+    const r = await getJsonResult(token, url, deadline);
+    return r.ok ? r.body : null;
 }
