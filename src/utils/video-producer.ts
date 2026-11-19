@@ -43,7 +43,7 @@ import { submit as falSubmit, submitFramedVideo, status as falStatus, result as 
 import { clipTasksWithSound, CLIP_SOUND_PROMPT } from '../lib/ai-clip';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
-import { DEFAULT_VOICE, isVoiceId, cleanScript, languageLabel, voiceLanguage } from '../lib/tts';
+import { DEFAULT_VOICE, isVoiceId, cleanScript, languageLabel, voiceLanguage, LONG_VOICEOVER_MAX_CHARS, VOICEOVER_MAX_CHARS } from '../lib/tts';
 import { normalizeCaptionStyle } from '../lib/captions';
 import { presignR2Get } from './social-publish';
 import { resolveBaseUrl } from './base-url';
@@ -944,7 +944,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // 1. The voiceover — it decides how long every scene is.
         let voiceoverAssetId = p.voiceoverAssetId ?? null;
         let words: Array<{ start: number; end: number }> = [];
-        const script = cleanScript(scriptOf(storyboard));
+        // A long video's script (Phase 4c) may run to 10,000 characters; it is spoken in parts (speakVoiceover).
+        const script = cleanScript(scriptOf(storyboard), isLongLength(brief.lengthS) ? LONG_VOICEOVER_MAX_CHARS : VOICEOVER_MAX_CHARS);
         // The owner's own voice, line by line (own-voice.ts): no voice is made — each scene's recording
         // is placed at its scene below. One recording of the whole script is the voiceover asset, as an AI one is.
         const ownLines = isOwnVoice(brief) && !voiceoverAssetId;
