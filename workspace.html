@@ -18973,7 +18973,14 @@ function _rqResultsHtml(post) {
     if (!where) return '';
     const r = post.results;
     if (!r) {
-        return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="pending"><p class="font-semibold">Results on ${where}</p><p class="mt-0.5">They appear here a few hours after the post goes out.</p></div>`;
+        // Promise results only when an ingest will actually read this post (get-social-drafts resultsExpected).
+        if (post.resultsExpected === 'pending') {
+            return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="pending"><p class="font-semibold">Results on ${where}</p><p class="mt-0.5">They appear here a few hours after the post goes out.</p></div>`;
+        }
+        if (post.resultsExpected === 'personal_profile') {
+            return `<div class="mt-2 pt-2 border-t border-emerald-200" data-rq-results="none"><p class="mt-0.5">LinkedIn doesn't share results for posts on a personal profile. Post to your Company Page to see them here.</p></div>`;
+        }
+        return '';
     }
     const one = (v, singular, plural) => (v == null ? null : `<span class="whitespace-nowrap"><strong>${Number(v).toLocaleString('en-GB')}</strong> ${v === 1 ? singular : plural}</span>`);
     const parts = [

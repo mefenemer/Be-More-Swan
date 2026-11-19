@@ -37,3 +37,24 @@ export function postResultsView(row: InsightRow): PostResults {
         fetchedAt: at,
     };
 }
+
+/** How far back every results ingest reads (ingest-facebook/instagram-insights WINDOW_DAYS, page-comments COMMENT_WINDOW_DAYS). */
+export const RESULTS_WINDOW_DAYS = 30;
+
+/**
+ * What the note may say about a published post that has no results yet:
+ *  'pending'          — an ingest will read it (the right platform and account, inside the window): "they appear in a few hours";
+ *  'personal_profile' — a LinkedIn post on a personal profile: LinkedIn gives members no post results, so say so;
+ *  null               — nothing is coming (outside the window, or no ingest): say nothing rather than promise. Pure.
+ */
+export function resultsExpectation(
+    post: { platform: string | null; publishedAt: Date | string | null; platformAuthorUrn: string | null },
+    now: number = Date.now(),
+): 'pending' | 'personal_profile' | null {
+    const platform = String(post.platform ?? '').toLowerCase();
+    if (!(RESULTS_PLATFORMS as readonly string[]).includes(platform)) return null;
+    if (platform === 'linkedin' && !String(post.platformAuthorUrn ?? '').startsWith('urn:li:organization:')) return 'personal_profile';
+    const at = post.publishedAt ? new Date(post.publishedAt).getTime() : NaN;
+    if (!Number.isFinite(at) || now - at > RESULTS_WINDOW_DAYS * 24 * 60 * 60 * 1000) return null;
+    return 'pending';
+}
