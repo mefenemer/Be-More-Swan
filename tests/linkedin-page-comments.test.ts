@@ -338,4 +338,19 @@ check('only postReply calls LinkedIn’s write endpoint', () => {
     assert.ok(src.indexOf('replyToComment(') > src.indexOf('export async function postReply('));
 });
 
+check('a post published with no connection_id still reaches stats and comments', () => {
+    // Staging 2026-11-19: "Post it now" queues with connection_id NULL; the publisher falls back to the
+    // org's newest active LinkedIn connection and never wrote it back, so loadPagePosts' plain join
+    // found zero Page posts. Both halves of the fix must stay.
+    const pc = read('src/utils/page-comments.ts');
+    const fn = pc.slice(pc.indexOf('export async function loadPagePosts('), pc.indexOf('export async function pageToken('));
+    assert.ok(fn.length > 0, 'loadPagePosts found');
+    assert.ok(fn.includes('COALESCE(${scheduledPosts.connectionId}'), 'join falls back when connection_id is NULL');
+    assert.ok(fn.includes("sc2.service_name = 'linkedin' AND sc2.is_active = true") && fn.includes('ORDER BY sc2.updated_at DESC LIMIT 1'), 'same rule as resolveSocialCredentials');
+    assert.ok(fn.includes('connectionId: systemConnections.id,'), 'groups by the resolved connection, not the NULL column');
+    assert.ok(!fn.includes('eq(systemConnections.id, scheduledPosts.connectionId)'), 'the plain join is gone');
+    const pub = read('netlify/functions/publish-social-posts.ts');
+    assert.ok(pub.includes('connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})'), 'publisher records the account it used');
+});
+
 queue.then(() => console.log(`\n${passed} passed`));

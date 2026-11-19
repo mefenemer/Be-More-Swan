@@ -185,11 +185,19 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
         assistantId: scheduledPosts.assistantId,
         platformPostId: scheduledPosts.platformPostId,
         publishedAt: scheduledPosts.publishedAt,
-        connectionId: scheduledPosts.connectionId,
+        connectionId: systemConnections.id,
         externalUserId: systemConnections.externalUserId,
     })
         .from(scheduledPosts)
-        .innerJoin(systemConnections, eq(systemConnections.id, scheduledPosts.connectionId))
+        // The account the post went out on. publish-social-posts.ts now records it, but a post queued
+        // without one was published through resolveSocialCredentials' fallback — the organisation's
+        // NEWEST active LinkedIn connection — and older rows still carry NULL. Mirror that rule here,
+        // or every such post is invisible to stats and comments (seen on staging, 2026-11-19).
+        .innerJoin(systemConnections, sql`${systemConnections.id} = COALESCE(${scheduledPosts.connectionId}, (
+            SELECT sc2.id FROM system_connections sc2
+            WHERE sc2.organisation_id = ${scheduledPosts.organisationId}
+              AND sc2.service_name = 'linkedin' AND sc2.is_active = true
+            ORDER BY sc2.updated_at DESC LIMIT 1))`)
         .where(and(
             eq(scheduledPosts.platform, 'linkedin'),
             eq(scheduledPosts.status, 'published'),
