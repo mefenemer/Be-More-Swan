@@ -50,8 +50,11 @@ export function elevenLabsSpeechCostUsd(chars: number): string {
 
 /** ~80 seconds of speech at a natural pace — longer than any short-form video needs. */
 export const VOICEOVER_MAX_CHARS = 1200;
-/** A long video's script (Phase 4c: 2, 5 or 10 minutes): ~1500 words is 10 minutes at 2.5 words a second. */
-export const LONG_VOICEOVER_MAX_CHARS = 10_000;
+/**
+ * A long video's script (Phase 4c: 2, 5 or 10 minutes). The fastest voices speak ~3.8 words a second (measured,
+ * scripts/measure-voice-pace.mjs), so 10 minutes can be ~2200 words, ~13,000 characters: 10,000 was too few.
+ */
+export const LONG_VOICEOVER_MAX_CHARS = 15_000;
 /** Spoken in parts of at most this many characters (~2½ minutes), side by side, then joined (src/lib/mp3-join.ts). */
 export const SPEECH_PART_CHARS = 2400;
 /** How many parts are spoken at once. */
@@ -83,6 +86,13 @@ export const DEFAULT_VOICE: VoiceId = 'british_woman';
 export const OFFERED_VOICES: readonly Voice[] = VOICES.filter((v) => !v.legacy);
 
 /** The language a voice speaks, by code ('en' when unknown). Pure. */
+/** How fast a voice really speaks, in words a second, as measured (catalogue `wps`). Null when not measured (Japanese). Pure. */
+export function voicePace(voice: string | null | undefined): number | null {
+    const v = VOICES.find((x) => x.id === voice) as { wps?: unknown } | undefined;
+    const n = Number(v?.wps);
+    return Number.isFinite(n) && n > 0.5 && n < 8 ? n : null;
+}
+
 export function voiceLanguage(voice: VoiceId): string {
     return VOICES.find((v) => v.id === voice)?.lang ?? 'en';
 }

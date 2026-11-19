@@ -9,8 +9,9 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allowsLongLength, scriptTooLong, storyboardUserPrompt, enforceStoryboard, LONG_SCRIPT_CHARS, type VideoBrief } from '../src/lib/storyboard';
-import { readBrief, scriptUnderBudget } from '../src/utils/video-producer';
+import { allowsLongLength, scriptTooLong, storyboardUserPrompt, enforceStoryboard, wordsPerSecondFor, LONG_SCRIPT_CHARS, type VideoBrief } from '../src/lib/storyboard';
+import { readBrief, scriptUnderBudget, scriptOverBudget } from '../src/utils/video-producer';
+import { voicePace } from '../src/lib/tts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -50,11 +51,11 @@ check('the planner is told a long presenter video is in chapters, written to eac
 
 check('a script too long to speak is refused with how much to cut; short videos and own sound are never refused', () => {
     const scenes = (n: number, chars: number) => ({ scenes: Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, voiceover: 'x'.repeat(chars) })) }) as never;
-    const msg = scriptTooLong(scenes(12, 1000), { lengthS: 600, voiceover: true });
-    assert.ok(msg && /more than the 10,000/.test(msg) && /by 2,011 characters/.test(msg), String(msg));
-    assert.strictEqual(scriptTooLong(scenes(9, 1000), { lengthS: 600, voiceover: true }), null);
-    assert.strictEqual(scriptTooLong(scenes(12, 1000), { lengthS: 600, voiceover: false }), null, 'own sound: no voiceover to speak');
-    assert.strictEqual(LONG_SCRIPT_CHARS, 10_000);
+    const msg = scriptTooLong(scenes(17, 1000), { lengthS: 600, voiceover: true });
+    assert.ok(msg && /more than the 15,000/.test(msg) && /by 2,016 characters/.test(msg), String(msg));
+    assert.strictEqual(scriptTooLong(scenes(14, 1000), { lengthS: 600, voiceover: true }), null);
+    assert.strictEqual(scriptTooLong(scenes(17, 1000), { lengthS: 600, voiceover: false }), null, 'own sound: no voiceover to speak');
+    assert.strictEqual(LONG_SCRIPT_CHARS, 15_000, 'the fastest voices need ~13,000 characters for 10 minutes');
     const vp = read('src/utils/video-producer.ts');
     const refuse = vp.indexOf('const tooLong = scriptTooLong(storyboard, brief);');
     assert.ok(refuse > 0 && refuse < vp.indexOf('const script = cleanScript(scriptOf(storyboard)'), 'refused before the voiceover is made');
@@ -97,6 +98,28 @@ check('a long voiced script well short of its length is planned once more, then 
     assert.match(vp, /shorter than the \$\{lengthLabel\(brief\.lengthS\)\} you chose — the video is as long as what is said/);
     const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
     assert.match(p, /the whole voiceover about 300 words in all, because the voice sets the video's length/);
+});
+
+check('a long voiced video writes to its voice\'s measured pace (staging project 51: Priya spoke 302 words in 84 s)', () => {
+    assert.strictEqual(voicePace('en_gb_lucy'), 3.83, 'Priya\'s English voice, measured');
+    assert.strictEqual(voicePace('ja_kyoko'), null, 'Japanese: no words-a-second figure');
+    assert.strictEqual(voicePace('no_such_voice'), null);
+    const long = { lengthS: 120, voiceover: true, voice: 'en_gb_lucy' } as never;
+    assert.strictEqual(wordsPerSecondFor(long), 3.64, 'the measured pace less 5% for the gaps between scenes');
+    assert.strictEqual(wordsPerSecondFor({ lengthS: 30, voiceover: true, voice: 'en_gb_lucy' } as never), 2.5, 'short videos as before');
+    assert.strictEqual(wordsPerSecondFor({ lengthS: 120, voiceover: true, voice: 'ja_kyoko' } as never), 2.5, 'not measured: the default');
+    // 2 minutes with Priya: ~437 words is right, not "over budget" against the old 2.5 (300 × 1.2 = 360).
+    const brief: VideoBrief = { purpose: 'walkthrough', lengthS: 120, message: 'A tour', voiceover: true, voice: 'en_gb_lucy' as never, allowAi: 'stock_only', presenter: { id: 'priya' }, screenAssetIds: [5] };
+    const sb = (words: number) => ({ title: 'T', caption: 'C', scenes: [{ id: 's1', beat: 'hook', voiceover: Array.from({ length: words }, () => 'word').join(' '), source: 'ai_presenter', targetS: 120 }] }) as never;
+    assert.strictEqual(scriptOverBudget(sb(437), brief), null);
+    assert.deepStrictEqual(scriptUnderBudget(sb(302), brief), { words: 302, budget: 437 }, 'project 51\'s 302 words are now short for Priya');
+    const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
+    assert.match(p, /this voice speaks about 3\.64 words a second — a 30-second chapter is about 109 words/);
+    assert.match(p, /the whole voiceover about 437 words in all/);
+    // Every voice that can speak a long video's language (all but Japanese) is measured.
+    const cat = JSON.parse(read('src/public/voice-catalogue.json'));
+    const missing = cat.voices.filter((v: { lang: string; wps?: number }) => v.lang !== 'ja' && !(v.wps! > 0)).map((v: { id: string }) => v.id);
+    assert.deepStrictEqual(missing, [], 'run scripts/measure-voice-pace.mjs --write for new voices');
 });
 
 console.log('form, chat and help');
