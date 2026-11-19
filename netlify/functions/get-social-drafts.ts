@@ -4,7 +4,8 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, or, sql, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns } from '../../db/schema';
+import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns, postInsights } from '../../db/schema';
+import { RESULTS_PLATFORMS, postResultsView, resultsExpectation, type PostResults } from '../../src/utils/post-results';
 import { resolvePostMedia, isVideoMedia, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { requesterNamesForJobIds, requesterNamesForVideoPosts } from '../../src/utils/requested-by';
@@ -196,6 +197,8 @@ export default withLambda(async (event) => {
                 postFormat: scheduledPosts.postFormat,
                 publishedAt: scheduledPosts.publishedAt,
                 platformPostUrl: scheduledPosts.platformPostUrl,
+                // Who it went out as — tells a Company Page post (results ingested) from a personal-profile one (none).
+                platformAuthorUrn: scheduledPosts.platformAuthorUrn,
                 disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
                 imageOverlays: scheduledPosts.imageOverlays,
                 // The CLEAN pre-bake picture. The editor paints image_overlays as a live layer over
@@ -251,6 +254,28 @@ export default withLambda(async (event) => {
                 // db/post-render-jobs.sql not applied in this environment — degrade to a bare
                 // warning rather than emptying the review queue.
                 console.warn('[get-social-drafts] render-error lookup skipped:', err instanceof Error ? err.message : err);
+            }
+        }
+
+        // A published post's own results (impressions, reach, reactions, comments, shares), for the
+        // "Posted" note — the numbers the scheduled ingests save into post_insights, which nothing on
+        // the post itself showed before (LinkedIn Standard-tier review, 2026-11-19). One query, only
+        // for published posts on a platform with an ingest. Best-effort: no row = "results come later".
+        const results = new Map<number, PostResults>();
+        const publishedIds = drafts.filter(d => d.status === 'published' && (RESULTS_PLATFORMS as readonly string[]).includes(String(d.platform))).map(d => d.id);
+        if (publishedIds.length) {
+            try {
+                const rows = await db
+                    .select({
+                        postId: postInsights.scheduledPostId, impressions: postInsights.impressions, reach: postInsights.reach,
+                        likes: postInsights.likes, comments: postInsights.comments, shares: postInsights.shares,
+                        videoViews: postInsights.videoViews, fetchedAt: postInsights.fetchedAt,
+                    })
+                    .from(postInsights)
+                    .where(and(inArray(postInsights.scheduledPostId, publishedIds), eq(postInsights.organisationId, organisationId)));
+                for (const r of rows) if (r.postId != null) results.set(r.postId, postResultsView(r));
+            } catch (err) {
+                console.warn('[get-social-drafts] results lookup skipped:', err instanceof Error ? err.message : err);
             }
         }
 
@@ -514,6 +539,10 @@ export default withLambda(async (event) => {
                 // Why the video render failed, when it did — null in every other state. In the
                 // customer's words: the stored message is Remotion's, AWS console links and all.
                 renderError: d.renderStatus === 'failed' ? customerRenderError(renderErrors.get(d.id)) : null,
+                // Its own results once published (post_insights); null before the first ingest or for a platform without one.
+                results: results.get(d.id) ?? null,
+                // With no results yet: whether any are coming ('pending'), why not ('personal_profile'), or nothing to say (null).
+                resultsExpected: d.status === 'published' && !results.has(d.id) ? resultsExpectation(d) : null,
                 // ⚠️ Only a SINGLE-picture post is "a brand card". A carousel made of brand cards
                 // (make-carousel: a cover + one per list item) has a brand_card row per slide, and
                 // the map above keeps whichever came last — so the editor drew slide 5 as the whole
