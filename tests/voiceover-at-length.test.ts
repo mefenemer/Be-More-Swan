@@ -61,7 +61,7 @@ const part = (fill: number, frames = 3) => Buffer.concat([id3(), infoFrame(), ..
     await check('a scene line: 240 characters, 1200 in a long video (form, chat card and planner)', () => {
         assert.strictEqual(maxLineChars({ lengthS: 30 }), 240);
         assert.strictEqual(maxLineChars({ lengthS: 600 }), 1200);
-        assert.match(read('src/lib/storyboard.ts'), /voiceover: clip\(o\.voiceover, maxLineChars\(brief\)\),/);
+        assert.match(read('src/lib/storyboard.ts'), /voiceover: lineAtSentence\(o\.voiceover, maxLineChars\(brief\), i, changes\),/, 'cut at a sentence, with a note (review of #761)');
         assert.match(read('src/utils/chat-video-scene.ts'), /const voiceover = str\(ui\.voiceover, 1200\);/);
         assert.match(read('src/components/assistant-videos.js'), /maxlength="\$\{Number\(v\.brief && v\.brief\.lengthS\) >= 120 \? 1200 : 240\}"/);
     });

@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allowsLongLength, scriptTooLong, storyboardUserPrompt, LONG_SCRIPT_CHARS, type VideoBrief } from '../src/lib/storyboard';
+import { allowsLongLength, scriptTooLong, storyboardUserPrompt, enforceStoryboard, LONG_SCRIPT_CHARS, type VideoBrief } from '../src/lib/storyboard';
 import { readBrief } from '../src/utils/video-producer';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -42,7 +42,8 @@ console.log('the plan and the script');
 check('the planner is told a long presenter video is in chapters, written to each chapter\'s length', () => {
     const brief: VideoBrief = { purpose: 'walkthrough', lengthS: 300, message: 'A tour of the booking system', voiceover: true, allowAi: 'stock_only', presenter: { id: 'amara' }, screenAssetIds: [5] };
     const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
-    assert.match(p, /a 5 minutes walkthrough video \(300 seconds at most\), 3–20 scenes/);
+    assert.match(p, /a 5 minutes walkthrough video \(300 seconds at most\), 4–20 scenes/, 'at least one chapter per ~75 s (review of #761)');
+    assert.match(p, /never more than 1200 characters a scene/);
     assert.match(p, /told in CHAPTERS/);
     assert.match(p, /a 30-second chapter is about 75 words/);
 });
@@ -58,6 +59,24 @@ check('a script too long to speak is refused with how much to cut; short videos 
     const refuse = vp.indexOf('const tooLong = scriptTooLong(storyboard, brief);');
     assert.ok(refuse > 0 && refuse < vp.indexOf('const script = cleanScript(scriptOf(storyboard)'), 'refused before the voiceover is made');
     assert.match(vp, /\(Couldn't find pictures\|The person who started\|The script is\)/, 'the owner\'s to fix, not a platform incident');
+});
+
+check('a long chapter over 1200 characters is cut at a sentence end, with a note (review of #761)', () => {
+    const brief: VideoBrief = { purpose: 'walkthrough', lengthS: 600, message: 'A tour', voiceover: true, allowAi: 'stock_only', presenter: { id: 'amara' }, screenAssetIds: [5] };
+    const line = 'This is one spoken sentence about the booking page. '.repeat(30).trim();   // ~1550 characters
+    const out = enforceStoryboard({ title: 'T', caption: 'C', scenes: [{ beat: 'hook', voiceover: 'Hello.', source: 'ai_presenter', targetS: 10 }, { beat: 'value', voiceover: line, source: 'ai_presenter', targetS: 90 }, { beat: 'cta', voiceover: 'Book now.', source: 'ai_presenter', targetS: 5 }] }, brief, [], [{ id: 5, name: 's', durationS: 300 }]);
+    const v = out.storyboard.scenes[1].voiceover;
+    assert.ok(v.length <= 1200 && v.endsWith('.'), `ends mid-sentence: …${v.slice(-20)}`);
+    assert.ok(out.changes.some((c) => /Scene 2: its voiceover was longer than 1,200 characters/.test(c)));
+});
+
+check('an over-long script is refused when "Make the video" is pressed, before tasks are held; markdown and links don\'t count', () => {
+    const fn = read('netlify/functions/video-projects.ts');
+    const refuse = fn.indexOf('const tooLong = scriptTooLong(row.storyboard as Storyboard, row.brief as VideoBrief);');
+    assert.ok(refuse > 0 && refuse < fn.indexOf('const hold = await holdBuild(db, orgId, row.storyboard as Storyboard'), 'before holdBuild');
+    const scenes = { scenes: [{ id: 's1', voiceover: 'x'.repeat(9_990) + ' https://example.com/a-very-long-link-that-is-not-spoken' }] } as never;
+    assert.strictEqual(scriptTooLong(scenes, { lengthS: 600, voiceover: true }), null, 'the link is not spoken, so it does not count');
+    assert.match(read('src/lib/storyboard.ts'), /A LONG video \(2, 5 or 10 minutes; only from the business's own footage, or an AI presenter walking through their screen recordings\)/);
 });
 
 console.log('form, chat and help');

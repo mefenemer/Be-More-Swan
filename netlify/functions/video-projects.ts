@@ -55,7 +55,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { startClip, dropPresenterScene, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
-import { enforceStoryboard, isLongLength, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { enforceStoryboard, isLongLength, isVideoShape, scriptTooLong, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
@@ -658,6 +658,9 @@ export default withLambda(async (event) => {
                 return json(409, { error: `Record ${nums.length === 1 ? `scene ${nums[0]}’s line` : `the lines for scenes ${nums.join(', ')}`} first, or remove ${nums.length === 1 ? 'its' : 'their'} words.` });
             }
         }
+        // A long script that can't be spoken: said now, before any tasks are held (the worker checks again; review of #761).
+        const tooLong = scriptTooLong(row.storyboard as Storyboard, row.brief as VideoBrief);
+        if (tooLong) return json(409, { error: tooLong });
         const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
         // Campaign orders and the weekly autopilot plan a storyboard with no person behind it
