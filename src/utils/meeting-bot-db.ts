@@ -14,7 +14,7 @@ import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, mee
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type RecallRegion,
 } from './meeting-bot';
@@ -314,18 +314,18 @@ export interface BotPollResult { checked: number; moved: number; imported: numbe
  * finished with (minutes written or given up, a bot that never got in, or 24 hours after the call).
  */
 /** The poll's share of the scheduled run (Netlify scheduled functions stop at 30 s; the pick-up check runs first). */
-export const BOT_POLL_BUDGET_MS = 15_000;
+export const BOT_POLL_BUDGET_MS = 12_000;
+/** Deleting Recall's copies gets its own window after the poll (its first batch always runs). Poll + media stay well
+ *  inside the scheduled function's 30 s with the pick-up check before them. */
+export const BOT_MEDIA_BUDGET_MS = 8_000;
 const POLL_BATCH = 5;
 /** Each Recall call the poll makes is cut off after this, so a batch can never outlast the time left (review of #769). */
 export const POLL_CALL_TIMEOUT_MS = 5_000;
 
 export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Promise<boolean>, now: Date = new Date(), budgetMs = BOT_POLL_BUDGET_MS): Promise<BotPollResult> {
     const out: BotPollResult = { checked: 0, moved: 0, imported: 0, mediaDeleted: 0, errors: 0 };
-    // Stops starting new Recall calls once its budget is spent, so the run never overruns and every step gets a turn;
-    // what is left is picked up next run (oldest-checked first).
-    const started = Date.now();
-    // A batch only starts when a whole call still fits, so the last one can't run past the budget.
-    const timeLeft = () => Date.now() - started + POLL_CALL_TIMEOUT_MS <= budgetMs;
+    // Stops starting new Recall calls once its budget is spent (runBatchesWithinBudget), so the run never overruns and every
+    // step gets a turn; what is left is picked up next run (oldest-checked first).
     const quiet = new Date(now.getTime() - 5 * 60 * 1000);
 
     await db.update(meetingBots).set({ status: 'failed', statusReason: 'not_sent', updatedAt: now }).where(and(
@@ -352,14 +352,12 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
             console.error('[meeting-bot] poll failed', { botId: row.id, status: err instanceof RecallError ? err.status : null });
         }
     };
-    // In small batches (each Recall call may take up to 15 s), never past the budget.
-    for (let i = 0; i < open.length && timeLeft(); i += POLL_BATCH) await Promise.all(open.slice(i, i + POLL_BATCH).map(pollOne));
+    // In small batches (each Recall call cut off at 5 s), never past the budget; the first batch always runs.
+    await runBatchesWithinBudget(open, POLL_BATCH, budgetMs, POLL_CALL_TIMEOUT_MS, pollOne);
 
     const orphaned = await db.select().from(meetingBots).where(and(
         eq(meetingBots.status, 'done'), isNotNull(meetingBots.joinedAt), isNull(meetingBots.importId), isNotNull(meetingBots.recallBotId))).limit(25);
     for (const row of orphaned) if (await ensureBotImport(db, row, dispatch).catch(() => null)) out.imported++;
-    // Media deletion is cheap and must not starve behind a slow poll: it gets its own short window.
-    const mediaStarted = Date.now();
 
     const finished = await db.select({ bot: meetingBots, importStatus: meetingImports.status }).from(meetingBots)
         .leftJoin(meetingImports, eq(meetingBots.importId, meetingImports.id))
@@ -371,10 +369,10 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
                 lt(meetingBots.updatedAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
             ),
         )).limit(25);
-    for (let i = 0; i < finished.length && Date.now() - mediaStarted + POLL_CALL_TIMEOUT_MS <= 5_000; i += POLL_BATCH) {
-        const done = await Promise.all(finished.slice(i, i + POLL_BATCH).map(({ bot }) => deleteBotMedia(db, bot, POLL_CALL_TIMEOUT_MS)));
-        out.mediaDeleted += done.filter(Boolean).length;
-    }
+    // Its own window, and its first batch ALWAYS runs: with a window equal to one call's timeout it never ran at all,
+    // and recordings of bots that failed or weren't let in stayed at Recall (review of #774).
+    const deleted = await runBatchesWithinBudget(finished, POLL_BATCH, BOT_MEDIA_BUDGET_MS, POLL_CALL_TIMEOUT_MS, ({ bot }) => deleteBotMedia(db, bot, POLL_CALL_TIMEOUT_MS));
+    out.mediaDeleted += deleted.filter(Boolean).length;
     return out;
 }
 

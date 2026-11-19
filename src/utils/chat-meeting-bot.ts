@@ -141,6 +141,11 @@ export async function resolveMeetingBotProposal(
         };
     } catch (err) {
         console.error('[chat-meeting-bot] resolve failed (non-fatal)', err instanceof Error ? err.message : err);
+        // A send the user DID give a link for: say we couldn't check it, rather than asking for the link again.
+        if (req.action === 'send') {
+            return { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title, joinAt: null,
+                blocked: 'I couldn’t check that just now, so nothing was sent. Try again in a moment, or use “Send to a call” on the Inbox tab.' };
+        }
         return null;
     }
 }

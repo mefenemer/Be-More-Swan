@@ -99,7 +99,7 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await page.evaluate(() => {
                 const w = window as unknown as { DisruptiveUIRegistry: { render: (ui: unknown) => HTMLElement | null } };
                 const host = document.getElementById('chat-card')!;
-                const card = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', platformLabel: 'Google Meet', title: 'Standup', joinAt: null, tasksPer5Min: 1 });
+                const card = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', platformLabel: 'Google Meet', title: 'Standup', joinAt: null, tasksPer5Min: 1, madeAt: new Date().toISOString() });
                 if (card) host.appendChild(card);
                 const blocked = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://zoom.us/j/1', title: null, joinAt: null, blocked: 'Zoom is coming soon.' });
                 if (blocked) { blocked.setAttribute('data-blocked', ''); host.appendChild(blocked); }

@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { runBatchesWithinBudget } from '../src/utils/meeting-bot';
 import {
     MEETING_BOT_PROPOSAL_TYPE, SEND_CARD_FRESH_MS, botCardSettledReason, formatMeetingBotsSnapshot, meetingBotFromUiElement, meetingBotPromptBlock,
 } from '../src/utils/chat-meeting-bot';
@@ -180,12 +181,35 @@ await test('review of #774: switching Note Takers mid-load never shows the first
 
 // ── Round 5 review notes on the engine (#769) ────────────────────────────────────────────────────
 
-await test('round 5: each Recall call in the poll is cut off at 5 s and a batch only starts if a whole call still fits', () => {
+await test('review of #774 (round 2): the budget helper ALWAYS runs the first batch, then stops when a whole call no longer fits', async () => {
+    let t = 0;
+    const clock = () => t;
+    const seen: number[] = [];
+    // A budget equal to one call's timeout: the old condition never started at all. Now the first batch runs.
+    const r1 = await runBatchesWithinBudget([1, 2, 3, 4, 5, 6, 7], 5, 5_000, 5_000, async (n) => { seen.push(n); t += 1_000; return n * 10; }, clock);
+    assert.deepEqual(r1, [10, 20, 30, 40, 50], 'first batch of 5 ran; the second didn\'t fit');
+    assert.deepEqual(seen, [1, 2, 3, 4, 5]);
+    t = 0;
+    const r2 = await runBatchesWithinBudget([1, 2, 3, 4, 5, 6, 7], 5, 20_000, 5_000, async (n) => { t += 100; return n; }, clock);
+    assert.equal(r2.length, 7, 'room for both batches');
+    assert.deepEqual(await runBatchesWithinBudget([], 5, 0, 5_000, async (n: number) => n, clock), []);
     const db = read('src/utils/meeting-bot-db.ts');
-    assert.match(db, /export const POLL_CALL_TIMEOUT_MS = 5_000;/);
-    assert.ok(db.includes('Date.now() - started + POLL_CALL_TIMEOUT_MS <= budgetMs'));
+    assert.ok(db.includes('runBatchesWithinBudget(open, POLL_BATCH, budgetMs, POLL_CALL_TIMEOUT_MS, pollOne)'));
+    assert.ok(db.includes('runBatchesWithinBudget(finished, POLL_BATCH, BOT_MEDIA_BUDGET_MS, POLL_CALL_TIMEOUT_MS,'));
+    assert.match(db, /export const BOT_POLL_BUDGET_MS = 12_000;/);
+    assert.match(db, /export const BOT_MEDIA_BUDGET_MS = 8_000;/);
+    assert.ok(!/mediaStarted/.test(db), 'the old never-true condition is gone');
     assert.ok(db.includes('getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!, POLL_CALL_TIMEOUT_MS)'));
-    assert.ok(db.includes('deleteBotMedia(db, bot, POLL_CALL_TIMEOUT_MS)'));
+});
+
+await test('review of #774 (round 2): a send card on screen expires at click; a failed read draws a "couldn\'t check" card, not a link question', () => {
+    const reg = read('src/components/disruptive-ui-registry.js');
+    const fn = reg.slice(reg.indexOf('function renderMeetingBotProposalCard'), reg.indexOf("register('meeting_bot_proposal'"));
+    const click = fn.slice(fn.indexOf("el.addEventListener('click'"));
+    assert.ok(click.indexOf('Date.now() - made > 10 * 60 * 1000') < click.indexOf("fetch('/.netlify/functions/meeting-bots'"), 'checked before sending');
+    const mod = read('src/utils/chat-meeting-bot.ts');
+    const katch = mod.slice(mod.indexOf("console.error('[chat-meeting-bot] resolve failed"));
+    assert.ok(katch.includes("if (req.action === 'send')") && katch.includes('I couldn’t check that just now, so nothing was sent.'));
 });
 
 await test('round 5: archiving or purging cancels a bot still being sent (no Recall id yet), so the guarded save withdraws it', () => {

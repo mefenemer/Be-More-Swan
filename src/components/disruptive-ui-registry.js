@@ -5064,6 +5064,15 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.addEventListener('click', async (e) => {
       if (e.target.closest('[data-mbp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
       if (!e.target.closest('[data-mbp-go]') || go.disabled) return;
+      // A send card left open on screen expires like a stored one (10 minutes, chat-meeting-bot.ts SEND_CARD_FRESH_MS):
+      // days later the same recurring link is a different call, and sending would charge for it (review of #774).
+      const made = send && typeof ui.madeAt === 'string' ? Date.parse(ui.madeAt) : NaN;
+      if (send && (!Number.isFinite(made) || Date.now() - made > 10 * 60 * 1000)) {
+        setBusy(true);
+        go.textContent = 'Expired';
+        say('An earlier request, so it isn’t sent now. Ask me again, or use “Send to a call” on the Inbox tab.', 'error');
+        return;
+      }
       const body = send
         ? { action: 'send', assistantId: Number(ui.assistantId), meetingUrl: ui.meetingUrl, title: ui.title || '', joinAt: ui.joinAt || null, source: 'chat' }
         : { action: 'remove', botId: Number(ui.botId) };
