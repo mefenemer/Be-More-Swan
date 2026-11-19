@@ -464,6 +464,23 @@ export default withLambda(async (event) => {
             if (conn?.vaultRefKey) {
                 const svc = conn.serviceName?.toLowerCase() ?? '';
                 const fbUserId = (conn.metadata as { fbUserId?: string | null } | null)?.fbUserId ?? null;
+
+                // Messages (src/utils/meta-messaging.ts): stop Meta sending this Page's messages to
+                // our webhook — but only once no other active facebook/instagram row, in any
+                // workspace, still uses the Page (its Facebook and Instagram rows share one
+                // subscription). Runs BEFORE the revoke / vault delete below, which end the token.
+                if (svc === 'facebook' || svc === 'instagram') {
+                    const fbPageId = (conn.metadata as { fbPageId?: string | null } | null)?.fbPageId
+                        ?? (svc === 'facebook' ? conn.externalUserId : null);
+                    if (fbPageId) {
+                        const { pageStillInUse, unsubscribePageFromMessages } = await import('../../src/utils/meta-messaging');
+                        if (!(await pageStillInUse(db, fbPageId, connIdInt).catch(() => true))) {
+                            const { getSecret: readSecret } = await import('../../src/utils/vault');
+                            const s = await readSecret(db, conn.vaultRefKey).catch(() => null) as { token?: string } | null;
+                            if (s?.token) await unsubscribePageFromMessages(s.token, fbPageId);
+                        }
+                    }
+                }
                 const sharing = await findDisconnectSharing(db, { connectionId: connIdInt, serviceName: svc, fbUserId, vaultRefKey: conn.vaultRefKey });
                 const plan = planDisconnectRevoke({ serviceName: svc, fbUserId, ...sharing });
                 const { getSecret } = await import('../../src/utils/vault');
