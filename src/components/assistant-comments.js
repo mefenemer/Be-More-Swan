@@ -160,7 +160,7 @@
       <article class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm" data-cmt-card="${c.id}">
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 font-bold">LinkedIn</span>
-          <span class="font-bold text-gray-900">${esc(c.authorName)}</span>
+          <span class="font-bold text-gray-900">${esc(c.authorLabel || 'Someone')} commented</span>
           ${c.commentedAt ? `<span class="text-gray-500">· ${esc(when(c.commentedAt))}</span>` : ''}
         </div>
         <p class="text-sm text-gray-900 mt-2 whitespace-pre-wrap break-words">${esc(c.body)}</p>
