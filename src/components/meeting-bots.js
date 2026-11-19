@@ -118,8 +118,13 @@
   }
 
   async function refresh() {
-    if (!st.assistantId) return;
-    try { st.data = await load(); } catch { /* keep what is shown; the next refresh tries again */ }
+    const forId = st.assistantId;
+    if (!forId) return;
+    let data = null;
+    try { data = await load(); } catch { /* keep what is shown; the next refresh tries again */ }
+    // Another Note Taker was opened while this was loading: its own refresh is on the way (review of #774).
+    if (st.assistantId !== forId) return;
+    if (data) st.data = data;
     render();
     schedule();
   }

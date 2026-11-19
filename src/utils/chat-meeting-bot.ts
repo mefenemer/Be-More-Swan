@@ -118,10 +118,12 @@ export async function resolveMeetingBotProposal(
                 platformLabel: PICKUP_PLATFORM_LABELS[row.platform as PickupPlatform] ?? row.platform,
                 title: row.title, joinAt: row.joinAt.toISOString(), live: LIVE.includes(row.status),
                 statusWords: BOT_STATUS_WORDS[row.status as BotStatus] ?? row.status,
+                madeAt: now.toISOString(),
                 ...(open ? {} : { blocked: 'It has already finished, so there is nothing to cancel.' }),
             };
         }
-        const base = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title };
+        // madeAt: a stored send card is only offered again for a short while (refreshMeetingBotCards).
+        const base = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title, madeAt: now.toISOString() };
         const block = (reason: string) => ({ ...base, joinAt: null, blocked: reason });
         if (!(await isFeatureEnabled(organisationId, MEETING_BOT_FLAG))) return block('Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
         const link = cleanMeetingLink(req.meetingUrl);
@@ -141,4 +143,53 @@ export async function resolveMeetingBotProposal(
         console.error('[chat-meeting-bot] resolve failed (non-fatal)', err instanceof Error ? err.message : err);
         return null;
     }
+}
+
+// ── Stored cards (a reopened conversation, the Team feed: src/utils/chat-card-refresh.ts) ───────────
+
+/** How long a stored "send" card is offered again. After that a click could send a bot into a LATER call on a recurring
+ *  link (the duplicate check only looks back 3 hours) and charge for it (review of #774). */
+export const SEND_CARD_FRESH_MS = 10 * 60 * 1000;
+
+/** Pure: why a stored card can no longer be acted on, or null while it still can. `bot` is the remove card's row. */
+export function botCardSettledReason(ui: Record<string, unknown>, bot: { status: string } | null, now: Date = new Date()): string | null {
+    if (ui.action === 'send') {
+        const made = typeof ui.madeAt === 'string' ? Date.parse(ui.madeAt) : NaN;
+        if (!Number.isFinite(made) || now.getTime() - made > SEND_CARD_FRESH_MS) {
+            return 'An earlier request, so it isn’t offered again. If the Note Taker should still join, ask me again or use “Send to a call” on the Inbox tab.';
+        }
+        return null;
+    }
+    if (ui.action === 'remove') {
+        if (!bot) return 'This booking no longer exists.';
+        if (!OPEN_BOT_STATUSES.includes(bot.status as BotStatus) || bot.status === 'ended') {
+            return `Already finished (${BOT_STATUS_WORDS[bot.status as BotStatus] ?? bot.status}), so there is nothing to cancel.`;
+        }
+    }
+    return null;
+}
+
+/** Settles stored meeting_bot_proposal cards that must not be clicked again. Never throws. */
+export async function refreshMeetingBotCards<M extends { uiElement: unknown }>(
+    db: Db, organisationId: number, aiAssistantId: number, messages: M[], now: Date = new Date(),
+): Promise<M[]> {
+    return Promise.all(messages.map(async (m) => {
+        const ui = m.uiElement as Record<string, unknown> | null;
+        if (!ui || ui.type !== MEETING_BOT_PROPOSAL_TYPE || ui.settled || ui.blocked) return m;
+        try {
+            let bot: { status: string } | null = null;
+            if (ui.action === 'remove') {
+                const [row] = await db.select({ status: meetingBots.status }).from(meetingBots).where(and(
+                    eq(meetingBots.id, Number(ui.botId)), eq(meetingBots.organisationId, organisationId), eq(meetingBots.aiAssistantId, aiAssistantId),
+                )).limit(1);
+                bot = row ?? null;
+            }
+            const why = botCardSettledReason(ui, bot, now);
+            return why ? { ...m, uiElement: { ...ui, settled: true, blocked: why } } : m;
+        } catch (err) {
+            console.error('[chat-meeting-bot] could not refresh a stored card (non-fatal)', err instanceof Error ? err.message : err);
+            // Safer to settle than to leave a live button we couldn't check.
+            return { ...m, uiElement: { ...ui, settled: true, blocked: 'This earlier request can’t be checked right now. Ask me again if it still needs doing.' } };
+        }
+    }));
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
-    MEETING_BOT_PROPOSAL_TYPE, formatMeetingBotsSnapshot, meetingBotFromUiElement, meetingBotPromptBlock,
+    MEETING_BOT_PROPOSAL_TYPE, SEND_CARD_FRESH_MS, botCardSettledReason, formatMeetingBotsSnapshot, meetingBotFromUiElement, meetingBotPromptBlock,
 } from '../src/utils/chat-meeting-bot';
 
 let passed = 0;
@@ -150,6 +150,32 @@ await test('chat card: drawn by the registry, a blocked card has no button, and 
     assert.ok(!/recall\.ai/i.test(fn));
     assert.match(read('src/utils/assistant-chat-capabilities.ts'), /meeting_bot_proposal: 'Send the Note Taker into a Meet or Teams call/);
     assert.match(read('src/config/chat-capabilities.generated.ts'), /"meeting_bot_proposal"/);
+});
+
+await test('review of #774: a reopened chat never re-offers an old send card, nor a remove card for a finished bot', () => {
+    const t = new Date('2026-11-19T12:00:00Z');
+    const fresh = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', madeAt: new Date(t.getTime() - 60_000).toISOString() };
+    assert.equal(botCardSettledReason(fresh, null, t), null, 'just made: still offered (a quick reload)');
+    const old = { ...fresh, madeAt: new Date(t.getTime() - SEND_CARD_FRESH_MS - 1000).toISOString() };
+    assert.match(botCardSettledReason(old, null, t) ?? '', /An earlier request/);
+    assert.match(botCardSettledReason({ type: MEETING_BOT_PROPOSAL_TYPE, action: 'send' }, null, t) ?? '', /An earlier request/, 'no madeAt = settled');
+    const rm = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'remove', botId: 3 };
+    assert.equal(botCardSettledReason(rm, { status: 'in_call' }, t), null);
+    assert.match(botCardSettledReason(rm, { status: 'done' }, t) ?? '', /Already finished \(Done\)/);
+    assert.match(botCardSettledReason(rm, { status: 'ended' }, t) ?? '', /Already finished/);
+    assert.match(botCardSettledReason(rm, null, t) ?? '', /no longer exists/);
+    const chain = read('src/utils/chat-card-refresh.ts');
+    assert.ok(chain.includes('out = await refreshMeetingBotCards(db, organisationId, aiAssistantId, out);'), 'in the one refresh chain');
+    const mod = read('src/utils/chat-meeting-bot.ts');
+    assert.ok(mod.includes("madeAt: now.toISOString() };"), 'send cards carry when they were made');
+});
+
+await test('review of #774: switching Note Takers mid-load never shows the first one\'s bots; a send with no link asks for it', () => {
+    const c = read('src/components/meeting-bots.js');
+    const r = c.slice(c.indexOf('async function refresh()'));
+    assert.ok(r.indexOf('if (st.assistantId !== forId) return;') < r.indexOf('render();'));
+    const orch = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(orch.includes("asked === 'send'") && orch.includes('Paste the Google Meet or Microsoft Teams link from the invite.'));
 });
 
 // ── Round 5 review notes on the engine (#769) ────────────────────────────────────────────────────

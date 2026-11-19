@@ -4068,9 +4068,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Send the Note Taker into a call, or take one out (src/utils/chat-meeting-bot.ts): rebuilt from facts; only the
         // click acts, through the same server action as the Inbox's "Send to a call".
         if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === MEETING_BOT_PROPOSAL_TYPE) {
+            const asked = (uiElement as { action?: unknown }).action;
             const botReq = meetingBotFromUiElement(uiElement);
             uiElement = botReq ? await resolveMeetingBotProposal(db, orgId, session.aiAssistantId, botReq) : null;
-            if (!uiElement) content = 'I couldn’t find that Note Taker booking, so I haven’t set anything up. Which one do you mean? They’re listed above the Inbox.';
+            if (!uiElement) {
+                content = asked === 'send'
+                    ? 'Which meeting should the Note Taker join? Paste the Google Meet or Microsoft Teams link from the invite.'
+                    : 'I couldn’t find that Note Taker booking, so I haven’t set anything up. Which one do you mean? They’re listed above the Inbox.';
+            }
         }
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
