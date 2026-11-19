@@ -42,6 +42,7 @@ export async function readTaskUsage(db: Db, organisationId: number, periodStart:
                COALESCE((SELECT SUM(${inFlightWeightSql(await getTaskCosts())})
                            FROM media_generation_jobs
                           WHERE organisation_id = ${organisationId} AND status IN ('queued', 'processing')
+                            AND prompt NOT LIKE 'video_project:%'   -- presenter pieces: in their video's hold already
                             AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;
 
     return {

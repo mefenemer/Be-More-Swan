@@ -21,9 +21,9 @@
 // ⚠️ Still scenes need a Remotion bundle from 2026-10-31 or later — redeploy both sites first.
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { contentAssets, organisations, scheduledPosts, videoProjects } from '../../db/schema';
+import { contentAssets, mediaGenerationJobs, organisations, scheduledPosts, videoProjects } from '../../db/schema';
 import { videoResults, type ResultRow } from '../lib/video-results';
 import { VIDEO_SHAPES, SHAPE_LABELS } from '../lib/storyboard';
 import { LOOK_LABELS } from '../lib/video-look';
@@ -55,7 +55,7 @@ import {
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import { applyCovers, cornerOf, coverWindow, type TimelineCover } from '../lib/scene-cover';
-import { AI_PRESENTER_FLAG, PRESENTERS, PRESENTER_AUDIO_TAIL_S, PRESENTER_MODEL, presenterAudioWindow, presenterById, presenterFaceKey, presenterTasks, presenterVoice, readBriefPresenter } from '../lib/presenters';
+import { AI_PRESENTER_FLAG, PRESENTERS, PRESENTER_AUDIO_TAIL_S, PRESENTER_MODEL, presenterAudioWindow, presenterPieces, presenterById, presenterFaceKey, presenterTasks, presenterVoice, readBriefPresenter } from '../lib/presenters';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
@@ -405,7 +405,7 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             const before = new Map(current.scenes.map((x) => [x.id, x]));
             const assets = { ...((p.sceneAssets ?? {}) as Record<string, number>) };
             // A presenter clip is its scene's spoken line: a changed or moved line makes it again (review of #721).
-            for (const sc of storyboard.scenes) { const b = before.get(sc.id); if (!b || sceneLooks(b) !== sceneLooks(sc) || (sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))) delete assets[sc.id]; }
+            for (const sc of storyboard.scenes) { const b = before.get(sc.id); if (!b || sceneLooks(b) !== sceneLooks(sc) || (sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))) dropPresenterScene(assets, sc.id); }
             const voiceSame = scriptOf(current) === scriptOf(storyboard);
             kept = { sceneAssets: assets, ...(voiceSame ? {} : { voiceoverAssetId: null }), ...(mode === 'notes' ? { momentNotes: [] } : {}) };
             if (current.music) storyboard = { ...storyboard, music: current.music };
@@ -643,6 +643,22 @@ export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, du
             const w = ownWindow(s.inS ?? 0, d, fileS);
             return [{ id: `vp_${s.id}`, assetId, inS: w.inS, outS: w.outS, gain: ownGain }];
         }
+        // An AI presenter in pieces (Phase 4c-2): back to back, each playing its slot (its file less the tail every
+        // piece carries), the last filling the scene, so the lips start again in step at every piece.
+        const pieceIds = s.source === 'ai_presenter' ? presenterPieceKeys(assetIds, s.id).map((k) => assetIds[k]).filter(Boolean) : [];
+        if (pieceIds.length > 1) {
+            const out: VideoClip[] = [];
+            let left = Math.round(d * 100) / 100;
+            pieceIds.forEach((id, k) => {
+                if (left <= 0.05) return;
+                const fileS = own?.clipS?.get(id);
+                const slot = k === pieceIds.length - 1 ? left : Math.min(left, fileS ? Math.max(0.5, fileS - PRESENTER_AUDIO_TAIL_S) : left);
+                const len = Math.round(slot * 100) / 100;
+                out.push({ id: `vp_${s.id}_${k + 1}`, assetId: id, inS: 0, outS: len, ...(own?.ownSound ? { gain: 0 } : {}) });
+                left = Math.round((left - len) * 100) / 100;
+            });
+            return out;
+        }
         // A stock or AI clip made for an earlier version: a reworded line can now run longer than
         // the clip, and a clip asked for past its end fails the whole render ("No frame found"). It
         // plays again from the start for the rest — the picture is kept, never sourced again.
@@ -842,49 +858,104 @@ async function sourceScene(db: Db, args: {
     return null;
 }
 
-/** How long one presenter clip may take at the model before it is cancelled (Kling AI Avatar took 4–6 min for 10 s). */
-// 8 minutes: the wait starts after the voiceover is made, and the whole build has a 15-minute ceiling (review of #721).
-export const PRESENTER_ATTEMPT_MS = 8 * 60 * 1000;
+/**
+ * A presenter piece still at the model after this long is abandoned and its scene reported (Phase 4c-2). Kling makes
+ * about 20 s per second of video (37.6 s took 12 min 26 s), so a 20 s piece is ~7 minutes plus any queue.
+ */
+export const PRESENTER_PIECE_MAX_MS = 45 * 60 * 1000;
+/** One build run's working time before it hands over to a fresh run: the worker's ceiling is 15 minutes. */
+export const BUILD_RUN_BUDGET_MS = 11 * 60 * 1000;
+/** The budget in force: VIDEO_BUILD_RUN_BUDGET_MS lowers it (to test a hand-over without a 10-minute video), never raises it. */
+export function buildRunBudgetMs(env: Record<string, string | undefined> = process.env): number {
+    const n = Number(env.VIDEO_BUILD_RUN_BUDGET_MS);
+    return Number.isFinite(n) && n >= 30_000 ? Math.min(n, BUILD_RUN_BUDGET_MS) : BUILD_RUN_BUDGET_MS;
+}
+
+/** Where a presenter scene's k-th piece (0-based) is kept on the project's scene assets. Pure. */
+export const presenterPieceKey = (sceneId: string, k: number) => `${sceneId}~p${k + 1}`;
+/** Every piece key of a scene (`s3~p1`, `s3~p2`…), as found in a scene-assets map. Pure. */
+export function presenterPieceKeys(assets: Record<string, unknown>, sceneId: string): string[] {
+    const re = new RegExp(`^${sceneId.replace(/[^\w]/g, '')}~p(\\d+)$`);
+    return Object.keys(assets).filter((k) => re.test(k)).sort((a, b) => Number(a.split('~p')[1]) - Number(b.split('~p')[1]));
+}
+/** Forget a presenter scene's clip and its pieces (a new voiceover, a reworded line). Mutates `assets`. */
+export function dropPresenterScene(assets: Record<string, unknown>, sceneId: string): void {
+    delete assets[sceneId];
+    for (const k of presenterPieceKeys(assets, sceneId)) delete assets[k];
+}
+/**
+ * The media job row that tracks a piece at fal (media_generation_jobs.prompt), so the NEXT build run finds it
+ * instead of paying for it again. The voiceover and the piece's window are in it: a new voiceover, or new scene
+ * timings, never pick up an old clip. Pure.
+ */
+export function presenterJobKey(projectId: number, voiceoverAssetId: number, pieceKey: string, w: { startS: number; endS: number }): string {
+    return `video_project:${projectId}:vo${voiceoverAssetId}:${pieceKey}:${w.startS.toFixed(2)}-${w.endS.toFixed(2)}`;
+}
+
+/** A piece's clip length from its job key: its window plus the tail every piece carries. Null when it can't be read. Pure. */
+export function pieceSecondsFromKey(key: string): number | null {
+    const m = /:(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(key);
+    if (!m) return null;
+    const len = Number(m[2]) - Number(m[1]);
+    return len > 0 ? Math.round((len + PRESENTER_AUDIO_TAIL_S) * 100) / 100 : null;
+}
+
+/** A video's presenter pieces still at the model: cancelled there and marked failed (a failed or swept build). */
+export async function abandonPresenterPieces(db: Db, projectId: number): Promise<void> {
+    const rows = await db.select({ id: mediaGenerationJobs.id, falStatusUrl: mediaGenerationJobs.falStatusUrl }).from(mediaGenerationJobs)
+        .where(and(like(mediaGenerationJobs.prompt, `video_project:${projectId}:%`), eq(mediaGenerationJobs.status, 'processing')));
+    for (const r of rows) {
+        if (r.falStatusUrl) await falCancel(r.falStatusUrl);
+        await db.update(mediaGenerationJobs).set({ status: 'failed', errorMessage: 'the build stopped', updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, r.id));
+    }
+}
+
+type Pcm = NonNullable<Awaited<ReturnType<typeof decodeAudio>>>;
 
 /**
- * An AI presenter speaking one scene's line (docs/video-producer-screen-walkthrough-plan.md §11.1, A2). The scene's
- * stretch of the voiceover (plus a short tail, so the clip always covers the scene) is cut out as a WAV, and the
- * presenter's face for the video's shape (in storage, uploaded once by scripts/make-presenters.mjs) is lip-synced to
- * it by the catalogue's avatar model. The clip plays muted on the timeline: the voiceover track already carries the
- * sound, so the lips line up with it. Throws on any failure — the caller refunds and reports the scene.
+ * Send one piece of an AI presenter scene to the avatar model (docs/video-producer-screen-walkthrough-plan.md §11.1,
+ * A2; pieces since 4c-2). The piece's stretch of the voiceover, plus a short tail and padded with silence past the end
+ * of the voice file, so the clip always covers its slot, is cut out as a WAV. The presenter's face for the video's
+ * shape is lip-synced to it. A media job row records the request, so a later run can finish it. Returns that row's id.
  */
-async function makePresenterClip(db: Db, args: {
+async function submitPresenterPiece(db: Db, args: {
     orgId: number; userId: number; assistantId: number | null; presenterId: string; shape: VideoShape;
-    voiceover: { storageKey: string | null; mimeType: string | null }; startS: number; endS: number; label: string;
-}): Promise<{ assetId: number; seconds: number }> {
-    if (!falConfigured()) throw new Error('AI presenters are not set up in this environment.');
+    pcm: Pcm; startS: number; endS: number; jobKey: string;
+}): Promise<number> {
     const p = presenterById(args.presenterId);
     if (!p) throw new Error('That presenter is no longer offered.');
-    if (!args.voiceover.storageKey) throw new Error('The voiceover could not be read for the presenter.');
-    const res = await fetch(await presignR2Get(args.voiceover.storageKey, 600));
-    const pcm = res.ok ? await decodeAudio(new Uint8Array(await res.arrayBuffer()), args.voiceover.mimeType) : null;
-    if (!pcm || !pcm.channels[0]?.length) throw new Error('The voiceover could not be read for the presenter.');
-    const rate = pcm.sampleRate;
-    const w = presenterAudioWindow(args.startS, args.endS, pcm.channels[0].length / rate);
-    if (w.endS - w.startS < 0.5) throw new Error('The presenter has too little to say in this scene.');
-    // The last scene runs past the last word (sceneTimingsFromWords adds 0.4 s), beyond the end of the voice file:
-    // pad with silence so the clip always covers the scene plus the tail — a clip shorter than its scene fails the
-    // whole render ("No frame found", review of #721).
+    const rate = args.pcm.sampleRate;
+    const voiceS = args.pcm.channels[0].length / rate;
+    const w = presenterAudioWindow(args.startS, args.endS, voiceS);
+    if (w.endS - w.startS < 0.5 && args.endS - args.startS < 0.5) throw new Error('The presenter has too little to say in this scene.');
+    // Past the end of the voice file (the last scene runs 0.4 s past the last word): silence, so the clip is never
+    // shorter than its slot — a clip shorter than its scene fails the whole render ("No frame found", review of #721).
     const want = Math.ceil((args.endS - w.startS + PRESENTER_AUDIO_TAIL_S) * rate);
-    const cut = pcm.channels[0].slice(Math.floor(w.startS * rate), Math.ceil(w.endS * rate));
+    const cut = args.pcm.channels[0].slice(Math.floor(w.startS * rate), Math.ceil(w.endS * rate));
     const slice = cut.length >= want ? cut : (() => { const f = new Float32Array(want); f.set(cut); return f; })();
     const audio = await persistBufferToR2({ orgId: args.orgId, bytes: Buffer.from(wavBytes({ channels: [slice], sampleRate: rate })), contentType: 'audio/wav', folder: 'video-producer' });
     const [audioUrl, imageUrl] = await Promise.all([presignR2Get(audio.storageKey, 3600), presignR2Get(presenterFaceKey(p.id, args.shape), 3600)]);
     const job = await falSubmit(PRESENTER_MODEL, { image_url: imageUrl, audio_url: audioUrl });
-    const deadline = Date.now() + PRESENTER_ATTEMPT_MS;
-    let done = false;
-    while (Date.now() < deadline) {
-        if ((await falStatus(job.statusUrl)) === 'COMPLETED') { done = true; break; }
-        await sleep(AI_CLIP_POLL_MS);
-    }
-    if (!done) { await falCancel(job.statusUrl); throw new Error('The presenter clip took too long and was abandoned.'); }
-    const v = extractVideo(await falResult(job.responseUrl));
     const seconds = Math.round((slice.length / rate) * 100) / 100;
+    const [row] = await db.insert(mediaGenerationJobs).values({
+        organisationId: args.orgId, userId: args.userId, assistantId: args.assistantId, mediaType: 'video', prompt: args.jobKey,
+        aspectRatio: args.shape, durationSeconds: Math.ceil(seconds), model: PRESENTER_MODEL, creditCost: 0, status: 'processing',
+        falRequestId: job.requestId, falStatusUrl: job.statusUrl, falResponseUrl: job.responseUrl,
+    }).returning({ id: mediaGenerationJobs.id });
+    return row.id;
+}
+
+/** A finished piece at fal: stored in R2 as a content asset, its job row marked done. Returns the asset id. */
+async function finishPresenterPiece(db: Db, args: {
+    orgId: number; userId: number; assistantId: number | null; presenterId: string; shape: VideoShape;
+    job: { id: number; prompt: string; falResponseUrl: string | null; durationSeconds: number | null }; label: string;
+}): Promise<number> {
+    const p = presenterById(args.presenterId);
+    if (!p || !args.job.falResponseUrl) throw new Error('The presenter clip could not be collected.');
+    const v = extractVideo(await falResult(args.job.falResponseUrl));
+    // The EXACT length, from the window in the job key: the job row's duration_seconds is a whole number, and a
+    // rounded-up length put every later piece out of step and ran slots past their file (review of #757).
+    const seconds = pieceSecondsFromKey(args.job.prompt) ?? args.job.durationSeconds ?? 0;
     await logMediaCost(PRESENTER_MODEL, { durationSeconds: seconds }, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId, sessionId: 'fal-presenter' });
     const stored = await persistRemoteMediaToR2({ orgId: args.orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI presenter' });
     const [asset] = await db.insert(contentAssets).values({
@@ -894,7 +965,9 @@ async function makePresenterClip(db: Db, args: {
         // A realistic made-up person: the "Made with AI" line and YouTube's synthetic flag apply (ai-disclosure.ts).
         renderParams: { kind: 'ai_presenter', presenterId: p.id, aiStyle: 'realistic' },
     }).returning({ id: contentAssets.id });
-    return { assetId: asset.id, seconds };
+    await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
+        .where(eq(mediaGenerationJobs.id, args.job.id));
+    return asset.id;
 }
 
 /**
@@ -923,6 +996,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
     const storyboard = p.storyboard as Storyboard;
     let held = p.creditHold;
     let spent = p.creditsSpent;
+    const runStarted = Date.now();
     const done: Record<string, number> = { ...(p.sceneAssets as Record<string, number>) };
 
     const settle = async (mediaType: MediaKind, cost: number, success: boolean, tasks?: number) => {
@@ -983,7 +1057,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                     words = vo.words;
                     await settle('voiceover', VOICEOVER_CREDIT_COST, true);
                     // Presenter clips kept from before were synced to the OLD voiceover: made again from this one.
-                    for (const s of storyboard.scenes) if (s.source === 'ai_presenter') delete done[s.id];
+                    for (const s of storyboard.scenes) if (s.source === 'ai_presenter') dropPresenterScene(done, s.id);
                 } catch (err) {
                     await settle('voiceover', VOICEOVER_CREDIT_COST, false);
                     throw new Error(`The voiceover could not be made (${err instanceof Error ? err.message : 'unknown error'}).`);
@@ -1024,21 +1098,102 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 .where(and(eq(contentAssets.id, voiceoverAssetId), eq(contentAssets.organisationId, orgId))).limit(1))[0] ?? null
             : null;
         const presenterPerSecond = presenterBrief ? (await getTaskCosts()).weights.ai_presenter : 0;
+        // Pieces (Phase 4c-2): a scene is cut at pauses into ~15 s pieces (presenterPieces), all sent at once; each
+        // piece's job row lets the NEXT run collect it. This run works until BUILD_RUN_BUDGET_MS, then hands over.
+        let handOver = false;
+        let voicePcm: Promise<Pcm | null> | null = null;
+        const loadVoice = () => (voicePcm ??= (async () => {
+            if (!voiceFile?.storageKey) return null;
+            const res = await fetch(await presignR2Get(voiceFile.storageKey, 600));
+            return res.ok ? decodeAudio(new Uint8Array(await res.arrayBuffer()), voiceFile.mimeType) : null;
+        })());
         const makePresenterScene = async (i: number) => {
             const scene = storyboard.scenes[i];
             const startS = durations.slice(0, i).reduce((a, d) => a + d, 0);
-            let clip: { assetId: number; seconds: number } | null = null;
+            const endS = startS + durations[i];
+            let made = false;
             try {
-                if (!presenterBrief || !voiceFile) throw new Error('This video has no presenter or no voiceover to speak.');
-                clip = await makePresenterClip(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id, shape: brief.shape ?? '9:16',
-                    voiceover: voiceFile, startS, endS: startS + durations[i], label: `scene ${i + 1}` });
+                if (!presenterBrief || !voiceFile || !voiceoverAssetId) throw new Error('This video has no presenter or no voiceover to speak.');
+                const pieces = presenterPieces(startS, endS, words);
+                const keys = pieces.map((_, k) => presenterPieceKey(scene.id, k));
+                const jobKeys = pieces.map((w, k) => presenterJobKey(projectId, voiceoverAssetId!, keys[k], w));
+                // What earlier runs already sent for these exact pieces.
+                const rows = await db.select({ id: mediaGenerationJobs.id, prompt: mediaGenerationJobs.prompt, status: mediaGenerationJobs.status,
+                    falStatusUrl: mediaGenerationJobs.falStatusUrl, falResponseUrl: mediaGenerationJobs.falResponseUrl,
+                    durationSeconds: mediaGenerationJobs.durationSeconds, resultAssetIds: mediaGenerationJobs.resultAssetIds, createdAt: mediaGenerationJobs.createdAt })
+                    .from(mediaGenerationJobs)
+                    .where(and(eq(mediaGenerationJobs.organisationId, orgId), inArray(mediaGenerationJobs.prompt, jobKeys), inArray(mediaGenerationJobs.status, ['processing', 'completed'])));
+                const byKey = new Map(rows.map((r) => [r.prompt, r]));
+                // Send every piece not already made or at the model.
+                for (const [k, w] of pieces.entries()) {
+                    if (done[keys[k]] || byKey.has(jobKeys[k])) continue;
+                    const pcm = await loadVoice();
+                    if (!pcm || !pcm.channels[0]?.length) throw new Error('The voiceover could not be read for the presenter.');
+                    const id = await submitPresenterPiece(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id,
+                        shape: brief.shape ?? '9:16', pcm, startS: w.startS, endS: w.endS, jobKey: jobKeys[k] });
+                    const [row] = await db.select({ id: mediaGenerationJobs.id, prompt: mediaGenerationJobs.prompt, status: mediaGenerationJobs.status,
+                        falStatusUrl: mediaGenerationJobs.falStatusUrl, falResponseUrl: mediaGenerationJobs.falResponseUrl,
+                        durationSeconds: mediaGenerationJobs.durationSeconds, resultAssetIds: mediaGenerationJobs.resultAssetIds, createdAt: mediaGenerationJobs.createdAt })
+                        .from(mediaGenerationJobs).where(eq(mediaGenerationJobs.id, id)).limit(1);
+                    byKey.set(jobKeys[k], row);
+                }
+                // Collect them as they finish, until every piece is in or this run's time is up.
+                for (;;) {
+                    for (const [k] of pieces.entries()) {
+                        if (done[keys[k]]) continue;
+                        const row = byKey.get(jobKeys[k]);
+                        if (!row) throw new Error('A presenter piece was not sent.');
+                        const madeId = Array.isArray(row.resultAssetIds) ? Number(row.resultAssetIds[0]) : 0;
+                        if (row.status === 'completed' && madeId > 0) { done[keys[k]] = madeId; continue; }
+                        // Finished at the model first: a piece done long ago is collected, never thrown away (review of #757).
+                        const state = row.falStatusUrl ? await falStatus(row.falStatusUrl) : 'IN_PROGRESS';
+                        if (state === 'COMPLETED') {
+                            // Claim it, so a second run of the same build can't collect (and log the cost of) it too.
+                            const [claim] = await db.update(mediaGenerationJobs)
+                                .set({ errorMessage: `collecting:${runStarted}`, updatedAt: new Date() })
+                                .where(and(eq(mediaGenerationJobs.id, row.id), eq(mediaGenerationJobs.status, 'processing'),
+                                    or(isNull(mediaGenerationJobs.errorMessage), lt(mediaGenerationJobs.updatedAt, new Date(Date.now() - 10 * 60 * 1000)))))
+                                .returning({ id: mediaGenerationJobs.id });
+                            if (!claim) {
+                                // Another run has it: read what it made on the next round.
+                                const [again] = await db.select({ status: mediaGenerationJobs.status, resultAssetIds: mediaGenerationJobs.resultAssetIds }).from(mediaGenerationJobs).where(eq(mediaGenerationJobs.id, row.id)).limit(1);
+                                if (again) Object.assign(row, again);
+                                continue;
+                            }
+                            try {
+                                done[keys[k]] = await finishPresenterPiece(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id,
+                                    shape: brief.shape ?? '9:16', job: row, label: pieces.length > 1 ? `scene ${i + 1}, part ${k + 1}` : `scene ${i + 1}` });
+                            } catch (err) {
+                                await db.update(mediaGenerationJobs).set({ errorMessage: null, updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, row.id));
+                                throw err;
+                            }
+                            continue;
+                        }
+                        if (Date.now() - new Date(row.createdAt).getTime() > PRESENTER_PIECE_MAX_MS) {
+                            if (row.falStatusUrl) await falCancel(row.falStatusUrl);
+                            await db.update(mediaGenerationJobs).set({ status: 'failed', errorMessage: 'took too long', updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, row.id));
+                            throw new Error('The presenter clip took too long and was abandoned.');
+                        }
+                    }
+                    if (keys.every((key) => done[key])) break;
+                    if (Date.now() - runStarted > buildRunBudgetMs()) { handOver = true; await save({}); return; }
+                    await save({});   // keeps updatedAt fresh, so the stuck sweep leaves a long build alone
+                    await sleep(AI_CLIP_POLL_MS);
+                }
+                // Another run of this build finished the scene first: take its clip, and leave the charge to it.
+                const [cur] = await db.select({ sceneAssets: videoProjects.sceneAssets }).from(videoProjects).where(eq(videoProjects.id, projectId)).limit(1);
+                const already = Number((cur?.sceneAssets as Record<string, number> | null)?.[scene.id]);
+                if (already > 0) { done[scene.id] = already; return; }
+                // The scene is made: its first piece stands for it (the build's "already made" check), the rest follow it.
+                done[scene.id] = done[keys[0]];
+                made = true;
             } catch (err) {
                 console.error(`[video-producer] build ${projectId} presenter scene ${scene.id} failed:`, err);
             }
-            // Charged by the seconds the presenter is on screen (D-A3), only when the clip was made.
-            // Never more than the cost shown before making, which counted the planned length (review of #721).
-            await settle('presenter', VIDEO_CREDIT_COST, !!clip, Math.min(presenterTasks(durations[i], presenterPerSecond), presenterTasks(scene.targetS, presenterPerSecond)));
-            if (clip) done[scene.id] = clip.assetId; else failed.add(i);
+            // Charged by the seconds the presenter is on screen (D-A3), only when the clip was made — once, in whichever
+            // run finishes the scene. Never more than the cost shown before making, which counted the planned length (review of #721).
+            await settle('presenter', VIDEO_CREDIT_COST, made, Math.min(presenterTasks(durations[i], presenterPerSecond), presenterTasks(scene.targetS, presenterPerSecond)));
+            if (!made) failed.add(i);
             await save({});
         };
         const makeScene = async (i: number) => {
@@ -1069,6 +1224,23 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         await Promise.all([...todo.filter(slow).map(makeScene), others]);
         // The parallel saves can land out of order; this one writes every scene made.
         await save({});
+        // Presenter pieces still at the model and this run's time used up (Phase 4c-2): a fresh run carries on from
+        // here — the project stays "building", made scenes and pieces are kept, sent pieces are collected, not re-sent.
+        if (handOver) {
+            console.log(`[video-producer] build ${projectId}: presenter pieces still being made — handing over to a fresh run`);
+            // A scene that failed in this run is tried once more by the next one — said on the card, not silently (review of #757).
+            if (failed.size) {
+                const which = [...failed].sort((a, b) => a - b).map((i) => i + 1).join(', ');
+                await save({ note: `Still making the presenter. Scene${failed.size === 1 ? '' : 's'} ${which} couldn’t be made and ${failed.size === 1 ? 'is' : 'are'} being tried again.` });
+            }
+            let woken = false;
+            for (let attempt = 0; attempt < 3 && !woken; attempt++) {
+                if (attempt) await sleep(2000 * attempt);
+                woken = await wakeVideoWorker({ projectId, action: 'build' });
+            }
+            if (!woken) console.error(`[video-producer] build ${projectId}: the next run could not be woken — the stuck sweep will stop it in 20 minutes`);
+            return;
+        }
         // 2b. Walkthrough screens (src/lib/scene-cover.ts): each sourced like a scene as long as its stretch,
         // kept under "<scene id>~cover". Free sources only (own video, library picture, stock), so the cost
         // shown before "Make the video" is unchanged.
@@ -1174,7 +1346,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             levels.musicUnder = Math.min(levels.musicUnder, levels.music);
         }
         // Reused stock / AI clips: their real lengths, so a longer reworded line never runs past one.
-        const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'ai_presenter').map((s) => done[s.id]).filter(Boolean);
+        const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'ai_presenter')
+            .flatMap((s) => [done[s.id], ...presenterPieceKeys(done, s.id).map((k) => done[k])]).filter(Boolean);
         const clipS = new Map<number, number>();
         if (reusedIds.length) {
             const rows = await db.select({ id: contentAssets.id, durationS: contentAssets.durationS }).from(contentAssets)
@@ -1265,6 +1438,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }
         await save({ status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The video could not be made.' }).catch(() => {});
+        // Presenter pieces still at the model stop there, and stop counting as running work (review of #757).
+        await abandonPresenterPieces(db, projectId).catch((e) => console.error(`[video-producer] build ${projectId}: pieces not stopped`, e));
     }
 }
 
@@ -1394,6 +1569,8 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
             .where(and(eq(videoProjects.id, p.id), inArray(videoProjects.status, ['reviewing', 'planning', 'building'])))
             .returning({ id: videoProjects.id });
         if (claimed && p.creditHold > 0) await settleHold(db, { orgId, amount: p.creditHold, success: false, mediaType: 'image', userId: p.createdBy });
+        // Its presenter pieces still at the model stop there too (Phase 4c-2, review of #757).
+        if (claimed) await abandonPresenterPieces(db, p.id).catch((err) => console.error('[video-producer] sweep: pieces not stopped', err));
     }
     return stuck.length;
 }
