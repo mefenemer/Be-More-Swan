@@ -92,7 +92,7 @@ The help article says each of these in plain words. The Note Taker's live status
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
    - Ask Recall in writing: their DPA and sub-processors, EU processing, deleting media on request, the Zoom OBF feature flag, and what the join message can say.
 
-   Done when one real minutes record exists from each of Meet and Teams through the existing writer.
+   Done when one real minutes record exists from each of Meet and Teams through the existing writer. (Runs 1–2 below prove joining and transcripts on both; the minutes-writer step is still open.)
 
    **Results so far:**
    - **Run 1, 2026-11-19, free Google Meet, Recall US West (`us-west-2`):**
@@ -102,6 +102,12 @@ The help article says each of these in plain words. The Note Taker's live status
      - **Clean-up:** Recall's copy of the media was deleted (`delete_media` returned 2xx).
      - **Speaker labels:** correct. The host was the only participant, so one label is right. Any other voice was someone in the same room on the host's device, and that is always one speaker, because names come from Meet participants. The two-device check (a second participant getting their own name) was **skipped by the owner, 2026-11-19**. Recall documents per-participant names, so it is checked in the real-account run before go-live (step 6) instead. The help article should say "everyone in one room shares one name".
      - **Not yet checked:** the pinned chat notice (look in the call), and running this transcript through the minutes writer.
+   - **Run 2, 2026-11-19, Microsoft Teams (`teams.microsoft.com/meet/…` link, passcode in the link), Recall US West:**
+     - **Joining:** the bot joined as an anonymous guest and waited in the lobby. The host admitted it, and it was recording within 0.6 minutes. No CAPTCHA or sign-in block on this meeting.
+     - **The call:** about 1 minute in the call, host only.
+     - **Transcript:** ready **at once**. 33 words in 1 block under the host's Teams display name, with no unlabelled lines. Word-for-word accurate.
+     - **Clean-up:** media deleted.
+     - **Not yet checked:** whether Teams showed the chat notice; a business tenant that blocks anonymous guests.
 1. **Legal and copy first.**
    - Add Recall.ai to the Trust page sub-processors (with ElevenLabs, if it isn't added yet).
    - Update the privacy notice and DPA (what the bot records, retention), and add the Terms clause: *you must tell the people in your meeting that the Note Taker is there and recording*.
