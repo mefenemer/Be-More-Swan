@@ -172,8 +172,8 @@ check('a non-GBP ad account is REFUSED, not converted', () => {
     // ⚠️ max_spend_gbp is named for its currency. Writing euros into it is the same mistake the
     // adapter refuses to make with costInLocalCurrency, and it would misreport every
     // cost-per-outcome figure downstream. Converting needs a rate we do not have.
-    assert.match(stage, /conn\.selectedCurrency !== 'GBP'/);
-    assert.match(stage, /bills in \$\{conn\.selectedCurrency\}/);
+    assert.match(stage, /selectedCurrency !== 'GBP'/);
+    assert.match(stage, /bills in \$\{selectedCurrency\}/);
 });
 
 check('the daily budget is bounded at both ends', () => {
@@ -198,7 +198,7 @@ check('an adapter that refuses to construct is reported, not crashed through', (
 check('a half-completed stage tells the user it is paused and safe', () => {
     // The orphan case: LinkedIn accepted it, our write failed. It cannot spend, and saying so is
     // the difference between a support ticket and a panic.
-    const branch = stage.slice(landmark(stage, 'stage_paid created a LinkedIn campaign but failed to record it'));
+    const branch = stage.slice(landmark(stage, 'campaign but failed to record it'));
     assert.match(branch, /It is paused and cannot spend/);
 });
 

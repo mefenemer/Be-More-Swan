@@ -34,9 +34,8 @@ import { getDb } from '../../db/client';
 import {
     adVariantMetrics, adVariants, aiAssistants, campaignBudgets, campaigns, userOrganisations,
 } from '../../db/schema';
-import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
+import { adapterForCampaign, networkLabel } from '../../src/utils/ad-networks/campaign-adapter';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
-import { getAdsConnection, getAdsToken, assessAdsReadiness } from '../../src/utils/linkedin-ads-connection';
 import {
     assessHeartbeat, optimise, type DailyMetric, type VariantWindow,
 } from '../../src/utils/campaign-optimiser';
@@ -85,6 +84,8 @@ export async function runPaidOptimiserSweep(headers?: Record<string, string | un
         objective: campaigns.objective,
         status: campaigns.status,
         externalCampaignId: campaigns.externalCampaignId,
+        // Which network to reach it on. NULL = staged before ad_network existed = LinkedIn.
+        adNetwork: campaigns.adNetwork,
         optimiserLastRunAt: campaigns.optimiserLastRunAt,
         controlState: campaigns.controlState,
     }).from(campaigns)
@@ -120,34 +121,20 @@ export async function runPaidOptimiserSweep(headers?: Record<string, string | un
                 continue;
             }
 
-            const readiness = assessAdsReadiness(await getAdsConnection(db, c.organisationId));
-            if (!readiness.ready) {
-                await haltCampaign(db, c, 'The LinkedIn advertising connection is no longer usable.', notice(c));
-                haltedTotal++;
-                continue;
-            }
-            const token = await getAdsToken(db, c.organisationId);
-            if (!token) {
-                await haltCampaign(db, c, 'The LinkedIn advertising connection needs reconnecting.', notice(c));
-                haltedTotal++;
-                continue;
-            }
-
-            let adapter;
-            try {
-                adapter = linkedInAdapter({
-                    accessToken: token,
-                    accountUrn: readiness.connection.selectedAccountUrn!,
-                    // No group needed here — this adapter only pauses and reads metrics.
-                    currencyCode: 'GBP',
-                }, { isProduction: isProductionDeploy(headers) });
-            } catch {
-                // Production: Development Tier is dev-only. There should be no live paid campaigns
-                // here at all, so this is logged and skipped rather than treated as a halt — a halt
-                // would need a network call we cannot make either.
+            const resolved = await adapterForCampaign(db, c.organisationId, c.adNetwork, { isProduction: isProductionDeploy(headers) });
+            if (!resolved.ok && resolved.noAdapter) {
+                // Production: these adapters are development only. There should be no live paid
+                // campaigns here at all, so this is logged and skipped rather than treated as a halt —
+                // a halt would need a network call we cannot make either.
                 console.warn('[optimise-paid] no adapter available; skipping', { campaignId: c.id });
                 continue;
             }
+            if (!resolved.ok) {
+                await haltCampaign(db, c, `The ${resolved.label} advertising connection is no longer usable: ${resolved.reason}`, notice(c));
+                haltedTotal++;
+                continue;
+            }
+            const adapter = resolved.adapter;
 
             // ── Step 2: control. A campaign we cannot stop must not keep running.
             const control = await adapter.checkControl(c.externalCampaignId!);
@@ -157,7 +144,7 @@ export async function runPaidOptimiserSweep(headers?: Record<string, string | un
                     controlCheckedAt: now, updatedAt: now,
                 }).where(eq(campaigns.id, c.id));
                 await haltCampaign(db, c,
-                    'We could not reach your LinkedIn ad account, so we stopped the campaign rather than let it keep spending unwatched.',
+                    `We could not reach your ${networkLabel(c.adNetwork)} ad account, so we stopped the campaign rather than let it keep spending unwatched.`,
                     notice(c), adapter);
                 haltedTotal++;
                 continue;
@@ -311,7 +298,7 @@ async function stamp(db: any, campaignId: number, now: Date): Promise<void> {
  */
 async function haltCampaign(
     db: any,
-    c: { id: number; objective: string; externalCampaignId: string | null },
+    c: { id: number; objective: string; externalCampaignId: string | null; adNetwork?: string | null },
     reason: string,
     into: OrgNotice,
     adapter?: { pauseCampaign(id: string): Promise<void> },
@@ -336,7 +323,7 @@ async function haltCampaign(
         name: c.objective.slice(0, 80),
         reason: stopped || !adapter
             ? reason
-            : `${reason} We could not confirm it stopped on LinkedIn — check your Campaign Manager.`,
+            : `${reason} We could not confirm it stopped on ${networkLabel(c.adNetwork)} — check your ${c.adNetwork === 'meta' ? 'Meta Ads Manager' : 'LinkedIn Campaign Manager'}.`,
     });
 }
 
