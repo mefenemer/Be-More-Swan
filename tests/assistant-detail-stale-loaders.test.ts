@@ -172,5 +172,13 @@ check('_loadConnections ignores a non-function argument and checks before writin
     assert.ok(b.indexOf('if (stale()) return;', blog) < b.indexOf('_renderConnectionsGrid();', blog), 'before the grid is drawn');
 });
 
+check('Synced actions (assistant-integrations.js load) check the ticket before storing or drawing', () => {
+    const ai = readFileSync(path.join(ROOT, 'src/components/assistant-integrations.js'), 'utf8');
+    const b = body(ai.replace(/\n  /g, '\n'), 'async function load() {');
+    assert.ok(b.includes("const stale = typeof window._detailTicket === 'function' ? window._detailTicket() : () => false;"));
+    assert.ok(b.indexOf('if (stale()) return;') < b.indexOf('state.scenarios = scenarios;'));
+    assert.ok(/catch \(e\) \{\n\s*if \(stale\(\)\) return;/.test(b), 'a stale failure says nothing');
+});
+
 console.log(`\n${passed}/${total} passed`);
 if (passed !== total) process.exit(1);
