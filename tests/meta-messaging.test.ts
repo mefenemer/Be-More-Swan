@@ -145,6 +145,19 @@ async function main() {
         assert.ok(src.includes("if (prevMessaging?.subscribed === true && (connMetadata.messaging as { subscribed?: boolean } | undefined)?.subscribed !== true) {"));
         assert.ok(src.indexOf('const prevMessaging') < src.indexOf('let isReconnect = false;'), 'merged before the row is written');
     });
+    await check("a missing table is recognised whether or not Drizzle wrapped the Postgres error", async () => {
+        const { isMissingTable } = await import('../src/utils/meta-messaging');
+        assert.equal(isMissingTable({ code: '42P01' }), true);
+        assert.equal(isMissingTable(Object.assign(new Error('Failed query'), { cause: { code: '42P01' } })), true, 'DrizzleQueryError puts the code on .cause');
+        assert.equal(isMissingTable(Object.assign(new Error('x'), { cause: { code: '23505' } })), false);
+        assert.equal(isMissingTable(null), false);
+        const hook = read('netlify/functions/meta-webhook.ts');
+        assert.ok(hook.includes('if (isMissingTable(err)) {') && !hook.includes("err?.code === '42P01'"));
+    });
+    await check('when another row still uses the Page, Disconnect hands it the subscription instead of dropping it', () => {
+        const src = read('netlify/functions/integrations.ts');
+        assert.ok(src.includes('await markPageSubscribedOnOtherRows(db, fbPageId, connIdInt)'));
+    });
     await check('filing a message is one transaction', () => {
         assert.ok(read('src/utils/meta-messaging.ts').includes('return db.transaction(async (tx) => storeInTx(tx as unknown as Db, m));'));
     });

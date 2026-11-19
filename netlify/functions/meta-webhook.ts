@@ -21,7 +21,7 @@
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { parseMessagingWebhook, storeMessagingEvent, verifyMetaSignature } from '../../src/utils/meta-messaging';
+import { isMissingTable, parseMessagingWebhook, storeMessagingEvent, verifyMetaSignature } from '../../src/utils/meta-messaging';
 
 const ok = { statusCode: 200, headers: { 'Content-Type': 'text/plain' }, body: 'EVENT_RECEIVED' };
 
@@ -63,7 +63,7 @@ export default withLambda(async (event) => {
         } catch (err: any) {
             // Table not created yet on this database (db/z-social-messages.sql not applied): a 500
             // would make Meta retry forever and then switch the subscription off. Drop and say so.
-            if (err?.code === '42P01') {
+            if (isMissingTable(err)) {
                 console.error('[meta-webhook] social_messages tables missing — apply db/z-social-messages.sql');
                 return ok;
             }

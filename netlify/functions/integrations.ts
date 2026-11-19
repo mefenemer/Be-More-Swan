@@ -477,8 +477,11 @@ export default withLambda(async (event) => {
                     const fbPageId = (conn.metadata as { fbPageId?: string | null } | null)?.fbPageId
                         ?? (svc === 'facebook' ? conn.externalUserId : null);
                     if (fbPageId) {
-                        const { pageStillInUse, unsubscribePageFromMessages } = await import('../../src/utils/meta-messaging');
-                        if (!(await pageStillInUse(db, fbPageId, connIdInt).catch(() => true))) {
+                        const { pageStillInUse, unsubscribePageFromMessages, markPageSubscribedOnOtherRows } = await import('../../src/utils/meta-messaging');
+                        if (await pageStillInUse(db, fbPageId, connIdInt).catch(() => true)) {
+                            // The rows still using the Page inherit the subscription to undo later.
+                            await markPageSubscribedOnOtherRows(db, fbPageId, connIdInt).catch(() => {});
+                        } else {
                             const { getSecret: readSecret } = await import('../../src/utils/vault');
                             const s = await readSecret(db, conn.vaultRefKey).catch(() => null) as { token?: string } | null;
                             const unsub = s?.token ? await unsubscribePageFromMessages(s.token, fbPageId) : null;

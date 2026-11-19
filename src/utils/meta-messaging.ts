@@ -260,6 +260,32 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
     return { stored: true, conversationId: conv.id };
 }
 
+/**
+ * Postgres "relation does not exist" — the tables aren't created on this database yet. Drizzle 1.0
+ * wraps driver errors (DrizzleQueryError) and puts the Postgres error on `.cause`, so `err.code`
+ * alone is always undefined; check both.
+ */
+export function isMissingTable(err: unknown): boolean {
+    const e = err as { code?: string; cause?: { code?: string } } | null;
+    return e?.code === '42P01' || e?.cause?.code === '42P01';
+}
+
+/**
+ * Disconnect skipped the unsubscribe because another active row still uses the Page: hand the
+ * subscription over to those rows, so the last one to go undoes it (Disconnect only unsubscribes a
+ * row marked subscribed).
+ */
+export async function markPageSubscribedOnOtherRows(db: Db, pageId: string, exceptConnectionId: number): Promise<void> {
+    await db.update(systemConnections).set({
+        metadata: sql`jsonb_set(COALESCE(${systemConnections.metadata}, '{}'::jsonb), '{messaging}', '{"subscribed": true}'::jsonb)`,
+    }).where(and(
+        sql`${systemConnections.serviceName} IN ('facebook','instagram')`,
+        eq(systemConnections.isActive, true),
+        sql`${systemConnections.id} <> ${exceptConnectionId}`,
+        sql`(${systemConnections.metadata}->>'fbPageId' = ${pageId} OR (${systemConnections.serviceName} = 'facebook' AND ${systemConnections.externalUserId} = ${pageId}))`,
+    ));
+}
+
 // ── Page subscription ────────────────────────────────────────────────────────────────────────
 
 export type SubscribeResult = { ok: true } | { ok: false; error: string };

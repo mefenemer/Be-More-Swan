@@ -172,6 +172,21 @@ async function main() {
             const [r] = await sql.unsafe(`SELECT ai_assistant_id FROM social_conversations WHERE connection_id = $1`, [fbConn]) as any[];
             assert.equal(r.ai_assistant_id, 9);
         });
+        await check('markPageSubscribedOnOtherRows marks only the other active rows on that Page', async () => {
+            const { markPageSubscribedOnOtherRows } = await import('../src/utils/meta-messaging');
+            const [a] = await sql.unsafe(`INSERT INTO system_connections (organisation_id, service_name, external_user_id, is_active, metadata)
+                VALUES (5, 'facebook', 'pg-5', true, '{"fbPageId":"pg-5"}') RETURNING id`) as any[];
+            const [b] = await sql.unsafe(`INSERT INTO system_connections (organisation_id, service_name, external_user_id, is_active, metadata)
+                VALUES (5, 'instagram', 'ig-5', true, '{"fbPageId":"pg-5","igUsername":"x"}') RETURNING id`) as any[];
+            const [c] = await sql.unsafe(`INSERT INTO system_connections (organisation_id, service_name, external_user_id, is_active, metadata)
+                VALUES (5, 'instagram', 'ig-6', true, '{"fbPageId":"other"}') RETURNING id`) as any[];
+            await markPageSubscribedOnOtherRows(db, 'pg-5', Number(a.id));
+            const meta = async (id: number) => ((await sql.unsafe(`SELECT metadata FROM system_connections WHERE id = $1`, [id])) as any[])[0].metadata;
+            assert.equal((await meta(Number(b.id))).messaging?.subscribed, true);
+            assert.equal((await meta(Number(b.id))).igUsername, 'x', 'other metadata kept');
+            assert.equal((await meta(Number(a.id))).messaging, undefined, 'not the row being disconnected');
+            assert.equal((await meta(Number(c.id))).messaging, undefined, 'not a row on another Page');
+        });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();
