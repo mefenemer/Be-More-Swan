@@ -137,6 +137,11 @@ async function main() {
         assert.ok(!/BASE_SCOPES = '[^']*(pages_messaging|instagram_manage_messages|pages_manage_metadata)/.test(src),
             'messaging permissions must not be in the always-asked list');
         assert.ok(src.includes('if (messagingEnabled() && fbPageId) {'));
+        assert.ok(!src.includes('scopes: SCOPES'), 'the stored scopes must not claim messaging permissions a person may have unticked');
+        assert.ok(src.includes('scopes: BASE_SCOPES'));
+    });
+    await check('filing a message is one transaction', () => {
+        assert.ok(read('src/utils/meta-messaging.ts').includes('return db.transaction(async (tx) => storeInTx(tx as unknown as Db, m));'));
     });
 
     // ── Subscribe / unsubscribe ──────────────────────────────────────────────────────────────
@@ -241,6 +246,8 @@ async function main() {
         const deleteAt = src.indexOf('if (plan.deleteVaultSecret) await deleteSecret(');
         assert.ok(unsubAt !== -1 && inUseAt !== -1 && revokeAt !== -1 && deleteAt !== -1);
         assert.ok(inUseAt < unsubAt && unsubAt < revokeAt && unsubAt < deleteAt);
+        const subAt = src.indexOf('?.messaging?.subscribed === true');
+        assert.ok(subAt !== -1 && subAt < inUseAt, 'only a row that subscribed the Page unsubscribes it');
     });
 
     if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }

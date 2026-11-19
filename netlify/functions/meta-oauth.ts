@@ -174,7 +174,6 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
             tokenExpiresAt,
             status: 'active',
             isActive: true,
-            scopes: SCOPES,
             metadata: connMetadata,
             ...(assistantId ? { assistantId } : {}),
             // Heal a row stored before this was set, but never reassign one that already has an
@@ -194,7 +193,9 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
             tokenExpiresAt,
             status: 'active',
             isActive: true,
-            scopes: SCOPES,
+            // What was always asked for — NOT the messaging permissions, which a person can untick.
+            // Whether messages work is metadata.messaging.subscribed, never this column.
+            scopes: BASE_SCOPES,
             metadata: connMetadata,
         });
     }

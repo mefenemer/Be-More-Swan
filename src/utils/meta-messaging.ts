@@ -184,6 +184,13 @@ export async function findMessagingConnection(db: Db, platform: MessagingPlatfor
  * message → 'replied'.
  */
 export async function storeMessagingEvent(db: Db, m: ParsedMessage): Promise<StoreResult> {
+    // One transaction: if moving the clocks failed after the message row was written, Meta's retry
+    // would see a duplicate and stop, leaving the conversation without that message's window and
+    // status for good. All or nothing, so the retry redoes the lot.
+    return db.transaction(async (tx) => storeInTx(tx as unknown as Db, m));
+}
+
+async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
     if (m.deleted) {
         const res = await db.update(socialMessages)
             .set({ body: null, attachmentType: null })

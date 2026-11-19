@@ -469,7 +469,11 @@ export default withLambda(async (event) => {
                 // our webhook — but only once no other active facebook/instagram row, in any
                 // workspace, still uses the Page (its Facebook and Instagram rows share one
                 // subscription). Runs BEFORE the revoke / vault delete below, which end the token.
-                if (svc === 'facebook' || svc === 'instagram') {
+                // Only a row that subscribed the Page (metadata.messaging.subscribed, set on connect while
+                // META_MESSAGING_ENABLED was on) — otherwise there is nothing to undo and two Graph calls
+                // would only slow Disconnect down.
+                const subscribed = (conn.metadata as { messaging?: { subscribed?: boolean } } | null)?.messaging?.subscribed === true;
+                if (subscribed && (svc === 'facebook' || svc === 'instagram')) {
                     const fbPageId = (conn.metadata as { fbPageId?: string | null } | null)?.fbPageId
                         ?? (svc === 'facebook' ? conn.externalUserId : null);
                     if (fbPageId) {
