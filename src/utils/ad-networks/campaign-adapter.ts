@@ -25,6 +25,13 @@ export async function adapterForCampaign(
     env: { isProduction: boolean },
 ): Promise<CampaignAdapterResult> {
     const label = networkLabel(network);
+    // ⚠️ `noAdapter` means ONE thing: this environment refuses dev-only adapters (production), so
+    // the optimiser skips rather than halts. Any OTHER construction error (e.g. a malformed stored
+    // account id) is a real problem with a live campaign and must halt it and tell the owner
+    // (review on e4fb6828).
+    if (env.isProduction) {
+        return { ok: false, label, noAdapter: true, reason: 'Advertising is not available here yet.' };
+    }
 
     if (network === 'meta') {
         const readiness = assessMetaAdsReadiness(await getMetaAdsConnection(db, organisationId));
@@ -39,7 +46,7 @@ export async function adapterForCampaign(
                 pageId: readiness.connection.selectedPageId ?? '',
             }, env) };
         } catch (err) {
-            return { ok: false, label, noAdapter: true, reason: err instanceof Error ? err.message : 'Advertising is not available here yet.' };
+            return { ok: false, label, reason: err instanceof Error ? err.message : 'The Meta advertising connection could not be used.' };
         }
     }
 
@@ -55,6 +62,6 @@ export async function adapterForCampaign(
             currencyCode: 'GBP',
         }, env) };
     } catch (err) {
-        return { ok: false, label, noAdapter: true, reason: err instanceof Error ? err.message : 'Advertising is not available here yet.' };
+        return { ok: false, label, reason: err instanceof Error ? err.message : 'The LinkedIn advertising connection could not be used.' };
     }
 }

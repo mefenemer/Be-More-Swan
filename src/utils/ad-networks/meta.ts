@@ -335,19 +335,20 @@ export function createMetaAdapter(cfg: MetaAdapterConfig): AdNetworkAdapter {
             const until = new Date();
             const since = new Date(until.getTime() - Math.max(1, days) * 86_400_000);
             const day = (d: Date) => d.toISOString().slice(0, 10);
-            const data = await call(t, `${act}/insights`, {
-                query: {
-                    level: 'ad',
-                    fields: 'ad_id,impressions,clicks,spend,actions,date_start',
-                    time_increment: '1',
-                    time_range: JSON.stringify({ since: day(since), until: day(until) }),
-                    filtering: JSON.stringify([{ field: 'ad.id', operator: 'IN', value: externalVariantIds }]),
-                    limit: '500',
-                },
-            });
+            // ⚠️ Read PER AD, not from the ad account currently selected: if the workspace switches
+            // accounts after launch, an account-level read would ask the wrong account, get nothing
+            // back, and the optimiser would lose sight of live spend (review on e4fb6828).
+            const query = {
+                fields: 'ad_id,impressions,clicks,spend,actions,date_start',
+                time_increment: '1',
+                time_range: JSON.stringify({ since: day(since), until: day(until) }),
+                limit: '500',
+            };
+            const pages = await Promise.all(externalVariantIds.map((id) => call(t, `${id}/insights`, { query })));
+            const rows = pages.flatMap((p) => (Array.isArray(p.data) ? p.data : []));
             // ⚠️ An empty list means EITHER no delivery OR no read access. Returned as-is, never
             // padded with zeroes, so the optimiser cannot read silence as a collapse (LinkedIn lesson).
-            return (Array.isArray(data.data) ? data.data : []).map((r: any) => ({
+            return rows.map((r: any) => ({
                 externalVariantId: String(r.ad_id),
                 day: String(r.date_start),
                 impressions: Number(r.impressions ?? 0),

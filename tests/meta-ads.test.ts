@@ -157,10 +157,20 @@ check('the ads callback only redeems its own state and only writes meta_ads', ()
     assert.ok(!/serviceName,\s*'(facebook|instagram)'/.test(cb) && !/'facebook'|'instagram'/.test(cb), 'the ads callback names a posting service');
 });
 
-check('a reconnect keeps the chosen account and Page (the LinkedIn reconnect wiped them)', () => {
+check('a reconnect keeps the chosen account and Page — even when a listing fails', () => {
     const cb = code(read('netlify/functions/meta-ads-oauth-callback.ts'));
     assert.ok(cb.includes('selectedAccountId: keepAccount'));
     assert.ok(cb.includes('keepPage ??'));
+    // A failed (null) listing falls back to the previous list, so the choice survives.
+    assert.ok(cb.includes('const accountList = accounts ?? prevAccounts;'));
+    assert.ok(cb.includes('const pageList = pages ?? prevPages;'));
+    assert.ok(cb.includes('adAccounts: accountList,') && cb.includes('pages: pageList,'));
+});
+
+check('only the production refusal skips; any other adapter failure halts', () => {
+    const ca = code(read('src/utils/ad-networks/campaign-adapter.ts'));
+    assert.equal((ca.match(/noAdapter: true/g) ?? []).length, 1, 'noAdapter is set for something other than production');
+    assert.ok(ca.indexOf('if (env.isProduction)') < ca.indexOf('noAdapter: true'));
 });
 
 check('the callback stores what was GRANTED, not what was asked for', () => {
@@ -212,6 +222,18 @@ async function main(): Promise<void> {
         assert.equal(calls.length, 1);
         assert.match(calls[0].url, /\/1001$/);
         assert.deepEqual(calls[0].body, { status: 'ACTIVE' });
+
+        // Metrics are read per ad, never from the currently selected account.
+        calls.length = 0;
+        globalThis.fetch = (async (url: string, init: any) => {
+            calls.push({ url, method: init?.method ?? 'GET', body: null, auth: init?.headers?.Authorization ?? null });
+            return new Response(JSON.stringify({ data: [{ ad_id: url.match(/\/(\d+)\/insights/)![1], impressions: '10', clicks: '2', spend: '1.50', date_start: '2026-11-19' }] }), { status: 200 });
+        }) as never;
+        const m = await adapter.fetchMetrics(['1004', '1005'], 3);
+        assert.ok(calls.every((c) => /\/(1004|1005)\/insights\?/.test(c.url)) && calls.length === 2, 'metrics not read per ad');
+        assert.ok(!calls.some((c) => c.url.includes('act_555/insights')));
+        assert.equal(m.length, 2);
+        assert.equal(m[0].spendGbp, 1.5);
 
         passed++; console.log(`  ✓ ${name}`);
     } catch (err) {

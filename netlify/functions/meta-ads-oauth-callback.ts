@@ -126,17 +126,25 @@ export default withLambda(async (event) => {
     // ⚠️ KEEP the previous choices when they are still available. LinkedIn's reconnect wiped the
     // chosen ad account (2026-11-18 live run), making the user pick it again after every reconnect.
     const prev = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const keepAccount = typeof prev.selectedAccountId === 'string' && accounts?.some((a) => a.id === prev.selectedAccountId)
+    // ⚠️ A FAILED listing (null) keeps the previous list and choice. Wiping them would make the
+    // connection read "not ready", and the optimiser would then halt a LIVE Meta campaign without the
+    // adapter — paused here, still spending on Meta (review on e4fb6828). Only a SUCCESSFUL listing
+    // that no longer contains the old choice may clear it.
+    const prevAccounts = Array.isArray(prev.adAccounts) ? prev.adAccounts as typeof accounts : null;
+    const prevPages = Array.isArray(prev.pages) ? prev.pages as typeof pages : null;
+    const accountList = accounts ?? prevAccounts;
+    const pageList = pages ?? prevPages;
+    const keepAccount = typeof prev.selectedAccountId === 'string' && accountList?.some((a) => a.id === prev.selectedAccountId)
         ? prev.selectedAccountId as string : null;
-    const keepPage = typeof prev.selectedPageId === 'string' && pages?.some((p) => p.id === prev.selectedPageId)
+    const keepPage = typeof prev.selectedPageId === 'string' && pageList?.some((p) => p.id === prev.selectedPageId)
         ? prev.selectedPageId as string : null;
 
     const metadata = {
-        adAccounts: accounts,          // null = could not ask; [] = none
-        pages,                         // null = could not ask; [] = none
+        adAccounts: accountList,       // null = could not ask (and nothing earlier); [] = none
+        pages: pageList,               // null = could not ask (and nothing earlier); [] = none
         selectedAccountId: keepAccount,
         // One Page and no previous choice: there is nothing to choose between.
-        selectedPageId: keepPage ?? (pages && pages.length === 1 ? pages[0].id : null),
+        selectedPageId: keepPage ?? (pageList && pageList.length === 1 ? pageList[0].id : null),
         access: 'standard',            // app-role holders only until App Review grants Advanced
     };
 
