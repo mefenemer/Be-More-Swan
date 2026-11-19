@@ -34,7 +34,7 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
-import { aiVideoTasks, formatCost, type TaskCosts } from '../config/task-weights';
+import { aiVideoTasks, formatCost, voiceoverTasks, type TaskCosts } from '../config/task-weights';
 import { getTaskCosts, getUpcomingTaskCosts } from './task-costs';
 import { isFeatureEnabled } from './feature-flags';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
@@ -502,6 +502,11 @@ export function musicToMake(storyboard: Storyboard, brief: VideoBrief): boolean 
     return !(storyboard.music?.assetId && storyboard.music.mood === mood);
 }
 
+/** The words the voiceover speaks: what the build sends to the voice, and what its tasks are counted on. Pure. */
+export function voiceoverScript(storyboard: Storyboard, brief: VideoBrief): string {
+    return cleanScript(scriptOf(storyboard), isLongLength(brief.lengthS) ? LONG_VOICEOVER_MAX_CHARS : VOICEOVER_MAX_CHARS);
+}
+
 /** Tasks for what is still to be made, at the live costs (getTaskCosts). Pure. */
 export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: TaskCosts, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
@@ -517,7 +522,8 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: Tas
         }
     }
     // The owner's own voice is never made, so never charged (own-voice.ts).
-    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += costs.weights.ai_voiceover;
+    // A long script counts by its length (voiceoverTasks), measured as the build will speak it (voiceoverScript).
+    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += voiceoverTasks(voiceoverScript(storyboard, brief).length, costs);
     return n;
 }
 
@@ -1052,7 +1058,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // refused here, before anything is spent, rather than cut (review of #754: the last scenes would be silent).
         const tooLong = scriptTooLong(storyboard, brief);
         if (tooLong) throw new Error(tooLong);
-        const script = cleanScript(scriptOf(storyboard), isLongLength(brief.lengthS) ? LONG_VOICEOVER_MAX_CHARS : VOICEOVER_MAX_CHARS);
+        const script = voiceoverScript(storyboard, brief);
         // The owner's own voice, line by line (own-voice.ts): no voice is made — each scene's recording
         // is placed at its scene below. One recording of the whole script is the voiceover asset, as an AI one is.
         const ownLines = isOwnVoice(brief) && !voiceoverAssetId;
@@ -1088,7 +1094,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                     });
                     voiceoverAssetId = vo.assetId;
                     words = vo.words;
-                    await settle('voiceover', VOICEOVER_CREDIT_COST, true);
+                    // Never above the quote: a cost change that starts mid-build doesn't reach it (costs when "Make the video" was pressed).
+                    const voTasks = voiceoverTasks(script.length, await getTaskCosts());
+                    await settle('voiceover', VOICEOVER_CREDIT_COST, true, p.startedAt ? Math.min(voTasks, voiceoverTasks(script.length, await getTaskCosts(p.startedAt))) : voTasks);
                     // Presenter clips kept from before were synced to the OLD voiceover: made again from this one.
                     for (const s of storyboard.scenes) if (s.source === 'ai_presenter') dropPresenterScene(done, s.id);
                 } catch (err) {
