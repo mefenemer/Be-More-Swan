@@ -59,7 +59,7 @@ check('results are promised only when an ingest will read the post', () => {
     const recent = new Date(now - day);
     assert.equal(resultsExpectation({ platform: 'linkedin', publishedAt: recent, platformAuthorUrn: 'urn:li:organization:135063921' }, now), 'pending');
     assert.equal(resultsExpectation({ platform: 'linkedin', publishedAt: recent, platformAuthorUrn: 'urn:li:person:abc' }, now), 'personal_profile', 'members get no post results');
-    assert.equal(resultsExpectation({ platform: 'linkedin', publishedAt: recent, platformAuthorUrn: null }, now), 'personal_profile', 'no recorded author = not a Page post');
+    assert.equal(resultsExpectation({ platform: 'linkedin', publishedAt: recent, platformAuthorUrn: null }, now), null, 'no recorded author: could be a Page post, so say nothing');
     assert.equal(resultsExpectation({ platform: 'facebook', publishedAt: recent, platformAuthorUrn: null }, now), 'pending');
     assert.equal(resultsExpectation({ platform: 'instagram', publishedAt: new Date(now - (RESULTS_WINDOW_DAYS + 1) * day), platformAuthorUrn: null }, now), null, 'outside the window: nothing is coming');
     assert.equal(resultsExpectation({ platform: 'x', publishedAt: recent, platformAuthorUrn: null }, now), null, 'no ingest');

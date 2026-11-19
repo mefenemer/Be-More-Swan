@@ -44,7 +44,7 @@ export const RESULTS_WINDOW_DAYS = 30;
 /**
  * What the note may say about a published post that has no results yet:
  *  'pending'          — an ingest will read it (the right platform and account, inside the window): "they appear in a few hours";
- *  'personal_profile' — a LinkedIn post on a personal profile: LinkedIn gives members no post results, so say so;
+ *  'personal_profile' — a LinkedIn post whose recorded author is not a Page: LinkedIn gives members no post results, so say so;
  *  null               — nothing is coming (outside the window, or no ingest): say nothing rather than promise. Pure.
  */
 export function resultsExpectation(
@@ -53,7 +53,13 @@ export function resultsExpectation(
 ): 'pending' | 'personal_profile' | null {
     const platform = String(post.platform ?? '').toLowerCase();
     if (!(RESULTS_PLATFORMS as readonly string[]).includes(platform)) return null;
-    if (platform === 'linkedin' && !String(post.platformAuthorUrn ?? '').startsWith('urn:li:organization:')) return 'personal_profile';
+    if (platform === 'linkedin') {
+        const author = String(post.platformAuthorUrn ?? '');
+        // No recorded author (published before db/z-scheduled-posts-author.sql): we can't tell a Page post
+        // from a profile one, so say nothing rather than tell a Page it's a personal profile.
+        if (!author) return null;
+        if (!author.startsWith('urn:li:organization:')) return 'personal_profile';
+    }
     const at = post.publishedAt ? new Date(post.publishedAt).getTime() : NaN;
     if (!Number.isFinite(at) || now - at > RESULTS_WINDOW_DAYS * 24 * 60 * 60 * 1000) return null;
     return 'pending';
