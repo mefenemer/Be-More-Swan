@@ -7458,10 +7458,18 @@ function _applyDashboardRegistry(data) {
     // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
     const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
     toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    // ⚠️ A property handler beats the HTML's onclick="openGeneratePostSheet()", and a slow earlier
+    // load can wire this page's button before this render runs: open the Meeting Note Taker, move on
+    // to Felix before its context arrives, and Felix's "New post" opened "New meeting" (staging,
+    // 2026-11-19). Put the default back on every render; the branches below (newAction, blog,
+    // newsletter) set their own again. Not `onclick = null`: that also drops the attribute's own
+    // handler (same slot), and the button then did nothing. No args: the event must not reach
+    // openGeneratePostSheet(explicitAssistantId).
+    const rqPrimaryBtn = document.getElementById('detail-rq-primary-btn');
+    if (rqPrimaryBtn) rqPrimaryBtn.onclick = () => window.openGeneratePostSheet?.();
     if (rqNew) {
         setText('detail-rq-primary-label', rqNew.label);
-        const rqBtn = document.getElementById('detail-rq-primary-btn');
-        if (rqBtn) rqBtn.onclick = () => _openRoleForm(rqNew.kind, data);
+        if (rqPrimaryBtn) rqPrimaryBtn.onclick = () => _openRoleForm(rqNew.kind, data);
     }
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
