@@ -57,6 +57,32 @@ person approves.
    Standard, Microsoft 365 Business and a paid Zoom plan? Hold one short call on each with transcription on, and read
    the transcript through each API with a test script. Confirm the Teams admin-consent and tenant-setting question, and
    the exact Zoom scope names. **Nothing is built before this works by hand.**
+
+   **Google Meet: ✅ proven 2026-11-19.**
+   - **Account:** Be More Swan's own Workspace has transcription. It worked although the Admin console's Meet video
+     settings showed no "Transcripts" row.
+   - **Set-up:** a separate Google Cloud project "BMS Meet test", with the sign-in screen set to **Internal** (only
+     bemoreswan.com accounts, no Google review), the Google Meet REST API on, and a Desktop OAuth client. The
+     verified YouTube project was not touched. The test script signs in with PKCE on a local address and asks only for
+     `meetings.space.readonly`.
+   - **What the API returns:**
+     - `conferenceRecords` lists the call once it has ended, with start and end times and the space.
+     - `participants` gives each person's display name from their Google account.
+     - `transcripts` shows state `FILE_GENERATED` and a link to the Doc.
+     - `transcripts.entries` holds `participant`, `text`, `languageCode`, `startTime` and `endTime`, in chunks of
+       about 15–30 seconds per speaker.
+   - **Minutes:** Google's transcript text went through the existing Note Taker (`meeting-minutes`) on staging, with
+     its header, time stamp and "Transcription ended after …" footer left in. The minutes were correct in 7.1 s:
+     attendees, both tasks with their owners, no false decisions, one risk, and a follow-up email.
+   - **Finding:**
+     - The API returns Google's **original** transcription only. Text someone types into the transcript Doc afterwards
+       is not in the entries.
+     - Reading the edited Doc would need a Drive scope, which Google rates **Restricted** (security assessment), so we
+       read the entries.
+     - People correct the minutes in the Inbox, as they do for pasted meetings.
+   - **Not yet seen:** a 2-person call read through the API. Later test calls never appeared in `conferenceRecords`,
+     most likely because another account hosted them. The list only returns calls the signed-in account hosted, so
+     help text must say "the call must be started from the connected account".
 1. **Shared engine (about 1 week):** the table, the scheduled job, the background writer, dedupe, metering, the Inbox
    pill, the chat line, tests with stubbed platforms.
 2. **Google Meet (3–4 days plus Google re-verification):** add the scope to the Google project, poll
