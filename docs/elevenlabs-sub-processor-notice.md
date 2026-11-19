@@ -11,9 +11,9 @@ handled customer data without being listed:
 
 | Since | What ElevenLabs receives | Commit |
 |---|---|---|
-| 2 Nov 2026 | Voiceover scripts (text-to-speech) | ddd2ffda |
+| 2 Nov 2026 | Voiceover scripts and "Read aloud" writing samples (text-to-speech) | ddd2ffda, 485dfc31 |
 | 12 Nov 2026 | Audio for word timings: our voiceovers, the customer's uploaded footage, own-voice recordings (Scribe) | b91cc6c4 |
-| 12 Nov 2026 | The product tour narration and "Read aloud" samples | openai-audio-retirement-plan.md |
+| 12 Nov 2026 | The product tour narration (our own copy, no customer data) | 264b1251 |
 
 Uploaded footage and voice recordings contain people's voices, so this is personal data. The
 notice is late, and the email says so plainly.
@@ -38,7 +38,11 @@ notice is late, and the email says so plainly.
    processes customer personal data as a processor. It makes **no promise about model training**,
    so our copy makes none either. Check in the ElevenLabs account what applies to us, including any
    data-retention or training setting, before you send.
-3. **Recipients:** Broadcast goes to every active user on a running plan, not just owners. That is
+3. **OpenAI's old row was too narrow (review of #782).** OpenAI has spoken customer voiceover scripts
+   since 31 Oct (ea3a9b40). Whisper transcribed customer footage and own-voice audio from 9 to 12 Nov
+   (5233e7fb, 00775a53), and is still the backup. This PR corrects the row. OpenAI is not a new
+   sub-processor, so clause 5 notice is arguably not owed. Whether to mention it in the email is your call.
+4. **Recipients:** Broadcast goes to every active user on a running plan, not just owners. That is
    more than the DPA needs, and it does no harm.
 
 ## After it is sent
