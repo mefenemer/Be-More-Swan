@@ -97,8 +97,10 @@ check('the picker is inline, not a link to a shared grid', () => {
 
 check('accounts are only fetched when the workspace could use one', () => {
     // No point asking LinkedIn about a workspace whose plan does not include advertising.
-    assert.match(code(ui), /state\.paid\.featureEnabled && state\.paid\.anyNetwork/);
-    assert.match(code(ui), /&& state\.adAccounts === null\) loadAdAccounts\(\)/);
+    const fn = ui.slice(landmark(ui, 'function loadAccountsFor(campaign)'), landmark(ui, '// ── Network switch'));
+    assert.match(fn, /if \(!p \|\| !p\.featureEnabled \|\| !p\.anyNetwork\) return;/);
+    assert.match(fn, /!p\.adsReady && state\.adAccounts === null\) \{\s*\n\s*loadAdAccounts\(\);/);
+    assert.match(fn, /state\.metaAds === null\) loadMetaAds\(\);/);
 });
 
 check('a saved selection reloads from the server rather than guessing', () => {

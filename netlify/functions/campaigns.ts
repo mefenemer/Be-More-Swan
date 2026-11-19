@@ -89,7 +89,7 @@ import { adapterForCampaign } from '../../src/utils/ad-networks/campaign-adapter
 import { linkedInErrorDetail } from '../../src/utils/ad-networks/linkedin';
 import { buildMetaTargeting, metaErrorDetail } from '../../src/utils/ad-networks/meta';
 import {
-    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsCreateProblem,
+    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsCreateProblem, metaAdsNeedsReconnect,
 } from '../../src/utils/meta-ads-connection';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
@@ -277,6 +277,9 @@ export default withLambda(async (event) => {
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
+                // Which network a paid campaign was staged on — the panel names it and the approve
+                // button speaks for it. NULL on organic campaigns.
+                adNetwork: campaigns.adNetwork,
             })
             .from(campaigns)
             .leftJoin(campaignBudgets, eq(campaignBudgets.campaignId, campaigns.id))
@@ -415,15 +418,38 @@ export default withLambda(async (event) => {
         // Creating needs w_organization_social; an older connection must reconnect first. Shown as
         // not-ready on the surface only — the optimiser keeps using assessAdsReadiness alone.
         const adsScope = adsReadiness?.ready ? adsScopeProblem(adsConnection) : null;
+
+        // ⚠️ WHERE THE PAID SURFACE IS REACHABLE. Production: only networks in the registry, which
+        // is empty — so every production workspace still sees the locked state naming the blocker.
+        // Anywhere else (staging, previews) the development-only LinkedIn and Meta adapters can be
+        // used, and the surface offers them; before 2026-11-19 it was locked here too, so the
+        // proven paid path could only be driven by calling the endpoints by hand.
+        const devAdaptersAllowed = !isProductionDeploy(event.headers as Record<string, string | undefined>);
+        const offeredNetworks: string[] = devAdaptersAllowed
+            ? ['linkedin', 'meta']
+            : networkAvailability().filter((n) => n.available).map((n) => n.network);
+
+        const metaConnection = featureEnabled ? await getMetaAdsConnection(db, orgId) : null;
+        const metaReadiness = featureEnabled ? assessMetaAdsReadiness(metaConnection) : null;
+        const metaCreate = metaReadiness?.ready ? metaAdsCreateProblem(metaConnection) : null;
+
         const paid = {
             featureEnabled,
             networks: networkAvailability(),
-            anyNetwork: anyNetworkAvailable(),
+            anyNetwork: anyNetworkAvailable() || offeredNetworks.length > 0,
+            offeredNetworks,
             adsReady: (adsReadiness?.ready ?? false) && !adsScope,
             adsReason: adsReadiness && !adsReadiness.ready ? adsReadiness.reason : adsScope,
             // The fix is the OAuth flow again, so the surface offers the connect link.
             needsReconnect: adsNeedsReconnect(adsConnection),
             selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
+            // Meta, beside LinkedIn's fields above (kept as they were for older clients).
+            meta: {
+                ready: (metaReadiness?.ready ?? false) && !metaCreate,
+                reason: metaReadiness && !metaReadiness.ready ? metaReadiness.reason : metaCreate,
+                needsReconnect: metaAdsNeedsReconnect(metaConnection),
+                connected: !!metaConnection,
+            },
         };
 
         // What "Add work" may offer. Only the assistants this workspace has actually hired — an

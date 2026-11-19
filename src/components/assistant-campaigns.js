@@ -69,6 +69,10 @@
     paid_: {},
     /** Ad accounts this connection can reach. null = not asked yet, [] = none reachable. */
     adAccounts: null,
+    /** Meta: { accounts, pages, selectedAccountId, selectedPageId } from meta-ads-account. null = not asked yet. */
+    metaAds: null,
+    /** Which network each not-yet-staged campaign's form is set to: 'linkedin' | 'meta'. */
+    paidNetwork: {},
     /** Chosen targeting entities, per campaign: { locations: [{urn,name}], ... }. */
     targeting: {},
     /** Order actions this workspace can use — the server filters by which assistants are hired. */
@@ -1705,7 +1709,22 @@
   //   the plan does not include it        → a commercial conversation
   //   no ad network is reachable          → we are waiting on LinkedIn, and it says so
   //   no account connected / none chosen  → the user can fix it right now
-  function paidLockedHtml() {
+  /** 'Meta' / 'LinkedIn' for a network key. LinkedIn for older rows that predate ad_network. */
+  const netLabel = (n) => (n === 'meta' ? 'Meta' : 'LinkedIn');
+
+  /** The network a campaign's panel is about: its own once staged, else the form's choice. */
+  function paidNetworkFor(c) {
+    if (c && c.mode === 'paid') return c.adNetwork === 'meta' ? 'meta' : 'linkedin';
+    const chosen = state.paidNetwork[c && c.id];
+    if (chosen) return chosen;
+    const p = state.paid || {};
+    const offered = p.offeredNetworks || ['linkedin'];
+    // Default to a network that is already set up, so the form is usable without a click.
+    if (offered.includes('meta') && p.meta && p.meta.ready && !p.adsReady) return 'meta';
+    return offered.includes('linkedin') ? 'linkedin' : (offered[0] || 'linkedin');
+  }
+
+  function paidLockedHtml(network) {
     const p = state.paid;
     if (!p) return '';
 
@@ -1735,6 +1754,8 @@
           <ul class="space-y-1">${rows}</ul>
         </div>`;
     }
+
+    if (network === 'meta') return metaReadinessHtml(p);
 
     if (!p.adsReady) {
       // The one blocker the user can act on. `adsReason` is the server's sentence — connect,
@@ -1776,6 +1797,70 @@
         </div>`;
     }
     return '';
+  }
+
+  /**
+   * Meta's "before you can advertise" box: connect, choose an ad account, choose the Facebook Page
+   * the adverts are published as. Mirrors LinkedIn's above — the server's sentence, then the one
+   * control that fixes it.
+   */
+  function metaReadinessHtml(p) {
+    const m = p.meta || {};
+    if (m.ready) return '';
+    const md = state.metaAds;
+    const accounts = (md && md.accounts) || [];
+    const pages = (md && md.pages) || [];
+    const pickers = !m.connected || md === null
+      ? (m.connected ? '<p class="text-xs text-gray-500 mt-2">Checking your Meta ad accounts…</p>' : '')
+      : `
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          ${accounts.length ? `
+            <select data-cmp-meta-account class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs">
+              <option value="">Choose an ad account…</option>
+              ${accounts.map((a) => `<option value="${esc(a.id)}"${a.id === md.selectedAccountId ? ' selected' : ''}>${esc(a.name)}${a.currency ? ` (${esc(a.currency)})` : ''}</option>`).join('')}
+            </select>` : ''}
+          ${pages.length ? `
+            <select data-cmp-meta-page class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs">
+              <option value="">Publish adverts as which Page?</option>
+              ${pages.map((pg) => `<option value="${esc(pg.id)}"${pg.id === md.selectedPageId ? ' selected' : ''}>${esc(pg.name)}</option>`).join('')}
+            </select>` : ''}
+          ${accounts.length || pages.length ? `
+            <button type="button" data-cmp-meta-save
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Use these
+            </button>` : ''}
+        </div>`;
+    const showConnect = !m.connected || m.needsReconnect;
+    return `
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <p class="text-xs font-bold text-amber-900">Before you can advertise on Meta</p>
+        <p class="text-xs text-amber-900 mt-1 leading-relaxed">${esc(m.reason || '')}</p>
+        ${pickers}
+        ${showConnect ? `
+          <a href="/.netlify/functions/meta-ads-oauth-init"
+            class="inline-flex items-center mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+            ${m.connected ? 'Reconnect Meta advertising' : 'Connect Meta advertising'}
+          </a>` : ''}
+        <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-meta-status></p>
+      </div>`;
+  }
+
+  /** LinkedIn | Meta switch on a not-yet-staged campaign. Only drawn when more than one is offered. */
+  function networkChooser(c, network) {
+    const p = state.paid || {};
+    // Only for a workspace that can advertise at all — above "not part of your plan" a switch is noise.
+    if (!p.featureEnabled || !p.anyNetwork) return '';
+    const offered = p.offeredNetworks || [];
+    if (offered.length < 2) return '';
+    return `
+      <div class="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Advertise on">
+        <span class="text-xs font-bold text-gray-600">Advertise on</span>
+        ${offered.map((n) => `
+          <button type="button" data-cmp-paid-net="${esc(String(c.id))}|${esc(n)}" aria-pressed="${n === network ? 'true' : 'false'}"
+            class="${n === network ? 'btn-primary' : 'btn-secondary border'} px-3 py-1 text-xs font-bold rounded-lg transition">
+            ${esc(netLabel(n))}
+          </button>`).join('')}
+      </div>`;
   }
 
   /**
@@ -1863,11 +1948,15 @@
   function paidPanel(c) {
     const st = state.paid_[c.id];
     if (!st || !st.open) return '';
-    const p = state.paid || {};
-    const locked = paidLockedHtml();
+    const network = paidNetworkFor(c);
+    const label = netLabel(network);
+    const locked = paidLockedHtml(network);
+    // The switch sits above a locked box too: "Meta is not set up" should not trap someone whose
+    // LinkedIn is ready.
+    const chooser = c.mode === 'paid' ? '' : networkChooser(c, network);
 
     if (locked) {
-      return `<div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">${locked}</div>`;
+      return `<div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">${chooser}${locked}</div>`;
     }
 
     // Already staged: show the ads and, if nothing is live yet, the approve button.
@@ -1886,7 +1975,7 @@
             <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p class="text-xs font-bold text-amber-900">Ready to go live</p>
               <p class="text-xs text-amber-900 mt-1 leading-relaxed">
-                These ads are staged on LinkedIn and paused. Approving starts real spending of
+                These ads are staged on ${esc(label)} and paused. Approving starts real spending of
                 <span class="font-bold">£${esc(budget.toFixed(2))} a day</span> until you pause it.
               </p>
               <p class="text-xs text-amber-900 mt-1 leading-relaxed">
@@ -1896,7 +1985,7 @@
                   // user should know which rules are actually running on their money.
                   : 'No cost limit is set, so ads are only paused when their click-through falls well below their own average.'}
               </p>
-              <button type="button" data-cmp-approve="${esc(String(c.id))}" data-cmp-budget="${esc(String(budget))}"
+              <button type="button" data-cmp-approve="${esc(String(c.id))}" data-cmp-budget="${esc(String(budget))}" data-cmp-network="${esc(network)}"
                 class="btn-golive mt-3 px-4 py-2 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
                 Approve &amp; launch
               </button>
@@ -1908,8 +1997,9 @@
     // Not staged yet: the staging form.
     return `
       <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">
+        ${chooser}
         <p class="text-xs text-gray-500 leading-relaxed mb-3">
-          Write up to three ads. They are created on LinkedIn <span class="font-bold">paused</span> —
+          Write up to three ads. They are created on ${esc(label)} <span class="font-bold">paused</span> —
           nothing is spent until you approve them on this page.
         </p>
 
@@ -1927,7 +2017,14 @@
           falls well below its own average. We do not guess what a result is worth to you.
         </p>
 
-        ${TARGET_FACETS.map((f) => facetPicker(c.id, f)).join('')}
+        ${network === 'meta'
+          ? `<div class="mb-3">
+               <label class="text-xs font-bold text-gray-600">Which countries? (two-letter codes, comma-separated)</label>
+               <input type="text" value="GB" data-cmp-meta-countries="${esc(String(c.id))}"
+                 class="w-full mt-1 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+               <p class="text-[11px] text-gray-500 mt-1">Meta will not run an advert without a location. GB is the United Kingdom.</p>
+             </div>`
+          : TARGET_FACETS.map((f) => facetPicker(c.id, f)).join('')}
 
         <div class="space-y-2">
           ${[0, 1, 2].map((i) => `
@@ -1946,12 +2043,12 @@
         </div>
         <p class="text-[11px] text-gray-500 mt-2 leading-relaxed">
           Use a tracked link from above as the destination and its clicks and sign-ups land in your funnel.
-          LinkedIn requires an image on every advert — paste a public link to a JPG or PNG.
+          ${esc(label)} requires an image on every advert — paste a public link to a JPG or PNG.
         </p>
 
-        <button type="button" data-cmp-stage="${esc(String(c.id))}"
+        <button type="button" data-cmp-stage="${esc(String(c.id))}" data-cmp-network="${esc(network)}"
           class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
-          Stage on LinkedIn (paused)
+          Stage on ${esc(label)} (paused)
         </button>
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-paid-status="${esc(String(c.id))}"></p>
       </div>`;
@@ -2316,8 +2413,7 @@
       if (st.open && !st.loaded && campaign && campaign.mode === 'paid') loadVariants(id);
       // Only when the panel is open AND the workspace could actually use an account — no point
       // asking LinkedIn about a workspace whose plan does not include advertising.
-      if (st.open && state.paid && state.paid.featureEnabled && state.paid.anyNetwork
-          && !state.paid.adsReady && state.adAccounts === null) loadAdAccounts();
+      if (st.open) loadAccountsFor(campaign);
       return;
     }
 
@@ -2339,14 +2435,21 @@
 
       if (!firstUrl) { sayPaid(id, 'Where should the first ad send people?', 'error'); return; }
       if (variants.length === 0) { sayPaid(id, 'Write at least one ad — a headline and body text.', 'error'); return; }
+      const network = stageBtn.dataset.cmpNetwork === 'meta' ? 'meta' : 'linkedin';
+      const label = netLabel(network);
       const picked = state.targeting[id] || {};
       const urns = (k) => (picked[k] || []).map((g) => g.urn);
       const locations = urns('locations');
-      if (locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
+      const countries = network === 'meta'
+        ? (document.querySelector(`[data-cmp-meta-countries="${id}"]`)?.value || '')
+          .split(/[\s,]+/).map((x) => x.trim().toUpperCase()).filter((x) => /^[A-Z]{2}$/.test(x))
+        : [];
+      if (network === 'meta' && countries.length === 0) { sayPaid(id, 'Add at least one country code, such as GB — Meta will not run an advert without one.', 'error'); return; }
+      if (network === 'linkedin' && locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
 
       const image = (u) => (document.querySelector(`[data-cmp-paid-image="${id}-${u}"]`)?.value || '').trim();
       const firstImage = image(0);
-      if (!firstImage) { sayPaid(id, 'LinkedIn needs an image on every advert. Paste a link to a JPG or PNG for ad 1.', 'error'); return; }
+      if (!firstImage) { sayPaid(id, `${label} needs an image on every advert. Paste a link to a JPG or PNG for ad 1.`, 'error'); return; }
 
       stageBtn.disabled = true;
       try {
@@ -2354,17 +2457,17 @@
         // asset URNs. Doing it here rather than inside stage_paid keeps the failure specific: a
         // rejected image says WHICH ad and why, instead of failing the whole campaign with one
         // opaque message after the user has written three ads.
-        sayPaid(id, 'Uploading images to LinkedIn…');
+        sayPaid(id, `Uploading images to ${label}…`);
         const urlToUrn = new Map();
         for (let i = 0; i < variants.length; i++) {
           const src = image(i) || firstImage;
           if (!urlToUrn.has(src)) {
-            const r = await fetch('/.netlify/functions/linkedin-ads-media', {
+            const r = await fetch(`/.netlify/functions/${network === 'meta' ? 'meta-ads-media' : 'linkedin-ads-media'}`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
               body: JSON.stringify({ action: 'upload', imageUrl: src }),
             });
             const d = await r.json();
-            if (!r.ok) throw new Error(`Ad ${i + 1}: ${d.error || 'that image could not be used.'}`);
+            if (!r.ok) throw new Error(`Ad ${i + 1}: ${d.error || 'that image could not be used.'}${d.detail ? ` (${d.detail})` : ''}`);
             // Cached by URL: three ads sharing one image is the common case, and uploading the
             // same file three times would be three round trips and three assets.
             urlToUrn.set(src, d.mediaUrn);
@@ -2377,21 +2480,24 @@
         return;
       }
 
-      sayPaid(id, 'Creating them on LinkedIn, paused…');
+      sayPaid(id, `Creating them on ${label}, paused…`);
       try {
         const res = await post({
           action: 'stage_paid',
+          network,
           campaignId: id,
           dailyBudgetGbp: budget,
           // Blank means NO ceiling — passed as undefined so the server stores null rather than 0.
           // Zero would pause every ad on its first conversion.
           maxCostPerOutcomeGbp: ceilingRaw === '' ? undefined : Number(ceilingRaw),
-          targeting: {
-            locations,
-            jobFunctions: urns('jobFunctions'),
-            seniorities: urns('seniorities'),
-            companySizes: urns('companySizes'),
-          },
+          targeting: network === 'meta'
+            ? { countries }
+            : {
+              locations,
+              jobFunctions: urns('jobFunctions'),
+              seniorities: urns('seniorities'),
+              companySizes: urns('companySizes'),
+            },
           variants,
         });
         window.showToast?.(res.message || 'Staged and paused.', 'success');
@@ -2402,7 +2508,7 @@
         // ⚠️ No re-render on failure. render() rewrites the tab's innerHTML and would wipe three
         // ads the user just wrote — the same rule the tracked-link form follows, and it matters
         // more here because there is more to lose.
-        sayPaid(id, err.message || 'LinkedIn would not accept that.', 'error');
+        sayPaid(id, err.message || `${label} would not accept that.`, 'error');
         stageBtn.disabled = false;
       }
       return;
@@ -2411,15 +2517,16 @@
     // ── Approve & launch. The only control in this product that starts real spending. ──
     const id = Number(approveBtn.dataset.cmpApprove);
     const budget = Number(approveBtn.dataset.cmpBudget);
+    const approveLabel = netLabel(approveBtn.dataset.cmpNetwork);
     if (!id) return;
 
     // ⚠️ The figure is in the confirm text AND echoed to the server, which refuses a mismatch.
     // That pair is what makes "a human, with the number in front of them" true rather than a claim:
     // the number the user agreed to is the number the server checks.
     const ok = await window.confirmModal(
-      'Your ads go live immediately and LinkedIn begins charging your ad account. '
+      `Your ads go live immediately and ${approveLabel} begins charging your ad account. `
       + 'You can pause them from this page at any time, and we check on them daily.',
-      { title: `Start spending £${budget.toFixed(2)} a day on LinkedIn?`, confirmLabel: 'Start spending', tone: 'golive' },
+      { title: `Start spending £${budget.toFixed(2)} a day on ${approveLabel}?`, confirmLabel: 'Start spending', tone: 'golive' },
     );
     if (!ok) return;
 
@@ -2427,7 +2534,7 @@
     sayPaid(id, 'Going live…');
     try {
       const res = await post({ action: 'approve_launch', campaignId: id, confirmDailyBudgetGbp: budget });
-      window.showToast?.(res.message || 'Live on LinkedIn.', 'success');
+      window.showToast?.(res.message || `Live on ${approveLabel}.`, 'success');
       state.paid_[id].loaded = false;
       await load();
       loadVariants(id);
@@ -2580,6 +2687,87 @@
     }
     if (state.rendered) render();
   }
+
+  /** Meta ad accounts and Pages. Fetched once, when the Meta form needs them. */
+  async function loadMetaAds() {
+    try {
+      const res = await fetch('/.netlify/functions/meta-ads-account', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'list' }),
+      });
+      const data = await res.json();
+      // null lists mean "could not ask" — the panel's sentence (paid.meta.reason) already says so.
+      state.metaAds = {
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
+        pages: Array.isArray(data.pages) ? data.pages : [],
+        selectedAccountId: data.selectedAccountId || null,
+        selectedPageId: data.selectedPageId || null,
+      };
+    } catch {
+      state.metaAds = { accounts: [], pages: [], selectedAccountId: null, selectedPageId: null };
+    }
+    if (state.rendered) render();
+  }
+
+  /** Load the account lists the open panel needs — only for a network that is not ready yet. */
+  function loadAccountsFor(campaign) {
+    const p = state.paid;
+    if (!p || !p.featureEnabled || !p.anyNetwork) return;
+    const network = paidNetworkFor(campaign);
+    if (network === 'meta') {
+      if (p.meta && p.meta.connected && !p.meta.ready && state.metaAds === null) loadMetaAds();
+    } else if (!p.adsReady && state.adAccounts === null) {
+      loadAdAccounts();
+    }
+  }
+
+  // ── Network switch + Meta account/Page save ────────────────────────────────
+  document.addEventListener('click', async (e) => {
+    const netBtn = e.target.closest('[data-cmp-paid-net]');
+    const metaSave = e.target.closest('[data-cmp-meta-save]');
+    if (!netBtn && !metaSave) return;
+
+    if (netBtn) {
+      const [cid, net] = netBtn.dataset.cmpPaidNet.split('|');
+      const id = Number(cid);
+      if (!id || (net !== 'meta' && net !== 'linkedin')) return;
+      state.paidNetwork[id] = net;
+      // ⚠️ Switching re-renders the form, so anything typed in it is lost. The switch sits ABOVE
+      // the fields on purpose: it is chosen before writing, not after.
+      if (state.rendered) render();
+      loadAccountsFor(state.campaigns.find((c) => c.id === id));
+      return;
+    }
+
+    const accountId = document.querySelector('[data-cmp-meta-account]')?.value || '';
+    const pageId = document.querySelector('[data-cmp-meta-page]')?.value || '';
+    const say = (text, tone) => {
+      const el = document.querySelector('[data-cmp-meta-status]');
+      if (!el) return;
+      el.textContent = text;
+      el.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+      el.style.display = '';
+    };
+    if (!accountId && !pageId) { say('Choose an ad account and a Page first.', 'error'); return; }
+    metaSave.disabled = true;
+    say('Saving…');
+    try {
+      const r = await fetch('/.netlify/functions/meta-ads-account', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'select', ...(accountId ? { accountId } : {}), ...(pageId ? { pageId } : {}) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Could not save that.');
+      state.metaAds = null;
+      await load();
+      // A partial save (an account but no Page yet) leaves Meta not ready: fetch the lists again,
+      // or the box would sit on "Checking…" with no pickers (review on d2a2f13e).
+      if (state.paid && state.paid.meta && state.paid.meta.connected && !state.paid.meta.ready) loadMetaAds();
+    } catch (err) {
+      say(err.message || 'Could not save that.', 'error');
+      metaSave.disabled = false;
+    }
+  });
 
   // ── §9.1 controls: form, plan, Add work ────────────────────────────────────
   // A third listener, for the same reason the link listener is separate: the start/pause handler
