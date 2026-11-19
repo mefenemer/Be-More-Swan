@@ -454,7 +454,7 @@ check('the UI uploads BEFORE staging, and names which ad failed', () => {
     // A rejected image should say WHICH ad and why, not fail the whole campaign with one opaque
     // message after three ads have been written.
     assert.ok(landmark(ui, "action: 'upload', imageUrl: src") < landmark(ui, "action: 'stage_paid'"));
-    assert.match(code(ui), /`Ad \$\{i \+ 1\}: \$\{d\.error/);
+    assert.match(code(ui), /`Ad \$\{i \+ 1\}: \$\{withPlatformReason\(d\.error/);
 });
 
 check('one image shared by three ads is uploaded once', () => {

@@ -2131,8 +2131,32 @@
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    if (!res.ok) {
+      const err = new Error(withPlatformReason(data.error || `Request failed (HTTP ${res.status}).`, data.detail));
+      err.detail = data.detail || null;
+      throw err;
+    }
     return data;
+  }
+
+  /**
+   * The server's sentence, plus the ad platform's own reason when it sent one.
+   *
+   * ⚠️ stage_paid and approve_launch return LinkedIn's or Meta's refusal as `detail` (e.g. the field
+   * at fault). Dropping it left people with "did not finish setting up the campaign" and no way to
+   * act; the first live runs needed a PR each just to SEE the reason (2026-11-18). The status code
+   * prefix and LinkedIn's "ERROR ::" scaffolding are stripped so it reads as a sentence.
+   */
+  function withPlatformReason(message, detail) {
+    if (!detail || typeof detail !== 'string') return message;
+    const reason = detail
+      .replace(/^\d{3}:\s*/, '')
+      .replace(/ERROR ::\s*/g, '')
+      .replace(/\s*::\s*/g, ': ')
+      .replace(/\s*\n\s*/g, ' · ')
+      .replace(/\s+·\s*$/, '')
+      .trim();
+    return reason ? `${message} Reason given: ${reason}` : message;
   }
 
   async function load() {
@@ -2467,7 +2491,7 @@
               body: JSON.stringify({ action: 'upload', imageUrl: src }),
             });
             const d = await r.json();
-            if (!r.ok) throw new Error(`Ad ${i + 1}: ${d.error || 'that image could not be used.'}${d.detail ? ` (${d.detail})` : ''}`);
+            if (!r.ok) throw new Error(`Ad ${i + 1}: ${withPlatformReason(d.error || 'that image could not be used.', d.detail)}`);
             // Cached by URL: three ads sharing one image is the common case, and uploading the
             // same file three times would be three round trips and three assets.
             urlToUrn.set(src, d.mediaUrn);
