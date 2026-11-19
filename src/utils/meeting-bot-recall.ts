@@ -5,7 +5,7 @@
 // Proven by hand on 2026-11-19 (plan Phase 0): create → status_changes → recordings[0].media_shortcuts.transcript →
 // presigned download → delete_media, on free Google Meet and Teams.
 
-import { RECALL_HOSTS, recallTranscriptLines, type BotTranscriptLine, type RecallRegion } from './meeting-bot';
+import { RECALL_HOSTS, recallTranscriptLines, type BotStatusChange, type BotTranscriptLine, type RecallRegion } from './meeting-bot';
 
 const TIMEOUT_MS = 15_000;
 
@@ -58,6 +58,8 @@ export interface RecallBotState {
     code: string | null;
     subCode: string | null;
     at: Date | null;
+    /** Every status change, oldest first (the poll replays them all). */
+    changes: BotStatusChange[];
     transcriptUrl: string | null;
     transcriptStatus: string | null;
 }
@@ -70,10 +72,15 @@ export async function getRecallBot(region: RecallRegion, botId: string): Promise
     const last = changes[changes.length - 1];
     const transcript = r.json.recordings?.[0]?.media_shortcuts?.transcript;
     const at = last?.created_at ? new Date(last.created_at) : null;
+    const all: BotStatusChange[] = changes.flatMap((c) => {
+        const t = c.created_at ? new Date(c.created_at) : null;
+        return typeof c.code === 'string' && t && !Number.isNaN(t.getTime()) ? [{ code: c.code, subCode: c.sub_code ?? null, at: t }] : [];
+    });
     return {
         code: last?.code ?? null,
         subCode: last?.sub_code ?? null,
         at: at && !Number.isNaN(at.getTime()) ? at : null,
+        changes: all,
         transcriptUrl: typeof transcript?.data?.download_url === 'string' ? transcript.data.download_url : null,
         transcriptStatus: transcript?.status?.code ?? null,
     };

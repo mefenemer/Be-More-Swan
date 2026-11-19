@@ -15,8 +15,8 @@ import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
-    cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, reserveUnits,
-    type BotStatus, type RecallRegion,
+    cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
+    type BotStatePatch, type BotStatus, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
@@ -242,6 +242,11 @@ export async function applyBotEvent(
     dispatch: (importId: number) => Promise<boolean>,
 ): Promise<BotStatus> {
     const patch = nextBotState({ status: row.status as BotStatus, joinedAt: row.joinedAt, leftAt: row.leftAt, statusReason: row.statusReason }, code, subCode, at);
+    return applyBotPatch(db, row, patch, dispatch);
+}
+
+/** Saves a worked-out change (one event, or a replay) and hands a finished call to the writer. */
+async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, dispatch: (importId: number) => Promise<boolean>): Promise<BotStatus> {
     if (!patch) return row.status as BotStatus;
     // Only from the state this patch was worked out from, so two events racing can't move it backwards.
     const [saved] = await db.update(meetingBots).set({
@@ -306,13 +311,16 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
         out.checked++;
         try {
             const bot = await getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!);
-            if (!bot.code) continue;
             const before = row.status;
-            const after = await applyBotEvent(db, row, bot.code, bot.subCode, bot.at ?? now, dispatch);
+            // EVERY change, replayed in order: the last one alone would lose a call whose webhooks were all missed.
+            const patch = replayBotState({ status: row.status as BotStatus, joinedAt: row.joinedAt, leftAt: row.leftAt, statusReason: row.statusReason }, bot.changes);
+            const after = await applyBotPatch(db, row, patch, dispatch);
             if (after !== before) out.moved++;
             else await db.update(meetingBots).set({ updatedAt: now }).where(and(eq(meetingBots.id, row.id), eq(meetingBots.status, row.status)));
         } catch (err) {
             out.errors++;
+            // Moved to the back of the queue, so a bot Recall keeps failing on can't stop the others being checked.
+            await db.update(meetingBots).set({ updatedAt: now }).where(eq(meetingBots.id, row.id)).catch(() => undefined);
             console.error('[meeting-bot] poll failed', { botId: row.id, status: err instanceof RecallError ? err.status : null });
         }
     }
@@ -335,6 +343,34 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
         if (await deleteBotMedia(db, bot)) out.mediaDeleted++;
     }
     return out;
+}
+
+/**
+ * Takes a workspace's (or some assistants') bots back from Recall before they would be lost track of: booked or live
+ * bots are withdrawn (a booked one is cancelled; a live one leaves), and Recall's media is deleted. Called when a Note
+ * Taker is archived or purged and before a workspace is deleted, so a bot booked weeks ahead never joins a call for an
+ * assistant or workspace that is gone (review of #769). Never throws; how many bots it touched.
+ */
+export async function withdrawMeetingBots(db: Db, organisationId: number, assistantIds?: readonly number[]): Promise<number> {
+    try {
+        if (assistantIds && !assistantIds.length) return 0;
+        const rows = await db.select().from(meetingBots).where(and(
+            eq(meetingBots.organisationId, organisationId), isNotNull(meetingBots.recallBotId),
+            ...(assistantIds ? [inArray(meetingBots.aiAssistantId, [...assistantIds])] : []),
+            or(inArray(meetingBots.status, [...OPEN_BOT_STATUSES]), isNull(meetingBots.mediaDeletedAt)),
+        ));
+        for (const row of rows) {
+            if (OPEN_BOT_STATUSES.includes(row.status as BotStatus) && row.status !== 'ended') {
+                const how = await removeRecallBot(row.recallRegion as RecallRegion, row.recallBotId!, !row.joinedAt).catch(() => null);
+                if (how) await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
+            }
+            await deleteBotMedia(db, row).catch(() => false);
+        }
+        return rows.length;
+    } catch (err) {
+        console.error('[meeting-bot] withdraw failed', { organisationId, err: err instanceof Error ? err.message : err });
+        return 0;
+    }
 }
 
 /** Deletes Recall's copy of the recording; marks the row once Recall agrees. */

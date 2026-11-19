@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import {
     ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
-    nextBotState, recallBotRequest, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
+    nextBotState, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
 } from '../src/utils/meeting-bot';
 import { botExternalId, parseBotExternalId } from '../src/utils/meeting-bot-db';
@@ -153,6 +153,25 @@ await test('removed by the host after joining: still done (what it heard is writ
     assert.equal(r.status, 'done');
     assert.equal(r.reason, 'bot_kicked_from_call');
     assert.equal(r.minutes, 20);
+});
+
+await test('review round 3: the poll replays EVERY change, so a recorded call whose webhooks were all missed is not lost', () => {
+    const changes = [
+        { code: 'done', subCode: null, at: at(32) },               // out of order on purpose: replay sorts by time
+        { code: 'joining_call', subCode: null, at: at(0) },
+        { code: 'in_call_recording', subCode: null, at: at(1) },
+        { code: 'call_ended', subCode: 'call_ended_by_host', at: at(31) },
+    ];
+    const p = replayBotState({ status: 'joining', joinedAt: null, leftAt: null }, changes);
+    assert.ok(p);
+    assert.equal(p!.status, 'done', 'not "failed / never_joined"');
+    assert.equal(p!.joinedAt?.getTime(), at(1).getTime());
+    assert.equal(p!.leftAt?.getTime(), at(31).getTime());
+    assert.equal(p!.minutesInCall, 30);
+    assert.equal(p!.statusReason, 'call_ended_by_host');
+    // Only the last change (the old way) would have lost it:
+    assert.equal(nextBotState({ status: 'joining', joinedAt: null, leftAt: null }, 'done', null, at(32))?.status, 'failed');
+    assert.equal(replayBotState({ status: 'in_call', joinedAt: at(1), leftAt: null }, [{ code: 'in_call_recording', subCode: null, at: at(1) }]), null, 'nothing moved');
 });
 
 await test('done without call_ended uses Recall\'s time as the leaving time', () => {
@@ -338,6 +357,29 @@ await test('Recall is reached from one file only, and the flag ships OFF', () =>
     const sql = read('db/z-meeting-bots.sql');
     assert.match(sql, /VALUES \('meeting_bot', FALSE, 0, NULL,/);
     assert.match(sql, /ADD COLUMN IF NOT EXISTS via TEXT NOT NULL DEFAULT 'transcript'/);
+});
+
+await test('review round 3: the poll replays all changes and moves a failing bot to the back of the queue', () => {
+    const src = read('src/utils/meeting-bot-db.ts');
+    const poll = src.slice(src.indexOf('export async function pollMeetingBots'), src.indexOf('export async function withdrawMeetingBots'));
+    assert.ok(poll.includes('replayBotState(') && poll.includes('bot.changes'));
+    const katch = poll.slice(poll.indexOf('} catch (err) {'));
+    assert.ok(katch.indexOf('updatedAt: now') >= 0 && katch.indexOf('updatedAt: now') < katch.indexOf('console.error'), 'bumped before logging');
+    assert.match(read('src/utils/meeting-bot-recall.ts'), /changes: all,/);
+});
+
+await test('review round 3: bots are withdrawn on archive, purge and workspace deletion; a purge keeps the bot rows', () => {
+    const arch = read('netlify/functions/manage-assistant.ts');
+    assert.ok(arch.indexOf('withdrawMeetingBots(db, orgId, [id])') > arch.indexOf('await db.delete(taskRuns)'), 'archive withdraws');
+    const purge = read('netlify/functions/purge-archived-assistants.ts');
+    assert.ok(purge.indexOf('withdrawMeetingBots(db, orgId, assistantIds)') < purge.indexOf('await db.delete(aiAssistants)'), 'before the delete');
+    const del = read('netlify/functions/account-delete-execute.ts');
+    assert.ok(del.indexOf('withdrawMeetingBots(db, user.organisationId)') < del.indexOf('await db.delete(organisations)'), 'before the cascade');
+    assert.match(read('db/z-meeting-bots-assistant-set-null.sql'), /REFERENCES ai_assistants\(id\) ON DELETE SET NULL;/);
+    assert.match(read('db/z-meeting-bots.sql'), /ai_assistant_id\s+INTEGER REFERENCES ai_assistants\(id\) ON DELETE SET NULL/);
+    const schema = read('db/schema.ts');
+    const bots = schema.slice(schema.indexOf('export const meetingBots = pgTable'), schema.indexOf('export const meetingBots = pgTable') + 900);
+    assert.ok(bots.includes('aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" })'));
 });
 
 await test('the charge happens after the latch and deletes Recall\'s copy; bot meetings skip the second capacity check', () => {

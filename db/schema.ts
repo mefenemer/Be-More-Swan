@@ -7494,7 +7494,8 @@ export const meetingImports = pgTable("meeting_imports", {
 export const meetingBots = pgTable("meeting_bots", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
-  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // SET NULL, not cascade: a purged Note Taker's bot rows stay so Recall's copy can still be tracked and deleted.
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
   requestedByUserId: integer("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
   // 'link' | 'chat' | 'calendar'
   source: text("source").notNull().default("link"),

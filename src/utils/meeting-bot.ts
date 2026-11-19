@@ -223,6 +223,31 @@ export function nextBotState(row: BotStateRow, code: string, subCode: string | n
     }
 }
 
+export interface BotStatusChange { code: string; subCode: string | null; at: Date }
+
+/**
+ * Every status change Recall holds for a bot, applied in order (the 15-minute poll's way in). Reading only the LAST change
+ * would turn a recorded call whose webhooks were all missed ("joining" → … → "done") into "never joined" and lose it
+ * (review of #769). The combined change from the row's state, or null when nothing moved. Pure.
+ */
+export function replayBotState(row: BotStateRow, changes: readonly BotStatusChange[]): BotStatePatch | null {
+    let cur: BotStateRow = { ...row };
+    let last: BotStatePatch | null = null;
+    let minutes: number | null = null;
+    for (const c of [...changes].sort((a, b) => a.at.getTime() - b.at.getTime())) {
+        const p = nextBotState(cur, c.code, c.subCode, c.at);
+        if (!p) continue;
+        last = p;
+        if (p.minutesInCall !== null) minutes = p.minutesInCall;
+        cur = { status: p.status, joinedAt: p.joinedAt, leftAt: p.leftAt, statusReason: p.statusReason };
+    }
+    if (!last) return null;
+    const same = (x: Date | null | undefined, y: Date | null | undefined) => (x?.getTime() ?? null) === (y?.getTime() ?? null);
+    const moved = last.status !== row.status || !same(last.joinedAt, row.joinedAt) || !same(last.leftAt, row.leftAt)
+        || (last.statusReason ?? null) !== (row.statusReason ?? null) || minutes !== null;
+    return moved ? { ...last, minutesInCall: minutes } : null;
+}
+
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
 export interface BotRequestInput {

@@ -22,7 +22,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS meeting_bots (
     id                    SERIAL PRIMARY KEY,
     organisation_id       INTEGER NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-    ai_assistant_id       INTEGER REFERENCES ai_assistants(id) ON DELETE CASCADE,
+    ai_assistant_id       INTEGER REFERENCES ai_assistants(id) ON DELETE SET NULL,  -- see z-meeting-bots-assistant-set-null.sql
     requested_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
     source                TEXT NOT NULL DEFAULT 'link' CHECK (source IN ('link', 'chat', 'calendar')),
     platform              TEXT NOT NULL CHECK (platform IN ('google_meet', 'teams', 'zoom')),
