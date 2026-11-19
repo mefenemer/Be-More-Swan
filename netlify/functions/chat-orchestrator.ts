@@ -13,7 +13,7 @@
 // payload; the client should show its own loading state between send and response.
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
-import { aiVideoPriceText, taskCostLabel, type TaskCosts } from '../../src/config/task-weights';
+import { aiVideoPriceText, formatCost, taskCostLabel, type TaskCosts } from '../../src/config/task-weights';
 
 /** A cost as the customer reads it today (Admin → Money → Task costs): "1 task", "20 tasks". */
 const cost = (c: TaskCosts, key: string): string => taskCostLabel(key, c) ?? 'tasks';
@@ -1985,7 +1985,7 @@ ${allow === 'stock_only' ? 'They chose stock footage, photos and their own pictu
 
 ${rc.videosSnapshot ?? 'Your list of videos could not be read this turn. Do not guess what exists: if the user refers to a video, ask them to check the "Videos" tab, and do not emit a projectId.'}
 
-WHAT IT COSTS. Planning a storyboard is free. Making the video uses tasks from their monthly allowance only for AI pictures (${rc.taskCosts.weights.ai_image} each), AI clips (${aiVideoPriceText(rc.taskCosts)}, at most ${MAX_AI_CLIPS} per video) and the voiceover (${rc.taskCosts.weights.ai_voiceover}). Stock footage, stock photos, their own pictures and branded cards use no extra tasks. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
+WHAT IT COSTS. Planning a storyboard is free. Making the video uses tasks from their monthly allowance only for AI pictures (${rc.taskCosts.weights.ai_image} each), AI clips (${aiVideoPriceText(rc.taskCosts)}, at most ${MAX_AI_CLIPS} per video) and the voiceover (${rc.taskCosts.weights.ai_voiceover}${rc.taskCosts.weights.ai_voiceover_long ? `, plus ${formatCost('ai_voiceover_long', rc.taskCosts.weights.ai_voiceover_long)} in a long walkthrough script` : ''}). Stock footage, stock photos, their own pictures and branded cards use no extra tasks. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
 
 WHAT YOU CANNOT DO. You do not make videos longer than 60 seconds, except from their OWN FOOTAGE in its own sound, or an AI PRESENTER walking through their screen recordings: those can be 2, 5 or 10 minutes, told in chapters (see THEIR OWN FOOTAGE and AI PRESENTER). Never longer than 10 minutes. You do not post them anywhere (for TikTok or anywhere else, they download the finished video). You never review footage from this chat yourself and never describe a video you have not reviewed: what you know of their videos is only what the lists above say. You never claim a video exists, or is being made, before the "Videos" tab says so. Use only facts from the business information — never invent prices, offers or claims.
 

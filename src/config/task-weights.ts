@@ -35,6 +35,11 @@ export const DEFAULT_TASK_WEIGHTS = {
     ai_music_shared: 12,
     // A voiceover (Video Producer plan, Phase 2, decided 2026-10-31: 1 per video). Costs us cents.
     ai_voiceover: 1,
+    // A LONG voiceover (Phase 4 walkthroughs, up to 15,000 characters; owner, 2026-11-19): tasks for each FURTHER
+    // started 2,500 characters after the first 2,500, on top of ai_voiceover. 0 = today's flat price. Raising it is a
+    // price rise: make a change dated 30+ days after it is announced (Terms 5.2), as with ai_presenter. A post's
+    // voiceover (1,200 characters at most) never reaches it. voiceoverTasks() below is the one rule.
+    ai_voiceover_long: 0,
     x_link_post: 10,
     // The Business Mentor's background work (docs/business-mentor-plan.md §2.1, decided: 1 task each).
     mentor_research: 1,
@@ -140,6 +145,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     ai_music: 'AI music',
     ai_music_shared: 'AI music (shared)',
     ai_voiceover: 'AI voiceovers',
+    ai_voiceover_long: 'AI voiceover (each further 2,500 characters)',
     x_link_post: 'X posts with a link',
     mentor_research: 'Business Mentor research',
     mentor_strategy: 'Business Mentor plan drafts',
@@ -200,7 +206,20 @@ export function formatCost(key: CostKey, value: number): string {
     if (key === 'chat_messages_per_task') return `every ${value} message${value === 1 ? '' : 's'}`;
     if (value === 0) return 'no tasks';
     const tasks = `${value} task${value === 1 ? '' : 's'}`;
+    if (key === 'ai_voiceover_long') return `${tasks} for each further ${VOICEOVER_CHARS_PER_STEP.toLocaleString('en-GB')} characters`;
     return key === 'ai_video_per_second' || key === 'ai_presenter' ? `${tasks} a second` : tasks;
+}
+
+/** Characters one voiceover task covers before ai_voiceover_long starts counting. */
+export const VOICEOVER_CHARS_PER_STEP = 2500;
+
+/**
+ * Tasks for one AI voiceover of `chars` characters: ai_voiceover, plus ai_voiceover_long for each further started
+ * 2,500 characters. 2,500 or fewer is ai_voiceover alone; 15,000 at 1 a step is 1 + 5 = 6. Pure.
+ */
+export function voiceoverTasks(chars: number, costs: TaskCosts): number {
+    const steps = Math.max(1, Math.ceil(Math.max(0, chars) / VOICEOVER_CHARS_PER_STEP));
+    return costs.weights.ai_voiceover + (steps - 1) * (costs.weights.ai_voiceover_long ?? 0);
 }
 
 /**

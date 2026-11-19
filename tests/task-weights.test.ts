@@ -38,8 +38,10 @@ check('the agreed weights: work 1, image 1, video and music 20, shared music 12,
 });
 
 check('every weight is a positive integer and every kind has a customer-facing label', () => {
+    // ai_voiceover_long is a top-up rate (each further 2,500 characters) whose fallback is today's price, nothing extra.
+    const mayBeZero = new Set(['ai_voiceover_long']);
     for (const [k, w] of Object.entries(DEFAULT_TASK_WEIGHTS)) {
-        assert.ok(Number.isInteger(w) && w > 0, `${k} = ${w}`);
+        assert.ok(Number.isInteger(w) && (w > 0 || (w === 0 && mayBeZero.has(k))), `${k} = ${w}`);
         assert.ok(WORK_KIND_LABELS[k as WorkKind], `${k} has no label`);
     }
 });
