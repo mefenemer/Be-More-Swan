@@ -86,7 +86,7 @@ The help article says each of these in plain words. The Note Taker's live status
 ## 5. Build list (each step one PR)
 
 0. **Proof (you, with me; 2–3 days).**
-   - Open a Recall.ai pay-as-you-go account (EU region if allowed). Keep the key in `.env`, never in chat. Send the bot into each test call with `scripts/probe-meeting-bots.mjs`.
+   - Recall.ai pay-as-you-go accounts: the US West workspace exists (2026-11-19). Open the **EU** one too at `https://eu-central-1.recall.ai` (a separate account and key) and run the UK tests there, since UK customers will run on it. Keep the key in `.env`, never in chat. Send the bot into each test call with `scripts/probe-meeting-bots.mjs`.
    - From a throwaway script, send a bot to a free Meet call, a Teams (free) call and a business Teams call.
    - For Zoom, send a bot to a meeting on our own Zoom account. External meetings need the OBF route and review (step 4).
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
@@ -116,7 +116,7 @@ The help article says each of these in plain words. The Note Taker's live status
 - **In the call:** the bot's name says what it is ("Note Taker for ⟨Business⟩"). On joining it posts: *"Hi, I'm ⟨Business⟩'s Be More Swan Note Taker. I'm making a transcript of this call to write the minutes. The host can remove me at any time."* Removing it from the call stops it straight away, and the record says "Removed from the call".
 - **The customer's duty:** the Terms make the customer responsible for telling participants. The send dialog says it in one line. Some US states need every participant's consent, which the in-call notice supports but doesn't replace. The help article says so.
 - **Data:** audio and video never reach Be More Swan. We read Recall's transcript, then **delete the recording at Recall straight away**. The transcript is kept **30 days** (pick-up plan D5), and the minutes until the user deletes them.
-- **Where it is processed:** UK and EU workspaces in Recall's EU region (Frankfurt), if Phase 0 confirms pay-as-you-go can use it. US workspaces in Recall's US region. That means two Recall accounts, chosen by the workspace's country.
+- **Where it is processed:** UK and EU workspaces in Recall's EU region (Frankfurt). Recall confirmed in writing (2026-11-19) that pay-as-you-go supports it, as a separate account with its own key. US workspaces in Recall's US region. That means two Recall accounts, chosen by the workspace's country.
 - **US recording law:** some US states require every participant's consent to record. The bot's name, its pinned join notice, the Terms clause and the send dialog's reminder are how we meet that. The help article names the rule plainly for US customers.
 
 ## 7. What happens to the transcript pick-up plan
@@ -162,7 +162,7 @@ Researched from each service's own pricing, docs, DPA and security pages; third-
 |---|---|---|---|---|---|---|---|
 | **1. Zoom OBF** | ✅ token URL (up to 50 tokens) | ✅ 4 ways, own Zoom app | ✅ own Zoom app | ✅ own Zoom app | ❌ web client only; on roadmap | ❌ not documented; Zoom bots reported stuck (forum) | ❌ ZAK only, "does not accept OBF" |
 | **2. Meet / Teams** | Guest + signed-in on all 3; personal Teams documented | Guest + signed-in (Workspace / M365) | Guest + signed-in on all 3 | Guest + signed-in; personal Teams (guest) | Guest; signed-in Meet; personal Teams | Guest only | Guest + signed-in (incl. personal Gmail) |
-| **3. UK / EU data** | DPA with UK Addendum. EU region (Frankfurt) is a separate account; ⚠️ whether pay-as-you-go can use it is unconfirmed. Retention per recording, delete endpoint | DPA with UK Addendum (as read by our researcher; confirm). All data in Paris (Scaleway). Retention 3–30 days by plan, delete endpoint | Hosted: no DPA, region or retention published. Self-host anywhere | DPA in trust centre. EU residency listed. Retention adjustable, delete endpoint | US only. DPA links broken. No retention controls | DPA on request. London EU region, not confirmed for Notetaker. 14-day default retention | EU by default. DPA covers UK GDPR. Audio kept 1 week |
+| **3. UK / EU data** | DPA with UK Addendum. EU region (Frankfurt) is a separate account; pay-as-you-go can use it (Recall, 2026-11-19). Retention per recording, delete endpoint | DPA with UK Addendum (as read by our researcher; confirm). All data in Paris (Scaleway). Retention 3–30 days by plan, delete endpoint | Hosted: no DPA, region or retention published. Self-host anywhere | DPA in trust centre. EU residency listed. Retention adjustable, delete endpoint | US only. DPA links broken. No retention controls | DPA on request. London EU region, not confirmed for Notetaker. 14-day default retention | EU by default. DPA covers UK GDPR. Audio kept 1 week |
 | **4. US data** | ✅ US regions, **SOC 2 Type II**, ISO 27001, BAA (Enterprise) | No US region, no own SOC 2 report, no BAA | Not found | US + EU. SOC 2 *in progress*, ISO 27001, BAA | US-hosted. No audit | US region. SOC 2 Type II, ISO 27001 | No US region. No SOC 2 |
 | **Chat notice on join** | ✅ send and pin | ✅ | ✅ | ✅ | ❌ | ✅ customisable | ✅ |
 | **5. Speaker names** | ✅ from the meeting app | ✅ from the meeting app (Teams 1–2 s lag) | ✅ from the meeting app | ✅ from the meeting app | Platform indicators, 4–7% unlabelled | ❌ audio guessing (AssemblyAI) | Audio guessing matched to the participant list |
@@ -177,12 +177,12 @@ Researched from each service's own pricing, docs, DPA and security pages; third-
 
 **Left:** Recall.ai (UK, EU and US). Meeting BaaS (EU only) was the runner-up; the owner chose no backup vendor (2026-11-19).
 
-**What to confirm with Recall in writing (Phase 0):**
-1. Can a pay-as-you-go account use the EU (Frankfurt) region for UK and EU customers, alongside a US account for US customers?
-2. Do external Zoom meetings need our own Zoom app?
-3. The sub-processor list.
-4. Do we qualify for the startup price?
-5. The chat-notice limits on Teams.
+**Questions put to Recall (answers 2026-11-19):**
+1. ✅ **Pay-as-you-go can use the EU region:** sign up separately at `https://eu-central-1.recall.ai`. Regions have separate accounts, credentials and resources.
+2. ✅ **External Zoom meetings need our own Zoom Marketplace app, reviewed and approved by Zoom.** Development credentials only work for meetings hosted by the app-owning user or organisation (plan step 4).
+3. ⏳ **Sub-processor list:** not yet received. Recall's reply linked their bots FAQ and sub-codes pages, not the list. Ask again, or read `https://security.recall.ai/subprocessors`, before step 1 (Trust page). The sub-codes (`https://docs.recall.ai/docs/sub-codes`) are what the status words in §3 map from.
+4. ⏳ **Startup price ($0.25/h):** not yet answered.
+5. ⏳ **Chat-notice limits on Teams:** not yet answered.
 
 **US customers.** Recall's US region keeps US customers' meeting data in the US, with a SOC 2 Type II report and a BAA available later if we ever serve health businesses. No service handles US "all-party consent" states (such as California, Florida, Illinois, Maryland, Massachusetts, Pennsylvania and Washington) for us. That is covered by the bot's name, the pinned chat notice on joining, the Terms clause and the send dialog's reminder (§6).
 
