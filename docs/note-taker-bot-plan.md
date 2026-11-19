@@ -86,7 +86,7 @@ The help article says each of these in plain words. The Note Taker's live status
 ## 5. Build list (each step one PR)
 
 0. **Proof (you, with me; 2–3 days).**
-   - Open a Recall.ai pay-as-you-go account on the **EU region**. Keep the key in `.env`, never in chat.
+   - Open a Recall.ai pay-as-you-go account (EU region if allowed) and a **Meeting BaaS** account (the fallback, §10). Keep both keys in `.env`, never in chat. Send both bots into the **same** calls, so speaker names, admission and transcript quality can be compared side by side.
    - From a throwaway script, send a bot to a free Meet call, a Teams (free) call and a business Teams call.
    - For Zoom, send a bot to a meeting on our own Zoom account. External meetings need the OBF route and review (step 4).
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
@@ -115,7 +115,9 @@ The help article says each of these in plain words. The Note Taker's live status
 
 - **In the call:** the bot's name says what it is ("Note Taker for ⟨Business⟩"). On joining it posts: *"Hi, I'm ⟨Business⟩'s Be More Swan Note Taker. I'm making a transcript of this call to write the minutes. The host can remove me at any time."* Removing it from the call stops it straight away, and the record says "Removed from the call".
 - **The customer's duty:** the Terms make the customer responsible for telling participants. The send dialog says it in one line. Some US states need every participant's consent, which the in-call notice supports but doesn't replace. The help article says so.
-- **Data:** audio and video never reach Be More Swan. We read Recall's transcript, then **delete the recording at Recall straight away**. The transcript is kept **30 days** (pick-up plan D5), and the minutes until the user deletes them. Processing is in Recall's EU region if Phase 0 confirms it.
+- **Data:** audio and video never reach Be More Swan. We read Recall's transcript, then **delete the recording at Recall straight away**. The transcript is kept **30 days** (pick-up plan D5), and the minutes until the user deletes them.
+- **Where it is processed:** UK and EU workspaces in Recall's EU region (Frankfurt), if Phase 0 confirms pay-as-you-go can use it. US workspaces in Recall's US region. That means two Recall accounts, chosen by the workspace's country.
+- **US recording law:** some US states require every participant's consent to record. The bot's name, its pinned join notice, the Terms clause and the send dialog's reminder are how we meet that. The help article names the rule plainly for US customers.
 
 ## 7. What happens to the transcript pick-up plan
 
@@ -123,7 +125,14 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
 
 ## 8. Decisions for the owner
 
-- **B1. Vendor.** *Recommended:* **Recall.ai**. It is the most used and documented, and covers Zoom's OBF route, signed-in bots and an EU region. Cheaper options exist (Meeting BaaS about $0.35–0.50/h, Vexa about $0.30/h) but are smaller. Building our own: no (§1).
+- **B1. Vendor.** *Recommended:* **Recall.ai, with Meeting BaaS as the tested fallback.** Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
+  - Zoom's OBF rule;
+  - speaker names from the meeting app;
+  - a UK-ready DPA and an EU region;
+  - SOC 2 Type II, ISO 27001 and US regions;
+  - a well-funded company.
+
+  It is not the cheapest: about $0.65/h all-in against MeetStream's $0.45. But its startup programme ($0.25/h for the first 10,000 hours) would make it the cheapest for our first year, if we qualify. Meeting BaaS is the best EU-only choice: hosted in Paris, with a UK-addendum DPA. It has no US region or SOC 2 report of its own. Building our own: no (§1).
 - **B2. Transcript.** *Recommended:* **Recall's own transcript** ($0.15/h). Speaker names come from the meeting platform, and no audio ever reaches us. The alternative, downloading the audio and sending it to ElevenLabs Scribe, guesses speakers from audio and brings audio handling back.
 - **B3. Charging.** *Recommended:* **1 task per started 5 minutes in the call**, minimum 1, nothing if never admitted. See §2 for the 3-minute alternative that covers cost on every plan.
 - **B4. Length limit.** *Recommended:* **2 hours by default**, changeable in settings up to 4. The allowance check before sending reserves the limit's tasks.
@@ -141,6 +150,40 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
 - **Zoom review** is outside our control (B7).
 - **Customers forgetting to tell people:** the in-call notice and the Terms cover us. The send dialog's one line reminds them every time.
 
+## 10. Bot services compared (2026-11-19)
+
+Researched from each service's own pricing, docs, DPA and security pages; third-party facts are marked. "Not found" means the service doesn't publish it. Every line is to be confirmed in writing before signing (Phase 0).
+
+**One fact applies to every service:** for Zoom meetings on other people's accounts, **we need our own Zoom app, approved by Zoom** (OBF tokens are minted from the customer's sign-in to *our* app). Meeting BaaS, Attendee and MeetStream say so outright. Recall's docs contradict each other on this, so ask them. Zoom's review is ours whichever service we choose.
+
+| | **Recall.ai** | **Meeting BaaS** | **Attendee** | **MeetStream** | **Vexa** | **Nylas Notetaker** | **Skribby** |
+|---|---|---|---|---|---|---|---|
+| **1. Zoom OBF** | ✅ token URL (up to 50 tokens) | ✅ 4 ways, own Zoom app | ✅ own Zoom app | ✅ own Zoom app | ❌ web client only; on roadmap | ❌ not documented; Zoom bots reported stuck (forum) | ❌ ZAK only, "does not accept OBF" |
+| **2. Meet / Teams** | Guest + signed-in on all 3; personal Teams documented | Guest + signed-in (Workspace / M365) | Guest + signed-in on all 3 | Guest + signed-in; personal Teams (guest) | Guest; signed-in Meet; personal Teams | Guest only | Guest + signed-in (incl. personal Gmail) |
+| **3. UK / EU data** | DPA with UK Addendum. EU region (Frankfurt) is a separate account; ⚠️ whether pay-as-you-go can use it is unconfirmed. Retention per recording, delete endpoint | DPA with UK Addendum (as read by our researcher; confirm). All data in Paris (Scaleway). Retention 3–30 days by plan, delete endpoint | Hosted: no DPA, region or retention published. Self-host anywhere | DPA in trust centre. EU residency listed. Retention adjustable, delete endpoint | US only. DPA links broken. No retention controls | DPA on request. London EU region, not confirmed for Notetaker. 14-day default retention | EU by default. DPA covers UK GDPR. Audio kept 1 week |
+| **4. US data** | ✅ US regions, **SOC 2 Type II**, ISO 27001, BAA (Enterprise) | No US region, no own SOC 2 report, no BAA | Not found | US + EU. SOC 2 *in progress*, ISO 27001, BAA | US-hosted. No audit | US region. SOC 2 Type II, ISO 27001 | No US region. No SOC 2 |
+| **Chat notice on join** | ✅ send and pin | ✅ | ✅ | ✅ | ❌ | ✅ customisable | ✅ |
+| **5. Speaker names** | ✅ from the meeting app | ✅ from the meeting app (Teams 1–2 s lag) | ✅ from the meeting app | ✅ from the meeting app | Platform indicators, 4–7% unlabelled | ❌ audio guessing (AssemblyAI) | Audio guessing matched to the participant list |
+| **6. Price per hour, bot + transcript** | $0.50 + $0.15 = **$0.65**; startup $0.25 for 10k h; 5 h free | $0.50→0.35 + ~$0.10 = **~$0.45–0.60**; 8 h free | $0.50→0.35 + captions $0 or own engine | $0.35 + $0.10 = **$0.45**; $0.25 at volume | $0.30 + $0.20 = **$0.50** | $15–49/month, then $0.65–0.80 (transcript and calendar included) | $0.35 + $0.04–1.01 (Nova-3: $0.67) |
+| **7. Maturity** | Series B, $51M raised (third-party); claims Zoom Preferred Partner | Small French company (SAS SPOKE). 2 incidents in Nov 2026, one rejecting up to 90% of Meet bots | Small. Very active releases. ELv2 licence | Launched Jul 2025. $125k pre-seed (third-party). About 11 people | 0.x release. 808 open issues | Large company; Notetaker is a small part of it | Bought by Alianza (Sep 2026); to be folded into Crux in Q1 2027 |
+| **8. Lock-in** | REST + signed webhooks. Proprietary | REST + signed webhooks. Self-host (BSL) | REST + signed webhooks. Self-host | REST + signed webhooks. OpenAPI | REST. Webhooks unfinished | Calendar ties us to Nylas grants | REST + signed webhooks |
+
+**Ruled out:**
+- **Vexa, Nylas Notetaker and Skribby**: no working Zoom OBF route, so no Zoom on other people's meetings. Vexa also has no DPA or audit. Nylas guesses speakers from audio. Skribby's future is uncertain after its sale.
+- **MeetStream**: the cheapest with good tech, but a tiny, very new company without a SOC 2 report yet. Too thin to hold customers' meeting data.
+- **Attendee**: good tech, but publishes nothing on hosted data terms, and self-hosting brings back the servers §1 avoids.
+
+**Left:** Recall.ai (UK, EU and US) and Meeting BaaS (EU only).
+
+**What to confirm with Recall in writing (Phase 0):**
+1. Can a pay-as-you-go account use the EU (Frankfurt) region for UK and EU customers, alongside a US account for US customers?
+2. Do external Zoom meetings need our own Zoom app?
+3. The sub-processor list.
+4. Do we qualify for the startup price?
+5. The chat-notice limits on Teams.
+
+**US customers.** Recall's US region keeps US customers' meeting data in the US, with a SOC 2 Type II report and a BAA available later if we ever serve health businesses. No service handles US "all-party consent" states (such as California, Florida, Illinois, Maryland, Massachusetts, Pennsylvania and Washington) for us. That is covered by the bot's name, the pinned chat notice on joining, the Terms clause and the send dialog's reminder (§6).
+
 ## Sources
 
 - Recall.ai pricing (pay-as-you-go $0.50/h; transcript $0.15/h; 7 days free storage): https://www.recall.ai/pricing and https://www.recall.ai/blog/new-recall-ai-pricing-for-2026
@@ -149,3 +192,10 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
 - Recall.ai Google Meet admission and signed-in bots: https://docs.recall.ai/docs/google-meet-faq and https://docs.recall.ai/docs/google-meet-login-getting-started
 - Recall.ai Teams (anonymous guest, lobby, CAPTCHA, signed-in bots): https://docs.recall.ai/docs/setting-up-signed-in-bots-for-microsoft-teams
 - Cost comparison of bot services (secondary source): https://apicostcalc.com/recall-ai-vs-meetingbaas-vs-vexa-cost-calculator.html
+- Recall.ai: bot create (zoom.obf_token_url) https://docs.recall.ai/reference/bot_create.md · regions https://docs.recall.ai/docs/regions · DPA https://www.recall.ai/data-processing-agreement · speaker names https://docs.recall.ai/docs/diarization.md · chat messages https://docs.recall.ai/docs/sending-chat-messages.md · funding (third-party) https://siliconangle.com/2025/09/05/recall-ai-lands-38m-unlock-spoken-data-scale/
+- Meeting BaaS: docs https://docs.meetingbaas.com/llms/all · DPA https://www.meetingbaas.com/en/legal/data-processing-agreement · pricing https://www.meetingbaas.com/en/pricing · status https://status.meetingbaas.com · licence https://www.meetingbaas.com/en/legal/license
+- Attendee: Zoom OAuth https://github.com/attendee-labs/attendee/blob/main/docs/zoom_oauth.md · pricing https://attendee.dev/pricing · licence https://github.com/attendee-labs/attendee/blob/main/LICENSE
+- MeetStream: Zoom authenticated bots https://docs.meetstream.ai/guides/app-integrations/zoom-authenticated-bots.md · pricing https://meetstream.ai/pricing · security https://meetstream.ai/security · funding (third-party) https://www.caplight.com/company/meetstream
+- Vexa: Zoom https://docs.vexa.ai/platforms/zoom · status https://docs.vexa.ai/roadmap/status.md · security https://vexa.ai/security · pricing https://vexa.ai/pricing
+- Nylas Notetaker: Zoom guide https://developer.nylas.com/docs/cookbook/notetaker/transcribe-zoom-meeting.md · forum report https://forums.nylas.com/t/nylas-notetaker-doesnt-join-in-zoom-bot-never-appears-in-the-meeting-or-waiting-room/1213 · pricing https://www.nylas.com/pricing/
+- Skribby: authentication https://skribby.io/docs/guides/bot-authentication · regions https://skribby.io/docs/guides/regions · pricing https://skribby.io/pricing · acquisition (third-party) https://www.channeldive.com/news/alianza-buys-skribby-aims-telco-ai-at-meetings-that-msps-manage/830140/
