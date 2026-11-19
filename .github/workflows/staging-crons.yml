@@ -138,6 +138,9 @@ jobs:
           # `run-poll-mailboxes` (10m) wakes the Email Assistant's mailbox reads (docs/email-assistant-plan.md §4).
           # Idempotent: a mailbox read in the last 9 minutes, or mid-read, is skipped. NOT `poll-mailboxes`
           # itself: that one is scheduled, and Netlify answers a URL call to a scheduled function with 403.
+          # `run-meeting-pickup` (15m) finds meetings that ended on Google Meet, Teams or Zoom and hands each to the Note
+          # Taker's background writer (meeting-pickup.ts, docs/meeting-apps-pickup-plan.md §2). Idempotent: a meeting
+          # is one meeting_imports row and each is claimed before it is written. Finds nothing until a platform is on.
           # `run-site-domain-checks` (10m) moves customer domains on their way (site-domains.ts checkDueDomains).
           # Idempotent: Netlify is only touched when something changed.
           # `run-scenario-jobs` (5m) drains the Integration Scenario Library's outbound hand-offs (process-scenario-jobs.ts):
@@ -165,6 +168,7 @@ jobs:
           run-campaign-reconciler   3600    120
           run-fix-live-check        1800    120
           run-poll-mailboxes        600     60
+          run-meeting-pickup        900     60
           run-site-domain-checks    600     120
           run-follower-counts       14400   120
           run-insights-ingest       21600   120

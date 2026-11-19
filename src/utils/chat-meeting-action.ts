@@ -125,6 +125,12 @@ export async function taskToolOn(db: Db, organisationId: number, aiAssistantId: 
 }
 
 /** Pure: the snapshot text from the rows. */
+/** The platform a meeting was picked up from (data.pickedUpFrom, src/utils/meeting-pickup.ts), or ''. */
+function pickedUpLabel(d: Record<string, unknown>): string {
+    const p = d.pickedUpFrom;
+    return p && typeof p === 'object' && typeof (p as { label?: unknown }).label === 'string' ? oneLine((p as { label: string }).label, 40) : '';
+}
+
 export function formatMeetingsSnapshot(
     total: number, waiting: number,
     rows: { id: number; title: string; approvalStatus: string; data: unknown; updatedAt: Date | string | null }[],
@@ -141,6 +147,7 @@ export function formatMeetingsSnapshot(
             day,
             `${tasks} action item${tasks === 1 ? '' : 's'}`,
             missing.length ? `no email for: ${missing.slice(0, 8).join(', ')}` : '',
+            pickedUpLabel(d) ? `picked up from ${pickedUpLabel(d)}` : '',
         ].filter(Boolean);
         let line = parts.join(' · ');
         const fe = meetingFollowup(d);

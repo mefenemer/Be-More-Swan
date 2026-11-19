@@ -2479,6 +2479,20 @@ function _rqMeetingFollowupSent(d) {
 }
 
 /**
+ * Where a meeting came from when the Note Taker picked it up by itself (data.pickedUpFrom, set by
+ * src/utils/meeting-pickup.ts): "Picked up from Google Meet", with a link to the call when the platform gave one.
+ * '' for pasted or chat meetings.
+ */
+function _rqMeetingPickedUp(r) {
+    const p = r.recordType === 'meeting' && r.data ? r.data.pickedUpFrom : null;
+    if (!p || typeof p.label !== 'string' || !p.label) return '';
+    const link = typeof p.link === 'string' && /^https:\/\//i.test(p.link)
+        ? ` · <a href="${_rqEsc(p.link)}" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-900">Open the call</a>`
+        : '';
+    return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Picked up from ${_rqEsc(p.label)}</span> Written from the platform's own transcript${link}</p>`;
+}
+
+/**
  * A follow-up that was NOT sent because no Gmail or Outlook was connected when the meeting was approved
  * (data.followupNotSent, stamped by sync-action.ts) — with the button that sends it once one is. '' otherwise.
  * Re-approving cannot resend it (only the first approval fires hand-offs), so this is the way back.
@@ -3467,7 +3481,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${snippet ? `<p class="text-xs text-gray-500 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
         ${_rqRecipient(r, statusKey)}
         ${_rqAttendeeFix(r, statusKey)}
-        ${_rqOutreachPreview(r, statusKey)}
+        ${_rqMeetingPickedUp(r)}${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
         ${_rqLeadNotes(r)}
         ${_rqDecisionDetail(r, statusKey)}

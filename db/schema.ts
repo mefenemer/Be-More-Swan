@@ -7392,3 +7392,51 @@ export const leadSiteWatchSignals = pgTable("lead_site_watch_signals", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
 }, (t) => [unique("lead_site_watch_signals_assistant_record_id_ref_key").on(t.assistantRecordId, t.ref)]);
+
+// ── Meeting pick-up (Note Taker reads Google Meet / Teams / Zoom transcripts) — db/z-meeting-imports.sql ──
+// One row per platform meeting per workspace; the unique key means a meeting is never written up twice.
+// src/utils/meeting-pickup.ts is the engine. docs/meeting-apps-pickup-plan.md §2.
+export const meetingImports = pgTable("meeting_imports", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // 'google_meet' | 'teams' | 'zoom'
+  platform: text("platform").notNull(),
+  // The platform's own id for the meeting (Meet: the conference record name).
+  externalId: text("external_id").notNull(),
+  title: text("title"),
+  meetingLink: text("meeting_link"),
+  startedAt: timestamp("started_at"),
+  endedAt: timestamp("ended_at"),
+  // 'found' | 'writing' | 'written' | 'skipped' | 'failed'
+  status: text("status").notNull().default("found"),
+  // Why a meeting was never written: 'no_transcript' | 'no_meeting' | 'task_limit' | 'assistant_gone'
+  skipReason: text("skip_reason"),
+  attempts: integer("attempts").notNull().default(0),
+  // Never transcript text.
+  lastError: text("last_error"),
+  leaseUntil: timestamp("lease_until"),
+  recordId: integer("record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  writtenAt: timestamp("written_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("meeting_imports_org_platform_external_uq").on(t.organisationId, t.platform, t.externalId),
+  check("meeting_imports_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+  check("meeting_imports_status_check", sql`${t.status} IN ('found','writing','written','skipped','failed')`),
+]);
+
+// Per workspace and platform: when meetings were last checked and how far (the Connections tab's line).
+export const meetingPickupState = pgTable("meeting_pickup_state", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  lastCheckedAt: timestamp("last_checked_at"),
+  checkedThrough: timestamp("checked_through"),
+  lastFound: integer("last_found").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("meeting_pickup_state_org_platform_uq").on(t.organisationId, t.platform),
+  check("meeting_pickup_state_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+]);
