@@ -14,6 +14,7 @@ import {
 } from './meeting-pickup';
 import { googleMeetSource } from './meeting-sources/google-meet';
 import { chargeBotMeeting, meetingBotSource, pollMeetingBots } from './meeting-bot-db';
+import { BOT_CHANNEL_BLOCK } from './meeting-bot';
 import { enforcePromptModeration } from './moderation';
 import { isFeatureEnabled } from './feature-flags';
 import { getIntegration } from './workspace-integrations';
@@ -168,9 +169,9 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSo
         async blocked(organisationId, text) {
             return (await enforcePromptModeration({ text, userId: null, organisationId, source: 'meeting_pickup' })) !== null;
         },
-        writeMinutes(organisationId, assistant, message) {
+        writeMinutes(organisationId, assistant, message, row) {
             return writeMeetingMinutes(db, {
-                organisationId, userId: null, assistant, message, channelBlock: PICKUP_CHANNEL_BLOCK,
+                organisationId, userId: null, assistant, message, channelBlock: row.via === 'bot' ? BOT_CHANNEL_BLOCK : PICKUP_CHANNEL_BLOCK,
                 sessionId: `meeting-pickup:${assistant.id}`, requestPath: false,
             });
         },

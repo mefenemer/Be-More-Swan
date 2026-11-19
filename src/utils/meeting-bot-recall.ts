@@ -129,8 +129,12 @@ export async function removeRecallBot(region: RecallRegion, botId: string, notJo
     return ok(leave.status) || leave.status === 404 ? 'left' : null;
 }
 
-/** Deletes Recall's copy of the recording and transcript. True when done (or already gone); false while the bot runs. */
+/**
+ * Deletes Recall's copy of the recording and transcript. True only when Recall says it is deleted (2xx) or the bot is
+ * gone (404). Anything else, including 400/409 while the bot is still running, is NOT done, so it is tried again
+ * (review of #769: counting 409 as done could mark a recording deleted that Recall still held).
+ */
 export async function deleteRecallMedia(region: RecallRegion, botId: string): Promise<boolean> {
     const r = await call(region, 'POST', `/bot/${encodeURIComponent(botId)}/delete_media/`);
-    return r.status === 404 || r.status === 409 || (r.status >= 200 && r.status < 300);
+    return r.status === 404 || (r.status >= 200 && r.status < 300);
 }

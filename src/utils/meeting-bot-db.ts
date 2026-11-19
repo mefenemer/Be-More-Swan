@@ -176,8 +176,16 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
         return fail(502, 'recall_refused', 'The Note Taker couldn\'t be sent to that meeting. Check the link and try again.');
     }
     try {
-        const [saved] = await db.update(meetingBots).set({ recallBotId, updatedAt: new Date() }).where(eq(meetingBots.id, row.id)).returning();
-        return { ok: true, bot: botView(saved ?? row), alreadySent: false };
+        // Only onto a row that is still open: if Remove was pressed while Recall was answering, the bot is withdrawn
+        // rather than left to join a call nobody tracks (review of #769).
+        const [saved] = await db.update(meetingBots).set({ recallBotId, updatedAt: new Date() })
+            .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();
+        if (!saved) {
+            await removeRecallBot(region, recallBotId, true).catch(() => null);
+            const [now2] = await db.select().from(meetingBots).where(eq(meetingBots.id, row.id)).limit(1);
+            return { ok: true, bot: botView(now2 ?? row), alreadySent: false };
+        }
+        return { ok: true, bot: botView(saved), alreadySent: false };
     } catch (err) {
         // Recall has the bot but we can't record its id, so its events could never be matched: take it back out rather
         // than let an untracked bot join (no minutes, no charge, media never deleted). Review of #769.
@@ -214,6 +222,11 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     // requireTenant's assistant check can't see it; review of #769). Same answer as not found: no hint it exists.
     if (!row || (row.aiAssistantId !== null && !canAccessAssistant(access, row.aiAssistantId))) return { ok: false, status: 404, error: 'That Note Taker was not found.' };
     if (!OPEN_BOT_STATUSES.includes(row.status as BotStatus) || row.status === 'ended') return { ok: true, bot: botView(row) };
+    // Just sent and Recall hasn't answered yet: there is nothing to withdraw yet, and marking it cancelled now would let
+    // the bot join untracked once Recall answers (review of #769). Ask to try again in a moment.
+    if (!row.recallBotId && row.createdAt.getTime() > Date.now() - 60_000) {
+        return { ok: false, status: 409, error: 'The Note Taker is still being sent. Try again in a moment.' };
+    }
     const notJoinedYet = !row.joinedAt;
     let how: 'deleted' | 'left' | null = 'deleted';
     if (row.recallBotId) {
@@ -296,8 +309,16 @@ export interface BotPollResult { checked: number; moved: number; imported: numbe
  * bot with no import gets one; a bot that never reached Recall is failed; and Recall's media is deleted once a bot is
  * finished with (minutes written or given up, a bot that never got in, or 24 hours after the call).
  */
-export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Promise<boolean>, now: Date = new Date()): Promise<BotPollResult> {
+/** The poll's share of the scheduled run (Netlify scheduled functions stop at 30 s; the pick-up check runs first). */
+export const BOT_POLL_BUDGET_MS = 15_000;
+const POLL_BATCH = 5;
+
+export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Promise<boolean>, now: Date = new Date(), budgetMs = BOT_POLL_BUDGET_MS): Promise<BotPollResult> {
     const out: BotPollResult = { checked: 0, moved: 0, imported: 0, mediaDeleted: 0, errors: 0 };
+    // Stops starting new Recall calls once its budget is spent, so the run never overruns and every step gets a turn;
+    // what is left is picked up next run (oldest-checked first).
+    const started = Date.now();
+    const timeLeft = () => Date.now() - started < budgetMs;
     const quiet = new Date(now.getTime() - 5 * 60 * 1000);
 
     await db.update(meetingBots).set({ status: 'failed', statusReason: 'not_sent', updatedAt: now }).where(and(
@@ -307,7 +328,7 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
         isNotNull(meetingBots.recallBotId), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]), lt(meetingBots.updatedAt, quiet),
         or(sql`${meetingBots.status} <> 'scheduled'`, lt(meetingBots.joinAt, now)),
     )).orderBy(meetingBots.updatedAt).limit(50);
-    for (const row of open) {
+    const pollOne = async (row: BotRow) => {
         out.checked++;
         try {
             const bot = await getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!);
@@ -323,11 +344,15 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
             await db.update(meetingBots).set({ updatedAt: now }).where(eq(meetingBots.id, row.id)).catch(() => undefined);
             console.error('[meeting-bot] poll failed', { botId: row.id, status: err instanceof RecallError ? err.status : null });
         }
-    }
+    };
+    // In small batches (each Recall call may take up to 15 s), never past the budget.
+    for (let i = 0; i < open.length && timeLeft(); i += POLL_BATCH) await Promise.all(open.slice(i, i + POLL_BATCH).map(pollOne));
 
     const orphaned = await db.select().from(meetingBots).where(and(
         eq(meetingBots.status, 'done'), isNotNull(meetingBots.joinedAt), isNull(meetingBots.importId), isNotNull(meetingBots.recallBotId))).limit(25);
     for (const row of orphaned) if (await ensureBotImport(db, row, dispatch).catch(() => null)) out.imported++;
+    // Media deletion is cheap and must not starve behind a slow poll: it gets its own short window.
+    const mediaStarted = Date.now();
 
     const finished = await db.select({ bot: meetingBots, importStatus: meetingImports.status }).from(meetingBots)
         .leftJoin(meetingImports, eq(meetingBots.importId, meetingImports.id))
@@ -339,8 +364,9 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
                 lt(meetingBots.updatedAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
             ),
         )).limit(25);
-    for (const { bot } of finished) {
-        if (await deleteBotMedia(db, bot)) out.mediaDeleted++;
+    for (let i = 0; i < finished.length && Date.now() - mediaStarted < 5_000; i += POLL_BATCH) {
+        const done = await Promise.all(finished.slice(i, i + POLL_BATCH).map(({ bot }) => deleteBotMedia(db, bot)));
+        out.mediaDeleted += done.filter(Boolean).length;
     }
     return out;
 }

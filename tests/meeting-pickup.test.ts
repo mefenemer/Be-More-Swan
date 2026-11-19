@@ -337,7 +337,7 @@ await test('the form and pick-up share one minutes writer', () => {
     assert.match(form, /writeMeetingMinutes\(db, \{/);
     assert.doesNotMatch(form, /anthropic\.messages\.create/);
     const dbFile = readFileSync('src/utils/meeting-pickup-db.ts', 'utf8');
-    assert.match(dbFile, /channelBlock: PICKUP_CHANNEL_BLOCK/);
+    assert.match(dbFile, /channelBlock: row\.via === 'bot' \? BOT_CHANNEL_BLOCK : PICKUP_CHANNEL_BLOCK/);
     assert.match(dbFile, /recordCompletedWork\(db, organisationId, 'meeting_pickup'/);
 });
 

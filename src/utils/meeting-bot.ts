@@ -5,9 +5,17 @@
 // meeting-bot-db.ts is the database half.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 import type { PickupPlatform } from './meeting-pickup';
 
 export const MEETING_BOT_FLAG = 'meeting_bot';
+
+/**
+ * How the minutes writer is told a bot meeting reached it (instead of meeting-pickup.ts PICKUP_CHANNEL_BLOCK). Carries the
+ * Note Taker's special-category clause: a bot can only be sent after the workspace accepted DPA 1.2, whose clause 13
+ * covers what people say in those meetings.
+ */
+export const BOT_CHANNEL_BLOCK = `The user's message is a transcript of a meeting the Note Taker joined itself, sent automatically after the call ended. Nobody is waiting to answer questions, so write the minutes from all of it at once and always include the card. Speaker names come from the meeting platform. Set uiElement to null only when the transcript holds no real meeting (only a sound check or silence, say), and then say in "reply" why.\n\n${MEETING_SPECIAL_CATEGORY_CLAUSE}`;
 
 // ── The link ─────────────────────────────────────────────────────────────────────────────────────
 

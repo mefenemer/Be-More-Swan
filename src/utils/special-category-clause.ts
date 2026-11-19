@@ -10,15 +10,15 @@
 // step-free?") would be refused. tests/email-assistant.test.ts holds this.
 
 import { EMAIL_SPECIAL_CATEGORY_CLAUSE } from './email-sort';
-import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 
 export const SPECIAL_CATEGORY_MARKER = '<!-- special-category-clause -->';
 
 /** The clause for a role. Pure. */
 export function specialCategoryClauseFor(roleKey: string | null | undefined, generalClause: string): string {
+    // The Note Taker's own clause (meeting-minutes.ts MEETING_SPECIAL_CATEGORY_CLAUSE) is NOT swapped in here yet: under
+    // DPA 1.1 clause 13 the general rule still applies to what customers paste. It reaches only the minutes of meetings
+    // the bot joined, which need DPA 1.2. Add 'meeting_note_taker' here when DPA 1.2 is published (legal drafts §9).
     if (roleKey === 'email_assistant') return EMAIL_SPECIAL_CATEGORY_CLAUSE;
-    // The Note Taker writes minutes from what people said, which it cannot ask them to resend (docs/note-taker-bot-legal.md §9).
-    if (roleKey === 'meeting_note_taker') return MEETING_SPECIAL_CATEGORY_CLAUSE;
     return generalClause;
 }
 

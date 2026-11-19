@@ -7,8 +7,9 @@
 /**
  * Meetings may mention health, beliefs or other special category data (DPA 1.2 clause 13, "Meetings the Note Taker
  * joins"; docs/note-taker-bot-legal.md §9). The minutes are still written, but such details are used only as far as the
- * minutes need and are never inferred or labelled. The general refusal clause must never reach this prompt: it would turn
- * an ordinary meeting into a refusal the user cannot fix. tests/meeting-bot.test.ts holds this.
+ * minutes need and are never inferred or labelled. Today it goes only into the channel block for meetings the BOT joined
+ * (meeting-bot.ts BOT_CHANNEL_BLOCK), which a workspace can only have after accepting DPA 1.2. Pasted meetings keep the
+ * DPA 1.1 rule until 1.2 is published. tests/meeting-bot.test.ts holds this.
  */
 export const MEETING_SPECIAL_CATEGORY_CLAUSE = 'SPECIAL-CATEGORY DATA IN MEETINGS: What people say in a meeting may mention health, disability, religion, ethnicity, sexuality, politics, union membership or criminal matters. Still write the minutes. Include such a detail only where a decision, risk or task cannot be understood without it, in neutral words. Never infer a special category that was not stated, never label a person by one, and never add one to an attendee, a task or the follow-up email unless the task itself is about it.';
 
@@ -57,8 +58,6 @@ Note-taking policy (from setup):
 Attribution rules: assignee is the person the meeting content implies owns the task ("I'll send the deck" → that speaker; "Sarah to chase legal" → Sarah). Use "Unassigned" when no owner is implied. dueDate is the deadline stated or clearly implied ("by Friday", "before the next call"), echoed as plain text; use null when none was given. Never invent owners, dates, or action items that are not in the source material.
 
 Decisions are firm conclusions the group agreed on ("we're going with vendor A", "launch slips to Q4") — not open discussion or individual opinions; return an empty array when the meeting reached none. Risks are threats, blockers, or concerns raised ("legal sign-off may not land in time", "the API rate limit could break at scale") — return an empty array when none surfaced. Never invent decisions or risks that are not in the source material.
-
-${MEETING_SPECIAL_CATEGORY_CLAUSE}
 
 ${o.channelBlock}
 

@@ -14,6 +14,7 @@ import {
     sourceFor, writeImport, type ImportRelease, type ImportRow, type MeetingSource, type PickupStore, type WriterDeps,
 } from '../src/utils/meeting-pickup';
 import { MEETING_SPECIAL_CATEGORY_CLAUSE, buildMeetingMinutesPrompt, FORM_CHANNEL_BLOCK } from '../src/utils/meeting-minutes';
+import { BOT_CHANNEL_BLOCK } from '../src/utils/meeting-bot';
 import { specialCategoryClauseFor, withSpecialCategoryClause } from '../src/utils/special-category-clause';
 import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 
@@ -290,15 +291,31 @@ await test('writeImport on a bot meeting: capacity and charge see the row, and t
 
 // ── Special category data (DPA 1.2 clause 13, legal drafts §9) ───────────────────────────────────
 
-await test('the minutes prompt carries the Note Taker\'s own special-category rule, never the refusal', () => {
+await test('review round 4: the Note Taker\'s special-category clause reaches ONLY bot meetings (DPA 1.2); chat and pasted meetings keep the DPA 1.1 rule', () => {
     const p = buildMeetingMinutesPrompt({ meetingPlatform: undefined, taskDestination: undefined, summaryFormat: undefined, channelBlock: FORM_CHANNEL_BLOCK });
-    assert.ok(p.includes(MEETING_SPECIAL_CATEGORY_CLAUSE));
-    assert.ok(!/cannot process sensitive personal information/i.test(p));
+    assert.ok(!p.includes(MEETING_SPECIAL_CATEGORY_CLAUSE), 'not in the shared prompt');
+    assert.ok(BOT_CHANNEL_BLOCK.includes(MEETING_SPECIAL_CATEGORY_CLAUSE), 'in the bot\'s channel block');
     const general = 'GENERAL: I cannot process sensitive personal information.';
-    assert.equal(specialCategoryClauseFor('meeting_note_taker', general), MEETING_SPECIAL_CATEGORY_CLAUSE);
-    assert.equal(specialCategoryClauseFor('social_media_manager', general), general);
-    const swapped = withSpecialCategoryClause(`Prompt\n\n<!-- special-category-clause -->\n${general}`, 'meeting_note_taker', general);
-    assert.ok(swapped.includes(MEETING_SPECIAL_CATEGORY_CLAUSE) && !swapped.includes(general), 'a saved prompt with the general clause is swapped');
+    assert.equal(specialCategoryClauseFor('meeting_note_taker', general), general, 'chat keeps the general rule until DPA 1.2 is published');
+    assert.equal(withSpecialCategoryClause(`Prompt\n\n<!-- special-category-clause -->\n${general}`, 'meeting_note_taker', general).includes(general), true);
+    assert.match(read('src/utils/meeting-pickup-db.ts'), /channelBlock: row\.via === 'bot' \? BOT_CHANNEL_BLOCK : PICKUP_CHANNEL_BLOCK/);
+});
+
+await test('review round 4: only a real deletion counts; bots go before every workspace deletion; Remove waits for an in-flight send; the poll has a budget', () => {
+    const rc = read('src/utils/meeting-bot-recall.ts');
+    const del = rc.slice(rc.indexOf('export async function deleteRecallMedia'));
+    assert.ok(!/409/.test(del.slice(del.indexOf('{'))), '409 is not "deleted"');
+    const ud = read('src/utils/user-deletion.ts');
+    const fn = ud.slice(ud.indexOf('export async function deleteUserAndSoleOrgs'));
+    assert.ok(fn.indexOf('withdrawBotsForDoomedOrgs(db, userId)') < fn.indexOf('db.transaction('), 'withdrawn before the transaction');
+    const bot = read('src/utils/meeting-bot-db.ts');
+    const rm = bot.slice(bot.indexOf('export async function removeMeetingBot'));
+    assert.ok(rm.indexOf("status: 409, error: 'The Note Taker is still being sent.") < rm.indexOf('removeRecallBot('));
+    const send = bot.slice(bot.indexOf('export async function sendMeetingBot'), bot.indexOf('// ── Listing and removing'));
+    assert.ok(send.includes('.where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();'), 'the id is saved only onto an open row');
+    assert.ok(send.indexOf('if (!saved) {') < send.lastIndexOf('removeRecallBot(region, recallBotId, true)'), 'and the bot withdrawn otherwise');
+    assert.match(bot, /export const BOT_POLL_BUDGET_MS = 15_000;/);
+    assert.ok(bot.includes('i < open.length && timeLeft(); i += POLL_BATCH'));
 });
 
 // ── Safety order (source scans) ──────────────────────────────────────────────────────────────────

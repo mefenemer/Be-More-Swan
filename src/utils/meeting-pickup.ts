@@ -256,7 +256,8 @@ export interface WriterDeps {
     hasCapacity(organisationId: number, row: ImportRow): Promise<boolean>;
     /** true when moderation blocks the text. */
     blocked(organisationId: number, text: string): Promise<boolean>;
-    writeMinutes(organisationId: number, assistant: MinutesAssistant, message: string): Promise<WriteMinutesResult>;
+    /** `row` says how the transcript reached us (a bot meeting gets its own channel block). */
+    writeMinutes(organisationId: number, assistant: MinutesAssistant, message: string, row: ImportRow): Promise<WriteMinutesResult>;
     /**
      * Files the meeting in the Inbox; its id, or null when it could not be saved. When a meeting record already carries
      * this import's id (a writer that died between filing and the latch), returns that one instead of filing a second.
@@ -333,7 +334,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             return 'skipped_blocked';
         }
 
-        const written = await d.writeMinutes(row.organisationId, assistant, message);
+        const written = await d.writeMinutes(row.organisationId, assistant, message, row);
         if (!written.ok) {
             if (written.reason === 'no_meeting') {
                 await d.store.release(row.id, { status: 'skipped', skipReason: 'no_meeting' }, d.now());
