@@ -7190,6 +7190,61 @@ export const pageComments = pgTable("page_comments", {
   check("page_comments_replied_via_check", sql`${t.repliedVia} IN ('app','linkedin')`),
 ]);
 
+// Facebook Page + Instagram messages (db/z-social-messages.sql, docs/meta-messages-plan.md). One
+// conversation per (connection, person); meta-webhook.ts writes both tables. A reply goes out only
+// from a person's click, and only while window_closes_at (last inbound + 24h) is in the future.
+export const socialConversations = pgTable("social_conversations", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  connectionId: integer("connection_id").notNull().references(() => systemConnections.id, { onDelete: "cascade" }),
+  // 'facebook' | 'instagram'
+  platform: text("platform").notNull(),
+  // The Page id (facebook) or the IG professional account id (instagram) the message was sent to.
+  accountExternalId: text("account_external_id").notNull(),
+  // Page-scoped / Instagram-scoped id of the person. Not a Facebook user id.
+  participantId: text("participant_id").notNull(),
+  participantName: text("participant_name"),
+  lastInboundAt: timestamp("last_inbound_at"),
+  lastOutboundAt: timestamp("last_outbound_at"),
+  // last_inbound_at + 24h. Our own replies never move it.
+  windowClosesAt: timestamp("window_closes_at"),
+  // 'new' | 'replied' | 'dismissed'
+  status: text("status").notNull().default("new"),
+  draftReply: text("draft_reply"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("social_conversations_connection_participant_uq").on(t.connectionId, t.participantId),
+  index("social_conversations_assistant_status_idx").on(t.aiAssistantId, t.status, t.lastInboundAt),
+  index("social_conversations_org_idx").on(t.organisationId),
+  check("social_conversations_platform_check", sql`${t.platform} IN ('facebook','instagram')`),
+  check("social_conversations_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
+]);
+
+export const socialMessages = pgTable("social_messages", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").notNull().references(() => socialConversations.id, { onDelete: "cascade" }),
+  // 'in' (from the person) | 'out' (from the Page / IG account — sent here or in Meta's own apps)
+  direction: text("direction").notNull(),
+  // Meta's message id. Webhook retries and echoes of our own sends dedupe on it.
+  mid: text("mid").notNull(),
+  // Null for an attachment-only message, and after the 90-day text purge.
+  body: text("body"),
+  // e.g. 'image' | 'video' | 'audio' | 'file' | 'sticker' | 'share' — Meta's URL is NOT copied.
+  attachmentType: text("attachment_type"),
+  sentAt: timestamp("sent_at").notNull(),
+  // The person who clicked Send here; null for inbound and for replies typed in Meta's apps.
+  sentBy: integer("sent_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("social_messages_mid_uq").on(t.mid),
+  index("social_messages_conversation_idx").on(t.conversationId, t.sentAt),
+  index("social_messages_org_idx").on(t.organisationId),
+  check("social_messages_direction_check", sql`${t.direction} IN ('in','out')`),
+]);
+
 // The site page directory (db/z-site-directory.sql, src/utils/site-directory.ts): one per workspace,
 // a map of its website — each page's address, title, one-line summary and what it offers — that
 // every live assistant reads (capped). 'hosted' is read from the published Be More Swan site,

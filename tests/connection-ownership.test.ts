@@ -60,7 +60,7 @@ test('reconnecting heals a NULL owner but never reassigns a real one', () => {
     assert.match(metaOauth, /existing\.userId == null && connectionUserId \? \{ userId: connectionUserId \}/);
     assert.match(
         metaOauth,
-        /\.select\(\{ id: systemConnections\.id, userId: systemConnections\.userId \}\)/,
+        /\.select\(\{ id: systemConnections\.id, userId: systemConnections\.userId[ ,]/,
         'the upsert lookup must read userId to make that decision',
     );
 });

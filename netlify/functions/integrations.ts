@@ -464,6 +464,37 @@ export default withLambda(async (event) => {
             if (conn?.vaultRefKey) {
                 const svc = conn.serviceName?.toLowerCase() ?? '';
                 const fbUserId = (conn.metadata as { fbUserId?: string | null } | null)?.fbUserId ?? null;
+
+                // Messages (src/utils/meta-messaging.ts): stop Meta sending this Page's messages to
+                // our webhook — but only once no other active facebook/instagram row, in any
+                // workspace, still uses the Page (its Facebook and Instagram rows share one
+                // subscription). Runs BEFORE the revoke / vault delete below, which end the token.
+                // Only a row that subscribed the Page (metadata.messaging.subscribed, set on connect while
+                // META_MESSAGING_ENABLED was on) — otherwise there is nothing to undo and two Graph calls
+                // would only slow Disconnect down.
+                const subscribed = (conn.metadata as { messaging?: { subscribed?: boolean } } | null)?.messaging?.subscribed === true;
+                if (subscribed && (svc === 'facebook' || svc === 'instagram')) {
+                    const fbPageId = (conn.metadata as { fbPageId?: string | null } | null)?.fbPageId
+                        ?? (svc === 'facebook' ? conn.externalUserId : null);
+                    if (fbPageId) {
+                        const { pageStillInUse, unsubscribePageFromMessages, markPageSubscribedOnOtherRows } = await import('../../src/utils/meta-messaging');
+                        if (await pageStillInUse(db, fbPageId, connIdInt).catch(() => true)) {
+                            // The rows still using the Page inherit the subscription to undo later.
+                            await markPageSubscribedOnOtherRows(db, fbPageId, connIdInt).catch(() => {});
+                        } else {
+                            const { getSecret: readSecret } = await import('../../src/utils/vault');
+                            const s = await readSecret(db, conn.vaultRefKey).catch(() => null) as { token?: string } | null;
+                            const unsub = s?.token ? await unsubscribePageFromMessages(s.token, fbPageId) : null;
+                            // Record it, so a later reconnect doesn't carry over a subscription Meta no longer has.
+                            if (unsub?.ok) {
+                                await db.update(systemConnections)
+                                    .set({ metadata: { ...(conn.metadata as Record<string, unknown> ?? {}), messaging: { subscribed: false, unsubscribedAt: new Date().toISOString() } } })
+                                    .where(eq(systemConnections.id, connIdInt))
+                                    .catch(() => {});
+                            }
+                        }
+                    }
+                }
                 const sharing = await findDisconnectSharing(db, { connectionId: connIdInt, serviceName: svc, fbUserId, vaultRefKey: conn.vaultRefKey });
                 const plan = planDisconnectRevoke({ serviceName: svc, fbUserId, ...sharing });
                 const { getSecret } = await import('../../src/utils/vault');

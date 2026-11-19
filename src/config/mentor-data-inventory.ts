@@ -103,6 +103,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('never', 'Guest review links: private addresses, and names and comments typed by people outside the workspace. Guest text reaches a model only on the user\'s click', [
         'review_links', 'review_link_responses',
     ]),
+    ...group('never', 'Facebook and Instagram messages: words typed by people outside the workspace, sent privately to the business. Read only by the Social Media assistant\'s Messages tab and its own chat (meta-messaging.ts)', ['social_conversations', 'social_messages']),
     ...group('never', 'Meeting pick-up bookkeeping (meeting-pickup.ts): which Google Meet, Teams and Zoom meetings were seen and written up. The minutes themselves are meeting records the Note Taker owns', ['meeting_imports', 'meeting_pickup_state']),
     ...group('never', 'LinkedIn Company Page comments: names and words typed by people outside the workspace. Read only by the Social Media assistant\'s own chat and Comments tab (page-comments.ts)', ['page_comments']),
     ...group('never', 'Secrets and connection credentials', [
