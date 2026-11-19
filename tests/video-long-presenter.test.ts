@@ -68,6 +68,10 @@ check('a long chapter over 1200 characters is cut at a sentence end, with a note
     const v = out.storyboard.scenes[1].voiceover;
     assert.ok(v.length <= 1200 && v.endsWith('.'), `ends mid-sentence: …${v.slice(-20)}`);
     assert.ok(out.changes.some((c) => /Scene 2: its voiceover was longer than 1,200 characters/.test(c)));
+    // A full stop on character 1201: never a line one over the limit (second review of #761).
+    const edge = 'a'.repeat(1200) + '. More words follow here.';
+    const e = enforceStoryboard({ title: 'T', caption: 'C', scenes: [{ beat: 'hook', voiceover: 'Hi.', source: 'ai_presenter', targetS: 5 }, { beat: 'value', voiceover: edge, source: 'ai_presenter', targetS: 80 }, { beat: 'cta', voiceover: 'Go.', source: 'ai_presenter', targetS: 5 }] }, brief, [], [{ id: 5, name: 's', durationS: 300 }]);
+    assert.ok(e.storyboard.scenes[1].voiceover.length <= 1200, `${e.storyboard.scenes[1].voiceover.length} characters`);
 });
 
 check('an over-long script is refused when "Make the video" is pressed, before tasks are held; markdown and links don\'t count', () => {

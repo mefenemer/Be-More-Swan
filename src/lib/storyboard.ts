@@ -313,8 +313,9 @@ function lineAtSentence(raw: unknown, max: number, i: number, changes: string[])
     if (full.length <= max) return full;
     const window = full.slice(0, max + 1);
     let cut = -1;
-    for (const m of window.matchAll(/[.!?…]["')\]]?(?=\s|$)/g)) cut = (m.index ?? 0) + m[0].length;
-    if (cut < max * 0.5) cut = window.lastIndexOf(' ');
+    // Only a sentence that ends inside the limit: one ending on character max+1 would return a line one over (review of #761).
+    for (const m of window.matchAll(/[.!?…]["')\]]?(?=\s|$)/g)) { const end = (m.index ?? 0) + m[0].length; if (end <= max) cut = end; }
+    if (cut < max * 0.5) cut = window.slice(0, max).lastIndexOf(' ');
     if (cut <= 0) cut = max;
     changes.push(`Scene ${i + 1}: its voiceover was longer than ${max.toLocaleString('en-GB')} characters, so it ends at “${full.slice(Math.max(0, cut - 30), cut).trim()}”. Split that scene in two, or ask for more scenes, to keep the rest.`);
     return full.slice(0, cut).trim();
