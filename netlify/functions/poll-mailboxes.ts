@@ -9,22 +9,12 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { mailboxesDueForSync, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 import { pruneOldActions } from '../../src/utils/mailbox-actions';
+import { mayRunScheduled } from '../../src/utils/scheduled-run-auth';
 
 export const config = { schedule: '*/10 * * * *' };
 
-/**
- * Who may run this: the cron secret, or Netlify's scheduler (a POST whose body carries `next_run`, or
- * an empty body). Same rule as content-retention.ts mayRun. The marker can be typed by hand, so the
- * real limit is what a run CAN do: wake reads of mailboxes already due, nothing a caller can choose.
- */
-export function mayPoll(event: { body?: string | null; headers?: Record<string, string | undefined> }): boolean {
-    const secret = process.env.CRON_TRIGGER_SECRET;
-    const token = String(event.headers?.['authorization'] ?? event.headers?.['Authorization'] ?? '').replace(/^Bearer\s+/i, '').trim();
-    if (token) return Boolean(secret) && token === secret;
-    const raw = event.body;
-    if (raw == null || raw === '') return true;
-    try { return typeof JSON.parse(String(raw))?.next_run === 'string'; } catch { return false; }
-}
+/** Who may run this (src/utils/scheduled-run-auth.ts): the cron secret or Netlify's scheduler. */
+export const mayPoll = mayRunScheduled;
 
 /** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
 export async function pollDueMailboxes(): Promise<{ due: number; dispatched: number }> {

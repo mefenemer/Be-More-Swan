@@ -7,32 +7,21 @@
 //     → 200 { recordId, title, card }   the meeting is in the Inbox
 //     → 422 { error }                   the model found no meeting in the text (nothing saved)
 //
-// Same rules as a chat turn: the shared prompt (src/utils/meeting-minutes.ts), the assistant's own and
+// Same rules as a chat turn: the shared writer (src/utils/meeting-minutes-writer.ts), the assistant's own and
 // workspace-wide rules, moderation, and the daily fair-use count — pasted text costs no task, as chat.
 
-import Anthropic from '@anthropic-ai/sdk';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, masterAssistants, organisations } from '../../db/schema';
-import { adaptForModel, replyText } from '../../src/config/model-options';
-import { logAiUsage } from '../../src/utils/ai-usage';
-import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
-import { loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
+import { aiAssistants, masterAssistants } from '../../db/schema';
 import { readAttachments } from '../../src/utils/chat-attachments';
 import { persistHubRecordsWithTitles } from '../../src/utils/hub-records';
-import {
-    FORM_CHANNEL_BLOCK, MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt,
-    meetingHubRecord, normaliseMinutesCard,
-} from '../../src/utils/meeting-minutes';
+import { FORM_CHANNEL_BLOCK, meetingHubRecord } from '../../src/utils/meeting-minutes';
+import { writeMeetingMinutes } from '../../src/utils/meeting-minutes-writer';
 import { TRANSCRIPT_MAX_CHARS } from '../../src/utils/meeting-transcript';
-import { parseModelJson } from '../../src/utils/model-json';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { meterInteraction } from '../../src/utils/task-credit';
 import { requireTenant } from '../../src/utils/tenant';
-import { sanitizeForModel } from '../../src/utils/text-safe';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -98,51 +87,13 @@ export default withLambda(async (event) => {
         return json(403, { code: 'UPGRADE_REQUIRED', error: capacity.limitMessage || 'Your plan has no tasks left this month.' });
     }
 
-    const [org] = await db.select({ name: organisations.name, industry: organisations.industry, businessDescription: organisations.businessDescription })
-        .from(organisations).where(eq(organisations.id, orgId)).limit(1);
-    const setup = (assistant.onboardingContext && typeof assistant.onboardingContext === 'object') ? assistant.onboardingContext as Record<string, unknown> : {};
-    const rulesBlock = await loadAssistantRulesBlock(db, { assistantId: assistant.id, organisationId: orgId });
-    const businessName = org?.name || 'this business';
-    const system = [
-        `You are "${assistant.name}", a digital assistant provided via the Be More Swan platform. You work exclusively for ${businessName}${org?.industry ? ` (industry: ${org.industry})` : ''}, not for Be More Swan itself.${org?.businessDescription ? ` About ${businessName}: ${org.businessDescription}` : ''}`,
-        buildMeetingMinutesPrompt({
-            meetingPlatform: setup.meetingPlatform,
-            taskDestination: setup.taskDestination,
-            summaryFormat: setup.summaryFormat,
-            channelBlock: FORM_CHANNEL_BLOCK,
-        }),
-        rulesBlock,
-    ].filter(Boolean).join('\n\n');
-
-    let raw: string;
-    try {
-        const { response, model } = await withRoleModel(
-            await loadRoleModel(db, 'meeting_note_taker'), MEETING_MINUTES_MODEL,
-            async (m, thinking) => ({ model: m, response: await anthropic.messages.create(adaptForModel({
-                model: m,
-                max_tokens: MEETING_MINUTES_MAX_TOKENS,
-                system: sanitizeForModel(system),
-                messages: sanitizeForModel([{ role: 'user' as const, content: message }]),
-            }, m, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
-            { requestPath: true, label: 'meeting-minutes' },
-        );
-        await logAiUsage({
-            workspaceId: orgId, userId, assistantId: assistant.id, model,
-            inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens,
-            sessionId: `meeting-minutes:${assistant.id}`, dataCategories: ['business_context'],
-        });
-        raw = replyText(response.content);
-    } catch (err) {
-        console.error('[meeting-minutes] model call failed', err);
-        return json(502, { error: 'The write-up didn\'t finish. Nothing was saved — try again in a moment.' });
-    }
-
-    const parsed = parseModelJson<{ reply?: unknown; uiElement?: unknown }>(raw);
-    const card = normaliseMinutesCard(parsed?.uiElement);
-    if (!card) {
-        const reply = typeof parsed?.reply === 'string' && parsed.reply.trim() ? parsed.reply.trim().slice(0, 500) : 'No meeting could be found in that text.';
-        return json(422, { error: reply });
-    }
+    const written = await writeMeetingMinutes(db, {
+        organisationId: orgId, userId, assistant, message, channelBlock: FORM_CHANNEL_BLOCK,
+        sessionId: `meeting-minutes:${assistant.id}`, requestPath: true,
+    });
+    if (!written.ok && written.reason === 'model_failed') return json(502, { error: 'The write-up didn\'t finish. Nothing was saved — try again in a moment.' });
+    if (!written.ok) return json(422, { error: written.reply });
+    const card = written.card;
     const record = meetingHubRecord(card as unknown as Record<string, unknown>);
     // Every pasted set of notes is its own meeting (the form never revises). The title returned is the one SAVED,
     // which has the date and time added when another meeting already has it — so it matches the Inbox.
