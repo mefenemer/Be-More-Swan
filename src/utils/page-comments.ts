@@ -190,14 +190,17 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
     })
         .from(scheduledPosts)
         // The account the post went out on. publish-social-posts.ts now records it, but a post queued
-        // without one was published through resolveSocialCredentials' fallback — the organisation's
-        // NEWEST active LinkedIn connection — and older rows still carry NULL. Mirror that rule here,
-        // or every such post is invisible to stats and comments (seen on staging, 2026-11-19).
+        // without one was published through resolveSocialCredentials' (organisation, platform)
+        // fallback, and older rows still carry NULL — invisible to stats and comments until this
+        // (seen on staging, 2026-11-19). Such a row is attributed ONLY when the organisation has
+        // exactly one active LinkedIn connection: with a personal profile AND a Page connected we
+        // can't tell which one it went out on ("newest" moves with every token refresh), and a
+        // wrong guess would show a personal post's comments on the Page's tab and reply AS the Page.
         .innerJoin(systemConnections, sql`${systemConnections.id} = COALESCE(${scheduledPosts.connectionId}, (
-            SELECT sc2.id FROM system_connections sc2
+            SELECT min(sc2.id) FROM system_connections sc2
             WHERE sc2.organisation_id = ${scheduledPosts.organisationId}
               AND sc2.service_name = 'linkedin' AND sc2.is_active = true
-            ORDER BY sc2.updated_at DESC LIMIT 1))`)
+            HAVING count(*) = 1))`)
         .where(and(
             eq(scheduledPosts.platform, 'linkedin'),
             eq(scheduledPosts.status, 'published'),
