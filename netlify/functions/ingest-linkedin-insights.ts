@@ -103,7 +103,7 @@ export async function ingestLinkedInInsights(): Promise<LinkedInIngestResult> {
             comments.failedPosts += r.failedPosts;
             for (const f of r.failures ?? []) if (comments.failures.length < MAX_REPORTED_FAILURES) comments.failures.push(f);
         } catch (err) {
-            if (isMissingTable(err)) { comments = { skipped: 'page_comments table missing — apply db/z-page-comments.sql' }; continue; }
+            if (isMissingTable(err)) { comments = { skipped: `comments not set up on this database (${err instanceof Error ? err.message.slice(0, 120) : 'missing table or column'}) — apply db/z-page-comments.sql and db/z-scheduled-posts-author.sql` }; continue; }
             console.error(`[ingest-linkedin-insights] conn ${connectionId} comments:`, err instanceof Error ? err.message : err);
         }
     }

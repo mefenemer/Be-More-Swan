@@ -364,6 +364,16 @@ check('Page posts are chosen by the account that WROTE them, not by connection_i
     assert.ok(read('db/z-scheduled-posts-author.sql').includes('ADD COLUMN IF NOT EXISTS platform_author_urn TEXT'));
 });
 
+check('a reply goes out AS the Page only under a post the Page wrote', () => {
+    const src = read('src/utils/page-comments.ts');
+    const fn = src.slice(src.indexOf('export async function postReply('));
+    const guard = fn.indexOf("if (!post || post.author !== conn.externalUserId)");
+    assert.ok(guard > 0, 'author checked against the Page connection');
+    assert.ok(guard < fn.indexOf('replyToComment('), 'before anything is posted');
+    assert.ok(guard < fn.indexOf('// Claim the row first'), 'before the row is claimed');
+    assert.ok(fn.includes("code: 'not_page_post'"));
+});
+
 check('a post deleted on LinkedIn (404) is an empty list, not a refused read; other refusals say why', async () => {
     await withFetch(() => json({ message: 'Not Found' }, 404), async () => {
         let reported = false;

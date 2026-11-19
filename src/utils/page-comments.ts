@@ -63,7 +63,6 @@ export const INGEST_COMMENTS_BUDGET_MS = 20_000;
 const SYNC_MIN_GAP_MS = 60_000;
 const lastSync = new Map<number, number>();
 
-/** A missing table (db/z-page-comments.sql not applied yet). */
 /** A missing table (42P01) or column (42703) — a manual SQL file (db/z-page-comments.sql,
  *  db/z-scheduled-posts-author.sql) hasn't been applied on this database yet. */
 export function isMissingTable(err: unknown): boolean {
@@ -500,6 +499,16 @@ export async function postReply(
         .from(systemConnections).where(eq(systemConnections.id, row.c.connectionId)).limit(1);
     if (!conn?.isActive || !isLinkedInPageUrn(conn.externalUserId)) {
         return { ok: false, status: 409, error: 'Your LinkedIn Company Page isn’t connected any more. Reconnect it in Connections, then post the reply.', code: 'not_connected' };
+    }
+    // Only ever answer AS the Page under a post the Page wrote. A comment stored before posts were
+    // picked by author (or whose connection has since become a different account) could sit on a
+    // personal post; replying to it as the Page would put the business's name in someone's feed.
+    if (row.c.scheduledPostId != null) {
+        const [post] = await db.select({ author: scheduledPosts.platformAuthorUrn }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, row.c.scheduledPostId), eq(scheduledPosts.organisationId, organisationId))).limit(1);
+        if (!post || post.author !== conn.externalUserId) {
+            return { ok: false, status: 409, error: 'This comment is on a post your Company Page didn’t write, so it can’t be answered as the Page. Dismiss it, or reply on LinkedIn yourself.', code: 'not_page_post' };
+        }
     }
     const token = await pageToken(db, organisationId, row.c.connectionId);
     if (!token) return { ok: false, status: 409, error: 'Your LinkedIn Company Page connection has no access key. Reconnect it in Connections.', code: 'not_connected' };

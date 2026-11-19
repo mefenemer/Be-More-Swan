@@ -323,8 +323,8 @@ export default withLambda(async () => {
             // LinkedIn connection that posts as a personal profile today can point at a Company Page
             // tomorrow — connection_id can't tell them apart afterwards; this can. LinkedIn Page stats
             // and comments read only posts whose author is the Page (page-comments.ts loadPagePosts).
-            // Its own statement, and never fatal: the post IS published, and a database that hasn't
-            // had db/z-scheduled-posts-author.sql yet must not leave it stuck as 'publishing'.
+            // Its own statement, and never fatal: the post IS published by now, and nothing here may
+            // leave it stuck as 'publishing' (raw SQL, so it doesn't depend on the Drizzle schema).
             if (creds.externalUserId) {
                 await db.execute(
                     `UPDATE scheduled_posts SET platform_author_urn = '${esc(String(creds.externalUserId))}' WHERE id = ${post.id}`

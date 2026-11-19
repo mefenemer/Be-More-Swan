@@ -2046,7 +2046,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   platformPostUrl: text("platform_post_url"),    // live URL after publish
   // The account that actually published it (LinkedIn: urn:li:organization:<id> for a Page). Set by
   // publish-social-posts.ts; connection_id can't say, since reconnect updates the row in place.
-  // db/z-scheduled-posts-author.sql.
+  // db/z-scheduled-posts-author.sql — ⚠️ must be on a database BEFORE this code: every select on
+  // scheduledPosts names this column.
   platformAuthorUrn: text("platform_author_urn"),
 
   // Content & creative
