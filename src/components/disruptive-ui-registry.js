@@ -5057,6 +5057,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>`}
       <p class="hidden mt-2 text-xs font-semibold" data-mbp-status role="status" aria-live="polite"></p>`;
     if (blocked) return el;
+    const shownAt = performance.now();
     const status = el.querySelector('[data-mbp-status]');
     const go = el.querySelector('[data-mbp-go]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
@@ -5064,10 +5065,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.addEventListener('click', async (e) => {
       if (e.target.closest('[data-mbp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
       if (!e.target.closest('[data-mbp-go]') || go.disabled) return;
-      // A send card left open on screen expires like a stored one (10 minutes, chat-meeting-bot.ts SEND_CARD_FRESH_MS):
-      // days later the same recurring link is a different call, and sending would charge for it (review of #774).
-      const made = send && typeof ui.madeAt === 'string' ? Date.parse(ui.madeAt) : NaN;
-      if (send && (!Number.isFinite(made) || Date.now() - made > 10 * 60 * 1000)) {
+      // A send card left open on screen expires like a stored one (chat-meeting-bot.ts SEND_CARD_FRESH_MS): days later the
+      // same recurring link is a different call, and sending would charge for it. Timed from when the card APPEARED here
+      // (performance.now), using the server's relative freshForMs, so a device clock that runs fast can't expire a new card
+      // (review of #774). No freshForMs (a card from before this rule) = expired.
+      const fresh = Number(ui.freshForMs);
+      if (send && (!Number.isFinite(fresh) || performance.now() - shownAt > fresh)) {
         setBusy(true);
         go.textContent = 'Expired';
         say('An earlier request, so it isn’t sent now. Ask me again, or use “Send to a call” on the Inbox tab.', 'error');

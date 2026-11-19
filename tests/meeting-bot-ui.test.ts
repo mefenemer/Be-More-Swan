@@ -168,7 +168,7 @@ await test('review of #774: a reopened chat never re-offers an old send card, no
     const chain = read('src/utils/chat-card-refresh.ts');
     assert.ok(chain.includes('out = await refreshMeetingBotCards(db, organisationId, aiAssistantId, out);'), 'in the one refresh chain');
     const mod = read('src/utils/chat-meeting-bot.ts');
-    assert.ok(mod.includes("madeAt: now.toISOString() };"), 'send cards carry when they were made');
+    assert.ok(mod.includes('madeAt: now.toISOString(), freshForMs: SEND_CARD_FRESH_MS'), 'send cards carry when they were made');
 });
 
 await test('review of #774: switching Note Takers mid-load never shows the first one\'s bots; a send with no link asks for it', () => {
@@ -196,18 +196,27 @@ await test('review of #774 (round 2): the budget helper ALWAYS runs the first ba
     const db = read('src/utils/meeting-bot-db.ts');
     assert.ok(db.includes('runBatchesWithinBudget(open, POLL_BATCH, budgetMs, POLL_CALL_TIMEOUT_MS, pollOne)'));
     assert.ok(db.includes('runBatchesWithinBudget(finished, POLL_BATCH, BOT_MEDIA_BUDGET_MS, POLL_CALL_TIMEOUT_MS,'));
-    assert.match(db, /export const BOT_POLL_BUDGET_MS = 12_000;/);
+    assert.match(db, /export const BOT_POLL_BUDGET_MS = 10_000;/);
+    // Round 3: the stuck-import hand-offs run in batches within their own budget too, so the whole run stays ≤ ~23 s.
+    assert.match(db, /export const BOT_IMPORT_BUDGET_MS = 5_000;/);
+    assert.ok(db.includes('runBatchesWithinBudget(orphaned, POLL_BATCH, BOT_IMPORT_BUDGET_MS, POLL_CALL_TIMEOUT_MS,'));
+    assert.ok(!/for \(const row of orphaned\)/.test(db), 'no unbounded one-at-a-time loop');
     assert.match(db, /export const BOT_MEDIA_BUDGET_MS = 8_000;/);
     assert.ok(!/mediaStarted/.test(db), 'the old never-true condition is gone');
     assert.ok(db.includes('getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!, POLL_CALL_TIMEOUT_MS)'));
 });
 
 await test('review of #774 (round 2): a send card on screen expires at click; a failed read draws a "couldn\'t check" card, not a link question', () => {
+    const mod = read('src/utils/chat-meeting-bot.ts');
     const reg = read('src/components/disruptive-ui-registry.js');
     const fn = reg.slice(reg.indexOf('function renderMeetingBotProposalCard'), reg.indexOf("register('meeting_bot_proposal'"));
     const click = fn.slice(fn.indexOf("el.addEventListener('click'"));
-    assert.ok(click.indexOf('Date.now() - made > 10 * 60 * 1000') < click.indexOf("fetch('/.netlify/functions/meeting-bots'"), 'checked before sending');
-    const mod = read('src/utils/chat-meeting-bot.ts');
+    assert.ok(click.indexOf('performance.now() - shownAt > fresh') < click.indexOf("fetch('/.netlify/functions/meeting-bots'"), 'checked before sending');
+    // Round 3: timed from when the card appeared, with the server's RELATIVE freshForMs, never the device clock vs madeAt.
+    assert.ok(!click.includes('Date.parse(ui.madeAt)'), 'no absolute server time against the device clock');
+    assert.ok(fn.indexOf('const shownAt = performance.now();') < fn.indexOf("el.addEventListener('click'"));
+    assert.ok(mod.includes('madeAt: now.toISOString(), freshForMs: SEND_CARD_FRESH_MS };'), 'a new card carries its freshness');
+    assert.ok(mod.includes("freshForMs: Math.max(0, SEND_CARD_FRESH_MS - (now.getTime() - Date.parse(String(ui.madeAt))))"), 'a re-served card carries only what is left');
     const katch = mod.slice(mod.indexOf("console.error('[chat-meeting-bot] resolve failed"));
     assert.ok(katch.includes("if (req.action === 'send')") && katch.includes('I couldn’t check that just now, so nothing was sent.'));
 });

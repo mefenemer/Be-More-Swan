@@ -26,6 +26,9 @@ import { getTaskCosts } from './task-costs';
 type Db = ReturnType<typeof getDb>;
 
 export const MEETING_BOT_PROPOSAL_TYPE = 'meeting_bot_proposal';
+/** How long a stored "send" card is offered again. After that a click could send a bot into a LATER call on a recurring
+ *  link (the duplicate check only looks back 3 hours) and charge for it (review of #774). */
+export const SEND_CARD_FRESH_MS = 10 * 60 * 1000;
 const LIVE: readonly string[] = ['joining', 'waiting_room', 'in_call'];
 const oneLine = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
@@ -122,8 +125,9 @@ export async function resolveMeetingBotProposal(
                 ...(open ? {} : { blocked: 'It has already finished, so there is nothing to cancel.' }),
             };
         }
-        // madeAt: a stored send card is only offered again for a short while (refreshMeetingBotCards).
-        const base = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title, madeAt: now.toISOString() };
+        // madeAt: a stored send card is only offered again for a short while (refreshMeetingBotCards). freshForMs: how long
+        // the card on screen stays clickable, RELATIVE, so a device clock that runs fast can't expire it at once (review of #774).
+        const base = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title, madeAt: now.toISOString(), freshForMs: SEND_CARD_FRESH_MS };
         const block = (reason: string) => ({ ...base, joinAt: null, blocked: reason });
         if (!(await isFeatureEnabled(organisationId, MEETING_BOT_FLAG))) return block('Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
         const link = cleanMeetingLink(req.meetingUrl);
@@ -152,9 +156,6 @@ export async function resolveMeetingBotProposal(
 
 // ── Stored cards (a reopened conversation, the Team feed: src/utils/chat-card-refresh.ts) ───────────
 
-/** How long a stored "send" card is offered again. After that a click could send a bot into a LATER call on a recurring
- *  link (the duplicate check only looks back 3 hours) and charge for it (review of #774). */
-export const SEND_CARD_FRESH_MS = 10 * 60 * 1000;
 
 /** Pure: why a stored card can no longer be acted on, or null while it still can. `bot` is the remove card's row. */
 export function botCardSettledReason(ui: Record<string, unknown>, bot: { status: string } | null, now: Date = new Date()): string | null {
@@ -190,7 +191,10 @@ export async function refreshMeetingBotCards<M extends { uiElement: unknown }>(
                 bot = row ?? null;
             }
             const why = botCardSettledReason(ui, bot, now);
-            return why ? { ...m, uiElement: { ...ui, settled: true, blocked: why } } : m;
+            if (why) return { ...m, uiElement: { ...ui, settled: true, blocked: why } };
+            // A send card still fresh is re-served with only the time it has LEFT, measured on our clock.
+            if (ui.action === 'send') return { ...m, uiElement: { ...ui, freshForMs: Math.max(0, SEND_CARD_FRESH_MS - (now.getTime() - Date.parse(String(ui.madeAt)))) } };
+            return m;
         } catch (err) {
             console.error('[chat-meeting-bot] could not refresh a stored card (non-fatal)', err instanceof Error ? err.message : err);
             // Safer to settle than to leave a live button we couldn't check.

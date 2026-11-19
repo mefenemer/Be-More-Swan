@@ -99,7 +99,9 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await page.evaluate(() => {
                 const w = window as unknown as { DisruptiveUIRegistry: { render: (ui: unknown) => HTMLElement | null } };
                 const host = document.getElementById('chat-card')!;
-                const card = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', platformLabel: 'Google Meet', title: 'Standup', joinAt: null, tasksPer5Min: 1, madeAt: new Date().toISOString() });
+                const card = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', platformLabel: 'Google Meet', title: 'Standup', joinAt: null, tasksPer5Min: 1,
+                    // Made 'an hour ago' by a fast device clock's reckoning: the relative freshForMs still holds (review of #774).
+                    madeAt: new Date(Date.now() - 3600_000).toISOString(), freshForMs: 600_000 });
                 if (card) host.appendChild(card);
                 const blocked = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://zoom.us/j/1', title: null, joinAt: null, blocked: 'Zoom is coming soon.' });
                 if (blocked) { blocked.setAttribute('data-blocked', ''); host.appendChild(blocked); }
@@ -113,6 +115,21 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await expect(page.locator('[data-blocked] button')).toHaveCount(0);
             await noSideScroll(page);
             expect(pageErrors).toEqual([]);
+        });
+
+        test('a send card whose freshness has run out says Expired and sends nothing', async ({ page, api }) => {
+            const posts = stub(api);
+            await open(page);
+            await page.evaluate(() => {
+                const w = window as unknown as { DisruptiveUIRegistry: { render: (ui: unknown) => HTMLElement | null } };
+                const card = w.DisruptiveUIRegistry.render({ type: 'meeting_bot_proposal', action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', title: 'Old', joinAt: null, tasksPer5Min: 1, madeAt: new Date().toISOString(), freshForMs: 0 });
+                if (card) document.getElementById('chat-card')!.appendChild(card);
+            });
+            await page.waitForTimeout(20);
+            const card = page.locator('[data-meeting-bot="send"]').first();
+            await card.getByRole('button', { name: 'Send it now' }).click();
+            await expect(card).toContainText('An earlier request');
+            expect(posts).toHaveLength(0);
         });
 
         test('nothing shows while the flag is off', async ({ page, api }) => {

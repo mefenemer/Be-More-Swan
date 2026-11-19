@@ -314,10 +314,12 @@ export interface BotPollResult { checked: number; moved: number; imported: numbe
  * finished with (minutes written or given up, a bot that never got in, or 24 hours after the call).
  */
 /** The poll's share of the scheduled run (Netlify scheduled functions stop at 30 s; the pick-up check runs first). */
-export const BOT_POLL_BUDGET_MS = 12_000;
-/** Deleting Recall's copies gets its own window after the poll (its first batch always runs). Poll + media stay well
- *  inside the scheduled function's 30 s with the pick-up check before them. */
+export const BOT_POLL_BUDGET_MS = 10_000;
+/** Deleting Recall's copies gets its own window after the poll (its first batch always runs). */
 export const BOT_MEDIA_BUDGET_MS = 8_000;
+/** Handing a missed 'done' bot's import to the writer (each hand-off can wait 5 s). Worst case for the whole bot run:
+ *  poll 10 + imports 5 + media 8 = 23 s, inside the scheduled function's 30 s after the pick-up check (review of #774). */
+export const BOT_IMPORT_BUDGET_MS = 5_000;
 const POLL_BATCH = 5;
 /** Each Recall call the poll makes is cut off after this, so a batch can never outlast the time left (review of #769). */
 export const POLL_CALL_TIMEOUT_MS = 5_000;
@@ -357,7 +359,10 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
 
     const orphaned = await db.select().from(meetingBots).where(and(
         eq(meetingBots.status, 'done'), isNotNull(meetingBots.joinedAt), isNull(meetingBots.importId), isNotNull(meetingBots.recallBotId))).limit(25);
-    for (const row of orphaned) if (await ensureBotImport(db, row, dispatch).catch(() => null)) out.imported++;
+    // In batches within its own budget, not one at a time with no limit (review of #774): 25 slow hand-offs in turn could
+    // take the run past its time limit before Recall's copies are deleted.
+    const imported = await runBatchesWithinBudget(orphaned, POLL_BATCH, BOT_IMPORT_BUDGET_MS, POLL_CALL_TIMEOUT_MS, (row) => ensureBotImport(db, row, dispatch).catch(() => null));
+    out.imported += imported.filter(Boolean).length;
 
     const finished = await db.select({ bot: meetingBots, importStatus: meetingImports.status }).from(meetingBots)
         .leftJoin(meetingImports, eq(meetingBots.importId, meetingImports.id))
