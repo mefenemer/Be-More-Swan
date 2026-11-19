@@ -31,8 +31,8 @@ const SERVE_URL = process.env.REMOTION_SERVE_URL;
 const COMPOSITION_ID = 'PostOverlay';
 
 // ── The concurrency budget, and why we size the fan-out ourselves ───────────────────────────────
-// AWS caps how many Lambdas an account may run AT ONCE. A new account gets 10 and ours is still
-// there (`npx remotion lambda quotas`, eu-west-2, verified 2026-08-02).
+// HISTORY (2026-08-02 to 2026-11-18), kept for why the fan-out is ours: the account then allowed 10
+// Lambdas AT ONCE (`npx remotion lambda quotas`, eu-west-2). Today's sizing is the ⚠️ paragraph below.
 //
 // Remotion's default fan-out knows nothing about that cap. bestFramesPerFunctionParam floors a chunk
 // at 20 frames, so the weekly YouTube Short — 10s at 30fps, 300 frames — asks for 15 renderer
@@ -46,27 +46,44 @@ const COMPOSITION_ID = 'PostOverlay';
 // "A Short can't carry this" — a symptom of this, not a separate bug.
 //
 // So: pick `concurrency` (the renderer-Lambda count) deliberately. The launch function is one MORE
-// on top of it, and two renders can legitimately overlap — a reviewer approving a video while the
-// weekly Short drafts — so the default of 3 keeps two entire renders (2 launch + 6 renderers = 8)
-// inside a limit of 10.
+// on top of it, and two renders can legitimately overlap. In that era a cap of 3 kept two renders
+// (2 launch + 6 renderers = 8) inside the limit of 10.
 //
-// Raise REMOTION_MAX_LAMBDAS after the AWS quota goes up. It is the throughput knob in both
-// directions: fewer Lambdas means MORE frames each, and each renderer is bounded by the deployed
-// function's 120s timeout, so this number is also the practical ceiling on clip length.
-const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 3);
+// ⚠️ The quota has since been RAISED to 1000 (`npx remotion lambda quotas`, eu-west-2, checked 2026-11-18),
+// and both environments run the 300 s function (remotion-render-…-300sec). Measured the same day on the
+// staging site (Phase 4a, docs/video-producer-screen-walkthrough-plan.md §12): a 2048 MB renderer does about
+// 2.6 frames a second on plain 1080p and about 1.4 with a screen cover (two videos decoding). So 3 Lambdas
+// was already too few for a 60 s 1080p video with a cover (600 frames each ≈ 430 s, past the 300 s chunk
+// timeout), and hopeless for 10 minutes. Size by frames instead: about FRAMES_PER_LAMBDA each, never fewer
+// than the 3 a short video always had.
+//
+// REMOTION_MAX_LAMBDAS caps a single render (default 120: a 10-minute video is 90; two at once, launch
+// functions included, are about 182 of the 1000). Lower it only if the quota ever drops back.
+const MAX_RENDER_LAMBDAS = Math.max(1, Math.floor(Number(process.env.REMOTION_MAX_LAMBDAS)) || 120);
+
+/** What a short render always used: 3 Lambdas. */
+const SHORT_RENDER_LAMBDAS = 3;
 
 // Below about a second of output per Lambda the ~10s cold start dominates the work, so splitting
-// further buys nothing and spends budget we do not have.
+// further buys nothing.
 const MIN_FRAMES_PER_LAMBDA = 30;
 
+/** Frames per renderer: at ~0.73 s a frame with a cover, about 150 s of the 300 s chunk timeout. */
+export const FRAMES_PER_LAMBDA = 200;
+
 /**
- * How many renderer Lambdas to spend on a render of `durationInFrames`.
+ * How many renderer Lambdas to spend on a render of `durationInFrames`: about one per FRAMES_PER_LAMBDA,
+ * at least 3 for anything a second or more (as always), capped at MAX_RENDER_LAMBDAS.
  *
  * Exported for the tests: this is the whole fix, and it is pure.
  */
 export function planConcurrency(durationInFrames: number): number {
-    const frames = Math.max(1, Math.floor(Number(durationInFrames)) || 1);
-    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.ceil(frames / MIN_FRAMES_PER_LAMBDA)));
+    const raw = Math.floor(Number(durationInFrames));
+    // Junk (NaN, Infinity, ≤ 0) is one frame: never a NaN, a fraction or a big guess.
+    const frames = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    const short = Math.min(SHORT_RENDER_LAMBDAS, Math.ceil(frames / MIN_FRAMES_PER_LAMBDA));
+    const sized = Math.ceil(frames / FRAMES_PER_LAMBDA);
+    return Math.max(1, Math.min(MAX_RENDER_LAMBDAS, Math.max(short, sized)));
 }
 
 // Remotion turns the underlying TooManyRequestsException / ConcurrentInvocationLimitExceeded into a

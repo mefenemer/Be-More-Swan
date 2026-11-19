@@ -1937,7 +1937,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const prefill = {
       assetIds: (Array.isArray(ui.assetIds) ? ui.assetIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 10),
       message: clean(ui.message, 1200),
-      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : null,
+      // 2, 5 and 10 minutes only in their own sound (Phase 4b); with a voiceover a long length is left for them to pick.
+      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) || ([120, 300, 600].includes(Number(ui.lengthS)) && ui.voiceover !== true) ? Number(ui.lengthS) : null,
       voiceover: ui.voiceover === true,
       cta: clean(ui.cta, 200),
     };
@@ -1946,7 +1947,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Review your footage</p>
       ${prefill.message ? `<p class="text-sm text-gray-900 mt-2">${esc(prefill.message)}</p>` : ''}
-      <p class="text-xs text-gray-700 mt-2">${prefill.assetIds.length ? `${prefill.assetIds.length} of your video${prefill.assetIds.length === 1 ? '' : 's'}` : 'Choose your videos'}${prefill.lengthS ? ` · ${prefill.lengthS} seconds` : ''} · ${prefill.voiceover ? 'with a voiceover' : 'keeping your own sound'}</p>
+      <p class="text-xs text-gray-700 mt-2">${prefill.assetIds.length ? `${prefill.assetIds.length} of your video${prefill.assetIds.length === 1 ? '' : 's'}` : 'Choose your videos'}${prefill.lengthS ? ` · ${prefill.lengthS >= 120 ? `${prefill.lengthS / 60} minutes` : `${prefill.lengthS} seconds`}` : ''} · ${prefill.voiceover ? 'with a voiceover' : 'keeping your own sound'}</p>
       <p class="text-xs text-gray-600 mt-2">Opens “Use my own footage” on the Videos tab, filled in. You check it there and press “Review my footage”, which shows what it uses first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-frp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open it</button>

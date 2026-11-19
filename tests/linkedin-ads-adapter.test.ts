@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
     LINKEDIN_API_VERSION, accountId, analyticsUrl, campaignCreateBody, creativeStatusPatchBody,
     dateParam, parseAnalytics, parseRestliId, statusPatchBody,
-    LinkedInAdsError, linkedInErrorDetail,
+    LinkedInAdsError, linkedInErrorDetail, campaignGroupUrn, campaignUrn, createdCreativeId,
 } from '../src/utils/ad-networks/linkedin';
 import { anyNetworkAvailable, linkedInAdapter, resolveAdapter } from '../src/utils/ad-networks/registry';
 import { isProductionDeploy } from '../src/utils/deploy-context';
@@ -278,8 +278,54 @@ check('linkedInErrorDetail names the status, message and field LinkedIn gives', 
 
 check('stage_paid returns LinkedIn\'s reason and logs it as a string', () => {
     const camp = read('netlify/functions/campaigns.ts');
-    assert.ok(camp.includes('const detail = linkedInErrorDetail(err);'));
+    assert.ok(camp.includes('const detail = linkedInErrorDetail(err) ?? (err instanceof Error ? err.message.slice(0, 400) : null);'));
     assert.match(camp, /error: 'LinkedIn would not accept the campaign\. No advert was created and nothing has been spent\.',\s*\n\s*detail,/);
 });
 
-console.log(`\n${passed} checks passed.\n`);
+console.log('\n──── what LinkedIn refused on the first live stage (2026-11-18) ────');
+
+check('a newly created campaign group is referenced by its full URN', () => {
+    assert.equal(campaignGroupUrn('1258941973'), 'urn:li:sponsoredCampaignGroup:1258941973');
+    assert.equal(campaignGroupUrn('urn:li:sponsoredCampaignGroup:7'), 'urn:li:sponsoredCampaignGroup:7');
+    assert.match(read('src/utils/ad-networks/linkedin.ts'), /return campaignGroupUrn\(parseRestliId\(created\)\);/);
+});
+
+check('the campaign locale is en_US — LinkedIn refuses en_GB as an interface locale', () => {
+    const b = campaignCreateBody({
+        accountUrn: 'urn:li:sponsoredAccount:1', campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:2',
+        name: 'x', dailyBudgetAmount: '5', currencyCode: 'GBP', startMs: 1, targeting: {},
+    } as never);
+    assert.deepEqual(b.locale, { country: 'US', language: 'en' });
+    assert.ok(!/'locale\.country': 'GB'/.test(read('src/utils/ad-networks/linkedin.ts')), 'typeahead still asks for en_GB');
+});
+
+check('a creative names its campaign by the full URN', () => {
+    assert.equal(campaignUrn('987'), 'urn:li:sponsoredCampaign:987');
+    assert.equal(campaignUrn('urn:li:sponsoredCampaign:987'), 'urn:li:sponsoredCampaign:987');
+    assert.match(read('src/utils/ad-networks/linkedin.ts'), /campaign: campaignUrn\(externalCampaignId\),/);
+});
+
+check('the campaign body declares politicalIntent', () => {
+    const b = campaignCreateBody({
+        accountUrn: 'urn:li:sponsoredAccount:1', campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:2',
+        name: 'x', dailyBudgetAmount: '5', currencyCode: 'GBP', startMs: 1, targeting: {},
+    } as never);
+    assert.equal(b.politicalIntent, 'NOT_POLITICAL');
+});
+
+// Async checks live in main(): the runner transpiles to CJS, so no top-level await.
+async function main(): Promise<void> {
+    const name = 'createInline: the creative id is read from the body when there is no header';
+    try {
+        const res = (h: string | null, body: unknown) => ({ headers: { get: (n: string) => (n === 'x-restli-id' ? h : null) }, json: async () => body });
+        assert.equal(await createdCreativeId(res(null, { value: { creative: 'urn:li:sponsoredCreative:55' } })), 'urn:li:sponsoredCreative:55');
+        assert.equal(await createdCreativeId(res('urn:li:sponsoredCreative:9', {})), 'urn:li:sponsoredCreative:9');
+        await assert.rejects(() => createdCreativeId(res(null, {})), /did not say which one/);
+        assert.match(read('src/utils/ad-networks/linkedin.ts'), /externalVariantIds\[v\.variantId\] = await createdCreativeId\(cres\);/);
+        passed++; console.log(`  ✓ ${name}`);
+    } catch (err) {
+        console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1;
+    }
+    console.log(`\n${passed} checks passed.\n`);
+}
+main();

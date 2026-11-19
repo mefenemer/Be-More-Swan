@@ -11,15 +11,15 @@
 // MEASURED length, a quote must really be in the transcript, and a suggestion may only point at a
 // video the owner chose. PURE: no database, no network. Tested in tests/footage.test.ts.
 
-import { keepsOwnSound, isVideoShape, SHAPE_LABELS, type Scene, type Storyboard, type VideoBrief } from './storyboard';
-import { MAX_CLIPS } from './video-edit';
+import { keepsOwnSound, isVideoShape, SHAPE_LABELS, capTotalLength, type Scene, type Storyboard, type VideoBrief } from './storyboard';
 
 // ── Limits (owner decision D-F5, 2026-11-09) ────────────────────────────────────────────────────
-export const MAX_FOOTAGE_S = 5 * 60;
+/** Up to 10 minutes since Phase 4b (long videos from own footage); 5 before. */
+export const MAX_FOOTAGE_S = 10 * 60;
 export const MAX_FOOTAGE_BYTES = 500 * 1024 * 1024;
 export const MAX_VIDEOS_PER_REVIEW = 10;
-/** A frame about every 2 seconds, at most this many — enough to see every shot of a 5-minute video. */
-export const MAX_FRAMES = 40;
+/** A frame about every 2 seconds, at most this many — one every 10 s on a 10-minute video (40 before Phase 4b). */
+export const MAX_FRAMES = 60;
 export const FRAME_EVERY_S = 2;
 /** One frame as base64 JPEG — the browser sends ~512 px frames, ~20–40 KB each. */
 export const MAX_FRAME_B64 = 220_000;
@@ -28,6 +28,12 @@ export const MAX_FRAME_B64 = 220_000;
 export const FOOTAGE_REVIEW_TASKS = 2;
 export const MAX_SUGGESTIONS = 12;
 export const MAX_SHOTS = 30;
+/**
+ * Pieces in one Video Producer video (Phase 4b): a tightened 10-minute take makes hundreds of cut points, and
+ * at the post editor's 40 most of its pauses came back. The render measured fine at this many (§12, 4a).
+ * The post editor keeps its own MAX_CLIPS (video-edit.ts).
+ */
+export const MAX_PROJECT_CLIPS = 200;
 
 /** When to grab frames for a video of `durationS` seconds. The browser uses the same rule. Pure. */
 export function frameTimes(durationS: number): number[] {
@@ -157,7 +163,8 @@ Return STRICT JSON only:
 }
 
 /** The words, compactly, for the shot-list call: "[12.3] hello there [13.1] and welcome". Pure. */
-export function transcriptText(words: SpokenWord[], maxChars = 6000): string {
+// 16,000 characters holds a 10-minute talker (about 1500 words plus time marks); 6000 cut off a fast 5-minute one.
+export function transcriptText(words: SpokenWord[], maxChars = 16000): string {
     if (!words.length) return '(no speech)';
     const out: string[] = [];
     let last = -10;
@@ -535,10 +542,28 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         }
         return c;
     });
+    // Chapters of one take (Phase 4b): snapping both ends to whole sentences can carry a scene's end past where
+    // the next scene starts, and the sentence between plays twice (staging project 48, 2026-11-18: "Next, the
+    // plan." at the end of one chapter and the start of the next). The later scene keeps it — it opens the topic.
+    // Compared with the previous scene of the SAME video, even with a card or stock between them; only when the
+    // later scene runs on past the earlier one's end (inside it, trimming would drop speech heard nowhere else).
+    if (keepsOwnSound(brief)) {
+        const lastOf = new Map<number, Scene>();
+        for (const b of scenes) {
+            if (b.source !== 'own_video' || b.assetId == null || b.inS == null || b.outS == null) continue;
+            const a = lastOf.get(b.assetId);
+            if (a && a.inS != null && a.outS != null && a.outS > b.inS && a.outS <= b.outS && b.inS - a.inS >= MIN_PIECE_S) {
+                a.outS = b.inS;
+                a.targetS = round1(a.outS - a.inS);
+            }
+            lastOf.set(b.assetId, b);
+        }
+    }
     const on = keepsOwnSound(brief) && brief.tighten !== false;
     // Words the owner struck out are cut in their own sound whether or not tightening is on.
     const anyStruck = keepsOwnSound(brief) && scenes.some((s) => s.cutWords?.length);
-    if (!on && !anyStruck) return { storyboard: { ...sb, scenes }, changes: [] };
+    // Snapping to whole sentences can add a few seconds: keep inside the render's 10 minutes (Phase 4b).
+    if (!on && !anyStruck) { const capNotes: string[] = []; return { storyboard: { ...sb, scenes: capTotalLength(scenes, capNotes) }, changes: capNotes }; }
     const words = new Map(videos.map((v) => [v.id, v.words]));
     const tight: Array<{ i: number; pieces: Piece[]; stats: TightenStats; segS: number }> = [];
     scenes.forEach((s, i) => {
@@ -549,10 +574,10 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         const { pieces, stats } = tightenSegment(s.inS, s.outS, words.get(s.assetId) ?? [], v?.analysis?.loudness, { cutWords: s.cutWords, auto });
         if (stats.savedS > 0 || stats.removed) tight.push({ i, pieces, stats, segS: s.outS - s.inS });
     });
-    if (!tight.length) return { storyboard: { ...sb, scenes }, changes: [] };
+    if (!tight.length) { const capNotes: string[] = []; return { storyboard: { ...sb, scenes: capTotalLength(scenes, capNotes) }, changes: capNotes }; }
     // Every scene that isn't tightened is one clip (a still too); the rest share the limit.
     const fixedCount = scenes.length - tight.length;
-    const capped = capPieces(tight.map((t) => t.pieces), MAX_CLIPS, fixedCount);
+    const capped = capPieces(tight.map((t) => t.pieces), MAX_PROJECT_CLIPS, fixedCount);
     let saved = 0;
     tight.forEach((t, k) => {
         const pieces = capped[k];
@@ -563,10 +588,12 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         s.tightened = { ...t.stats, savedS: round1(Math.max(0, t.segS - len)) };
         saved += t.segS - len;
     });
-    const total = scenes.reduce((a, s) => a + s.targetS, 0);
+    const capNotes: string[] = [];
+    const fitted = capTotalLength(scenes, capNotes);
+    const total = fitted.reduce((a, s) => a + s.targetS, 0);
     return {
-        storyboard: { ...sb, scenes },
-        changes: saved >= 0.5 ? [`Pauses, “um”s and repeated takes cut from your clips: ${saved.toFixed(1)} s shorter, about ${Math.round(total)} s in all.`] : [],
+        storyboard: { ...sb, scenes: fitted },
+        changes: [...(saved >= 0.5 ? [`Pauses, “um”s and repeated takes cut from your clips: ${saved.toFixed(1)} s shorter, about ${Math.round(total)} s in all.`] : []), ...capNotes],
     };
 }
 

@@ -15,7 +15,7 @@ expert lens. **Load one persona per session** and stay in it. Depth beats breadt
 ## Shared rules (every persona)
 
 - **Staging only:** `https://staging--bemoreswan.netlify.app`. Never bemoreswan.com, never the prod admin.
-- **No real outside effects.** Don't connect real Facebook/Instagram accounts (Meta App Review is pending; connecting can disturb the owner's own grants). Don't send email or messages to addresses outside the owner's test inboxes. Don't publish to any real site.
+- **No real outside effects.** Don't connect real Facebook/Instagram accounts (connecting can disturb the owner's own grants). Don't send email or messages to addresses outside the owner's test inboxes. Don't publish to any real site.
 - **No real payment details.** Stripe test cards only, on staging only.
 - **Browser only.** Don't edit the repo, run scripts or write tests. Claude writes the regression test from your ticket.
 - **One bug per ticket.** If you find three, file three.

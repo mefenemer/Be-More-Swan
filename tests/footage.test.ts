@@ -175,13 +175,14 @@ check('silentWav is a valid 8-bit mono WAV of silence', () => {
 
 // ── Phase 2–3: frames, shot lists, the review ───────────────────────────────────────────────────
 
-check('frameTimes: about every 2 s, at most 40, all inside the video — and the browser uses the same rule', () => {
+check('frameTimes: about every 2 s, at most 60 (a 10-minute video, Phase 4b), all inside the video — and the browser uses the same rule', () => {
     assert.strictEqual(frameTimes(10).length, 5);
-    assert.strictEqual(frameTimes(300).length, MAX_FRAMES);
-    assert.ok(frameTimes(300).every((t) => t > 0 && t < 300));
+    assert.strictEqual(MAX_FRAMES, 60);
+    assert.strictEqual(frameTimes(600).length, MAX_FRAMES);
+    assert.ok(frameTimes(600).every((t) => t > 0 && t < 600));
     assert.deepStrictEqual(frameTimes(0), []);
     const js = read('src/components/footage-reader.js');
-    assert.ok(js.includes('const MAX_FRAMES = 40;') && js.includes('const FRAME_EVERY_S = 2;'));
+    assert.ok(js.includes('const MAX_FRAMES = 60;') && js.includes('const FRAME_EVERY_S = 2;'));
 });
 
 const words = [{ word: 'Welcome', start: 1, end: 1.4 }, { word: 'to', start: 1.4, end: 1.5 }, { word: 'the', start: 1.5, end: 1.6 }, { word: 'cafe!', start: 1.6, end: 2 }];
@@ -571,6 +572,39 @@ check('the review screen stops painting its own text over a finished render', ()
 check('the clip limit is 40 in the render and in the post editor', () => {
     assert.strictEqual(MAX_CLIPS, 40);
     assert.ok(read('workspace.html').includes('const _PCE_MAX_CLIPS = 40;'));
+});
+
+check('chapters of one take never repeat a sentence across a scene boundary (staging project 48)', () => {
+    // "Hello there. Next, the plan. We write it." — the planner cut inside "Next, the plan", and snapping both
+    // scenes to whole sentences gave both of them that sentence.
+    const w = (word: string, start: number) => ({ word, start, end: start + 0.3 });
+    const words = [w('Hello', 0.2), w('there.', 0.6), w('Next,', 2.0), w('the', 2.35), w('plan.', 2.7), w('We', 4.0), w('write', 4.35), w('it.', 4.7)];
+    const vids = [{ id: 11, name: 'take', durationS: 6, analysis: null, words }];
+    const sb = { title: 'T', caption: '', scenes: [
+        { id: 's1', beat: 'hook', voiceover: '', source: 'own_video', assetId: 11, inS: 0, outS: 2.4, targetS: 2.4 },
+        { id: 's2', beat: 'value', voiceover: '', source: 'own_video', assetId: 11, inS: 2.4, outS: 6, targetS: 3.6 },
+    ] } as never;
+    for (const tighten of [true, false]) {
+        const out = tightenStoryboard(sb, brief({ voiceover: false, footageAssetIds: [11], tighten }), vids).storyboard.scenes;
+        const span = (s: { inS?: number; outS?: number; cuts?: Array<{ inS: number; outS: number }> }) => s.cuts?.length ? [s.cuts[0].inS, s.cuts[s.cuts.length - 1].outS] : [s.inS!, s.outS!];
+        assert.ok(span(out[0])[1] <= span(out[1])[0] + 0.001, `tighten ${tighten}: scene 1 ends at ${span(out[0])[1]}, scene 2 starts at ${span(out[1])[0]}`);
+        assert.ok(span(out[1])[0] <= 2.0, 'the later scene keeps "Next, the plan."');
+    }
+    // A branded card between two chapters of the same take: still no repeat (review of #750).
+    const withCard = { title: 'T', caption: '', scenes: [
+        { id: 's1', beat: 'hook', voiceover: '', source: 'own_video', assetId: 11, inS: 0, outS: 2.4, targetS: 2.4 },
+        { id: 's2', beat: 'value', voiceover: '', source: 'brand_card', targetS: 3 },
+        { id: 's3', beat: 'value', voiceover: '', source: 'own_video', assetId: 11, inS: 2.4, outS: 6, targetS: 3.6 },
+    ] } as never;
+    const c = tightenStoryboard(withCard, brief({ voiceover: false, footageAssetIds: [11], tighten: false }), vids).storyboard.scenes;
+    assert.ok(c[0].outS! <= c[2].inS! + 0.001, `card between: scene 1 ends at ${c[0].outS}, scene 3 starts at ${c[2].inS}`);
+    // A later scene entirely inside the earlier one is left alone: trimming would drop speech heard nowhere else.
+    const inside = { title: 'T', caption: '', scenes: [
+        { id: 's1', beat: 'hook', voiceover: '', source: 'own_video', assetId: 11, inS: 0, outS: 6, targetS: 6 },
+        { id: 's2', beat: 'value', voiceover: '', source: 'own_video', assetId: 11, inS: 2.0, outS: 3.1, targetS: 1.1 },
+    ] } as never;
+    const n = tightenStoryboard(inside, brief({ voiceover: false, footageAssetIds: [11], tighten: false }), vids).storyboard.scenes;
+    assert.strictEqual(n[0].outS, 6);
 });
 
 console.log(`\nfootage: ${passed} passed`);

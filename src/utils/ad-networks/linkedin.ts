@@ -92,6 +92,11 @@ export function campaignCreateBody(input: {
         creativeSelection: 'OPTIMIZED',
         audienceExpansionEnabled: false,
         offsiteDeliveryEnabled: false,
+        // ⚠️ REQUIRED since LinkedIn's political-ads rules (422 "politicalIntent :: field is required",
+        // first live stage 2026-11-18). This is a DECLARATION on the advertiser's behalf. Our
+        // campaigns are small-business marketing, but before any customer stages a campaign the
+        // stage form must ask them, not assume — docs/campaign-orchestrator-plan.md §9.10 item 1.
+        politicalIntent: 'NOT_POLITICAL',
 
         // ── Bidding: AUTO, and this trio must move together ──────────────────
         // ⚠️ THE FIRST DRAFT WOULD HAVE CREATED A CAMPAIGN THAT NEVER DELIVERED. It sent
@@ -116,7 +121,11 @@ export function campaignCreateBody(input: {
 
         // Amount is a STRING in this API, and currency travels with it. Never a bare number.
         dailyBudget: { amount: input.dailyBudgetAmount, currencyCode: input.currencyCode },
-        locale: { country: 'GB', language: 'en' },
+        // ⚠️ en_US, NOT en_GB. This is the language OF THE AD, not where it runs (that is the
+        // location facet in targetingCriteria). LinkedIn turns it into an interface-locale
+        // targeting facet and supports only en_US for English: en_GB was refused live with
+        // "Interface locale urn:li:locale:en_GB is not supported in Targeting Criteria" (2026-11-18).
+        locale: { country: 'US', language: 'en' },
         runSchedule: input.endMs ? { start: input.startMs, end: input.endMs } : { start: input.startMs },
         targetingCriteria: input.targeting,
         status: 'PAUSED',
@@ -200,6 +209,20 @@ export function parseAnalytics(payload: unknown): AnalyticsRow[] {
 }
 
 /** The created entity's id, which comes back in a HEADER rather than the body. */
+/**
+ * The new creative's id from a `creatives?action=createInline` response: the x-restli-id header when
+ * present, else the action's body `{ value: { creative: "urn:li:sponsoredCreative:<id>" } }`.
+ */
+export async function createdCreativeId(res: { headers: { get(name: string): string | null }; json(): Promise<unknown> }): Promise<string> {
+    const header = res.headers.get('x-restli-id') || res.headers.get('x-linkedin-id');
+    if (header) return header;
+    type ActionBody = { value?: { creative?: string; id?: string | number } };
+    const body: ActionBody = await res.json().then((b) => (b ?? {}) as ActionBody, () => ({}));
+    const id = body.value?.creative ?? (body.value?.id !== undefined ? String(body.value.id) : '');
+    if (!id) throw new Error('LinkedIn created the advert but did not say which one, so it cannot be tracked. It is paused and cannot spend.');
+    return String(id);
+}
+
 export function parseRestliId(res: { headers: { get(name: string): string | null } }): string {
     const id = res.headers.get('x-restli-id') || res.headers.get('x-linkedin-id');
     if (!id) throw new Error('LinkedIn accepted the write but returned no x-restli-id, so the entity cannot be tracked.');
@@ -309,7 +332,10 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
                     headers: headers(cfg.accessToken),
                     body: JSON.stringify({
                         creative: {
-                            campaign: externalCampaignId,
+                            // ⚠️ The URN, not the bare id the create header returns (the
+                            // same trap as campaignGroup, 2026-11-18). The stored id stays bare:
+                            // activate/pause/checkControl strip it with accountId() either way.
+                            campaign: campaignUrn(externalCampaignId),
                             intendedStatus: 'ACTIVE',
                             inlineContent: {
                                 post: {
@@ -331,7 +357,10 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
                         },
                     }),
                 });
-                externalVariantIds[v.variantId] = parseRestliId(cres);
+                // ⚠️ createInline is an ACTION: its id comes back in the BODY
+                // (`value.creative`), not in x-restli-id. Reading only the header threw after
+                // LinkedIn had already created the creative (first full live stage, 2026-11-18).
+                externalVariantIds[v.variantId] = await createdCreativeId(cres);
             }
 
             return { externalCampaignId, externalVariantIds, status: 'paused' };
@@ -489,8 +518,10 @@ export async function searchTargeting(
         query,
         facet: TARGETING_FACETS[facet],
         queryVersion: 'QUERY_USES_URNS',
+        // Display language for entity names. en_US for the same reason as the campaign locale:
+        // it is LinkedIn's supported English locale (en_GB was refused on campaigns, 2026-11-18).
         'locale.language': 'en',
-        'locale.country': 'GB',
+        'locale.country': 'US',
         lixEntity: accountUrn,
     });
     const res = await call(`${BASE}/adTargetingEntities?${params.toString()}`, {
@@ -600,7 +631,20 @@ export async function ensureCampaignGroup(
             status: 'ACTIVE',
         }),
     });
-    return parseRestliId(created);
+    // ⚠️ The header carries the BARE id (seen live 2026-11-18: "1258941973"), and a campaign's
+    // `campaignGroup` must be the full URN — LinkedIn 422 "Invalid Urn format. Invalid prefix".
+    // The search branch above already builds the URN; this one has to as well.
+    return campaignGroupUrn(parseRestliId(created));
+}
+
+/** A campaign id or URN, as the URN LinkedIn requires in a creative's `campaign`. */
+export function campaignUrn(idOrUrn: string): string {
+    return idOrUrn.startsWith('urn:') ? idOrUrn : `urn:li:sponsoredCampaign:${idOrUrn}`;
+}
+
+/** A campaign group id or URN, as the URN LinkedIn requires in `campaignGroup`. */
+export function campaignGroupUrn(idOrUrn: string): string {
+    return idOrUrn.startsWith('urn:') ? idOrUrn : `urn:li:sponsoredCampaignGroup:${idOrUrn}`;
 }
 
 /**

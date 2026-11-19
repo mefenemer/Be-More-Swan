@@ -70,10 +70,38 @@ export async function persistRemoteMediaToR2(params: {
     /** Key segment under content/org-N/ — e.g. 'generated', 'canva'. */
     folder?: string;
     label?: string;
+    /**
+     * Pass the download straight through to R2 instead of holding it in memory. For rendered videos: a
+     * 10-minute 1080p MP4 can be several hundred MB, close to a function's memory (Phase 4). Needs the
+     * response's Content-Length (S3 needs the size up front); without it, falls back to buffering.
+     * Only for responses with no Content-Encoding (Remotion's S3 MP4s): fetch decodes a gzip/br body,
+     * so its length would no longer match Content-Length and the upload would fail (loudly, not silently).
+     */
+    stream?: boolean;
 }): Promise<{ storageKey: string; fileSize: number }> {
     const res = await fetch(params.url);
     if (!res.ok) throw new Error(`Could not download ${params.label || 'media'} (${res.status}).`);
+    const size = streamableSize(params.stream, res.headers.get('content-length'), !!res.body);
+    if (size !== null) {
+        const storageKey = `content/org-${params.orgId}/${params.folder || 'generated'}/${crypto.randomUUID()}.${extFromMime(params.contentType)}`;
+        const { S3Client, PutObjectCommand } = await s3Sdk();
+        const { Readable } = await import('node:stream');
+        const s3 = new S3Client({
+            region: 'auto', endpoint: R2_ENDPOINT,
+            credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+        });
+        const body = Readable.fromWeb(res.body as unknown as import('node:stream/web').ReadableStream);
+        await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: body, ContentLength: size, ContentType: params.contentType }));
+        return { storageKey, fileSize: size };
+    }
     return persistBufferToR2({ ...params, bytes: Buffer.from(await res.arrayBuffer()) });
+}
+
+/** The byte count to stream with, or null to buffer instead (not asked, no body, or no usable Content-Length). Pure. */
+export function streamableSize(stream: boolean | undefined, contentLength: string | null, hasBody: boolean): number | null {
+    if (!stream || !hasBody || contentLength == null || !/^\d+$/.test(contentLength.trim())) return null;
+    const n = Number(contentLength.trim());
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 /**

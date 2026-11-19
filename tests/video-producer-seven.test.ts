@@ -144,7 +144,7 @@ check('a mood makes a track for the video once (charged then), kept on the story
     assert.ok(vp.includes('await makeVideoTrack(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, mood, videoS: totalS'));
     assert.ok(vp.includes("await settle('audio', MUSIC_CREDIT_COST, true);") && vp.includes("await settle('audio', MUSIC_CREDIT_COST, false);"), 'charged only when made');
     assert.ok(vp.includes('storyboard.music = { assetId: t.assetId, title: t.title, mood };'));
-    assert.ok(vp.includes('audio.push(musicTrack({'));
+    assert.ok(vp.includes('audio.push(...musicTracks({'), 'looped when shorter than the video (Phase 4b)');
     // The cost shown and held includes the track, once.
     const b = { ...brief, musicMood: 'upbeat' } as VideoBrief;
     const made = { sceneAssets: { s1: 1, s2: 2, s3: 3 }, voiceoverAssetId: 9 };

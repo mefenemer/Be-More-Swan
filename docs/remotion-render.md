@@ -183,9 +183,15 @@ the worker marks `render_status='failed'`, and the post keeps the still it was s
 become — so a video-only platform then refuses it with "A Short can't carry this", which is the
 symptom people report rather than the cause.
 
+> **Update 2026-11-18 (Phase 4a):** the quota is now **1000** and both environments run the **300 s** function
+> (`remotion-render-4-0-498-mem2048mb-disk2048mb-300sec`). Measured: ~2.6 frames/s per renderer on plain 1080p,
+> ~1.4 with a screen cover. `planConcurrency` therefore sizes every render at **about 200 frames per renderer**
+> (at least 3, capped by `REMOTION_MAX_LAMBDAS`, default **120**): 9 for 60 s, 90 for 10 minutes. A 10-minute
+> render took 3 min 13 s and cost $0.27. The two points below are the history of the 10-Lambda era.
+
 Two things keep this fixed, and you want both:
 
-1. **`REMOTION_MAX_LAMBDAS`** (`src/lib/remotion-lambda.ts`, default **3**) sizes the fan-out
+1. **`REMOTION_MAX_LAMBDAS`** (`src/lib/remotion-lambda.ts`; default **120** since 2026-11-18, it was **3** in this era) sizes the fan-out
    ourselves via `renderMediaOnLambda`'s `concurrency`. The launch function is one *more* Lambda on
    top, and two renders can legitimately overlap, so the default keeps `2 × (1 + 3) = 8` inside a
    limit of 10. Raise it once the quota goes up — but note the trade: fewer Lambdas means **more
