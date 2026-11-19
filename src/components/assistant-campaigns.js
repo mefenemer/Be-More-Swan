@@ -2046,6 +2046,14 @@
           ${esc(label)} requires an image on every advert — paste a public link to a JPG or PNG.
         </p>
 
+        <label class="flex items-start gap-2 mt-3 text-xs text-gray-700 leading-relaxed">
+          <input type="checkbox" data-cmp-paid-declare="${esc(String(c.id))}" class="mt-0.5" />
+          <span>
+            These adverts are <span class="font-bold">not</span> about politics, elections or social issues,
+            and <span class="font-bold">not</span> about housing, jobs, credit or financial services.
+            ${esc(label)} asks every advertiser to declare this, and we pass on your answer.
+          </span>
+        </label>
         <button type="button" data-cmp-stage="${esc(String(c.id))}" data-cmp-network="${esc(network)}"
           class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Stage on ${esc(label)} (paused)
@@ -2471,6 +2479,12 @@
       if (network === 'meta' && countries.length === 0) { sayPaid(id, 'Add at least one country code, such as GB — Meta will not run an advert without one.', 'error'); return; }
       if (network === 'linkedin' && locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
 
+      // The declaration is the advertiser's to make, so it is asked, never assumed.
+      if (!document.querySelector(`[data-cmp-paid-declare="${id}"]`)?.checked) {
+        sayPaid(id, `Tick the box to confirm what these adverts are about — ${label} asks every advertiser to declare it. If they are about politics, housing, jobs, credit or financial services, create them directly in ${network === 'meta' ? 'Meta Ads Manager' : 'LinkedIn Campaign Manager'}.`, 'error');
+        return;
+      }
+
       const image = (u) => (document.querySelector(`[data-cmp-paid-image="${id}-${u}"]`)?.value || '').trim();
       const firstImage = image(0);
       if (!firstImage) { sayPaid(id, `${label} needs an image on every advert. Paste a link to a JPG or PNG for ad 1.`, 'error'); return; }
@@ -2510,6 +2524,8 @@
           action: 'stage_paid',
           network,
           campaignId: id,
+          // Only ever 'none' from here: the box above is the person's statement.
+          adCategoryDeclaration: 'none',
           dailyBudgetGbp: budget,
           // Blank means NO ceiling — passed as undefined so the server stores null rather than 0.
           // Zero would pause every ad on its first conversion.

@@ -153,7 +153,7 @@ export default withLambda(async (event) => {
 
     // ⚠️ Scoped to service_name = 'linkedin_ads'. Widening this to 'linkedin' would overwrite the
     // workspace's posting connection with an ads token that cannot post.
-    const [existing] = await db.select({ id: systemConnections.id })
+    const [existing] = await db.select({ id: systemConnections.id, metadata: systemConnections.metadata })
         .from(systemConnections)
         .where(and(
             eq(systemConnections.organisationId, organisationId),
@@ -161,11 +161,21 @@ export default withLambda(async (event) => {
         ))
         .limit(1);
 
+    // ⚠️ A reconnect KEEPS the chosen account when it is still listed (it used to wipe it, so every
+    // reconnect meant choosing again — live run 2026-11-18). A FAILED listing keeps the previous
+    // list too: wiping it would read as "not ready" and the optimiser would halt a live campaign
+    // without the adapter. Same rule as the Meta callback.
+    const prev = (existing?.metadata ?? {}) as Record<string, unknown>;
+    const prevAccounts = Array.isArray(prev.adAccounts) ? prev.adAccounts as AdAccount[] : null;
+    const accountList = accounts ?? prevAccounts;
+    const keepAccount = typeof prev.selectedAccountUrn === 'string' && accountList?.some((a) => a.urn === prev.selectedAccountUrn)
+        ? prev.selectedAccountUrn as string : null;
+
     const metadata = {
-        // null means "we could not ask", [] means "the member has none". Different messages.
-        adAccounts: accounts,
-        // Set later, when the user picks one. Until then nothing can be staged.
-        selectedAccountUrn: null as string | null,
+        // null means "we could not ask" (and nothing earlier), [] means "the member has none".
+        adAccounts: accountList,
+        // Kept from before when still available; otherwise chosen later. Until then nothing can be staged.
+        selectedAccountUrn: keepAccount,
         tier: 'development',
     };
 

@@ -647,17 +647,17 @@ prompt text (§9.0), and the prompt-surfaces test extended.
 
 Found while staging a paused test campaign on staging (Marmalade, ad account 561389113).
 
-1. **Political intent is declared FOR the advertiser.** `campaignCreateBody` sends
+1. ✅ **DONE 2026-11-19: the advertiser declares it** (stage-form tick-box, `adCategoryDeclaration`, audit row `campaign_paid_staged`; special categories refused). Was: **Political intent is declared FOR the advertiser.** `campaignCreateBody` sends
    `politicalIntent: 'NOT_POLITICAL'` (LinkedIn requires the field). Before any customer can stage a
    campaign, the stage form must ask them and pass their answer through. Owner decision.
 2. **Development Tier: every ad account must be added by hand** to the "Be More Swan Adverts" app's
    Account Management list (developer portal → Products → Advertising API → View Ad Accounts), max 5.
    Reads work without it; every write is a 403. Standard Tier is needed before paid opens to customers.
-3. **The stage error box drops LinkedIn's reason.** `stage_paid` returns `detail` (#742), but
+3. ✅ **DONE 2026-11-19 (#770).** Was: **The stage error box drops LinkedIn's reason.** `stage_paid` returns `detail` (#742), but
    `assistant-campaigns.js` `post()` only shows `data.error`.
 4. **A failed creative leaves an orphan PAUSED campaign**, and a retry creates another — campaign
    creation does not search first, unlike the group. Nothing can spend.
-5. **Reconnecting clears the chosen ad account**, so the user has to pick it again.
+5. ✅ **DONE 2026-11-19 (LinkedIn now keeps it, like Meta).** Was: **Reconnecting clears the chosen ad account**, so the user has to pick it again.
 6. **Ads are declared en_US.** LinkedIn's only supported English interface locale; en_GB was
    refused. UK-only delivery comes from the location facet, not the locale.
 7. **The paid surface is unreachable everywhere** while `ADAPTERS` is empty (`anyNetworkAvailable()`),

@@ -245,6 +245,29 @@ check('the reason is cleaned into a sentence (status code and ERROR :: scaffoldi
     );
 });
 
+console.log('\n──── the ad-category declaration is the advertiser\'s ────');
+
+check('stage_paid refuses without the declaration, refuses special categories, and records who declared', () => {
+    const camp = code(read('netlify/functions/campaigns.ts'));
+    assert.ok(camp.includes("if (declaration === 'special') {"), 'special categories not refused');
+    assert.ok(camp.includes("if (declaration !== 'none') {"), 'missing declaration not refused');
+    assert.ok(camp.indexOf("if (declaration !== 'none') {") < camp.indexOf('await adapter.stageCampaign('), 'declaration checked after the network call');
+    assert.ok(camp.includes("actionType: 'campaign_paid_staged'") && camp.includes("adCategoryDeclaration: 'none',") && camp.includes('stagedByUserId: userId'));
+});
+
+check('the form asks for the declaration and only sends it when ticked', () => {
+    const ui = read('src/components/assistant-campaigns.js');
+    assert.ok(ui.includes('data-cmp-paid-declare='), 'no declaration box');
+    assert.ok(ui.indexOf('[data-cmp-paid-declare="${id}"]') < ui.indexOf("adCategoryDeclaration: 'none',"), 'sent before it is checked');
+});
+
+check('a LinkedIn reconnect keeps the chosen account, even when the listing fails', () => {
+    const cb = code(read('netlify/functions/linkedin-ads-oauth-callback.ts'));
+    assert.ok(cb.includes('const accountList = accounts ?? prevAccounts;'));
+    assert.ok(cb.includes('selectedAccountUrn: keepAccount,'));
+    assert.ok(!cb.includes('selectedAccountUrn: null as string | null'), 'reconnect still wipes the choice');
+});
+
 // ── A mocked end-to-end stage. Async, so it runs in main() (the runner is CJS: no top-level await).
 async function main(): Promise<void> {
     const name = 'stageCampaign: campaign PAUSED first, then ad set, creative, ad — ids read from bodies, token never in a URL';

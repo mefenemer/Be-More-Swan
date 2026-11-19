@@ -148,9 +148,9 @@ export function metaCampaignBody(name: string): Record<string, unknown> {
         // Clicks to a tracked link are what we measure, so traffic is the honest objective.
         objective: 'OUTCOME_TRAFFIC',
         status: 'PAUSED',
-        // Required, and a declaration on the advertiser's behalf: none of housing, credit,
-        // employment, social issues/elections/politics. Same follow-up as LinkedIn's politicalIntent
-        // — before customers stage campaigns the stage form must ask (plan §9.10).
+        // Required. The ADVERTISER's answer, not ours: stage_paid only reaches here when the person
+        // staging ticked that the adverts are none of housing, credit/financial, employment, or
+        // social issues/elections/politics (adCategoryDeclaration) — special categories are refused.
         special_ad_categories: [],
         // Required when the budget lives on the ad set rather than the campaign.
         is_adset_budget_sharing_enabled: false,

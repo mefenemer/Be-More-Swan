@@ -1419,6 +1419,26 @@ export default withLambda(async (event) => {
             maxCostPerOutcomeGbp = String(ceiling);
         }
 
+        // ⚠️ THE ADVERTISER'S OWN DECLARATION, not ours. Both networks require one on every campaign
+        // (LinkedIn `politicalIntent`, Meta `special_ad_categories`). Until 2026-11-19 we sent "none"
+        // on the customer's behalf; now the person staging must tick that it is true. Political /
+        // social-issue / housing / employment / credit adverts need each platform's own
+        // authorisation and restricted targeting, which we do not support, so they are refused here
+        // with a sentence rather than mis-declared.
+        const declaration = String(body.adCategoryDeclaration ?? '');
+        if (declaration === 'special') {
+            return json(400, {
+                error: `Adverts about politics, elections, social issues, housing, employment, credit or financial services have extra rules on ${networkLabel}, and we cannot set those up for you yet. Create this one directly in ${network === 'meta' ? 'Meta Ads Manager' : 'LinkedIn Campaign Manager'}.`,
+                code: 'special_ad_category',
+            });
+        }
+        if (declaration !== 'none') {
+            return json(400, {
+                error: 'Confirm what these adverts are about before staging them.',
+                code: 'declaration_required',
+            });
+        }
+
         const rawVariants = Array.isArray(body.variants) ? body.variants : [];
         if (rawVariants.length < 1 || rawVariants.length > 3) {
             return json(400, { error: 'Stage between one and three ad variants.' });
@@ -1583,6 +1603,24 @@ export default withLambda(async (event) => {
             return json(500, {
                 error: `The campaign was created on ${networkLabel} but we could not record it here. It is paused and cannot spend. Please contact support with this campaign id.`,
             });
+        }
+
+        // The declaration is a statement the PERSON made, sent to the network in their name — so who
+        // made it, when, and for which campaign is kept permanently.
+        try {
+            await db.insert(auditLogs).values({
+                actionType: 'campaign_paid_staged',
+                resourceType: 'campaigns',
+                resourceId: String(campaign.id),
+                newState: {
+                    organisationId: orgId, stagedByUserId: userId, network,
+                    externalCampaignId: staged.externalCampaignId,
+                    adCategoryDeclaration: 'none',
+                },
+            });
+        } catch (err) {
+            // The campaign is staged and recorded; a lost audit row must not report failure for it.
+            console.error(`[campaigns] stage_paid audit row failed (campaign ${campaign.id}): ${err instanceof Error ? err.message : String(err)}`);
         }
 
         return json(200, {
