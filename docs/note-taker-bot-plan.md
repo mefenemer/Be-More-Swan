@@ -100,7 +100,7 @@ The help article says each of these in plain words. The Note Taker's live status
      - **The call:** about 1.1 minutes in the call, then the host ended it.
      - **Transcript:** ready **at once** when the bot finished. The streaming transcript needs no post-call wait. 94 words in 1 block, all under the host's Meet display name, with no unlabelled lines. The words read accurately, including three spoken tasks.
      - **Clean-up:** Recall's copy of the media was deleted (`delete_media` returned 2xx).
-     - ⚠️ **One speaker label for what sounded like two voices.** Names come from Meet participants, so two people sharing one device show as one speaker. To check: a second person on a **separate** device should get their own name.
+     - **Speaker labels:** correct. The host was the only participant, so one label is right. Any other voice was someone in the same room on the host's device, and that is always one speaker, because names come from Meet participants. Still to check: a second participant on a **separate** device should get their own name. The help article should say "everyone in one room shares one name".
      - **Not yet checked:** the pinned chat notice (look in the call), and running this transcript through the minutes writer.
 1. **Legal and copy first.**
    - Add Recall.ai to the Trust page sub-processors (with ElevenLabs, if it isn't added yet).
