@@ -14,7 +14,7 @@
 //
 // PURE. Tested in tests/video-chapters.test.ts.
 
-import type { Scene } from './storyboard';
+import { isLongLength, type Scene } from './storyboard';
 import { sceneTimes, type SceneTime } from './video-notes';
 
 export interface Chapter {
@@ -68,9 +68,11 @@ export function defaultChapterTitle(scene: SceneLike): string {
 
 /**
  * The video's chapters: consecutive scenes that share a beat, placed by the timeline's scene times.
- * Scenes with no time (an old timeline) are skipped. `titles` = the owner's names, by first scene id. Pure.
+ * Scenes with no time (an old timeline) are skipped. `titles` = the owner's names, by first scene id.
+ * `everyScene`: a long video (2, 5 or 10 minutes, Phase 4b) is planned in chapters, one topic a scene, mostly
+ * all "value" — grouped by beat, three of staging project 48's seven chapters became one. There every scene is a chapter. Pure.
  */
-export function videoChapters(scenes: SceneLike[], times: SceneTime[], titles?: Record<string, unknown> | null): Chapter[] {
+export function videoChapters(scenes: SceneLike[], times: SceneTime[], titles?: Record<string, unknown> | null, everyScene = false): Chapter[] {
     if (!scenes.length || !times.length) return [];
     const byId = new Map(scenes.map((s, i) => [s.id, { s, n: i + 1 }]));
     const out: Chapter[] = [];
@@ -79,7 +81,7 @@ export function videoChapters(scenes: SceneLike[], times: SceneTime[], titles?: 
         const hit = byId.get(t.sceneId);
         if (!hit) continue;
         const prev = out[out.length - 1];
-        if (prev && hit.s.beat === lastBeat) {
+        if (prev && !everyScene && hit.s.beat === lastBeat) {
             prev.endS = t.endS;
             prev.scenes.push(hit.n);
             continue;
@@ -176,7 +178,7 @@ export function chaptersFor(row: { timeline: unknown; brief: unknown; storyboard
     const tl = row.timeline as ({ durationS?: number; chapterTitles?: Record<string, string> } & Parameters<typeof sceneTimes>[0]) | null;
     const scenes = (row.storyboard as { scenes?: SceneLike[] } | null)?.scenes;
     if (!tl || !scenes?.length) return { chapters: [], youtubeChapters: null, chaptersWhyNot: null };
-    const chapters = videoChapters(scenes, sceneTimes(tl), tl.chapterTitles);
+    const chapters = videoChapters(scenes, sceneTimes(tl), tl.chapterTitles, isLongLength((row.brief as { lengthS?: number } | null)?.lengthS));
     const lines = youtubeChapterLines(chapters, durationS ?? tl.durationS ?? null);
     const wide = ((row.brief as { shape?: string } | null)?.shape ?? '9:16') === '16:9' || (tl.durationS ?? 0) > 180;
     return { chapters, youtubeChapters: lines && wide ? lines : null, chaptersWhyNot: !lines ? 'short' : !wide ? 'not_wide' : null };

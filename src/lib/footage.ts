@@ -542,6 +542,23 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         }
         return c;
     });
+    // Chapters of one take (Phase 4b): snapping both ends to whole sentences can carry a scene's end past where
+    // the next scene starts, and the sentence between plays twice (staging project 48, 2026-11-18: "Next, the
+    // plan." at the end of one chapter and the start of the next). The later scene keeps it — it opens the topic.
+    // Compared with the previous scene of the SAME video, even with a card or stock between them; only when the
+    // later scene runs on past the earlier one's end (inside it, trimming would drop speech heard nowhere else).
+    if (keepsOwnSound(brief)) {
+        const lastOf = new Map<number, Scene>();
+        for (const b of scenes) {
+            if (b.source !== 'own_video' || b.assetId == null || b.inS == null || b.outS == null) continue;
+            const a = lastOf.get(b.assetId);
+            if (a && a.inS != null && a.outS != null && a.outS > b.inS && a.outS <= b.outS && b.inS - a.inS >= MIN_PIECE_S) {
+                a.outS = b.inS;
+                a.targetS = round1(a.outS - a.inS);
+            }
+            lastOf.set(b.assetId, b);
+        }
+    }
     const on = keepsOwnSound(brief) && brief.tighten !== false;
     // Words the owner struck out are cut in their own sound whether or not tightening is on.
     const anyStruck = keepsOwnSound(brief) && scenes.some((s) => s.cutWords?.length);
