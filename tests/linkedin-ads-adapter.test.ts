@@ -278,7 +278,9 @@ check('linkedInErrorDetail names the status, message and field LinkedIn gives', 
 
 check('stage_paid returns LinkedIn\'s reason and logs it as a string', () => {
     const camp = read('netlify/functions/campaigns.ts');
-    assert.ok(camp.includes('const detail = linkedInErrorDetail(err) ?? metaErrorDetail(err) ?? (err instanceof Error ? err.message.slice(0, 400) : null);'));
+    assert.ok(camp.includes('const detail = linkedInErrorDetail(err) ?? metaErrorDetail(err) ?? ownSentence;'));
+    // A programming error never reaches the customer as a "reason".
+    assert.ok(camp.includes('const ownSentence = err instanceof Error && err.constructor === Error ? err.message.slice(0, 400) : null;'));
     // Never "nothing was created" — a campaign may exist, paused (review on #747).
     assert.match(camp, /error: `\$\{networkLabel\} did not finish setting up the campaign\. Nothing is running and nothing has been spent\.`,\s*\n\s*detail,/);
 });

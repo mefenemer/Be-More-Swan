@@ -220,6 +220,31 @@ check('the panel switches network, and stage/upload/approve follow it', () => {
     assert.ok(/await load\(\);\s*\n(\s*\/\/.*\n)*\s*if \(state\.paid && state\.paid\.meta && state\.paid\.meta\.connected && !state\.paid\.meta\.ready\) loadMetaAds\(\);/.test(ui), 'partial Meta save leaves the box stuck');
 });
 
+console.log('\n──── the error box shows the platform\'s reason ────');
+
+check('post() carries the server\'s detail into the message the panel shows', () => {
+    const ui = read('src/components/assistant-campaigns.js');
+    const post = ui.slice(ui.indexOf('async function post(payload)'), ui.indexOf('async function load()'));
+    assert.ok(post.includes('withPlatformReason(data.error ||') && post.includes('data.detail'), 'post() drops detail');
+    assert.ok(ui.includes('withPlatformReason(d.error ||'), 'image upload does not use the same wording');
+});
+
+check('the reason is cleaned into a sentence (status code and ERROR :: scaffolding removed)', () => {
+    const ui = read('src/components/assistant-campaigns.js');
+    const src = ui.slice(ui.indexOf('function withPlatformReason('), ui.indexOf('async function load()'));
+    // eslint-disable-next-line no-new-func
+    const withPlatformReason = new Function(`${src}; return withPlatformReason;`)();
+    assert.equal(withPlatformReason('Did not finish.', null), 'Did not finish.');
+    assert.equal(
+        withPlatformReason('LinkedIn did not finish.', '422: ERROR :: /campaignGroup :: Invalid Urn format.\nERROR :: /politicalIntent :: field is required\n'),
+        'LinkedIn did not finish. Reason given: /campaignGroup: Invalid Urn format. · /politicalIntent: field is required',
+    );
+    assert.equal(
+        withPlatformReason('Meta did not finish.', '400: Invalid parameter (code 100/1487390) Pick a page'),
+        'Meta did not finish. Reason given: Invalid parameter (code 100/1487390) Pick a page',
+    );
+});
+
 // ── A mocked end-to-end stage. Async, so it runs in main() (the runner is CJS: no top-level await).
 async function main(): Promise<void> {
     const name = 'stageCampaign: campaign PAUSED first, then ad set, creative, ad — ids read from bodies, token never in a URL';

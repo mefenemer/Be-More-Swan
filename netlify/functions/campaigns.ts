@@ -1528,7 +1528,11 @@ export default withLambda(async (event) => {
             // reason is safe to show and is the only way anyone can act on it.
             // Our own adapter errors are sentences we wrote — safe to show, and the only clue when
             // LinkedIn accepted the call and something after it failed (2026-11-18: detail was null).
-            const detail = linkedInErrorDetail(err) ?? metaErrorDetail(err) ?? (err instanceof Error ? err.message.slice(0, 400) : null);
+            // ⚠️ Only OUR adapter sentences (plain Error) fall through to the customer. A programming
+            // error (TypeError "Cannot read properties of undefined…") is logged, never shown as the
+            // platform's "reason" (review on #770).
+            const ownSentence = err instanceof Error && err.constructor === Error ? err.message.slice(0, 400) : null;
+            const detail = linkedInErrorDetail(err) ?? metaErrorDetail(err) ?? ownSentence;
             console.error(`[campaigns] stage_paid failed at the network (campaign ${campaign.id}): ${detail ?? String(err)}`);
             return json(502, {
                 // A campaign group may already exist (it is created first, and found again on retry),
