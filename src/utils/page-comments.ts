@@ -169,7 +169,6 @@ export async function syncCommentsForConnection(
                 commentUrn: c.commentUrn,
                 objectUrn: c.objectUrn ?? post.platformPostId,
                 authorUrn: c.actorUrn,
-                authorName: c.actorName,
                 body: c.text,
                 commentedAt: c.createdAt,
             }))).onConflictDoNothing({ target: [pageComments.connectionId, pageComments.commentUrn] }).returning({ id: pageComments.id });
@@ -285,7 +284,9 @@ export async function syncAssistantComments(db: Db, organisationId: number, assi
 
 export interface CommentView {
     id: number;
-    authorName: string;
+    /** Who, as far as we may say: 'A LinkedIn Page' for a company, else 'Someone'. LinkedIn gives
+     *  this app no commenter names (linkedin-page-api.ts fetchPostComments) — Open on LinkedIn shows who. */
+    authorLabel: string;
     body: string;
     commentedAt: string | null;
     postId: number | null;
@@ -305,7 +306,7 @@ type CommentRow = typeof pageComments.$inferSelect;
 export function commentView(r: CommentRow, postCaption: string | null = null): CommentView {
     return {
         id: r.id,
-        authorName: r.authorName?.trim() || (r.authorUrn?.startsWith('urn:li:organization:') ? 'A LinkedIn Page' : 'A LinkedIn member'),
+        authorLabel: r.authorUrn?.startsWith('urn:li:organization:') ? 'A LinkedIn Page' : 'Someone',
         body: r.body,
         commentedAt: toIso(r.commentedAt) ?? toIso(r.createdAt),
         postId: r.scheduledPostId,
@@ -414,7 +415,7 @@ export const REPLY_RULES = `How to write the reply:
 - You are replying AS the business's LinkedIn Company Page, under its own post, to the person who commented. Write in the first person plural ("we"), in the brand's voice.
 - Answer what they actually said. Thank them only when a thank-you fits — never open every reply the same way.
 - One to three short sentences. Plain text: no markdown, no hashtags, no emoji unless the comment used them.
-- Use their first name at most once, and only if it is given below.
+- You don't know the commenter's name — never guess one or invent a greeting with a name.
 - Never invent facts, prices, dates, offers or promises that are not in the business details. If they ask something the details don't answer, invite them to message the Page or get in touch rather than guessing.
 - If the comment is a complaint, acknowledge it calmly and offer to take it to a private conversation. Never argue.
 - If the comment is spam, abusive or a sales pitch, reply with an empty string — the person will dismiss it.`;
@@ -441,11 +442,9 @@ export async function draftReply(
         roleKeyOfAssistant(db, assistantId),
     ]);
     const modelChoice = await loadRoleModel(db, roleKey ?? 'social_media_manager');
-    const firstName = row.c.authorName?.trim().split(/\s+/)[0] || null;
     const payload = {
         post: (row.caption || '').slice(0, 3000),
         comment: row.c.body.slice(0, 2000),
-        commenter_first_name: firstName,
         current_draft: row.c.draftReply || null,
     };
     let reply: string | null = null;
@@ -564,7 +563,7 @@ export async function buildCommentsChatBlock(db: Db, organisationId: number, ass
     try {
         const { comments, counts, hasPageConnection: connected } = await listComments(db, organisationId, assistantId);
         const fresh = comments.filter((c) => c.status === 'new').slice(0, CHAT_SNAPSHOT_COMMENTS);
-        const lines = fresh.map((c) => `#${c.id} · ${c.authorName} · "${c.body.replace(/\s+/g, ' ').slice(0, 140)}"${c.postExcerpt ? ` · on: "${c.postExcerpt.slice(0, 60)}"` : ''}${c.draftReply ? ' · reply drafted' : ''}`);
+        const lines = fresh.map((c) => `#${c.id} · ${c.authorLabel} · "${c.body.replace(/\s+/g, ' ').slice(0, 140)}"${c.postExcerpt ? ` · on: "${c.postExcerpt.slice(0, 60)}"` : ''}${c.draftReply ? ' · reply drafted' : ''}`);
         return `YOUR COMMENTS TAB — comments people left on the posts you published to the business's LinkedIn Company Page, fetched every few hours (the tab's "Check for new comments" button fetches now). ${connected ? 'A Company Page is connected.' : 'No LinkedIn Company Page is connected, so no comments are fetched: to get them, the user reconnects LinkedIn in Connections and chooses "A Company Page". Comments on a personal LinkedIn profile, Facebook, Instagram or X are not fetched.'}
 Comments: ${counts.new} new, ${counts.replied} replied, ${counts.dismissed} dismissed.${fresh.length ? `\nNew comments${counts.new > fresh.length ? ` (the ${fresh.length} most recent of ${counts.new})` : ''}:\n${lines.join('\n')}` : ''}
 

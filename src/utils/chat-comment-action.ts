@@ -43,7 +43,7 @@ export interface CommentActionCard {
     action: CommentAction;
     assistantId: number;
     commentId: number;
-    authorName: string;
+    authorLabel: string;
     body: string;
     postExcerpt: string | null;
     linkedInUrl: string | null;
@@ -68,7 +68,7 @@ export async function resolveCommentActionProposal(
         else if (req.action === 'post_reply' && !c.draftReply) blocked = 'There’s no reply to post yet — ask me to draft one first.';
         return {
             type: COMMENT_ACTION_PROPOSAL_TYPE, action: req.action, assistantId, commentId: c.id,
-            authorName: c.authorName, body: c.body, postExcerpt: c.postExcerpt, linkedInUrl: c.linkedInUrl,
+            authorLabel: c.authorLabel, body: c.body, postExcerpt: c.postExcerpt, linkedInUrl: c.linkedInUrl,
             draftReply: c.draftReply, instruction: req.instruction, maxReplyChars: MAX_REPLY_CHARS, blocked,
         };
     } catch (err) {

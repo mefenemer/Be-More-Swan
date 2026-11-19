@@ -146,8 +146,6 @@ export interface LinkedInComment {
     objectUrn: string | null;
     /** urn:li:person:… or urn:li:organization:… */
     actorUrn: string | null;
-    /** The person's name when LinkedIn expanded it (actor~), else null. */
-    actorName: string | null;
     text: string;
     createdAt: Date | null;
     /** Set on a reply to another comment. */
@@ -163,16 +161,11 @@ export function parseComment(el: unknown): LinkedInComment | null {
     const text = typeof e.message?.text === 'string' ? e.message.text : '';
     if (!commentUrn || !text.trim()) return null;
     const actorUrn = typeof e.actor === 'string' ? e.actor : (typeof e.created?.actor === 'string' ? e.created.actor : null);
-    const x = e['actor~'];
-    const first = typeof x?.localizedFirstName === 'string' ? x.localizedFirstName : '';
-    const last = typeof x?.localizedLastName === 'string' ? x.localizedLastName : '';
-    const name = `${first} ${last}`.trim() || (typeof x?.localizedName === 'string' ? x.localizedName : '');
     const time = num(e.created?.time);
     return {
         commentUrn,
         objectUrn: typeof e.object === 'string' ? e.object : null,
         actorUrn,
-        actorName: name || null,
         text: text.slice(0, 4000),
         createdAt: time != null ? new Date(time) : null,
         parentCommentUrn: typeof e.parentComment === 'string' ? e.parentComment : null,
@@ -185,8 +178,7 @@ export function parseCommentsResponse(body: unknown): LinkedInComment[] {
     return Array.isArray(elements) ? elements.map(parseComment).filter((c): c is LinkedInComment => !!c) : [];
 }
 
-/** The people's names, asked for as a projection. LinkedIn may refuse it — then we ask without. */
-const NAME_PROJECTION = 'projection=(elements*(*,actor~(localizedFirstName,localizedLastName,localizedName)))';
+/** Comments read per post per call — LinkedIn's page size for socialActions comments. */
 const COMMENTS_PAGE = 50;
 
 /** Why a comments read came back empty-handed — the caller reports it (the ingest's result carries
@@ -198,18 +190,18 @@ export type ReadFailure = { status: number; message: string };
  * caller must not read null as "no comments" — and `onFail` then says why. A 404 means the post is
  * gone (deleted on LinkedIn): that is an empty list, not a failure, so a deleted post doesn't keep
  * the tab warning about a refused read. Never throws.
+ *
+ * One plain call, no `actor~` name projection: LinkedIn gives a Community Management app no
+ * documented way to name a commenter (decoration is deprecated in the versioned APIs and the
+ * People API is restricted), its terms bar storing other members' profile data, and the refused
+ * projection cost a second call per post against the Development tier's 500 a day. The tab says
+ * "Someone" and links to the comment on LinkedIn, where the Page admin can see who it was.
  */
 export async function fetchPostComments(token: string, postUrn: string, deadline?: number, onFail?: (f: ReadFailure) => void): Promise<LinkedInComment[] | null> {
-    const base = `${API}/socialActions/${restliEncode(postUrn)}/comments?start=0&count=${COMMENTS_PAGE}`;
-    const named = await getJsonResult(token, `${base}&${NAME_PROJECTION}`, deadline);
-    if (named.ok) return parseCommentsResponse(named.body);
-    if (named.status === 404) return [];
-    // Past the deadline, a half-second retry would rarely land — give up and let the caller defer the post.
-    if (deadline && Date.now() > deadline) { onFail?.({ status: named.status, message: named.message }); return null; }
-    const plain = await getJsonResult(token, base, deadline);
-    if (plain.ok) return parseCommentsResponse(plain.body);
-    if (plain.status === 404) return [];
-    onFail?.({ status: plain.status, message: plain.message });
+    const r = await getJsonResult(token, `${API}/socialActions/${restliEncode(postUrn)}/comments?start=0&count=${COMMENTS_PAGE}`, deadline);
+    if (r.ok) return parseCommentsResponse(r.body);
+    if (r.status === 404) return [];
+    onFail?.({ status: r.status, message: r.message });
     return null;
 }
 

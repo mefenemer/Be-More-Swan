@@ -6522,7 +6522,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Comment Action Proposal Card (Social Media chat) ──────────────
   // { type: 'comment_action_proposal', action: 'draft'|'post_reply'|'dismiss', assistantId, commentId,
-  //   authorName, body, postExcerpt, linkedInUrl, draftReply, instruction, maxReplyChars, blocked, settled? }
+  //   authorLabel, body, postExcerpt, linkedInUrl, draftReply, instruction, maxReplyChars, blocked, settled? }
   //
   // The Comments tab's buttons, from chat. Every fact comes from the page_comments row
   // (src/utils/chat-comment-action.ts). The click dispatches `comment:action`; chat-session.js calls
@@ -6547,7 +6547,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
-      <p class="text-xs text-gray-500 mt-2">#${esc(String(ui.commentId))} · LinkedIn · ${esc(ui.authorName || 'A LinkedIn member')}</p>
+      <p class="text-xs text-gray-500 mt-2">#${esc(String(ui.commentId))} · LinkedIn · ${esc(ui.authorLabel || 'Someone')} commented</p>
       <div class="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(ui.body || '')}</p></div>
       ${ui.postExcerpt ? `<p class="text-xs text-gray-500 mt-1 break-words">On your post: “${esc(ui.postExcerpt)}”</p>` : ''}
       ${ui.linkedInUrl ? `<a href="${esc(ui.linkedInUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs underline text-gray-700">Open on LinkedIn</a>` : ''}

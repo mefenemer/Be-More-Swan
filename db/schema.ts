@@ -7170,9 +7170,9 @@ export const pageComments = pgTable("page_comments", {
   commentUrn: text("comment_urn").notNull(),
   // The post the comment is on — a reply's `object`.
   objectUrn: text("object_urn"),
+  // urn:li:person:… or urn:li:organization:… — never a name: LinkedIn gives this app none, and its terms
+  // bar storing other members' profile data (db/z-page-comments-drop-author-name.sql).
   authorUrn: text("author_urn"),
-  // Null when LinkedIn would not say — the tab says "A LinkedIn member".
-  authorName: text("author_name"),
   body: text("body").notNull(),
   commentedAt: timestamp("commented_at"),
   draftReply: text("draft_reply"),
