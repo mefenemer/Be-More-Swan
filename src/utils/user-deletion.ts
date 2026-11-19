@@ -13,6 +13,7 @@
 // billing, and every later webhook would land on nothing. That case is reported, not guessed at.
 
 import { erasePartnerDataForUser } from './partner-erasure';
+import { withdrawMeetingBots } from './meeting-bot-db';
 import { and, eq, ne, inArray, isNotNull, notInArray, type SQL } from 'drizzle-orm';
 import { users, organisations, userOrganisations, plans } from '../../db/schema';
 
@@ -49,6 +50,10 @@ export async function deleteUserAndSoleOrgs(
     userId: number,
     opts: { onlyIf?: SQL } = {},
 ): Promise<UserDeletionResult> {
+    // Meeting bots still with Recall for the workspaces this deletion will remove are withdrawn FIRST, outside the
+    // transaction (it calls Recall): once the cascade has removed their rows, nothing could match a bot to delete it
+    // (docs/note-taker-bot-plan.md; review of #769). Same fate rule as below. Never throws.
+    await withdrawBotsForDoomedOrgs(db, userId).catch(() => undefined);
     return db.transaction(async (tx: any) => {
         const result: UserDeletionResult = { userDeleted: false, deletedOrgIds: [], keptOrgs: [] };
 
@@ -124,4 +129,23 @@ export async function deleteUserAndSoleOrgs(
 
         return result;
     });
+}
+
+/** The workspaces deleteUserAndSoleOrgs is about to delete (no other member, no live subscription): withdraw their bots. */
+async function withdrawBotsForDoomedOrgs(db: any, userId: number): Promise<void> {
+    const memberships: { orgId: number }[] = await db.select({ orgId: userOrganisations.organisationId })
+        .from(userOrganisations).where(eq(userOrganisations.userId, userId));
+    const [legacy]: { orgId: number | null }[] = await db.select({ orgId: users.organisationId }).from(users).where(eq(users.id, userId)).limit(1);
+    const orgIds = [...new Set([...memberships.map(m => m.orgId), ...(legacy?.orgId ? [legacy.orgId] : [])])];
+    for (const orgId of orgIds) {
+        const others = await db.select({ id: userOrganisations.id }).from(userOrganisations)
+            .where(and(eq(userOrganisations.organisationId, orgId), ne(userOrganisations.userId, userId))).limit(1);
+        const legacyOthers = await db.select({ id: users.id }).from(users)
+            .where(and(eq(users.organisationId, orgId), ne(users.id, userId))).limit(1);
+        const livePlans = await db.select({ id: plans.id }).from(plans).where(and(
+            eq(plans.organisationId, orgId), isNotNull(plans.stripeSubscriptionId), notInArray(plans.status, ENDED_PLAN_STATUSES),
+        )).limit(1);
+        const fate = decideOrgFate({ otherMembers: others.length + legacyOthers.length, hasLiveSubscription: livePlans.length > 0 });
+        if (fate !== 'leave' && fate !== 'keep_billed') await withdrawMeetingBots(db, orgId);
+    }
 }

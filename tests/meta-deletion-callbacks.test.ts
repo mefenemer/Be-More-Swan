@@ -119,7 +119,7 @@ test('facebook revoke deletes the vault secret, not just the row status', () => 
 // ── The writer that makes the join possible ──────────────────────────────────────────────────
 test('meta-oauth persists fbUserId on the connection', () => {
     assert.ok(
-        /const connMetadata = \{[^}]*fbUserId[^}]*\}/.test(metaOauth),
+        /const connMetadata(?:: [^=]+)? = \{[^}]*fbUserId[^}]*\}/.test(metaOauth),
         'without fbUserId on the row, a verified deletion callback can never match it',
     );
     assert.ok(

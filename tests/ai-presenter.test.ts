@@ -111,7 +111,7 @@ check('the flag: off for customers until the Terms notice, and the server never 
 check('the build makes presenter scenes in parallel, charged per second only when made', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes("if (scene.source === 'ai_presenter') return makePresenterScene(i);"));
-    assert.ok(vp.includes("await settle('presenter', VIDEO_CREDIT_COST, !!clip, Math.min("), 'settled as presenter work, only when made');
+    assert.ok(vp.includes("await settle('presenter', VIDEO_CREDIT_COST, made, Math.min("), 'settled as presenter work, only when made (once, Phase 4c-2)');
     assert.ok(vp.includes("storyboard.scenes[i].source === 'ai_video' || storyboard.scenes[i].source === 'ai_presenter'"), 'alongside the AI clips');
     assert.ok(vp.includes('presignR2Get(presenterFaceKey(p.id, args.shape), 3600)') && vp.includes('falSubmit(PRESENTER_MODEL, { image_url: imageUrl, audio_url: audioUrl })'));
     assert.ok(vp.includes("renderParams: { kind: 'ai_presenter', presenterId: p.id, aiStyle: 'realistic' }"));
@@ -148,13 +148,13 @@ check('review of #721: a new voiceover remakes every presenter clip, and the cos
     assert.strictEqual(buildTasks(sb, brief({ presenter: { id: 'amara' } }), costs, { sceneAssets: { s1: 9 }, voiceoverAssetId: null } as never), 6 + DEFAULT_TASK_WEIGHTS.ai_voiceover,
         'a kept clip with the voiceover to be made again is counted');
     const vp = read('src/utils/video-producer.ts');
-    assert.ok(vp.includes("for (const s of storyboard.scenes) if (s.source === 'ai_presenter') delete done[s.id];"));
+    assert.ok(vp.includes("for (const s of storyboard.scenes) if (s.source === 'ai_presenter') dropPresenterScene(done, s.id);"), 'its pieces too (Phase 4c-2)');
 });
 
 check('review of #721: the clip covers the last scene, the charge never exceeds the cost shown, other shapes remake it, the voice\'s language is followed', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes('const want = Math.ceil((args.endS - w.startS + PRESENTER_AUDIO_TAIL_S) * rate);'), 'padded with silence past the voice file');
-    assert.ok(vp.includes("s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'ai_presenter').map((s) => done[s.id])"), 'its real length is known to the timeline');
+    assert.ok(vp.includes(".flatMap((s) => [done[s.id], ...presenterPieceKeys(done, s.id).map((k) => done[k])]).filter(Boolean);"), 'its real length (and every piece\'s) is known to the timeline');
     assert.ok(vp.includes('Math.min(presenterTasks(durations[i], presenterPerSecond), presenterTasks(scene.targetS, presenterPerSecond))'));
     const sb = { title: 't', caption: 'c', scenes: [{ id: 's1', beat: 'hook', voiceover: 'Hi', source: 'ai_presenter', targetS: 3 }, { id: 's2', beat: 'value', voiceover: 'x', source: 'stock_video', targetS: 3 }] } as unknown as Parameters<typeof assetsForShape>[0];
     assert.deepStrictEqual(assetsForShape(sb, { s1: 9, s2: 10 }), { s2: 10 }, 'a presenter clip is made again for the new shape');
@@ -169,7 +169,8 @@ check('second review of #721: no own voice on a presenter video, moved lines rem
     assert.ok(read('src/components/assistant-videos.js').includes('if (v.brief.presenter) return `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Presenter:</span>'));
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes("(sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))"));
-    assert.ok(vp.includes('export const PRESENTER_ATTEMPT_MS = 8 * 60 * 1000;'));
+    // The wait fits the build: since Phase 4c-2 a piece may outlive one run (it hands over); a piece is abandoned after 45 minutes.
+    assert.ok(vp.includes('export const PRESENTER_PIECE_MAX_MS = 45 * 60 * 1000;') && vp.includes('export const BUILD_RUN_BUDGET_MS = 11 * 60 * 1000;'));
 });
 
 check('third review of #721: never a face on another gender\'s voice; three presenter scenes when the last isn\'t one', () => {

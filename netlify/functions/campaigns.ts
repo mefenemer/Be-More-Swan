@@ -84,8 +84,13 @@ import { buildTargetingCriteria } from '../../src/utils/ad-networks/linkedin';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
-import { anyNetworkAvailable, linkedInAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
+import { anyNetworkAvailable, linkedInAdapter, metaAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
+import { adapterForCampaign } from '../../src/utils/ad-networks/campaign-adapter';
 import { linkedInErrorDetail } from '../../src/utils/ad-networks/linkedin';
+import { buildMetaTargeting, metaErrorDetail } from '../../src/utils/ad-networks/meta';
+import {
+    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsCreateProblem, metaAdsNeedsReconnect,
+} from '../../src/utils/meta-ads-connection';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
@@ -272,6 +277,9 @@ export default withLambda(async (event) => {
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
+                // Which network a paid campaign was staged on — the panel names it and the approve
+                // button speaks for it. NULL on organic campaigns.
+                adNetwork: campaigns.adNetwork,
             })
             .from(campaigns)
             .leftJoin(campaignBudgets, eq(campaignBudgets.campaignId, campaigns.id))
@@ -410,15 +418,38 @@ export default withLambda(async (event) => {
         // Creating needs w_organization_social; an older connection must reconnect first. Shown as
         // not-ready on the surface only — the optimiser keeps using assessAdsReadiness alone.
         const adsScope = adsReadiness?.ready ? adsScopeProblem(adsConnection) : null;
+
+        // ⚠️ WHERE THE PAID SURFACE IS REACHABLE. Production: only networks in the registry, which
+        // is empty — so every production workspace still sees the locked state naming the blocker.
+        // Anywhere else (staging, previews) the development-only LinkedIn and Meta adapters can be
+        // used, and the surface offers them; before 2026-11-19 it was locked here too, so the
+        // proven paid path could only be driven by calling the endpoints by hand.
+        const devAdaptersAllowed = !isProductionDeploy(event.headers as Record<string, string | undefined>);
+        const offeredNetworks: string[] = devAdaptersAllowed
+            ? ['linkedin', 'meta']
+            : networkAvailability().filter((n) => n.available).map((n) => n.network);
+
+        const metaConnection = featureEnabled ? await getMetaAdsConnection(db, orgId) : null;
+        const metaReadiness = featureEnabled ? assessMetaAdsReadiness(metaConnection) : null;
+        const metaCreate = metaReadiness?.ready ? metaAdsCreateProblem(metaConnection) : null;
+
         const paid = {
             featureEnabled,
             networks: networkAvailability(),
-            anyNetwork: anyNetworkAvailable(),
+            anyNetwork: anyNetworkAvailable() || offeredNetworks.length > 0,
+            offeredNetworks,
             adsReady: (adsReadiness?.ready ?? false) && !adsScope,
             adsReason: adsReadiness && !adsReadiness.ready ? adsReadiness.reason : adsScope,
             // The fix is the OAuth flow again, so the surface offers the connect link.
             needsReconnect: adsNeedsReconnect(adsConnection),
             selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
+            // Meta, beside LinkedIn's fields above (kept as they were for older clients).
+            meta: {
+                ready: (metaReadiness?.ready ?? false) && !metaCreate,
+                reason: metaReadiness && !metaReadiness.ready ? metaReadiness.reason : metaCreate,
+                needsReconnect: metaAdsNeedsReconnect(metaConnection),
+                connected: !!metaConnection,
+            },
         };
 
         // What "Add work" may offer. Only the assistants this workspace has actually hired — an
@@ -1325,21 +1356,42 @@ export default withLambda(async (event) => {
             return json(400, { error: 'Pause this campaign before adding advertising to it.' });
         }
 
-        // Gate 2 — a connected ad account the user has actually chosen.
-        const stageConnection = await getAdsConnection(db, orgId);
-        const readiness = assessAdsReadiness(stageConnection);
-        if (!readiness.ready) return json(400, { error: readiness.reason });
-        const stageScopeProblem = adsScopeProblem(stageConnection);
-        if (stageScopeProblem) return json(400, { error: stageScopeProblem, code: 'ads_reconnect' });
-        const conn = readiness.connection;
+        // Which network. LinkedIn unless the caller says Meta — LinkedIn was the only network
+        // before 2026-11-19, so an older caller that sends nothing keeps its behaviour.
+        const network: 'linkedin' | 'meta' = body.network === 'meta' ? 'meta' : 'linkedin';
+        const networkLabel = network === 'meta' ? 'Meta' : 'LinkedIn';
+
+        // Gate 2 — a connected ad account the user has actually chosen, on that network.
+        let linkedInAccountUrn: string | null = null;
+        let metaAccountId: string | null = null;
+        let metaPageId: string | null = null;
+        let selectedCurrency: string | null;
+        if (network === 'meta') {
+            const metaConnection = await getMetaAdsConnection(db, orgId);
+            const metaReadiness = assessMetaAdsReadiness(metaConnection);
+            if (!metaReadiness.ready) return json(400, { error: metaReadiness.reason });
+            const createProblem = metaAdsCreateProblem(metaConnection);
+            if (createProblem) return json(400, { error: createProblem, code: 'meta_ads_not_ready' });
+            metaAccountId = metaReadiness.connection.selectedAccountId;
+            metaPageId = metaReadiness.connection.selectedPageId;
+            selectedCurrency = metaReadiness.connection.selectedCurrency;
+        } else {
+            const stageConnection = await getAdsConnection(db, orgId);
+            const readiness = assessAdsReadiness(stageConnection);
+            if (!readiness.ready) return json(400, { error: readiness.reason });
+            const stageScopeProblem = adsScopeProblem(stageConnection);
+            if (stageScopeProblem) return json(400, { error: stageScopeProblem, code: 'ads_reconnect' });
+            linkedInAccountUrn = readiness.connection.selectedAccountUrn;
+            selectedCurrency = readiness.connection.selectedCurrency;
+        }
 
         // ⚠️ GBP ONLY, for now, and refused rather than converted. `campaign_budgets.max_spend_gbp`
         // is named for its currency, and writing euros into it would be the same mistake the
         // adapter refuses to make with `costInLocalCurrency`. Converting needs a rate we do not
         // have and would silently misreport every cost-per-outcome figure downstream.
-        if (conn.selectedCurrency !== 'GBP') {
+        if (selectedCurrency !== 'GBP') {
             return json(400, {
-                error: `That LinkedIn ad account bills in ${conn.selectedCurrency}. We can only manage accounts that bill in GBP at the moment.`,
+                error: `That ${networkLabel} ad account bills in ${selectedCurrency}. We can only manage accounts that bill in GBP at the moment.`,
             });
         }
 
@@ -1367,6 +1419,26 @@ export default withLambda(async (event) => {
             maxCostPerOutcomeGbp = String(ceiling);
         }
 
+        // ⚠️ THE ADVERTISER'S OWN DECLARATION, not ours. Both networks require one on every campaign
+        // (LinkedIn `politicalIntent`, Meta `special_ad_categories`). Until 2026-11-19 we sent "none"
+        // on the customer's behalf; now the person staging must tick that it is true. Political /
+        // social-issue / housing / employment / credit adverts need each platform's own
+        // authorisation and restricted targeting, which we do not support, so they are refused here
+        // with a sentence rather than mis-declared.
+        const declaration = String(body.adCategoryDeclaration ?? '');
+        if (declaration === 'special') {
+            return json(400, {
+                error: `Adverts about politics, elections, social issues, housing, employment, credit or financial services have extra rules on ${networkLabel}, and we cannot set those up for you yet. Create this one directly in ${network === 'meta' ? 'Meta Ads Manager' : 'LinkedIn Campaign Manager'}.`,
+                code: 'special_ad_category',
+            });
+        }
+        if (declaration !== 'none') {
+            return json(400, {
+                error: 'Confirm what these adverts are about before staging them.',
+                code: 'declaration_required',
+            });
+        }
+
         const rawVariants = Array.isArray(body.variants) ? body.variants : [];
         if (rawVariants.length < 1 || rawVariants.length > 3) {
             return json(400, { error: 'Stage between one and three ad variants.' });
@@ -1384,12 +1456,15 @@ export default withLambda(async (event) => {
         let targetingCriteria: Record<string, unknown>;
         try {
             const t = (body.targeting && typeof body.targeting === 'object') ? body.targeting as Record<string, string[]> : {};
-            targetingCriteria = buildTargetingCriteria({
-                locations: Array.isArray(t.locations) ? t.locations.slice(0, 20) : [],
-                jobFunctions: Array.isArray(t.jobFunctions) ? t.jobFunctions.slice(0, 20) : [],
-                seniorities: Array.isArray(t.seniorities) ? t.seniorities.slice(0, 20) : [],
-                companySizes: Array.isArray(t.companySizes) ? t.companySizes.slice(0, 20) : [],
-            });
+            targetingCriteria = network === 'meta'
+                // Meta: ISO country codes, e.g. { countries: ['GB'] }.
+                ? buildMetaTargeting({ countries: Array.isArray(t.countries) ? t.countries.slice(0, 25) : [] })
+                : buildTargetingCriteria({
+                    locations: Array.isArray(t.locations) ? t.locations.slice(0, 20) : [],
+                    jobFunctions: Array.isArray(t.jobFunctions) ? t.jobFunctions.slice(0, 20) : [],
+                    seniorities: Array.isArray(t.seniorities) ? t.seniorities.slice(0, 20) : [],
+                    companySizes: Array.isArray(t.companySizes) ? t.companySizes.slice(0, 20) : [],
+                });
         } catch (err) {
             return json(400, { error: err instanceof Error ? err.message : 'Choose where these ads should run.' });
         }
@@ -1416,7 +1491,7 @@ export default withLambda(async (event) => {
         const mediaUrns = rawVariants.map((v: any) => (typeof v?.mediaUrn === 'string' ? v.mediaUrn.trim() : ''));
         if (mediaUrns.some((m: string) => !m)) {
             return json(400, {
-                error: 'LinkedIn adverts need an image, and we cannot upload one for you yet. This is the last piece we are missing — everything else about this campaign is ready.',
+                error: `${networkLabel} adverts need an image. Upload one first and pass its reference with each variant.`,
                 code: 'creative_media_required',
             });
         }
@@ -1424,18 +1499,21 @@ export default withLambda(async (event) => {
         // Gate 3 — an adapter. In production this THROWS: the LinkedIn adapter is Development Tier
         // and registered for development only, so a production caller gets an honest refusal here
         // rather than a half-built campaign.
-        const token = await getAdsToken(db, orgId);
-        if (!token) return json(400, { error: 'The LinkedIn advertising connection needs reconnecting.' });
+        const token = network === 'meta' ? await getMetaAdsToken(db, orgId) : await getAdsToken(db, orgId);
+        if (!token) return json(400, { error: `The ${networkLabel} advertising connection needs reconnecting.` });
         let adapter;
         try {
-            adapter = linkedInAdapter({
-                accessToken: token,
-                accountUrn: conn.selectedAccountUrn!,
-                // ⚠️ No campaignGroupUrn. It used to be passed as '' — LinkedIn REQUIRES a real
-                // group on campaign creation, so every stage would have failed at the first call.
-                // The adapter now resolves one per campaign, idempotently.
-                currencyCode: 'GBP',
-            }, { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) });
+            const env = { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) };
+            adapter = network === 'meta'
+                ? metaAdapter({ accessToken: token, accountId: metaAccountId!, pageId: metaPageId! }, env)
+                : linkedInAdapter({
+                    accessToken: token,
+                    accountUrn: linkedInAccountUrn!,
+                    // ⚠️ No campaignGroupUrn. It used to be passed as '' — LinkedIn REQUIRES a real
+                    // group on campaign creation, so every stage would have failed at the first call.
+                    // The adapter now resolves one per campaign, idempotently.
+                    currencyCode: 'GBP',
+                }, env);
         } catch (err) {
             return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
         }
@@ -1470,12 +1548,18 @@ export default withLambda(async (event) => {
             // reason is safe to show and is the only way anyone can act on it.
             // Our own adapter errors are sentences we wrote — safe to show, and the only clue when
             // LinkedIn accepted the call and something after it failed (2026-11-18: detail was null).
-            const detail = linkedInErrorDetail(err) ?? (err instanceof Error ? err.message.slice(0, 400) : null);
+            // ⚠️ Only OUR adapter sentences (plain Error) fall through to the customer. A programming
+            // error (TypeError "Cannot read properties of undefined…") is logged, never shown as the
+            // platform's "reason" (review on #770).
+            const ownSentence = err instanceof Error && err.constructor === Error ? err.message.slice(0, 400) : null;
+            const detail = linkedInErrorDetail(err) ?? metaErrorDetail(err) ?? ownSentence;
             console.error(`[campaigns] stage_paid failed at the network (campaign ${campaign.id}): ${detail ?? String(err)}`);
             return json(502, {
                 // A campaign group may already exist (it is created first, and found again on retry),
                 // so this does not claim that nothing was created — only that nothing can spend.
-                error: 'LinkedIn would not accept the campaign. No advert was created and nothing has been spent.',
+                // Not "nothing was created": a campaign (and earlier ads) may already exist, paused
+                // (review on #747). What is always true is that nothing is running or spending.
+                error: `${networkLabel} did not finish setting up the campaign. Nothing is running and nothing has been spent.`,
                 detail,
             });
         }
@@ -1487,7 +1571,7 @@ export default withLambda(async (event) => {
         try {
             await db.update(campaigns).set({
                 mode: 'paid',
-                adNetwork: 'linkedin',
+                adNetwork: network,
                 externalCampaignId: staged.externalCampaignId,
                 updatedAt: new Date(),
             }).where(eq(campaigns.id, campaign.id));
@@ -1499,7 +1583,7 @@ export default withLambda(async (event) => {
             await db.insert(adVariants).values(variants.map((v, i) => ({
                 organisationId: orgId,
                 campaignId: campaign.id,
-                network: 'linkedin',
+                network,
                 externalVariantId: staged.externalVariantIds[i] ?? null,
                 headline: v.headline!,
                 body: v.bodyText!,
@@ -1513,12 +1597,30 @@ export default withLambda(async (event) => {
                 status: 'staged',
             })));
         } catch (err) {
-            console.error('[campaigns] stage_paid created a LinkedIn campaign but failed to record it', {
+            console.error(`[campaigns] stage_paid created a ${networkLabel} campaign but failed to record it`, {
                 campaignId: campaign.id, externalCampaignId: staged.externalCampaignId,
             }, err);
             return json(500, {
-                error: 'The campaign was created on LinkedIn but we could not record it here. It is paused and cannot spend. Please contact support with this campaign id.',
+                error: `The campaign was created on ${networkLabel} but we could not record it here. It is paused and cannot spend. Please contact support with this campaign id.`,
             });
+        }
+
+        // The declaration is a statement the PERSON made, sent to the network in their name — so who
+        // made it, when, and for which campaign is kept permanently.
+        try {
+            await db.insert(auditLogs).values({
+                actionType: 'campaign_paid_staged',
+                resourceType: 'campaigns',
+                resourceId: String(campaign.id),
+                newState: {
+                    organisationId: orgId, stagedByUserId: userId, network,
+                    externalCampaignId: staged.externalCampaignId,
+                    adCategoryDeclaration: 'none',
+                },
+            });
+        } catch (err) {
+            // The campaign is staged and recorded; a lost audit row must not report failure for it.
+            console.error(`[campaigns] stage_paid audit row failed (campaign ${campaign.id}): ${err instanceof Error ? err.message : String(err)}`);
         }
 
         return json(200, {
@@ -1527,7 +1629,7 @@ export default withLambda(async (event) => {
             variantsStaged: variants.length,
             // Said out loud so no caller has to infer it.
             status: 'paused',
-            message: 'Staged on LinkedIn and paused. Nothing will be spent until you approve it.',
+            message: `Staged on ${networkLabel} and paused. Nothing will be spent until you approve it.`,
         });
     }
 
@@ -1588,24 +1690,15 @@ export default withLambda(async (event) => {
             return json(400, { error: 'There are no staged ads on this campaign to launch.' });
         }
 
-        const readiness = assessAdsReadiness(await getAdsConnection(db, orgId));
-        if (!readiness.ready) return json(400, { error: readiness.reason });
+        // The adapter for the network this campaign was staged on (LinkedIn for older rows).
+        const resolved = await adapterForCampaign(db, orgId, campaign.adNetwork, {
+            isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>),
+        });
+        if (!resolved.ok) return json(400, { error: resolved.reason });
+        const adapter = resolved.adapter;
+        const approveLabel = resolved.label;
 
-        const token = await getAdsToken(db, orgId);
-        if (!token) return json(400, { error: 'The LinkedIn advertising connection needs reconnecting.' });
-
-        let adapter;
-        try {
-            adapter = linkedInAdapter({
-                accessToken: token,
-                accountUrn: readiness.connection.selectedAccountUrn!,
-                currencyCode: 'GBP',
-            }, { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) });
-        } catch (err) {
-            return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
-        }
-
-        // Property 2. Ask LinkedIn, now, whether we can still control this campaign.
+        // Property 2. Ask the network, now, whether we can still control this campaign.
         // A campaign we cannot stop is a campaign we must not start.
         const control = await adapter.checkControl(campaign.externalCampaignId);
         if (!control.ok) {
@@ -1614,7 +1707,7 @@ export default withLambda(async (event) => {
                 controlCheckedAt: new Date(), updatedAt: new Date(),
             }).where(eq(campaigns.id, campaign.id));
             return json(400, {
-                error: 'We cannot reach your LinkedIn ad account, so we will not start this campaign — we would not be able to stop it. Reconnect and try again.',
+                error: `We cannot reach your ${approveLabel} ad account, so we will not start this campaign — we would not be able to stop it. Reconnect and try again.`,
             });
         }
 
@@ -1653,7 +1746,7 @@ export default withLambda(async (event) => {
         try {
             await adapter.activateCampaign(campaign.externalCampaignId);
         } catch (err) {
-            console.error('[campaigns] approve_launch: LinkedIn refused activation, rolling back', {
+            console.error(`[campaigns] approve_launch: ${approveLabel} refused activation, rolling back`, {
                 campaignId: campaign.id,
             }, err);
             // Roll back to exactly where we were. Reverting the variants to 'staged' also clears
@@ -1665,7 +1758,10 @@ export default withLambda(async (event) => {
             await db.update(campaigns).set({
                 status: campaign.status, updatedAt: new Date(),
             }).where(eq(campaigns.id, campaign.id));
-            return json(502, { error: 'LinkedIn would not start the campaign. Nothing has been launched and nothing has been spent.' });
+            return json(502, {
+                error: `${approveLabel} would not start the campaign. Nothing has been launched and nothing has been spent.`,
+                detail: linkedInErrorDetail(err) ?? metaErrorDetail(err),
+            });
         }
 
         // A money action, so it leaves a permanent record of who authorised it.
@@ -1687,7 +1783,7 @@ export default withLambda(async (event) => {
             variantsLive: staged.length,
             // Say what happens next, including how to stop it. A launch confirmation without a
             // route back is the pattern connection-pause-needs-a-resume is named after.
-            message: `Live on LinkedIn, spending up to £${dailyBudget.toFixed(2)} a day. You can pause it from this page at any time.`,
+            message: `Live on ${approveLabel}, spending up to £${dailyBudget.toFixed(2)} a day. You can pause it from this page at any time.`,
         });
     }
 

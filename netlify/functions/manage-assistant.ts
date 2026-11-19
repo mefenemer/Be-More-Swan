@@ -5,6 +5,7 @@
 // Edit is handled client-side: redirect to onboarding with ?edit=assistantId
 // so the user can modify their blueprint/setup answers.
 
+import { withdrawMeetingBots } from '../../src/utils/meeting-bot-db';
 import { Handler } from '@netlify/functions';
 import { eq, and, inArray, count, asc, isNull } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
@@ -232,6 +233,10 @@ export default withLambda(async (event) => {
                     eq(taskRuns.assistantId, id),
                     inArray(taskRuns.status, ['pending', 'running', 'reviewing', 'suspended']),
                 ));
+
+                // A Note Taker's booked or live meeting bots are withdrawn too, so none joins a call for an archived
+                // assistant (docs/note-taker-bot-plan.md; review of #769). Never throws.
+                await withdrawMeetingBots(db, orgId, [id]);
 
                 // Issue #191: notify the user, with a link to the archived assistant's detail page
                 // (where the reinstate banner lives) and the deletion deadline spelled out.

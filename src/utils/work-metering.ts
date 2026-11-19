@@ -85,6 +85,8 @@ export async function getTaskUsage(db: Db, organisationId: number): Promise<Task
           COALESCE((SELECT SUM(${inFlightWeightSql(costs)}) FROM media_generation_jobs
                      WHERE organisation_id = ${organisationId}
                        AND status IN ('queued', 'processing')
+                       -- A presenter piece (Phase 4c-2) is already in its video's build hold: never counted twice.
+                       AND prompt NOT LIKE 'video_project:%'
                        -- A job stuck for hours is dead, not in flight; don't let it block the org.
                        AND created_at > now() - interval '2 hours'), 0) AS in_flight`);
     const row = (rows as unknown as Array<{ used: number; bonus: number; in_flight: number }>)[0];

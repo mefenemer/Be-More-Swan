@@ -95,7 +95,7 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     standup_summarizer:        ['chat', 'project_mgmt'],
     // 'email' (2026-11-16): its follow-up email sends from the workspace's own Gmail or Outlook
     // (src/utils/meeting-followup-send.ts), so those mailbox cards belong on its Connections tab.
-    meeting_note_taker:        ['email', 'calendar', 'knowledge'],
+    meeting_note_taker:        ['meeting_apps', 'email', 'calendar', 'knowledge'],
     // Its mailbox is connected on its own Emails tab (mailbox-oauth.ts → mailboxes table), not a workspace
     // connection, so it needs none of these; 'knowledge' lets it read Brand Assets like any assistant.
     email_assistant:           ['knowledge'],
@@ -121,6 +121,7 @@ export const CATEGORY_LABELS: Record<string, { label: string; description: strin
     crm:            { label: 'CRM',                 description: 'Look up and update contacts and deals.' },
     cms:            { label: 'Content / CMS',        description: 'Draft and publish website content.' },
     search_console: { label: 'Search Console',      description: 'Pull search performance and indexing data.' },
+    meeting_apps:   { label: 'Meeting apps',        description: 'Pick up meetings from Google Meet, Teams and Zoom by themselves.' },
     inventory:      { label: 'Inventory',           description: 'Track stock levels and product data.' },
     support:        { label: 'Support Desk',        description: 'Read and reply to support tickets.' },
     chat:           { label: 'Team Chat',           description: 'Read and post messages in team chat.' },
@@ -178,6 +179,16 @@ export const MAILBOX_ROLES = new Set<string>(['lead_qualifier', 'newsletter_edit
 
 export function usesOutreachMailbox(a: AssistantRole | null | undefined): boolean {
     return !!(a?.roleKey && MAILBOX_ROLES.has(a.roleKey));
+}
+
+// The meeting apps the Note Taker picks meetings up from (src/utils/meeting-pickup.ts). Served by oauth-integrations
+// (workspace_integrations), drawn by _meetingAppsCard() in integrations.js — and only for workspaces with the
+// meeting_pickup flag on, so `meeting_apps` is NOT in EXTERNALLY_LIVE_CATEGORIES: with the flag off the Connections
+// tab shows the category "Coming soon", which is true. integrations.ts sends `meetingApps` when it is on.
+export const MEETING_APP_PROVIDERS = ['google_meet'] as const;
+
+export function usesMeetingApps(a: AssistantRole | null | undefined): boolean {
+    return !!allowedCategoriesForAssistant(a)?.has('meeting_apps');
 }
 
 export interface SupportedTool {

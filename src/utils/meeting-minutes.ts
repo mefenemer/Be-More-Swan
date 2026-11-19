@@ -4,6 +4,15 @@
 // clean the model's card with normaliseMinutesCard and file it with meetingHubRecord, so a meeting
 // written up in either place comes out the same. tests/meeting-minutes.test.ts holds them together.
 
+/**
+ * Meetings may mention health, beliefs or other special category data (DPA 1.2 clause 13, "Meetings the Note Taker
+ * joins"; docs/note-taker-bot-legal.md §9). The minutes are still written, but such details are used only as far as the
+ * minutes need and are never inferred or labelled. Today it goes only into the channel block for meetings the BOT joined
+ * (meeting-bot.ts BOT_CHANNEL_BLOCK), which a workspace can only have after accepting DPA 1.2. Pasted meetings keep the
+ * DPA 1.1 rule until 1.2 is published. tests/meeting-bot.test.ts holds this.
+ */
+export const MEETING_SPECIAL_CATEGORY_CLAUSE = 'SPECIAL-CATEGORY DATA IN MEETINGS: What people say in a meeting may mention health, disability, religion, ethnicity, sexuality, politics, union membership or criminal matters. Still write the minutes. Include such a detail only where a decision, risk or task cannot be understood without it, in neutral words. Never infer a special category that was not stated, never label a person by one, and never add one to an attendee, a task or the follow-up email unless the task itself is about it.';
+
 /** The meeting model and reply size, for chat and the form alike (Admin can still pick a model per role). */
 export const MEETING_MINUTES_MODEL = 'claude-haiku-5-5';
 // A 60-minute transcript's minutes, attendees and follow-up outgrew 2048 (finish plan step 4).

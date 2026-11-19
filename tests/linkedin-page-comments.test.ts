@@ -100,14 +100,16 @@ check('follower total from networkSizes firstDegreeSize', async () => {
 
 const C1 = 'urn:li:comment:(urn:li:activity:6631349431612559360,6636062862760562688)';
 
-check('a documented comment element parses; names from actor~ when present', () => {
+check('a documented comment element parses; no name is ever kept, even if LinkedIn sends one', () => {
     const c = parseComment({
         actor: 'urn:li:person:abc', commentUrn: C1, id: '6636062862760562688',
         created: { actor: 'urn:li:person:abc', time: 1582160678569 }, message: { attributes: [], text: 'Do you ship to Leeds?' },
         object: 'urn:li:activity:6631349431612559360', 'actor~': { localizedFirstName: 'Sam', localizedLastName: 'Lee' },
     });
     assert.ok(c);
-    assert.equal(c!.actorName, 'Sam Lee');
+    assert.equal(c!.actorUrn, 'urn:li:person:abc');
+    assert.ok(!('actorName' in c!), 'no name field at all');
+    assert.ok(!JSON.stringify(c).includes('Sam'), 'an actor~ name in the payload is dropped');
     assert.equal(c!.objectUrn, 'urn:li:activity:6631349431612559360');
     assert.equal(c!.createdAt?.getTime(), 1582160678569);
     assert.equal(parseComment({ commentUrn: C1, message: { text: '   ' } }), null, 'no text, no row');
@@ -116,22 +118,23 @@ check('a documented comment element parses; names from actor~ when present', () 
 
 check('the Page’s own comments are not kept; its replies mark their parent answered; side-threads are left out', () => {
     const list = [
-        { commentUrn: C1, objectUrn: 'p', actorUrn: 'urn:li:person:a', actorName: null, text: 'Q', createdAt: null, parentCommentUrn: null, replyCount: null },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,2)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Thanks!', createdAt: null, parentCommentUrn: C1, replyCount: null },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,3)', objectUrn: 'p', actorUrn: ORG, actorName: null, text: 'Our own note', createdAt: null, parentCommentUrn: null, replyCount: null },
-        { commentUrn: 'urn:li:comment:(urn:li:activity:1,4)', objectUrn: 'p', actorUrn: 'urn:li:person:b', actorName: null, text: 'me too', createdAt: null, parentCommentUrn: C1, replyCount: null },
+        { commentUrn: C1, objectUrn: 'p', actorUrn: 'urn:li:person:a', text: 'Q', createdAt: null, parentCommentUrn: null, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,2)', objectUrn: 'p', actorUrn: ORG, text: 'Thanks!', createdAt: null, parentCommentUrn: C1, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,3)', objectUrn: 'p', actorUrn: ORG, text: 'Our own note', createdAt: null, parentCommentUrn: null, replyCount: null },
+        { commentUrn: 'urn:li:comment:(urn:li:activity:1,4)', objectUrn: 'p', actorUrn: 'urn:li:person:b', text: 'me too', createdAt: null, parentCommentUrn: C1, replyCount: null },
     ];
     const { toKeep, answeredParents } = classifyComments(ORG, list);
     assert.deepEqual(toKeep.map((c) => c.commentUrn), [C1]);
     assert.equal(answeredParents.get(C1)?.text, 'Thanks!');
 });
 
-check('fetchPostComments asks with the name projection, then without when refused; null only when both fail', async () => {
-    await withFetch((url) => url.includes('projection=') ? json({}, 403) : json({ elements: [{ commentUrn: C1, message: { text: 'hi' } }] }), async (calls) => {
+check('fetchPostComments makes ONE plain call — no name projection; null when refused', async () => {
+    await withFetch(() => json({ elements: [{ commentUrn: C1, message: { text: 'hi' } }] }), async (calls) => {
         const got = await fetchPostComments('tok', 'urn:li:share:9');
         assert.equal(got?.length, 1);
-        assert.equal(calls.length, 2);
-        assert.match(calls[1].url, /\/rest\/socialActions\/urn%3Ali%3Ashare%3A9\/comments\?start=0&count=50$/);
+        assert.equal(calls.length, 1, 'one call per post, not two');
+        assert.match(calls[0].url, /\/rest\/socialActions\/urn%3Ali%3Ashare%3A9\/comments\?start=0&count=50$/);
+        assert.ok(!calls[0].url.includes('projection'), 'never asks for names');
     });
     await withFetch(() => json({}, 500), async () => {
         assert.equal(await fetchPostComments('tok', 'urn:li:share:9'), null);
@@ -231,14 +234,16 @@ check('one slow call can’t overrun the budget: each read waits at most the tim
     assert.equal(callTimeoutMs(1_000 + 60_000, 1_000), 10_000);
     assert.equal(callTimeoutMs(1_000, 5_000), 500, 'past the deadline still gets a short try');
     const src = read('src/utils/page-comments.ts');
-    assert.ok(src.includes('fetchPostComments(opts.token, post.platformPostId, opts.deadline)'));
+    assert.ok(src.includes('fetchPostComments(opts.token, post.platformPostId, opts.deadline, (f) => { failure = f; })'));
     assert.ok(src.includes('fetchCommentReplies(opts.token, c.commentUrn, opts.deadline)'));
 });
 
 check('a read cut off by the deadline counts as left for later, never as LinkedIn refusing', async () => {
     const src = read('src/utils/page-comments.ts');
-    assert.ok(src.includes('if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }'));
-    // Past the deadline, the plain retry is skipped: one call, not two.
+    const at = src.indexOf('if (!topLevel) {');
+    assert.ok(at > 0);
+    const block = src.slice(at, at + 400);
+    assert.ok(block.indexOf('{ r.skippedForTime++; continue; }') > 0 && block.indexOf('{ r.skippedForTime++; continue; }') < block.indexOf('r.failedPosts++'), 'past the deadline → deferred, before any failure is counted');
     await withFetch(() => json({}, 504), async (calls) => {
         assert.equal(await fetchPostComments('tok', 'urn:li:share:9', Date.now() - 1), null);
         assert.equal(calls.length, 1);
@@ -271,12 +276,13 @@ check('replies are tidied to LinkedIn’s 1,250 characters', () => {
     assert.equal(tidyReply('x'.repeat(2000)).length, 1250);
 });
 
-check('the view never shows a blank author', () => {
+check('the view says who only as "Someone" or "A LinkedIn Page" — never a name', () => {
     const base = { id: 1, organisationId: 1, aiAssistantId: 1, connectionId: 1, scheduledPostId: 2, platform: 'linkedin', commentUrn: C1, objectUrn: 'urn:li:share:9', body: 'hi', commentedAt: null, draftReply: null, status: 'new', repliedVia: null, replyText: null, replyCommentUrn: null, decidedBy: null, decidedAt: null, createdAt: new Date(), updatedAt: new Date() };
-    assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a', authorName: null }).authorName, 'A LinkedIn member');
-    assert.equal(commentView({ ...base, authorUrn: 'urn:li:organization:5', authorName: '' }).authorName, 'A LinkedIn Page');
-    assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a', authorName: 'Sam Lee' }, 'Our   new menu').postExcerpt, 'Our new menu');
-    const replied = { ...base, authorUrn: 'urn:li:person:a', authorName: 'Sam', status: 'replied', repliedVia: 'app' };
+    assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a' }).authorLabel, 'Someone');
+    assert.equal(commentView({ ...base, authorUrn: null }).authorLabel, 'Someone');
+    assert.equal(commentView({ ...base, authorUrn: 'urn:li:organization:5' }).authorLabel, 'A LinkedIn Page');
+    assert.equal(commentView({ ...base, authorUrn: 'urn:li:person:a' }, 'Our   new menu').postExcerpt, 'Our new menu');
+    const replied = { ...base, authorUrn: 'urn:li:person:a', status: 'replied', repliedVia: 'app' };
     assert.equal(commentView({ ...replied, replyCommentUrn: null }).replyUnconfirmed, true);
     assert.equal(commentView({ ...replied, replyCommentUrn: 'confirmed' }).replyUnconfirmed, false);
 });
@@ -336,6 +342,66 @@ check('only postReply calls LinkedIn’s write endpoint', () => {
     const src = read('src/utils/page-comments.ts');
     assert.equal(src.split('replyToComment(').length - 1, 1, 'one call site');
     assert.ok(src.indexOf('replyToComment(') > src.indexOf('export async function postReply('));
+});
+
+check('Page posts are chosen by the account that WROTE them, not by connection_id', () => {
+    // Staging 2026-11-19: post 202 went out from a personal profile; the same connection row was later
+    // reconnected as the Company Page (social-oauth-callback.ts updates in place), so a connection_id
+    // match claimed the profile's post for the Page. The recorded author is the only safe key.
+    const pc = read('src/utils/page-comments.ts');
+    const fn = pc.slice(pc.indexOf('export async function loadPagePosts('), pc.indexOf('export async function pageToken('));
+    assert.ok(fn.length > 0, 'loadPagePosts found');
+    assert.ok(fn.includes('eq(systemConnections.externalUserId, scheduledPosts.platformAuthorUrn)'), 'joined on the recorded author');
+    assert.ok(fn.includes("like(scheduledPosts.platformAuthorUrn, 'urn:li:organization:%')"), 'only posts a Page wrote');
+    assert.ok(fn.includes('eq(systemConnections.organisationId, scheduledPosts.organisationId)'), 'never another workspace\'s connection');
+    assert.ok(!fn.includes('scheduledPosts.connectionId'), 'connection_id plays no part — it can change identity on reconnect');
+    assert.ok(!fn.includes('COALESCE('), 'the NULL-connection guess is gone');
+    assert.ok(fn.includes('if (seen.has(row.id)) continue;'), 'a post is read once even if two connections match');
+    const pub = read('netlify/functions/publish-social-posts.ts');
+    assert.ok(pub.includes("const author = creds.externalUserId ? `, platform_author_urn = '${esc(String(creds.externalUserId))}'` : '';"), 'publisher records the author');
+    assert.ok(pub.includes("${usedConnection}${author} WHERE id = ${post.id}`"), 'in the same statement that marks it published — the two can never disagree');
+    assert.ok(!pub.includes('author not recorded for post'), 'no separate, silently-failing author write');
+    assert.ok(read('db/schema.ts').includes('platformAuthorUrn: text("platform_author_urn"),'));
+    assert.ok(read('db/z-scheduled-posts-author.sql').includes('ADD COLUMN IF NOT EXISTS platform_author_urn TEXT'));
+});
+
+check('a reply goes out AS the Page only under a post the Page wrote', () => {
+    const src = read('src/utils/page-comments.ts');
+    const fn = src.slice(src.indexOf('export async function postReply('));
+    const guard = fn.indexOf("if (!post || post.author !== conn.externalUserId)");
+    assert.ok(guard > 0, 'author checked against the Page connection');
+    assert.ok(guard < fn.indexOf('replyToComment('), 'before anything is posted');
+    assert.ok(guard < fn.indexOf('// Claim the row first'), 'before the row is claimed');
+    assert.ok(fn.includes("code: 'not_page_post'"));
+});
+
+check('no commenter name is requested, stored, shown or sent to the model', () => {
+    const api = read('src/utils/linkedin-page-api.ts');
+    assert.ok(!api.includes("'actor~'") && !api.includes('localizedFirstName'), 'no actor~ projection or parsing');
+    assert.ok(!read('src/utils/page-comments.ts').includes('authorName'), 'nothing written to or read from a name column');
+    assert.ok(!read('db/schema.ts').includes('authorName: text("author_name"),\n  body: text("body").notNull(),\n  commentedAt'), 'page_comments has no author_name');
+    assert.ok(read('db/z-page-comments-drop-author-name.sql').includes('ALTER TABLE page_comments DROP COLUMN IF EXISTS author_name;'));
+    assert.ok(!read('src/utils/page-comments.ts').includes('commenter_first_name'), 'the model is never handed a name');
+    assert.ok(read('src/components/assistant-comments.js').includes("${esc(c.authorLabel || 'Someone')} commented"));
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes("${esc(ui.authorLabel || 'Someone')} commented"));
+});
+
+check('a post deleted on LinkedIn (404) is an empty list, not a refused read; other refusals say why', async () => {
+    await withFetch(() => json({ message: 'Not Found' }, 404), async () => {
+        let reported = false;
+        assert.deepEqual(await fetchPostComments('tok', 'urn:li:share:9', undefined, () => { reported = true; }), []);
+        assert.equal(reported, false, 'gone is not a failure');
+    });
+    await withFetch(() => json({ message: 'Not enough permissions to access: GET /socialActions' }, 403), async (calls) => {
+        let got: { status: number; message: string } | null = null;
+        assert.equal(await fetchPostComments('tok', 'urn:li:share:9', undefined, (f) => { got = f; }), null);
+        assert.equal(calls.length, 1, 'one call');
+        assert.equal(got!.status, 403);
+        assert.ok(got!.message.includes('Not enough permissions'));
+    });
+    const ingest = read('netlify/functions/ingest-linkedin-insights.ts');
+    assert.ok(ingest.includes('comments.failures.push(f)'), 'the ingest result carries the reasons');
+    assert.ok(ingest.includes('if (!isMissingTable(err)) throw err;'), 'a missing author column skips the tick instead of failing it');
 });
 
 queue.then(() => console.log(`\n${passed} passed`));

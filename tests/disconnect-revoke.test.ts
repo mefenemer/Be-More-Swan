@@ -99,7 +99,7 @@ check('the connection lookup selects metadata (where fbUserId lives)', () => {
     assert.ok(sel.includes('metadata: systemConnections.metadata'));
 });
 check('meta-oauth still records fbUserId in the row metadata', () => {
-    assert.ok(read('netlify/functions/meta-oauth.ts').includes('const connMetadata = { accountType, fbPageId, igUsername, pageName, fbUserId };'));
+    assert.ok(read('netlify/functions/meta-oauth.ts').includes('const connMetadata: Record<string, unknown> = { accountType, fbPageId, igUsername, pageName, fbUserId };'));
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ' — SOME FAILED' : ''}`);

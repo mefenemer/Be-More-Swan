@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { systemConnections, users, auditLogs, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, getSecret, deleteSecret, deleteSecretsByPrefix, buildSocialRefKey } from '../../src/utils/vault';
+import { messagingEnabled, subscribePageToMessages, withMessagingScopes } from '../../src/utils/meta-messaging';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -39,12 +40,14 @@ const metaSecret  = process.env.META_APP_SECRET!;
 // and in Development mode, but requires Meta App Review before general (Live-mode) users can grant it.
 // instagram_manage_insights is what ingest-instagram-insights.ts needs for /{media-id}/insights.
 // Accounts connected before it was added lack it until they reconnect.
-// pages_messaging deliberately NOT requested: there is no Messenger webhook or reply flow for App
-// Review to demonstrate, so it was dropped from the review submission. Re-add it only alongside a
-// working receive/reply path (see docs/meta-app-review-submission.md).
-// pages_manage_metadata likewise NOT requested: its only user, the Meta branch of
-// social-profile-sync.ts, is disabled until it is fixed (see META_PROFILE_SYNC_ENABLED there).
-const SCOPES      = 'instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement,pages_manage_posts,business_management';
+// Messages (docs/meta-messages-plan.md): pages_messaging, instagram_manage_messages and
+// pages_manage_metadata are added ONLY while META_MESSAGING_ENABLED=true (withMessagingScopes),
+// because they are not approved for Advanced Access yet — switch it on per environment for testing
+// and recording, and on prod once Meta approves them. pages_manage_metadata is used ONLY to
+// subscribe the Page to the messages webhook; Sync Profile's Meta branch stays disabled
+// (META_PROFILE_SYNC_ENABLED in social-profile-sync.ts).
+const BASE_SCOPES = 'instagram_basic,instagram_content_publish,instagram_manage_insights,pages_show_list,pages_read_engagement,pages_manage_posts,business_management';
+const SCOPES      = withMessagingScopes(BASE_SCOPES, messagingEnabled());
 const TOKEN_TTL_DAYS = 60;
 
 function csrfToken(): string {
@@ -113,7 +116,7 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
     const { externalUserId, fbPageId, pageName, igUsername } = opts.account;
     const metaErr = (code: string) => metaErrUrl(code, platform, assistantId);
     const accountType = 'BUSINESS';
-    const connMetadata = { accountType, fbPageId, igUsername, pageName, fbUserId };
+    const connMetadata: Record<string, unknown> = { accountType, fbPageId, igUsername, pageName, fbUserId };
 
     // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
     // any token is persisted, so nothing is stored on rejection.
@@ -135,6 +138,17 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
 
     const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+    // Messages: ask Meta to send this Page's messages (and its Instagram account's DMs) to
+    // meta-webhook.ts. Recorded on the connection; a failure never stops the connect — the Messages
+    // tab reads `messaging.subscribed` and offers Reconnect.
+    if (messagingEnabled() && fbPageId) {
+        const sub = await subscribePageToMessages(longLivedToken, fbPageId);
+        connMetadata.messaging = sub.ok
+            ? { subscribed: true, at: new Date().toISOString() }
+            : { subscribed: false, error: sub.error, at: new Date().toISOString() };
+        if (!sub.ok) console.warn(`[meta-oauth] messages subscription failed for Page ${fbPageId}: ${sub.error}`);
+    }
+
     // The org's first member — the notification recipient below, and the owner of last resort
     // for a connection whose state predates `userId` riding in it (an OAuth flow already in
     // flight across this deploy). Resolved before the upsert because the row now needs it.
@@ -143,7 +157,7 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
 
     // Upsert system_connections — update existing if same external id, else create.
     const [existing] = await db
-        .select({ id: systemConnections.id, userId: systemConnections.userId })
+        .select({ id: systemConnections.id, userId: systemConnections.userId, metadata: systemConnections.metadata })
         .from(systemConnections)
         .where(and(
             eq(systemConnections.organisationId, organisationId),
@@ -151,6 +165,15 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
             eq(systemConnections.externalUserId, externalUserId),
         ))
         .limit(1);
+
+    // A Page this row subscribed stays subscribed at Meta until something unsubscribes it, so a
+    // reconnect that didn't (or couldn't) subscribe again must not forget it — Disconnect reads
+    // `messaging.subscribed` to know there is a subscription to undo.
+    const prevMessaging = (existing?.metadata as { messaging?: { subscribed?: boolean } } | null)?.messaging;
+    if (prevMessaging?.subscribed === true && (connMetadata.messaging as { subscribed?: boolean } | undefined)?.subscribed !== true) {
+        const failed = connMetadata.messaging as { error?: string } | undefined;
+        connMetadata.messaging = { ...prevMessaging, ...(failed?.error ? { lastError: failed.error } : {}) };
+    }
 
     let isReconnect = false;
     if (existing) {
@@ -179,7 +202,9 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
             tokenExpiresAt,
             status: 'active',
             isActive: true,
-            scopes: SCOPES,
+            // What was always asked for — NOT the messaging permissions, which a person can untick.
+            // Whether messages work is metadata.messaging.subscribed, never this column.
+            scopes: BASE_SCOPES,
             metadata: connMetadata,
         });
     }

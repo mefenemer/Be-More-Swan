@@ -17,6 +17,7 @@
 //
 // PURE: no database, no network. Tested in tests/storyboard.test.ts.
 
+import { cleanScript, voicePace, LONG_VOICEOVER_MAX_CHARS } from './tts';
 import type { CaptionStyle } from './captions';
 import { isStillMotion, type StillMotion } from './still-motion';
 import { readNameCaption, type LowerThirdStyle, type NameCaption } from './lower-third';
@@ -277,11 +278,72 @@ export function isLongLength(v: unknown): boolean {
 }
 
 /**
- * May this brief be long? Only a video in its own footage's sound with no AI presenter (4b): it needs no AI
- * voice, whose making and timing stop well short of 10 minutes (4c). Pure.
+ * May this brief be long (2, 5 or 10 minutes)? Two kinds of video can:
+ *   · own footage in its own sound, with no presenter (4b) — no AI voice is needed;
+ *   · an AI presenter walking viewers through the owner's screen recordings (4c-3, the Atera format) — the voice is
+ *     spoken in parts (4c-1) and the presenter made in pieces across build runs (4c-2).
+ * A stock or AI-only video, or a presenter with nothing to show, stays short. Pure.
  */
-export function allowsLongLength(brief: Pick<VideoBrief, 'voiceover' | 'footageAssetIds' | 'presenter'>): boolean {
-    return keepsOwnSound(brief) && !brief.presenter;
+export function allowsLongLength(brief: Pick<VideoBrief, 'voiceover' | 'footageAssetIds' | 'presenter' | 'screenAssetIds'>): boolean {
+    if (brief.presenter) return !!brief.screenAssetIds?.length;
+    return keepsOwnSound(brief);
+}
+
+/**
+ * Is this script too long to speak? A long video's script is spoken up to LONG_SCRIPT_CHARS (10,000 characters, about
+ * 10 minutes); 20 chapters of 1200 characters could reach 24,000, and cutting the rest would leave the last scenes
+ * silent and untimed (review of #754). Refused before anything is spent, with the length to cut to. Pure.
+ */
+export const LONG_SCRIPT_CHARS = LONG_VOICEOVER_MAX_CHARS;
+export function scriptTooLong(storyboard: Pick<Storyboard, 'scenes'>, brief: Pick<VideoBrief, 'lengthS' | 'voiceover' | 'voice'>): string | null {
+    if (!brief.voiceover) return null;
+    // Spoken past the render's 10 minutes at the voice's measured pace: the end would be cut off (review of #765).
+    if (isLongLength(brief.lengthS)) {
+        const pace = voicePace(brief.voice ?? null);
+        const words = scriptOf(storyboard as Storyboard).split(/\s+/).filter(Boolean).length;
+        if (pace && words / pace > MAX_VIDEO_S + 5) {
+            const over = Math.ceil(words - MAX_VIDEO_S * pace);
+            return `The script is about ${Math.round(words / pace / 60 * 10) / 10} minutes of speech in this voice, more than the 10 a video can hold. Shorten some lines by about ${over.toLocaleString('en-GB')} words, then make the video.`;
+        }
+    }
+    // Measured as it will be spoken: markdown and links don't count (cleanScript, review of #761).
+    const chars = cleanScript(scriptOf(storyboard as Storyboard), Number.MAX_SAFE_INTEGER).length;
+    const max = isLongLength(brief.lengthS) ? LONG_SCRIPT_CHARS : null;
+    if (max == null || chars <= max) return null;
+    return `The script is ${chars.toLocaleString('en-GB')} characters, more than the ${max.toLocaleString('en-GB')} (about 10 minutes) a voiceover can hold. Shorten some lines by ${(chars - max).toLocaleString('en-GB')} characters, then make the video.`;
+}
+
+/**
+ * A scene's line within `max` characters: whole as given when it fits, else cut at the last sentence end (else word)
+ * before the limit, with a note — a long video's chapter cut mid-word, silently, was shorter than asked (review of #761). Pure but for `changes`.
+ */
+function lineAtSentence(raw: unknown, max: number, i: number, changes: string[]): string {
+    const full = clip(raw, 100_000);
+    if (full.length <= max) return full;
+    const window = full.slice(0, max + 1);
+    let cut = -1;
+    // Only a sentence that ends inside the limit: one ending on character max+1 would return a line one over (review of #761).
+    for (const m of window.matchAll(/[.!?…]["')\]]?(?=\s|$)/g)) { const end = (m.index ?? 0) + m[0].length; if (end <= max) cut = end; }
+    if (cut < max * 0.5) cut = window.slice(0, max).lastIndexOf(' ');
+    if (cut <= 0) cut = max;
+    changes.push(`Scene ${i + 1}: its voiceover was longer than ${max.toLocaleString('en-GB')} characters, so it ends at “${full.slice(Math.max(0, cut - 30), cut).trim()}”. Split that scene in two, or ask for more scenes, to keep the rest.`);
+    return full.slice(0, cut).trim();
+}
+
+/**
+ * Words a second to write a brief's voiceover at. A LONG voiced video uses its voice's measured pace (catalogue `wps`,
+ * less 5% for the gaps between scenes): staging project 51 wrote 302 words at the assumed 2.5 and Priya's voice
+ * (3.83) spoke them in 84 s for a "2-minute" video. Short videos, and voices not measured, keep WORDS_PER_SECOND. Pure.
+ */
+export function wordsPerSecondFor(brief: Pick<VideoBrief, 'lengthS' | 'voiceover' | 'voice'>): number {
+    if (!isLongLength(brief.lengthS) || !brief.voiceover) return WORDS_PER_SECOND;
+    const pace = voicePace(brief.voice ?? null);
+    return pace ? Math.round(pace * 0.95 * 100) / 100 : WORDS_PER_SECOND;
+}
+
+/** A scene's voiceover line, at most: 240 characters (about 16 s), or 1200 in a long video (Phase 4c: a chapter of 30 s or more). Pure. */
+export function maxLineChars(brief: Pick<VideoBrief, 'lengthS'>): number {
+    return isLongLength(brief.lengthS) ? 1200 : 240;
 }
 
 /** The most scenes this brief may have: 20 for a long video, 8 otherwise. Pure. */
@@ -347,7 +409,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         const scene: Scene = {
             id: `s${i + 1}`,
             beat,
-            voiceover: clip(o.voiceover, 240),
+            voiceover: lineAtSentence(o.voiceover, maxLineChars(brief), i, changes),
             source,
             targetS: Math.max(MIN_SCENE_S, Number(o.targetS) || brief.lengthS / 5),
         };
@@ -706,7 +768,7 @@ export function storyboardSystemPrompt(): string {
 
 Rules:
 - One idea per video. Open with a hook that lands in under 3 seconds. End with the call to action.
-- A LONG video (2, 5 or 10 minutes; only from the business's own footage) follows the chapter rules in the VIDEO line instead of the short-video pace.
+- A LONG video (2, 5 or 10 minutes; only from the business's own footage, or an AI presenter walking through their screen recordings) follows the chapter rules in the VIDEO line instead of the short-video pace.
 - Write the voiceover to be SPOKEN: short sentences, about ${WORDS_PER_SECOND} words per second of scene. No URLs, no hashtags, no emoji.
 - On-screen text is optional and short (under 8 words). The voiceover is captioned automatically, so do not repeat it on screen.
 - Where on-screen text goes (optional; leave all four out and it sits clear of the captions for the whole scene): "textPos" top | middle | bottom — never where the captions are (the brief says where); "textWhen" scene | first | last | words (the whole scene, its first or last 3 seconds, or only while that scene's line is spoken — good for a key phrase or the call to action); "textStyle" dark | plain | brand (a brand-colour box suits the call to action); "textAnim" rise | fade | pop | none. Use them sparingly: most scenes need none.
@@ -757,7 +819,9 @@ export function storyboardUserPrompt(args: {
             ? isLongLength(brief.lengthS)
                 ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most, never more), 2–${MAX_LONG_SCENES} scenes. A long video is told in CHAPTERS: each scene is one topic or step, and becomes a chapter. Split a long take into several own_video scenes at the start of a new topic — consecutive scenes may continue in the same video (the next scene's inS where the last one's outS was), always at a sentence boundary, never mid-sentence. Keep the best takes; leave out repeats, false starts and off-topic stretches. The opening scene still gets to the point fast; a closing branded card is its own scene.`
                 : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
-            : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
+            : isLongLength(brief.lengthS)
+                ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most), ${Math.min(MAX_LONG_SCENES, Math.max(MIN_SCENES, Math.ceil(brief.lengthS * wordsPerSecondFor(brief) / 180)))}–${MAX_LONG_SCENES} scenes, scene lengths adding up to about ${brief.lengthS} seconds. A long video is told in CHAPTERS: each scene is one topic or step of the walkthrough and becomes a chapter. Write each scene's voiceover for its length (this voice speaks about ${wordsPerSecondFor(brief)} words a second — a 30-second chapter is about ${Math.round(30 * wordsPerSecondFor(brief))} words), never more than 1200 characters a scene, in short spoken sentences — the whole voiceover about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words in all, because the voice sets the video's length, with the screen recording showing what is being said. Open with what the viewer will learn, end with the call to action.`
+                : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',
@@ -789,7 +853,7 @@ export function storyboardUserPrompt(args: {
 
 /** The current scenes, numbered, as the planner sees them for a words-only change. Pure. */
 function scenesListing(sb: Storyboard): string {
-    return sb.scenes.map((s, i) => `${i + 1}. [${s.beat}; picture: ${s.source}${s.keywords ? ` "${clip(s.keywords, 60)}"` : s.prompt ? ` "${clip(s.prompt, 80)}"` : ''}] voiceover: "${clip(s.voiceover, 240)}"${s.onScreenText ? `; on screen: "${clip(s.onScreenText, 60)}"` : ''}`).join('\n');
+    return sb.scenes.map((s, i) => `${i + 1}. [${s.beat}; picture: ${s.source}${s.keywords ? ` "${clip(s.keywords, 60)}"` : s.prompt ? ` "${clip(s.prompt, 80)}"` : ''}] voiceover: "${clip(s.voiceover, 1200)}"${s.onScreenText ? `; on screen: "${clip(s.onScreenText, 60)}"` : ''}`).join('\n');
 }
 
 /** "Rewrite the script": same scenes, same pictures, new words. Pure. */

@@ -93,9 +93,9 @@ export function campaignCreateBody(input: {
         audienceExpansionEnabled: false,
         offsiteDeliveryEnabled: false,
         // ⚠️ REQUIRED since LinkedIn's political-ads rules (422 "politicalIntent :: field is required",
-        // first live stage 2026-11-18). This is a DECLARATION on the advertiser's behalf. Our
-        // campaigns are small-business marketing, but before any customer stages a campaign the
-        // stage form must ask them, not assume — docs/campaign-orchestrator-plan.md §9.10 item 1.
+        // first live stage 2026-11-18). The ADVERTISER declares it: stage_paid refuses unless the
+        // person staging ticked "not political / no special category" (adCategoryDeclaration), and
+        // refuses political adverts outright — so NOT_POLITICAL here is always their answer.
         politicalIntent: 'NOT_POLITICAL',
 
         // ── Bidding: AUTO, and this trio must move together ──────────────────

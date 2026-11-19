@@ -278,7 +278,8 @@ export default withLambda(async () => {
                 }
             } else if (post.platform === 'linkedin') {
                 // A Document carousel (li_document) goes out as one PDF of its slides through LinkedIn's
-                // Posts API; every other LinkedIn post stays on ugcPosts (docs/linkedin-document-carousel-plan.md).
+                // Posts API (docs/linkedin-document-carousel-plan.md). Everything else: a Company Page post also
+                // uses the Posts API, a personal-profile post still uses ugcPosts (social-publish.ts publishLinkedIn).
                 result = isLinkedInDocument(post.format_key)
                     ? await publishLinkedInDocument(text, token, creds.externalUserId, image, linkedInDocumentTitle(post.caption))
                     : await publishLinkedIn(text, token, creds.externalUserId, image);
@@ -311,8 +312,20 @@ export default withLambda(async () => {
 
             // The public address, so the "published" notification has something to open.
             const liveUrl = livePostUrl(post.platform, result.id);
+            // Record the account it actually went out on. A post queued with no connection_id was
+            // published through the (organisation, platform) fallback above, and anything that later
+            // reads the post back — LinkedIn Page stats and comments join on this column — needs to
+            // know which account that was. COALESCE: never overwrite a connection the post already named.
+            const usedConnection = Number.isInteger(creds.connectionId) ? `, connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})` : '';
+            // And who it went out AS. Reconnecting updates a connection row in place, so a LinkedIn
+            // connection that posts as a personal profile today can point at a Company Page tomorrow —
+            // connection_id can't tell them apart afterwards; this can. LinkedIn Page stats and comments
+            // read only posts whose author is the Page (page-comments.ts loadPagePosts). In the same
+            // statement as 'published', so the two can't disagree. Requires
+            // db/z-scheduled-posts-author.sql — as does every Drizzle read of scheduled_posts.
+            const author = creds.externalUserId ? `, platform_author_urn = '${esc(String(creds.externalUserId))}'` : '';
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''} WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''}${usedConnection}${author} WHERE id = ${post.id}`
             );
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent;
             // covers autonomous posts that bypass manual approval). Never blocks publish success.

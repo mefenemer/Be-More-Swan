@@ -52,6 +52,15 @@ export const DEFAULT_TASK_WEIGHTS = {
     // "Make it a carousel" on a Top list post (docs/top-lists-plan.md, owner decision 4, 2026-11-15):
     // one task per carousel, never per slide. The slides are brand cards: no AI call, no provider cost.
     carousel: 1,
+    // A meeting the Note Taker picked up from Google Meet, Teams or Zoom and wrote up by itself
+    // (docs/meeting-apps-pickup-plan.md, owner decision D3, 2026-11-18). Checking for meetings is free, and so is a
+    // meeting with no transcript. Pasted meetings stay free (counted like chat).
+    meeting_pickup: 1,
+    // The Note Taker joining a call itself as a bot (docs/note-taker-bot-plan.md, owner decision B3, 2026-11-19): tasks for
+    // each STARTED 5 minutes it is in the call, charged once the minutes are filed. Nothing when it is never let in.
+    // Nobody can be charged before launch: the meeting_bot flag stays off until the 30-day Terms notice has run
+    // (docs/note-taker-bot-legal.md §1).
+    meeting_bot_call: 1,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -140,6 +149,8 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     footage_review: 'Footage reviews',
     caption_translation: 'Caption translations',
     carousel: 'Carousels',
+    meeting_pickup: 'Meetings picked up',
+    meeting_bot_call: 'Note Taker in calls (per 5 minutes)',
     // No "every 10 messages" here: how often chat is charged is now a setting (chat_messages_per_task).
     chat_messages: 'Chat',
     editing_helper: 'Editing helpers',

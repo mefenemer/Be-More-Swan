@@ -15,7 +15,11 @@ export const SPECIAL_CATEGORY_MARKER = '<!-- special-category-clause -->';
 
 /** The clause for a role. Pure. */
 export function specialCategoryClauseFor(roleKey: string | null | undefined, generalClause: string): string {
-    return roleKey === 'email_assistant' ? EMAIL_SPECIAL_CATEGORY_CLAUSE : generalClause;
+    // The Note Taker's own clause (meeting-minutes.ts MEETING_SPECIAL_CATEGORY_CLAUSE) is NOT swapped in here yet: under
+    // DPA 1.1 clause 13 the general rule still applies to what customers paste. It reaches only the minutes of meetings
+    // the bot joined, which need DPA 1.2. Add 'meeting_note_taker' here when DPA 1.2 is published (legal drafts §9).
+    if (roleKey === 'email_assistant') return EMAIL_SPECIAL_CATEGORY_CLAUSE;
+    return generalClause;
 }
 
 /**
@@ -27,7 +31,7 @@ export function withSpecialCategoryClause(prompt: string | null, roleKey: string
     const clause = specialCategoryClauseFor(roleKey, generalClause);
     if (!prompt) return `${SPECIAL_CATEGORY_MARKER}\n${clause}`;
     if (prompt.includes(SPECIAL_CATEGORY_MARKER)) {
-        if (roleKey === 'email_assistant' && prompt.includes(generalClause)) return prompt.replace(generalClause, clause);
+        if (clause !== generalClause && prompt.includes(generalClause)) return prompt.replace(generalClause, clause);
         return prompt;
     }
     return `${prompt}\n\n${SPECIAL_CATEGORY_MARKER}\n${clause}`;

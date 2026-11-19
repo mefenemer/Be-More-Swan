@@ -54,7 +54,8 @@ export function videoSceneRequestFromUiElement(uiElement: unknown): VideoSceneRe
     const scene = Number(ui.scene);
     if (!Number.isInteger(projectId) || projectId <= 0 || !Number.isInteger(scene) || scene <= 0) return null;
     const req: VideoSceneRequest = { projectId, scene, summary: str(ui.summary, 300) || null };
-    const voiceover = str(ui.voiceover, 240);
+    // Up to 1200 in a long video's chapter (Phase 4c); the server clips a short video's line to 240 (maxLineChars).
+    const voiceover = str(ui.voiceover, 1200);
     if (voiceover) req.voiceover = voiceover;
     // An empty string is a real answer here: take the words off the screen.
     if (typeof ui.onScreenText === 'string') req.onScreenText = str(ui.onScreenText, 60);

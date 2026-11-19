@@ -127,7 +127,8 @@ export async function decideAutoPublish(db: Db, args: {
     });
 
     // The connection is stamped on the row either way: a review-bound post still needs it to publish
-    // once a human approves, and nothing else in the codebase ever sets scheduled_posts.connection_id.
+    // once a human approves. publish-social-posts.ts also records the connection a post actually went
+    // out on when it was queued without one (COALESCE — it never replaces one set here).
     const { live, connectionId } = await findLiveConnection(db, args.organisationId, args.platform);
 
     if (gate.status !== 'scheduled') return { ...gate, connectionId };

@@ -10,6 +10,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, adminAuditLog } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { archivedAssistantsWithLiveSites, takeAssistantSitesOffline } from '../../src/utils/site-offline';
+import { withdrawMeetingBots } from '../../src/utils/meeting-bot-db';
 
 export default withLambda(async () => {
     const db = getDb();
@@ -34,6 +35,11 @@ export default withLambda(async () => {
     }
 
     const ids = expired.map(a => a.id);
+    // Any meeting bot still with Recall for these assistants is withdrawn first (archiving already did; this catches a
+    // failed attempt), so none joins a call untracked once the assistant is gone. Never throws.
+    const byOrg = new Map<number, number[]>();
+    for (const a of expired) byOrg.set(a.organisationId, [...(byOrg.get(a.organisationId) ?? []), a.id]);
+    for (const [orgId, assistantIds] of byOrg) await withdrawMeetingBots(db, orgId, assistantIds);
     await db.delete(aiAssistants).where(inArray(aiAssistants.id, ids));
 
     const summary: Record<number, number> = {};

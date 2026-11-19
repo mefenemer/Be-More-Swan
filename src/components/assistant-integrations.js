@@ -192,16 +192,23 @@
   async function load() {
     const h = host();
     if (!h) return;
+    // The assistant page's ticket (assistants.js _detailTicket): the user may open another assistant
+    // while this is on its way, and its Synced actions must not land in that one's card.
+    const stale = typeof window._detailTicket === 'function' ? window._detailTicket() : () => false;
     try {
       // Shared GET cache (cached-fetch.js): the page load and opening Settings → Connections asked for
       // the same list seconds apart. Any activate / toggle / remove (a POST) clears it.
       const url = API + '/scenarios?assistantId=' + encodeURIComponent(state.assistantId);
       const res = await (window.bmsCachedFetch ? window.bmsCachedFetch(url, { ttlMs: 300000 }) : fetch(url));
+      if (stale()) return;
       if (!res.ok) throw new Error('status ' + res.status);
-      state.scenarios = (await res.json()).scenarios || [];
+      const scenarios = (await res.json()).scenarios || [];
+      if (stale()) return;
+      state.scenarios = scenarios;
       render();
       openPendingSetup();
     } catch (e) {
+      if (stale()) return;
       // Degrade quietly — the platform grid + Revoke All above stay usable.
       h.innerHTML = '<p class="text-sm text-gray-400">Couldn’t load this assistant’s actions.</p>';
       h.classList.remove('hidden');

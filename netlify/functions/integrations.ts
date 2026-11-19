@@ -6,7 +6,8 @@ import { systemConnections, scheduledPosts, users, auditLogs, workspaceIntegrati
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
-import { isServiceAllowedForAssistant, isConnectAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
+import { isServiceAllowedForAssistant, isConnectAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER, usesMeetingApps } from '../../src/utils/connection-map';
+import { loadMeetingApps } from '../../src/utils/meeting-pickup-db';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -273,7 +274,10 @@ export default withLambda(async (event) => {
                         };
                     })()
                     : null;
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
+                // The Note Taker's meeting apps (Google Meet), with when meetings were last checked — only while the
+                // meeting_pickup flag is on for this workspace; otherwise the category stays "Coming soon".
+                const meetingApps = usesMeetingApps(assistant) && currentOrgId ? await loadMeetingApps(db, currentOrgId) : null;
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, meetingApps, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
             }
 
             return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
@@ -464,6 +468,37 @@ export default withLambda(async (event) => {
             if (conn?.vaultRefKey) {
                 const svc = conn.serviceName?.toLowerCase() ?? '';
                 const fbUserId = (conn.metadata as { fbUserId?: string | null } | null)?.fbUserId ?? null;
+
+                // Messages (src/utils/meta-messaging.ts): stop Meta sending this Page's messages to
+                // our webhook — but only once no other active facebook/instagram row, in any
+                // workspace, still uses the Page (its Facebook and Instagram rows share one
+                // subscription). Runs BEFORE the revoke / vault delete below, which end the token.
+                // Only a row that subscribed the Page (metadata.messaging.subscribed, set on connect while
+                // META_MESSAGING_ENABLED was on) — otherwise there is nothing to undo and two Graph calls
+                // would only slow Disconnect down.
+                const subscribed = (conn.metadata as { messaging?: { subscribed?: boolean } } | null)?.messaging?.subscribed === true;
+                if (subscribed && (svc === 'facebook' || svc === 'instagram')) {
+                    const fbPageId = (conn.metadata as { fbPageId?: string | null } | null)?.fbPageId
+                        ?? (svc === 'facebook' ? conn.externalUserId : null);
+                    if (fbPageId) {
+                        const { pageStillInUse, unsubscribePageFromMessages, markPageSubscribedOnOtherRows } = await import('../../src/utils/meta-messaging');
+                        if (await pageStillInUse(db, fbPageId, connIdInt).catch(() => true)) {
+                            // The rows still using the Page inherit the subscription to undo later.
+                            await markPageSubscribedOnOtherRows(db, fbPageId, connIdInt).catch(() => {});
+                        } else {
+                            const { getSecret: readSecret } = await import('../../src/utils/vault');
+                            const s = await readSecret(db, conn.vaultRefKey).catch(() => null) as { token?: string } | null;
+                            const unsub = s?.token ? await unsubscribePageFromMessages(s.token, fbPageId) : null;
+                            // Record it, so a later reconnect doesn't carry over a subscription Meta no longer has.
+                            if (unsub?.ok) {
+                                await db.update(systemConnections)
+                                    .set({ metadata: { ...(conn.metadata as Record<string, unknown> ?? {}), messaging: { subscribed: false, unsubscribedAt: new Date().toISOString() } } })
+                                    .where(eq(systemConnections.id, connIdInt))
+                                    .catch(() => {});
+                            }
+                        }
+                    }
+                }
                 const sharing = await findDisconnectSharing(db, { connectionId: connIdInt, serviceName: svc, fbUserId, vaultRefKey: conn.vaultRefKey });
                 const plan = planDisconnectRevoke({ serviceName: svc, fbUserId, ...sharing });
                 const { getSecret } = await import('../../src/utils/vault');

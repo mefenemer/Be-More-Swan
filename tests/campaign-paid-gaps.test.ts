@@ -97,8 +97,10 @@ check('the picker is inline, not a link to a shared grid', () => {
 
 check('accounts are only fetched when the workspace could use one', () => {
     // No point asking LinkedIn about a workspace whose plan does not include advertising.
-    assert.match(code(ui), /state\.paid\.featureEnabled && state\.paid\.anyNetwork/);
-    assert.match(code(ui), /&& state\.adAccounts === null\) loadAdAccounts\(\)/);
+    const fn = ui.slice(landmark(ui, 'function loadAccountsFor(campaign)'), landmark(ui, '// ── Network switch'));
+    assert.match(fn, /if \(!p \|\| !p\.featureEnabled \|\| !p\.anyNetwork\) return;/);
+    assert.match(fn, /!p\.adsReady && state\.adAccounts === null\) \{\s*\n\s*loadAdAccounts\(\);/);
+    assert.match(fn, /state\.metaAds === null\) loadMetaAds\(\);/);
 });
 
 check('a saved selection reloads from the server rather than guessing', () => {
@@ -339,7 +341,7 @@ check('a missing image REFUSES before any work is thrown away', () => {
     // Without an upload path every stage would be rejected by the API, AFTER the user had written
     // three ads and chosen their targeting.
     assert.match(stage, /code: 'creative_media_required'/);
-    assert.match(stage, /we cannot upload one for you yet/);
+    assert.match(stage, /adverts need an image\. Upload one first/);
     assert.ok(landmark(stage, 'creative_media_required') < landmark(stage, 'await adapter.stageCampaign('),
         'the media check runs after the network call');
 });
@@ -452,7 +454,7 @@ check('the UI uploads BEFORE staging, and names which ad failed', () => {
     // A rejected image should say WHICH ad and why, not fail the whole campaign with one opaque
     // message after three ads have been written.
     assert.ok(landmark(ui, "action: 'upload', imageUrl: src") < landmark(ui, "action: 'stage_paid'"));
-    assert.match(code(ui), /`Ad \$\{i \+ 1\}: \$\{d\.error/);
+    assert.match(code(ui), /`Ad \$\{i \+ 1\}: \$\{withPlatformReason\(d\.error/);
 });
 
 check('one image shared by three ads is uploaded once', () => {

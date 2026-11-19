@@ -2044,6 +2044,11 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   publishedAt: timestamp("published_at"),
   platformPostId: text("platform_post_id"),      // external ID after publish
   platformPostUrl: text("platform_post_url"),    // live URL after publish
+  // The account that actually published it (LinkedIn: urn:li:organization:<id> for a Page). Set by
+  // publish-social-posts.ts; connection_id can't say, since reconnect updates the row in place.
+  // db/z-scheduled-posts-author.sql — ⚠️ must be on a database BEFORE this code: every select on
+  // scheduledPosts names this column.
+  platformAuthorUrn: text("platform_author_urn"),
 
   // Content & creative
   caption: text("caption"),
@@ -7165,9 +7170,9 @@ export const pageComments = pgTable("page_comments", {
   commentUrn: text("comment_urn").notNull(),
   // The post the comment is on — a reply's `object`.
   objectUrn: text("object_urn"),
+  // urn:li:person:… or urn:li:organization:… — never a name: LinkedIn gives this app none, and its terms
+  // bar storing other members' profile data (db/z-page-comments-drop-author-name.sql).
   authorUrn: text("author_urn"),
-  // Null when LinkedIn would not say — the tab says "A LinkedIn member".
-  authorName: text("author_name"),
   body: text("body").notNull(),
   commentedAt: timestamp("commented_at"),
   draftReply: text("draft_reply"),
@@ -7188,6 +7193,61 @@ export const pageComments = pgTable("page_comments", {
   check("page_comments_platform_check", sql`${t.platform} IN ('linkedin')`),
   check("page_comments_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
   check("page_comments_replied_via_check", sql`${t.repliedVia} IN ('app','linkedin')`),
+]);
+
+// Facebook Page + Instagram messages (db/z-social-messages.sql, docs/meta-messages-plan.md). One
+// conversation per (connection, person); meta-webhook.ts writes both tables. A reply goes out only
+// from a person's click, and only while window_closes_at (last inbound + 24h) is in the future.
+export const socialConversations = pgTable("social_conversations", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  connectionId: integer("connection_id").notNull().references(() => systemConnections.id, { onDelete: "cascade" }),
+  // 'facebook' | 'instagram'
+  platform: text("platform").notNull(),
+  // The Page id (facebook) or the IG professional account id (instagram) the message was sent to.
+  accountExternalId: text("account_external_id").notNull(),
+  // Page-scoped / Instagram-scoped id of the person. Not a Facebook user id.
+  participantId: text("participant_id").notNull(),
+  participantName: text("participant_name"),
+  lastInboundAt: timestamp("last_inbound_at"),
+  lastOutboundAt: timestamp("last_outbound_at"),
+  // last_inbound_at + 24h. Our own replies never move it.
+  windowClosesAt: timestamp("window_closes_at"),
+  // 'new' | 'replied' | 'dismissed'
+  status: text("status").notNull().default("new"),
+  draftReply: text("draft_reply"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("social_conversations_connection_participant_uq").on(t.connectionId, t.participantId),
+  index("social_conversations_assistant_status_idx").on(t.aiAssistantId, t.status, t.lastInboundAt),
+  index("social_conversations_org_idx").on(t.organisationId),
+  check("social_conversations_platform_check", sql`${t.platform} IN ('facebook','instagram')`),
+  check("social_conversations_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
+]);
+
+export const socialMessages = pgTable("social_messages", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").notNull().references(() => socialConversations.id, { onDelete: "cascade" }),
+  // 'in' (from the person) | 'out' (from the Page / IG account — sent here or in Meta's own apps)
+  direction: text("direction").notNull(),
+  // Meta's message id. Webhook retries and echoes of our own sends dedupe on it.
+  mid: text("mid").notNull(),
+  // Null for an attachment-only message, and after the 90-day text purge.
+  body: text("body"),
+  // e.g. 'image' | 'video' | 'audio' | 'file' | 'sticker' | 'share' — Meta's URL is NOT copied.
+  attachmentType: text("attachment_type"),
+  sentAt: timestamp("sent_at").notNull(),
+  // The person who clicked Send here; null for inbound and for replies typed in Meta's apps.
+  sentBy: integer("sent_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("social_messages_mid_uq").on(t.mid),
+  index("social_messages_conversation_idx").on(t.conversationId, t.sentAt),
+  index("social_messages_org_idx").on(t.organisationId),
+  check("social_messages_direction_check", sql`${t.direction} IN ('in','out')`),
 ]);
 
 // The site page directory (db/z-site-directory.sql, src/utils/site-directory.ts): one per workspace,
@@ -7392,3 +7452,94 @@ export const leadSiteWatchSignals = pgTable("lead_site_watch_signals", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
 }, (t) => [unique("lead_site_watch_signals_assistant_record_id_ref_key").on(t.assistantRecordId, t.ref)]);
+
+// ── Meeting pick-up (Note Taker reads Google Meet / Teams / Zoom transcripts) — db/z-meeting-imports.sql ──
+// One row per platform meeting per workspace; the unique key means a meeting is never written up twice.
+// src/utils/meeting-pickup.ts is the engine. docs/meeting-apps-pickup-plan.md §2.
+export const meetingImports = pgTable("meeting_imports", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // 'google_meet' | 'teams' | 'zoom'
+  platform: text("platform").notNull(),
+  // The platform's own id for the meeting (Meet: the conference record name).
+  externalId: text("external_id").notNull(),
+  title: text("title"),
+  meetingLink: text("meeting_link"),
+  startedAt: timestamp("started_at"),
+  endedAt: timestamp("ended_at"),
+  // 'found' | 'writing' | 'written' | 'skipped' | 'failed'
+  status: text("status").notNull().default("found"),
+  // Why a meeting was never written: 'no_transcript' | 'no_meeting' | 'task_limit' | 'assistant_gone'
+  skipReason: text("skip_reason"),
+  attempts: integer("attempts").notNull().default(0),
+  // Never transcript text.
+  lastError: text("last_error"),
+  leaseUntil: timestamp("lease_until"),
+  recordId: integer("record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  writtenAt: timestamp("written_at"),
+  // 'transcript' (the platform's own, picked up) | 'bot' (the Note Taker joined the call). db/z-meeting-bots.sql.
+  via: text("via").notNull().default("transcript"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("meeting_imports_org_platform_external_uq").on(t.organisationId, t.platform, t.externalId),
+  check("meeting_imports_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+  check("meeting_imports_status_check", sql`${t.status} IN ('found','writing','written','skipped','failed')`),
+  check("meeting_imports_via_check", sql`${t.via} IN ('transcript','bot')`),
+]);
+
+// The Note Taker joining a call itself: one row per Recall.ai bot sent (docs/note-taker-bot-plan.md §4,
+// db/z-meeting-bots.sql). When the call ends its transcript becomes a meeting_imports row (via 'bot').
+export const meetingBots = pgTable("meeting_bots", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // SET NULL, not cascade: a purged Note Taker's bot rows stay so Recall's copy can still be tracked and deleted.
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  requestedByUserId: integer("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  // 'link' | 'chat' | 'calendar'
+  source: text("source").notNull().default("link"),
+  // 'google_meet' | 'teams' | 'zoom'
+  platform: text("platform").notNull(),
+  meetingUrl: text("meeting_url").notNull(),
+  title: text("title"),
+  joinAt: timestamp("join_at").notNull(),
+  lengthLimitMinutes: integer("length_limit_minutes").notNull().default(120),
+  // 'eu' | 'us': which Recall account. Fixed per bot.
+  recallRegion: text("recall_region").notNull(),
+  recallBotId: text("recall_bot_id"),
+  // scheduled | joining | waiting_room | in_call | ended | done | not_admitted | removed | cancelled | failed
+  status: text("status").notNull().default("scheduled"),
+  // A Recall sub-code or our own short reason; never meeting text.
+  statusReason: text("status_reason"),
+  joinedAt: timestamp("joined_at"),
+  leftAt: timestamp("left_at"),
+  minutesInCall: integer("minutes_in_call"),
+  importId: integer("import_id").references(() => meetingImports.id, { onDelete: "set null" }),
+  mediaDeletedAt: timestamp("media_deleted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Open bots only (z-meeting-bots.sql): a cancelled or finished bot never blocks re-booking the same time.
+  uniqueIndex("meeting_bots_org_url_join_open_uq").on(t.organisationId, t.meetingUrl, t.joinAt)
+    .where(sql`${t.status} IN ('scheduled','joining','waiting_room','in_call','ended')`),
+  check("meeting_bots_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+  check("meeting_bots_region_check", sql`${t.recallRegion} IN ('eu','us')`),
+  check("meeting_bots_source_check", sql`${t.source} IN ('link','chat','calendar')`),
+  check("meeting_bots_status_check", sql`${t.status} IN ('scheduled','joining','waiting_room','in_call','ended','done','not_admitted','removed','cancelled','failed')`),
+]);
+
+// Per workspace and platform: when meetings were last checked and how far (the Connections tab's line).
+export const meetingPickupState = pgTable("meeting_pickup_state", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  lastCheckedAt: timestamp("last_checked_at"),
+  checkedThrough: timestamp("checked_through"),
+  lastFound: integer("last_found").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("meeting_pickup_state_org_platform_uq").on(t.organisationId, t.platform),
+  check("meeting_pickup_state_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+]);

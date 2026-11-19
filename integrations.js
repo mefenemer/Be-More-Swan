@@ -421,6 +421,8 @@ let _mailboxProviders = [];
 // the assistant's policy does not include the category. It is a READ connector: nothing is ever
 // published to it, which is why its card speaks of what it pulls IN, not what it sends out.
 let _searchConsole = null;
+// The Note Taker's meeting apps (Google Meet), sent only while the meeting_pickup flag is on for the workspace.
+let _meetingApps = null;
 const MAILBOX_CATALOG = {
     gmail: {
         label: 'Gmail',
@@ -616,8 +618,12 @@ window.initAssistantConnections = async function (assistantId, currentData) {
         ...((window.cachedContext?.linked_integrations) || []).map(Number),
     ]);
 
+    // The assistant page's ticket (assistants.js _detailTicket): a slow load for the assistant the
+    // user just left must not draw its connections into the next one's card.
+    const stale = typeof window._detailTicket === 'function' ? window._detailTicket() : () => false;
     await _loadSocialHandles();
-    await _loadConnections();
+    if (stale()) return;
+    await _loadConnections(stale);
 
 };
 
@@ -693,7 +699,9 @@ document.addEventListener('assistant:platformsChanged', (e) => {
 });
 
 // ── Load & render platform cards ─────────────────────────────────
-async function _loadConnections() {
+// isStale: only from initAssistantConnections. Other callers pass nothing (or an Event, as a listener).
+async function _loadConnections(isStale) {
+    const stale = () => typeof isStale === 'function' && isStale();
     const grid = document.getElementById('connections-grid');
     if (!grid) return;
 
@@ -704,6 +712,7 @@ async function _loadConnections() {
         const res = await fetch(url);
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
+        if (stale()) return;
         _userConnections = (data.connections || []).filter(c => c.userId !== null);
         // Server-authoritative relevance allow-list (undefined when no assistant scope).
         _allowedServices = Array.isArray(data.allowedServices) ? data.allowedServices : null;
@@ -713,6 +722,7 @@ async function _loadConnections() {
         // array means "not a mailbox role", not "nothing connected".
         _mailboxProviders = Array.isArray(data.mailboxProviders) ? data.mailboxProviders : [];
         _searchConsole = data.searchConsole && typeof data.searchConsole === 'object' ? data.searchConsole : null;
+        _meetingApps = Array.isArray(data.meetingApps) ? data.meetingApps : null;
         // Monthly X posting usage { used, allowance, remaining } for the X-card gauge (Phase 1).
         _xCredits = (data.xCredits && typeof data.xCredits.allowance === 'number') ? data.xCredits : null;
         _linkedinPages = data.linkedinPages === true;
@@ -723,6 +733,7 @@ async function _loadConnections() {
     // Blog destinations (cms category) — a separate subsystem, loaded only when it's live for
     // this assistant so the OAuth-only pages never call it.
     await _loadBlogDestinations();
+    if (stale()) return;
 
     _renderConnectionsGrid();
 }
@@ -752,7 +763,8 @@ function _renderConnectionsGrid() {
     // (published by assistant-integrations.js) so a capability never appears as both an
     // enable-able recipe and a "coming soon" card.
     const covered = window._syncedActionCategories || new Set();
-    const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
+    // Meeting apps are live only where pick-up is switched on; then their real rows replace the coming-soon one.
+    const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key) && !(t.key === 'meeting_apps' && _meetingApps));
 
     // Assistant panel: collapsible SECTIONS by purpose (owner, 2026-11-17) — each holds its tools'
     // rows and, under each tool, what this assistant does with it (its actions, drawn by
@@ -771,6 +783,10 @@ function _renderConnectionsGrid() {
         for (const d of _blogDestinations) rows.push({ cat: 'cms', html: _blogDestCard(d), on: !!d.connected });
         for (const m of _mailboxProviders) rows.push({ cat: 'email', html: _mailboxCard(m), on: !!m.connected });
         if (_searchConsole) rows.push({ cat: 'search_console', html: _searchConsoleCard(_searchConsole), on: !!_searchConsole.connected });
+        if (_meetingApps) {
+            for (const m of _meetingApps) rows.push({ cat: 'meeting_apps', html: _meetingAppCard(m), on: !!m.connected });
+            for (const [key, label] of [['teams_pickup', 'Microsoft Teams'], ['zoom_pickup', 'Zoom']]) rows.push({ cat: 'meeting_apps', html: _comingSoonCard({ key, label, description: 'Picks up the meeting when it has a transcript.' }), on: false, soon: true, title: label });
+        }
         for (const t of comingSoon) rows.push({ cat: t.key, html: _comingSoonCard(t), on: false, soon: true, title: t.label });
         const sectionsHtml = _connSections(rows, groups);
         grid.innerHTML = sectionsHtml || '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">This assistant doesn&#39;t connect to any outside tools — everything it does happens inside Be More Swan. If that changes, the connections it can use will appear here.</div>';
@@ -830,6 +846,8 @@ const CONN_SECTIONS = [
       long: 'Connect your CRM and approved records are pushed to it, so contacts and deals stay in step without copying anything across.' },
     { cat: 'cms', title: 'Publish your blog', short: 'Where your articles go live.',
       long: 'Connect the places your articles are published or shared. Each one publishes when you approve an article.' },
+    { cat: 'meeting_apps', title: 'Pick up meetings', short: 'Minutes appear after your calls, no pasting.',
+      long: 'Connect the Google account that hosts your calls. After a Google Meet call with a transcript ends, the minutes are written from Google’s own transcript and wait in the Inbox for you to approve — nothing joins or records your call. It needs Google Workspace Business Standard or higher, with transcription turned on in the call. Each meeting written up counts against your task allowance; calls without a transcript don’t.' },
     { cat: 'search_console', title: 'See how people find you', short: 'Searches that bring people to your site.',
       long: 'Connect Google Search Console and this assistant can read which searches bring people to your site. It never changes anything there.' },
     { cat: 'design', title: 'Bring in designs', short: 'Use designs you made elsewhere.',
@@ -995,6 +1013,67 @@ window._intDisconnectMailbox = async function (provider, label) {
         await _loadConnections();
     } catch (e) {
         window.showToast?.(e.message || `Could not disconnect ${label}.`, { icon: '⚠️' });
+    }
+};
+
+// ── Meeting apps (meeting_apps category, the Note Taker) ──────────────
+// Google Meet today (src/utils/meeting-sources/google-meet.ts). READ-ONLY like Search Console: it reads the transcript
+// Google made and never joins, records or posts anything. The line under it says when meetings were last checked, so
+// "connected but nothing appeared" (transcription off, another account hosted the call) has an answer.
+function _meetingAppCard(m) {
+    const connected = !!m.connected;
+    const broken = !connected && !!m.status;
+    const connectUrl = _withAssistantId('/api/oauth/google_meet/connect');
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const when = m.lastCheckedAt ? new Date(m.lastCheckedAt) : null;
+    const ago = when ? _meetingAgo(when) : '';
+    const checked = !connected ? ''
+        : m.lastError ? 'Couldn’t read your calls at the last check — reconnect if this keeps happening'
+        : when ? `Last checked ${ago}${m.writtenRecently ? ` · ${m.writtenRecently} meeting${m.writtenRecently === 1 ? '' : 's'} written up in the last 30 days` : ' · no calls with a transcript yet'}`
+        : 'Checks every 15 minutes for calls with a transcript';
+    return _connRow({
+        key: 'google_meet', iconBg: 'bg-emerald-50', iconText: 'text-emerald-700', emoji: '🎥',
+        label: 'Google Meet',
+        sub: connected ? `${m.accountName ? `Calls hosted by ${_esc(m.accountName)}. ` : ''}${_esc(checked)}`
+            : broken ? 'Needs reconnecting'
+            : 'Writes up calls that have a transcript. Business Standard or higher; start calls from the account you connect.',
+        subTone: broken || (connected && m.lastError) ? 'warn' : '',
+        control: connected
+            ? _rowPill('Connected')
+            : `<a href="${connectUrl}" class="${_ROW_BTN} btn-primary border-transparent">${broken ? 'Reconnect' : 'Connect'}</a>`,
+        manageHtml: connected
+            ? `<div class="flex items-center gap-2 flex-wrap">
+                   <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
+                   <button type="button" onclick="window._intDisconnectMeetingApp('google_meet')" class="${ghostPill} btn-destructive">Disconnect</button>
+               </div>`
+            : '',
+    });
+}
+
+function _meetingAgo(d) {
+    const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const h = Math.round(mins / 60);
+    return h < 24 ? `${h} hour${h === 1 ? '' : 's'} ago` : d.toLocaleDateString();
+}
+
+window._intDisconnectMeetingApp = async function (provider) {
+    if (provider !== 'google_meet') return;
+    if (!(await window.confirmModal(
+        'Calls stop being picked up from Google Meet. Meetings already written up stay in the Inbox, and you can still paste notes or attach a transcript.',
+        { title: 'Disconnect Google Meet?', confirmLabel: 'Yes, disconnect', cancelLabel: 'Keep it connected' },
+    ))) return;
+    try {
+        const res = await fetch('/api/oauth/google_meet/disconnect', { method: 'POST' });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            throw new Error(d.error || 'Could not disconnect Google Meet.');
+        }
+        window.showToast?.('Google Meet disconnected.', { icon: '🔌' });
+        await _loadConnections();
+    } catch (e) {
+        window.showToast?.(e.message || 'Could not disconnect Google Meet.', { icon: '⚠️' });
     }
 };
 

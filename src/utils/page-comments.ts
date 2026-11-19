@@ -22,7 +22,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from 'drizz
 import type { getDb } from '../../db/client';
 import { aiAssistants, pageComments, scheduledPosts, systemConnections } from '../../db/schema';
 import {
-    fetchCommentReplies, fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment,
+    fetchCommentReplies, fetchPostComments, linkedInCommentUrl, replyToComment, type LinkedInComment, type ReadFailure,
 } from './linkedin-page-api';
 import { notArchivedAssistant } from './archived-assistant-drafts';
 import { isLinkedInPageUrn } from './linkedin-page';
@@ -63,10 +63,12 @@ export const INGEST_COMMENTS_BUDGET_MS = 20_000;
 const SYNC_MIN_GAP_MS = 60_000;
 const lastSync = new Map<number, number>();
 
-/** A missing table (db/z-page-comments.sql not applied yet). */
+/** A missing table (42P01) or column (42703) — a manual SQL file (db/z-page-comments.sql,
+ *  db/z-scheduled-posts-author.sql) hasn't been applied on this database yet. */
 export function isMissingTable(err: unknown): boolean {
     const e = err as { code?: string; cause?: { code?: string } } | null;
-    return e?.code === '42P01' || e?.cause?.code === '42P01';
+    const code = e?.code ?? e?.cause?.code;
+    return code === '42P01' || code === '42703';
 }
 
 function toIso(v: Date | string | null | undefined): string | null {
@@ -84,7 +86,13 @@ export interface PagePost {
     platformPostId: string;
 }
 
-export interface SyncResult { posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number }
+export interface SyncResult {
+    posts: number; fetched: number; added: number; repliedOnLinkedIn: number; failedPosts: number; skippedForTime: number;
+    /** What LinkedIn said for each refused post (first MAX_REPORTED_FAILURES) — the only place the
+     *  reason survives, since Netlify's function log drops the warnings. */
+    failures?: { postId: number; postUrn: string; status: number; message: string }[];
+}
+export const MAX_REPORTED_FAILURES = 10;
 
 /**
  * Decide what one post's comment list means for our rows. Pure, so tests can feed it LinkedIn's
@@ -124,10 +132,17 @@ export async function syncCommentsForConnection(
     const r: SyncResult = { posts: opts.posts.length, fetched: 0, added: 0, repliedOnLinkedIn: 0, failedPosts: 0, skippedForTime: 0 };
     for (const post of opts.posts) {
         if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
-        const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline);
+        let failure: ReadFailure | null = null;
+        const topLevel = await fetchPostComments(opts.token, post.platformPostId, opts.deadline, (f) => { failure = f; });
         // A read that came back empty-handed AFTER the deadline was most likely cut off by it, not refused:
         // count it as left for later, so a slow LinkedIn never reads as "reconnect your Company Page".
-        if (!topLevel) { if (opts.deadline && Date.now() > opts.deadline) r.skippedForTime++; else r.failedPosts++; continue; }
+        if (!topLevel) {
+            if (opts.deadline && Date.now() > opts.deadline) { r.skippedForTime++; continue; }
+            r.failedPosts++;
+            const f = failure as ReadFailure | null;
+            if (f && (r.failures ??= []).length < MAX_REPORTED_FAILURES) r.failures.push({ postId: post.id, postUrn: post.platformPostId, status: f.status, message: f.message });
+            continue;
+        }
         r.fetched += topLevel.length;
         // The Page's own replies sit UNDER each comment, not in the post's list. Ask for them only on
         // comments still waiting on our side (new, not stored yet, or a reply LinkedIn never confirmed)
@@ -154,7 +169,6 @@ export async function syncCommentsForConnection(
                 commentUrn: c.commentUrn,
                 objectUrn: c.objectUrn ?? post.platformPostId,
                 authorUrn: c.actorUrn,
-                authorName: c.actorName,
                 body: c.text,
                 commentedAt: c.createdAt,
             }))).onConflictDoNothing({ target: [pageComments.connectionId, pageComments.commentUrn] }).returning({ id: pageComments.id });
@@ -185,17 +199,28 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
         assistantId: scheduledPosts.assistantId,
         platformPostId: scheduledPosts.platformPostId,
         publishedAt: scheduledPosts.publishedAt,
-        connectionId: scheduledPosts.connectionId,
+        connectionId: systemConnections.id,
         externalUserId: systemConnections.externalUserId,
     })
         .from(scheduledPosts)
-        .innerJoin(systemConnections, eq(systemConnections.id, scheduledPosts.connectionId))
+        // The Page connection that WROTE the post — matched on the author the publisher recorded
+        // (platform_author_urn), never on connection_id alone: reconnecting updates a connection row
+        // in place, so a connection that posted as a personal profile can point at a Page later, and
+        // connection_id would then claim the profile's posts for the Page — their comments on the
+        // Page's tab, replies sent AS the Page (seen on staging 2026-11-19, post 202). A post with no
+        // recorded author (published before db/z-scheduled-posts-author.sql) is left out: Page
+        // posting had only run on staging by then.
+        .innerJoin(systemConnections, and(
+            eq(systemConnections.organisationId, scheduledPosts.organisationId),
+            eq(systemConnections.serviceName, 'linkedin'),
+            eq(systemConnections.externalUserId, scheduledPosts.platformAuthorUrn),
+        ))
         .where(and(
             eq(scheduledPosts.platform, 'linkedin'),
             eq(scheduledPosts.status, 'published'),
             isNotNull(scheduledPosts.platformPostId),
             gte(scheduledPosts.publishedAt, since),
-            like(systemConnections.externalUserId, 'urn:li:organization:%'),
+            like(scheduledPosts.platformAuthorUrn, 'urn:li:organization:%'),
             eq(systemConnections.isActive, true),
             // An archived assistant's posts gather no new comments to answer (archived-assistant-drafts.ts).
             notArchivedAssistant(scheduledPosts.assistantId),
@@ -208,8 +233,12 @@ export async function loadPagePosts(db: Db, scope: { organisationId?: number; as
         console.warn(`[page-comments] loadPagePosts hit its cap of ${MAX_PAGE_POSTS} posts — the oldest LinkedIn Page posts in the ${COMMENT_WINDOW_DAYS}-day window were skipped this tick. Page through them before this grows further.`);
     }
     const byConnection = new Map<number, { orgUrn: string; organisationId: number; posts: (PagePost & { publishedAt: Date | null })[] }>();
+    const seen = new Set<number>();
     for (const row of rows) {
         if (!row.connectionId || !row.platformPostId || !isLinkedInPageUrn(row.externalUserId) || row.organisationId == null) continue;
+        // Two live connections for the same Page in one workspace would join a post twice. Read it once.
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
         const g = byConnection.get(row.connectionId) ?? { orgUrn: row.externalUserId!, organisationId: row.organisationId, posts: [] };
         g.posts.push({ id: row.id, organisationId: row.organisationId, assistantId: row.assistantId, platformPostId: row.platformPostId, publishedAt: row.publishedAt });
         byConnection.set(row.connectionId, g);
@@ -242,7 +271,8 @@ export async function syncAssistantComments(db: Db, organisationId: number, assi
         const token = await pageToken(db, organisationId, connectionId);
         if (!token) { total.posts += g.posts.length; total.failedPosts += g.posts.length; continue; }
         const r = await syncCommentsForConnection(db, { connectionId, orgUrn: g.orgUrn, token, posts: g.posts, deadline });
-        for (const k of Object.keys(total) as (keyof SyncResult)[]) total[k] += r[k];
+        for (const k of ['posts', 'fetched', 'added', 'repliedOnLinkedIn', 'failedPosts', 'skippedForTime'] as const) total[k] += r[k];
+        for (const f of r.failures ?? []) if ((total.failures ??= []).length < MAX_REPORTED_FAILURES) total.failures.push(f);
     }
     if (total.failedPosts && total.failedPosts === total.posts - total.skippedForTime) {
         return { ok: false, status: 502, error: 'LinkedIn wouldn’t share the comments just now. If this keeps happening, reconnect your Company Page in Connections.', code: 'linkedin_refused' };
@@ -254,7 +284,9 @@ export async function syncAssistantComments(db: Db, organisationId: number, assi
 
 export interface CommentView {
     id: number;
-    authorName: string;
+    /** Who, as far as we may say: 'A LinkedIn Page' for a company, else 'Someone'. LinkedIn gives
+     *  this app no commenter names (linkedin-page-api.ts fetchPostComments) — Open on LinkedIn shows who. */
+    authorLabel: string;
     body: string;
     commentedAt: string | null;
     postId: number | null;
@@ -274,7 +306,7 @@ type CommentRow = typeof pageComments.$inferSelect;
 export function commentView(r: CommentRow, postCaption: string | null = null): CommentView {
     return {
         id: r.id,
-        authorName: r.authorName?.trim() || (r.authorUrn?.startsWith('urn:li:organization:') ? 'A LinkedIn Page' : 'A LinkedIn member'),
+        authorLabel: r.authorUrn?.startsWith('urn:li:organization:') ? 'A LinkedIn Page' : 'Someone',
         body: r.body,
         commentedAt: toIso(r.commentedAt) ?? toIso(r.createdAt),
         postId: r.scheduledPostId,
@@ -383,7 +415,7 @@ export const REPLY_RULES = `How to write the reply:
 - You are replying AS the business's LinkedIn Company Page, under its own post, to the person who commented. Write in the first person plural ("we"), in the brand's voice.
 - Answer what they actually said. Thank them only when a thank-you fits — never open every reply the same way.
 - One to three short sentences. Plain text: no markdown, no hashtags, no emoji unless the comment used them.
-- Use their first name at most once, and only if it is given below.
+- You don't know the commenter's name — never guess one or invent a greeting with a name.
 - Never invent facts, prices, dates, offers or promises that are not in the business details. If they ask something the details don't answer, invite them to message the Page or get in touch rather than guessing.
 - If the comment is a complaint, acknowledge it calmly and offer to take it to a private conversation. Never argue.
 - If the comment is spam, abusive or a sales pitch, reply with an empty string — the person will dismiss it.`;
@@ -410,11 +442,9 @@ export async function draftReply(
         roleKeyOfAssistant(db, assistantId),
     ]);
     const modelChoice = await loadRoleModel(db, roleKey ?? 'social_media_manager');
-    const firstName = row.c.authorName?.trim().split(/\s+/)[0] || null;
     const payload = {
         post: (row.caption || '').slice(0, 3000),
         comment: row.c.body.slice(0, 2000),
-        commenter_first_name: firstName,
         current_draft: row.c.draftReply || null,
     };
     let reply: string | null = null;
@@ -468,6 +498,16 @@ export async function postReply(
         .from(systemConnections).where(eq(systemConnections.id, row.c.connectionId)).limit(1);
     if (!conn?.isActive || !isLinkedInPageUrn(conn.externalUserId)) {
         return { ok: false, status: 409, error: 'Your LinkedIn Company Page isn’t connected any more. Reconnect it in Connections, then post the reply.', code: 'not_connected' };
+    }
+    // Only ever answer AS the Page under a post the Page wrote. A comment stored before posts were
+    // picked by author (or whose connection has since become a different account) could sit on a
+    // personal post; replying to it as the Page would put the business's name in someone's feed.
+    if (row.c.scheduledPostId != null) {
+        const [post] = await db.select({ author: scheduledPosts.platformAuthorUrn }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, row.c.scheduledPostId), eq(scheduledPosts.organisationId, organisationId))).limit(1);
+        if (!post || post.author !== conn.externalUserId) {
+            return { ok: false, status: 409, error: 'This comment is on a post your Company Page didn’t write, so it can’t be answered as the Page. Dismiss it, or reply on LinkedIn yourself.', code: 'not_page_post' };
+        }
     }
     const token = await pageToken(db, organisationId, row.c.connectionId);
     if (!token) return { ok: false, status: 409, error: 'Your LinkedIn Company Page connection has no access key. Reconnect it in Connections.', code: 'not_connected' };
@@ -523,7 +563,7 @@ export async function buildCommentsChatBlock(db: Db, organisationId: number, ass
     try {
         const { comments, counts, hasPageConnection: connected } = await listComments(db, organisationId, assistantId);
         const fresh = comments.filter((c) => c.status === 'new').slice(0, CHAT_SNAPSHOT_COMMENTS);
-        const lines = fresh.map((c) => `#${c.id} · ${c.authorName} · "${c.body.replace(/\s+/g, ' ').slice(0, 140)}"${c.postExcerpt ? ` · on: "${c.postExcerpt.slice(0, 60)}"` : ''}${c.draftReply ? ' · reply drafted' : ''}`);
+        const lines = fresh.map((c) => `#${c.id} · ${c.authorLabel} · "${c.body.replace(/\s+/g, ' ').slice(0, 140)}"${c.postExcerpt ? ` · on: "${c.postExcerpt.slice(0, 60)}"` : ''}${c.draftReply ? ' · reply drafted' : ''}`);
         return `YOUR COMMENTS TAB — comments people left on the posts you published to the business's LinkedIn Company Page, fetched every few hours (the tab's "Check for new comments" button fetches now). ${connected ? 'A Company Page is connected.' : 'No LinkedIn Company Page is connected, so no comments are fetched: to get them, the user reconnects LinkedIn in Connections and chooses "A Company Page". Comments on a personal LinkedIn profile, Facebook, Instagram or X are not fetched.'}
 Comments: ${counts.new} new, ${counts.replied} replied, ${counts.dismissed} dismissed.${fresh.length ? `\nNew comments${counts.new > fresh.length ? ` (the ${fresh.length} most recent of ${counts.new})` : ''}:\n${lines.join('\n')}` : ''}
 

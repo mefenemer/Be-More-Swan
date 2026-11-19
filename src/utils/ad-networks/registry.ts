@@ -32,6 +32,7 @@ import { AD_NETWORK_BLOCKERS, AD_NETWORK_LABELS, type AdNetwork } from '../../co
 import type { AdNetworkAdapter } from './types';
 import { mockAdapter } from './mock';
 import { createLinkedInAdapter, type LinkedInAdapterConfig } from './linkedin';
+import { createMetaAdapter, type MetaAdapterConfig } from './meta';
 
 /**
  * Real, reachable adapters.
@@ -132,4 +133,17 @@ export function networkAvailability(): { network: string; label: string; availab
         const { adapter, blocker } = resolveAdapter(network);
         return { network, label: AD_NETWORK_LABELS[network] ?? network, available: !!adapter, blocker };
     });
+}
+
+/**
+ * Meta, for development only — the same arrangement as linkedInAdapter(), for the same reasons:
+ * not in ADAPTERS, refused in production, verdict passed in rather than read from NODE_ENV.
+ * App-role holders can use ads_management on their own ad accounts at Standard access; customers
+ * need Advanced access (App Review) before this can be registered.
+ */
+export function metaAdapter(cfg: MetaAdapterConfig, env: { isProduction: boolean }): AdNetworkAdapter {
+    if (env.isProduction) {
+        throw new Error('The Meta ads adapter is development only and must not be used in production.');
+    }
+    return createMetaAdapter(cfg);
 }

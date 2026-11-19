@@ -2479,6 +2479,22 @@ function _rqMeetingFollowupSent(d) {
 }
 
 /**
+ * Where a meeting came from when the Note Taker picked it up by itself (data.pickedUpFrom, set by
+ * src/utils/meeting-pickup.ts): "Picked up from Google Meet", with a link to the call when the platform gave one.
+ * '' for pasted or chat meetings.
+ */
+function _rqMeetingPickedUp(r) {
+    const p = r.recordType === 'meeting' && r.data ? r.data.pickedUpFrom : null;
+    if (!p || typeof p.label !== 'string' || !p.label) return '';
+    const link = typeof p.link === 'string' && /^https:\/\//i.test(p.link)
+        ? ` · <a href="${_rqEsc(p.link)}" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-900">Open the call</a>`
+        : '';
+    // The Note Taker joined this one itself (pickedUpFrom.via 'bot'; docs/note-taker-bot-plan.md).
+    if (p.via === 'bot') return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Joined by Note Taker · ${_rqEsc(p.label)}</span> Written from the Note Taker's own transcript${link}</p>`;
+    return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Picked up from ${_rqEsc(p.label)}</span> Written from the platform's own transcript${link}</p>`;
+}
+
+/**
  * A follow-up that was NOT sent because no Gmail or Outlook was connected when the meeting was approved
  * (data.followupNotSent, stamped by sync-action.ts) — with the button that sends it once one is. '' otherwise.
  * Re-approving cannot resend it (only the first approval fires hand-offs), so this is the way back.
@@ -3467,7 +3483,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${snippet ? `<p class="text-xs text-gray-500 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
         ${_rqRecipient(r, statusKey)}
         ${_rqAttendeeFix(r, statusKey)}
-        ${_rqOutreachPreview(r, statusKey)}
+        ${_rqMeetingPickedUp(r)}${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
         ${_rqLeadNotes(r)}
         ${_rqDecisionDetail(r, statusKey)}
@@ -6376,6 +6392,7 @@ function _applyAssistantRulesScope() {
 }
 
 window._renderRunbookDirectives = async function(assistantId) {
+    const stale = _detailTicket();
     // ⚠️ Gated to roles whose work reads these rows (issue #131). content_rules reach a model ONLY
     // through compiled blueprint §4, and src/utils/blueprint-prompt.ts has exactly two callers:
     // process-content-jobs.ts (the social/blog drafting worker) and the admin smoke test. Nothing in
@@ -6407,6 +6424,7 @@ window._renderRunbookDirectives = async function(assistantId) {
         const res = await _cachedGet(`/.netlify/functions/content-rules?assistantId=${aid}`);
         if (res.ok) rules = (await res.json()).rules || [];
     } catch { /* non-critical */ }
+    if (stale()) return;
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     if (!rules.length) {
         host.innerHTML = viaChat
@@ -6455,6 +6473,7 @@ window._renderRunbookDirectives = async function(assistantId) {
 // that actually reached targeting from one still sitting as evidence, so it is rendered per reason
 // rather than summed away. Pinned by tests/lead-reject-reasons.test.ts.
 window._renderLeadRejectionEvidence = async function(assistantId) {
+    const stale = _detailTicket();
     const host = document.getElementById('runbook-lead-rejections');
     // The whole CARD is shown/hidden, not just this host — since issue #131 the panel is a top-level
     // card rather than a block inside Learned Directives, which is now hidden for this very role.
@@ -6486,6 +6505,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
         });
         if (res.ok) payload = await res.json();
     } catch { /* non-critical — the directives list below still renders */ }
+    if (stale()) return;
 
     // A failed lookup is not "no rejections". Say nothing rather than assert an empty history.
     if (!payload || !Array.isArray(payload.reasons)) {
@@ -7444,11 +7464,23 @@ function _applyDashboardRegistry(data) {
     // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
     const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
     toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    // ⚠️ A property handler beats the HTML's onclick="openGeneratePostSheet()", and a slow earlier
+    // load can wire this page's button before this render runs: open the Meeting Note Taker, move on
+    // to Felix before its context arrives, and Felix's "New post" opened "New meeting" (staging,
+    // 2026-11-19). Put the default back on every render; the branches below (newAction, blog,
+    // newsletter) set their own again. Not `onclick = null`: that also drops the attribute's own
+    // handler (same slot), and the button then did nothing. No args: the event must not reach
+    // openGeneratePostSheet(explicitAssistantId).
+    const rqPrimaryBtn = document.getElementById('detail-rq-primary-btn');
+    if (rqPrimaryBtn) rqPrimaryBtn.onclick = () => window.openGeneratePostSheet?.();
     if (rqNew) {
         setText('detail-rq-primary-label', rqNew.label);
-        const rqBtn = document.getElementById('detail-rq-primary-btn');
-        if (rqBtn) rqBtn.onclick = () => _openRoleForm(rqNew.kind, data);
+        if (rqPrimaryBtn) rqPrimaryBtn.onclick = () => _openRoleForm(rqNew.kind, data);
     }
+    // The Note Taker joins a call itself (docs/note-taker-bot-plan.md step 3): "Send to a call" + the Live & upcoming
+    // strip. The component shows nothing unless the meeting_bot flag is on; every other role clears it.
+    if (data.roleKey === 'meeting_note_taker') window.MeetingBots?.mount({ assistantId: data.id, assistantName: data.name });
+    else window.MeetingBots?.unmount();
     toggle('detail-rq-col-posted', !rqIsRecords);
     // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
     // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent
@@ -9050,7 +9082,29 @@ function _endCardLoading(id) {
 // state synchronously (_setMetricsEmptyState('pending')), so there is nothing to wait for. _KPI_KEYS
 // is the surviving list of the same four keys.
 
+// ⚠️ Stale-response guard. Each call takes a ticket; only the newest call may touch the page after
+// an await. Without it, a slow get-assistant-context for one assistant (Orbit Scribe) landed after
+// the user had already opened another (Felix) and repainted Felix's page as Orbit Scribe — name,
+// "New meeting" button, _detailReviewQueue and all. A ticket, not an id compare: A → B → A leaves
+// two calls for A in flight, and only the second may paint.
+let _detailInitSeq = 0;
+// The same ticket for the loaders the call starts (metrics, activity, goals, rules, connections,
+// audience, the Review badge…). Each one fetches for ONE assistant and then looks its cards up by
+// id, so a slow answer for Orbit Scribe landed in Felix's cards. A loader takes a ticket as it
+// starts — `const stale = _detailTicket();` — and checks `if (stale()) return;` after every await,
+// before it paints or sets a global. Also used from integrations.js, hence the window copy.
+function _detailTicket() {
+    const t = _detailInitSeq;
+    return () => t !== _detailInitSeq;
+}
+window._detailTicket = _detailTicket;
+// Leaving the assistant page for another view (loadView in workspace.html) takes a ticket too, so a
+// late answer for the page just left can't set _currentAssistantName, _detailReviewQueue or a
+// card on the next view.
+window._leaveAssistantDetail = () => { _detailInitSeq++; };
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
+    const _detailSeq = ++_detailInitSeq;
+    const _detailStale = () => _detailSeq !== _detailInitSeq;
     if (!assistantId) {
         // No assistant to load — don't leave the loading skeleton stuck on screen forever.
         document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
@@ -9307,8 +9361,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     window.bmsCachedFetch?.('/.netlify/functions/get-usage-summary').catch(() => {});
     try {
         const res = await fetch(`/.netlify/functions/get-assistant-context?id=${assistantId}`);
+        if (_detailStale()) return;
         if (res.status === 403) {
             const errBody = await res.json().catch(() => ({}));
+            if (_detailStale()) return;
             if (errBody.code === 'DPA_REQUIRED') {
                 // Show blocking DPA acceptance modal — user cannot view assistant config until accepted
                 const modal = document.getElementById('modal-dpa-required');
@@ -9324,7 +9380,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             throw new Error('Failed to load');
         }
         if (!res.ok) throw new Error('Failed to load');
-        currentData = await res.json();
+        const _ctx = await res.json();
+        // Checked BEFORE anything is written: every line below paints the page or sets a window.* global.
+        if (_detailStale()) return;
+        currentData = _ctx;
         // Read by list cards that name the assistant ("Written by Bella"), outside this closure.
         window._currentAssistantName = currentData.name || '';
 
@@ -9596,10 +9655,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     } finally {
         // Issue #177 follow-up: reveal the real (now role-correct) markup and drop the generic
         // loading skeleton — runs on success, failure, and the DPA-required early return alike,
-        // so the skeleton never gets stuck showing.
-        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
-        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        // so the skeleton never gets stuck showing. Not for a superseded call: the newer call owns
+        // the skeleton, and revealing it here would show its page half-built.
+        if (!_detailStale()) {
+            document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+            document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        }
     }
+    // A superseded call that failed (the catch above) must not go on to start the loaders below.
+    if (_detailStale()) return;
 
     // ── First-run welcome ─────────────────────────────────────────
     // A just-onboarded assistant (arriving with ?welcome=1, lifted onto the flag in
@@ -9790,7 +9854,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Autopilot's post totals (Created/Scheduled/Published) fill from the metrics fetch — clear its
     // skeleton when they're in.
     _loads.push(_fetchAndRenderAssistantMetrics(assistantId)
-        .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
+        .finally(() => { if (_skelAutopilot && !_detailStale()) _endCardLoading('autopilot-status-card'); }));
     // Not awaited: the hero is complete without it, and the strip reveals itself when it lands.
     _renderAssistantTaskShare(assistantId);
     // Results ▸ Autopilot: posts per content pillar (Social), or per topic (Blog, Email) — src/components/pillar-list.js.
@@ -9837,8 +9901,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading activity…</div>';
         try {
             const res = await fetch(`${_activityUrl}?id=${assistantId}&timeframe=${timeframe}`);
+            if (_detailStale()) return;
             if (res.ok) {
                 const { logs, activeJobCount } = await res.json();
+                if (_detailStale()) return;
                 // Feed the operational status pill (Epic 1 AC1.1.2): mid-flight jobs → "Executing Task".
                 window._updateOpSignals?.({ activeJobCount: activeJobCount || 0 });
                 if (logs && logs.length > 0) {
@@ -9956,7 +10022,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 _activityLoadFailed();
             }
         } catch {
-            _activityLoadFailed();
+            if (!_detailStale()) _activityLoadFailed();
         }
         }; // end loadActivity
         // A failed read is not an empty history — it used to say "No activity yet" either way.
@@ -10003,6 +10069,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // still renders from this call — that is what decides whether it shows at all for a non-social
     // role — but it no longer BLOCKS on it.
     _loads.push(window.initAssistantConnections(assistantId, currentData).then(() => {
+        if (_detailStale()) return;
         // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
         // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
         window.AssistantIntegrations?.init({ assistantId });
@@ -10048,6 +10115,7 @@ function _nyWhen(v) {
 }
 
 async function _prefetchDetailRqBadge(assistantId) {
+    const stale = _detailTicket();
     const rq = window._detailReviewQueue || {};
     try {
         let count = 0;
@@ -10103,6 +10171,7 @@ async function _prefetchDetailRqBadge(assistantId) {
                 items.push({ id: d.id, label: words ? (words.length > 70 ? words.slice(0, 70) + '…' : words) : 'Post with no caption yet', sub: _nyWhen(d.publishDate) });
             }
         }
+        if (stale()) return;
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);
         // The compact header's Needs-you card names the first few (the Brand Designer's Briefs feed
@@ -10148,6 +10217,7 @@ async function _prefetchDetailRqBadge(assistantId) {
  *    verdict on the assistant rather than a blank field in Settings.
  */
 async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
+    const stale = _detailTicket();
     const roiStrip = document.getElementById('detail-roi-strip');
     if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
     const el = id => document.getElementById(id);
@@ -10166,6 +10236,7 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
         const res = await fetch(`/.netlify/functions/get-lead-roi?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
+        if (stale()) return;
         if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
 
         // Nothing measured yet. Keeping the strip hidden — rather than showing "~0h" — is the same
@@ -10248,6 +10319,7 @@ const _WRITTEN_ROI_HOURS_NOTE = {
 };
 
 async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
+    const stale = _detailTicket();
     const roiStrip = document.getElementById('detail-roi-strip');
     if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
     const el = id => document.getElementById(id);
@@ -10267,6 +10339,7 @@ async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
         const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
+        if (stale()) return;
         if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
 
         // Nothing written yet. Hidden rather than "~0h", the same rule both other paths follow —
@@ -10354,6 +10427,7 @@ document.addEventListener('bms:notifications-arrived', _refreshTaskShareSoon);
 // assistant (get-usage-summary) — the same two numbers the dashboard's "Tasks this month" card uses.
 // Hidden when the plan has no task limit or the workspace is still on the old credits.
 async function _renderAssistantTaskShare(assistantId, opts = {}) {
+    const stale = _detailTicket();
     const strip = document.getElementById('detail-task-share');
     if (!strip) return;
     if (!opts.fresh) strip.classList.add('hidden');
@@ -10364,8 +10438,8 @@ async function _renderAssistantTaskShare(assistantId, opts = {}) {
     try {
         const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u, { fresh: !!opts.fresh }) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
-        // The user may have opened another assistant while this was loading.
-        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+        // The user may have opened another assistant (or another view) while this was loading.
+        if (stale() || Number(window._currentAssistantId) !== Number(assistantId)) return;
         if (!cap || cap.taskLimit == null || !cap.taskLimit || !us || us.unit !== 'tasks') return;
         const limit = Number(cap.taskLimit);
         const total = Number(cap.taskCount || 0);
@@ -10407,6 +10481,7 @@ async function _renderAssistantTaskShare(assistantId, opts = {}) {
 const _ACTIVITY_TF_WORDS = { '1d': 'last day', '7d': 'last 7 days', '30d': 'last 30 days', '90d': 'last 90 days' };
 
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
+    const stale = _detailTicket();
     // Remembered for _refreshAssistantMetrics above — the period toggle calls straight back into
     // here, so this is the one place that knows which view is on screen.
     _detailMetricsPeriod = period;
@@ -10447,6 +10522,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
         const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
+        if (stale()) return;
 
         // Gate on any real ROI signal, not just post creation — hoursSaved already accounts for
         // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
@@ -10605,6 +10681,7 @@ const _audienceFullTime = (iso) => new Date(iso).toLocaleString('en-GB', { day: 
  * as "nothing connected yet", not as an empty box.
  */
 async function _fetchAndRenderBlogDestinations() {
+    const stale = _detailTicket();
     const block = document.getElementById('autopilot-audience');
     const list = document.getElementById('audience-by-platform');
     if (!block || !list) return;
@@ -10628,6 +10705,7 @@ async function _fetchAndRenderBlogDestinations() {
         const res = await fetch('/.netlify/functions/connect-blog-destination');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { destinations } = await res.json();
+        if (stale()) return;
         if (!Array.isArray(destinations) || !destinations.length) {
             list.innerHTML = '<p class="text-xs text-gray-500 py-1">No blog platforms available to connect.</p>';
             setFooter('');
@@ -10665,6 +10743,7 @@ async function _fetchAndRenderBlogDestinations() {
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
             : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Settings ▸ Connections</span> to syndicate them further.');
     } catch (err) {
+        if (stale()) return;
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
         // blip must never be reported to the user as "you have nothing connected".
@@ -10695,6 +10774,7 @@ async function _fetchAndRenderBlogDestinations() {
  * one assistant would report a smaller number than that assistant's own send will reach.
  */
 async function _fetchAndRenderNewsletterList() {
+    const stale = _detailTicket();
     const block = document.getElementById('autopilot-audience');
     const list = document.getElementById('audience-by-platform');
     if (!block || !list) return;
@@ -10727,6 +10807,7 @@ async function _fetchAndRenderNewsletterList() {
         const res = await fetch('/.netlify/functions/audience-contacts?countsOnly=1', { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        if (stale()) return;
         if (data.needsSetup) {
             list.innerHTML = '<p class="text-xs text-gray-500 py-1">The audience tables have not been set up on this environment yet.</p>';
             setFooter('');
@@ -10783,6 +10864,7 @@ async function _fetchAndRenderNewsletterList() {
             + audienceLink('See who is on it →'),
             'These come straight from your own audience table — nothing is cached and no background job is involved, so there is nothing to wait for.');
     } catch (err) {
+        if (stale()) return;
         console.error('[newsletter-list] load failed:', err);
         // A network blip must never be reported to the user as "your list is empty".
         list.innerHTML = '<p class="text-xs text-gray-500 py-1">Couldn\'t load your list just now.</p>';
@@ -10804,6 +10886,7 @@ async function _fetchAndRenderNewsletterList() {
  * the information, and hiding the row would silently shrink the chart.
  */
 async function _fetchAndRenderFollowerCounts() {
+    const stale = _detailTicket();
     const block = document.getElementById('autopilot-audience');
     const list = document.getElementById('audience-by-platform');
     if (!block || !list) return;
@@ -10835,6 +10918,7 @@ async function _fetchAndRenderFollowerCounts() {
         // these refresh on a schedule; without it they only refresh when someone opens the page. The
         // server owns that fact — never hardcode the optimistic version here.
         const { counts, cacheTtlMinutes, backgroundRefresh } = await res.json();
+        if (stale()) return;
 
         if (!Array.isArray(counts) || !counts.length) {
             setNotes('Followers & subscribers', '', '');
@@ -10969,6 +11053,7 @@ async function _fetchAndRenderFollowerCounts() {
                 : 'Follower counts are cached so opening this page never hammers the platform APIs. There is no background refresh job — a page load after the cache expires is what triggers the next check.',
         );
     } catch {
+        if (stale()) return;
         // Supplementary data, but the block is already on screen — say so rather than leaving a
         // titled box with nothing in it.
         setNotes('Followers & subscribers', '', '');
@@ -11174,6 +11259,7 @@ function _kickoffFixLink(key) {
 // working. Clicking it activates the assistant via manage-assistant (resume).
 // ─────────────────────────────────────────────────────────────────
 async function _renderKickOff(assistantId) {
+    const stale = _detailTicket();
     const card      = document.getElementById('kickoff-card');
     const listEl    = document.getElementById('kickoff-checklist');
     const btn       = document.getElementById('btn-kick-off');
@@ -11208,7 +11294,8 @@ async function _renderKickOff(assistantId) {
         const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
         if (!res.ok) { card.classList.add('hidden'); return; }
         data = await res.json();
-    } catch { card.classList.add('hidden'); return; }
+    } catch { if (!stale()) card.classList.add('hidden'); return; }
+    if (stale()) return;
 
     // US5 AC5.2: system_paused → red "Attention Required" diagnostic + targeted fix CTA,
     // replacing the normal kick-off flow (the kick-off endpoint also 409s on system_paused).
@@ -11597,6 +11684,7 @@ function _setMetricsEmptyState(mode, info) {
 //     delivery failure when the truth is that nobody is telling us — see deliveryUnknown.
 //   • Unsubscribe rate, before the first issue has gone out. A rate over zero recipients is not 0%.
 async function _loadNewsletterMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11616,8 +11704,10 @@ async function _loadNewsletterMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-newsletter-performance?assistantId=${encodeURIComponent(assistantId)}`);
+        if (stale()) return;
         if (!res.ok) throw new Error(`performance ${res.status}`);
         const d = await res.json();
+        if (stale()) return;
 
         if (d.needsSetup) {
             _setMetricsEmptyState('cards');
@@ -11673,6 +11763,7 @@ async function _loadNewsletterMetrics(assistantId) {
         setDot('value', d.clickRate === null ? 'flat' : d.clickRate >= 0.02 ? 'up' : 'down');
         _setKpiCard('value', { empty: d.clickRate === null });
     } catch (err) {
+        if (stale()) return;
         console.error('[newsletter metrics]', err);
         _setMetricsEmptyState('cards');
         _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
@@ -11689,6 +11780,7 @@ async function _loadNewsletterMetrics(assistantId) {
 // The window is 90 days, not the social 30: blogs publish weekly at best, and 30 days on a
 // fortnightly cadence reports "2" and makes an ordinary month look like a collapse.
 async function _loadBlogMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11750,8 +11842,10 @@ async function _loadBlogMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-blog-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         _renderBlogReaders(data.readers);
 
         if (!data.hasData) { _setMetricsEmptyState('blog-no-data'); return; }
@@ -11805,6 +11899,7 @@ async function _loadBlogMetrics(assistantId) {
             if (hasRead) setDot('value', secs >= 120 ? 'up' : 'none');
         }
     } catch (err) {
+        if (stale()) return;
         console.error('[blog-metrics] load failed:', err);
         _setMetricsEmptyState('error');
     }
@@ -11897,6 +11992,7 @@ function _renderBlogReaders(readers) {
 // "Last 30 days": a 30-day window across a six-week flight cliff-drops at rollover and reports a
 // collapse that is really an artefact of the window.
 async function _loadCampaignMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11908,8 +12004,10 @@ async function _loadCampaignMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-campaign-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
 
         // No campaigns ever run. Four zeroes would read as a campaign that failed rather than one
         // that was never started, so the explanatory panel is the honest answer.
@@ -11961,6 +12059,7 @@ async function _loadCampaignMetrics(assistantId) {
             }
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -11970,6 +12069,7 @@ async function _loadCampaignMetrics(assistantId) {
 // ?metrics=1, in the order the registry's `metricKeys` names. All time. "Needs You" (awaiting) is
 // amber like every other role's — a number the user is meant to bring down.
 async function _loadRecordsMetrics(assistantId, roleKey) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -11977,8 +12077,10 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
     const keys = window.AssistantDashboardRegistry?.get?.(roleKey)?.metricKeys || ['made', 'approved', 'awaiting', 'turnedDown'];
     try {
         const res = await fetch(`/.netlify/functions/assistant-records?metrics=1&assistantId=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('records-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -11994,6 +12096,7 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
             if (key === 'awaiting' && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12003,6 +12106,7 @@ async function _loadRecordsMetrics(assistantId, roleKey) {
 // brand-briefs.ts `performance`, because this assistant publishes nothing and the shared endpoint
 // (post_insights) would report "nothing published" for ever.
 async function _loadBrandMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12013,8 +12117,10 @@ async function _loadBrandMetrics(assistantId) {
             body: JSON.stringify({ action: 'performance', assistantId }),
             bmsRead: true,   // a read: leaves the shared GET cache alone (cached-fetch.js)
         });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('brand-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12043,6 +12149,7 @@ async function _loadBrandMetrics(assistantId) {
             if (trendEl('value')) trendEl('value').textContent = '—';
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12053,13 +12160,16 @@ async function _loadBrandMetrics(assistantId) {
 // — videos made, the share made without changes and average turnaround. Three cards: "Times Used" (in
 // posts and articles) was removed 2026-11-10 — the owner wants nothing here about other assistants' work.
 async function _loadVideoMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch(`/.netlify/functions/video-projects?performance=1&assistantId=${encodeURIComponent(assistantId)}`, { credentials: 'same-origin', bmsRead: true });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('video-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12078,6 +12188,7 @@ async function _loadVideoMetrics(assistantId) {
         const turn = t == null ? '—' : t < 60 ? `${Math.max(1, Math.round(t))} min` : t < 2880 ? `${Math.floor(t / 60)} h${Math.round(t % 60) ? ` ${Math.round(t % 60)} min` : ''}` : `${Math.round(t / 1440)} days`;
         set('ctr', turn, t == null);
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12089,14 +12200,17 @@ async function _loadVideoMetrics(assistantId) {
 // Routed here by `metricsSource: 'shop'`. From shop.ts `get` stats: new orders, orders and money taken in
 // the last 30 days (pounds, less refunds), refunded orders. Workspace-wide (the shop is the workspace's).
 async function _loadShopMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch('/.netlify/functions/shop', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get', assistantId: Number(assistantId) }) });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         const s = data.stats;
         if (!s || !(data.orders || []).length) { _setMetricsEmptyState('shop-no-data'); return; }
         _setMetricsEmptyState('cards');
@@ -12112,19 +12226,23 @@ async function _loadShopMetrics(assistantId) {
             if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
 
 async function _loadMailboxMetrics() {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
     try {
         const res = await fetch('/.netlify/functions/mailboxes', { credentials: 'same-origin' });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.available || !(data.mailboxes || []).length || !data.stats) { _setMetricsEmptyState('records-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12139,6 +12257,7 @@ async function _loadMailboxMetrics() {
             if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
         });
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12147,6 +12266,7 @@ async function _loadMailboxMetrics() {
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
 async function _loadSiteMetrics(assistantId) {
+    const stale = _detailTicket();
     // Website Assistant: visitors to the LIVE site (counted at the edge, no cookies — site-visits.ts),
     // pages read, and what the site brought in, over the last 30 days; plus Draft / Live.
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
@@ -12157,9 +12277,12 @@ async function _loadSiteMetrics(assistantId) {
     });
     try {
         const [siteRes, visitRes] = await Promise.all([post({ action: 'get', assistantId }), post({ action: 'visits', assistantId })]);
+        if (stale()) return;
         if (!siteRes.ok) { _setMetricsEmptyState('error'); return; }
         const data = await siteRes.json();
+        if (stale()) return;
         const v = visitRes.ok ? await visitRes.json() : null;
+        if (stale()) return;
         _setMetricsEmptyState('cards');
         const live = data.site?.status === 'published';
         const note = document.getElementById('metrics-status-note');
@@ -12191,6 +12314,7 @@ async function _loadSiteMetrics(assistantId) {
         put('value', live ? 'Live' : 'Draft', !live, null, live ? (data.site?.unpublishedChanges ? 'Changes waiting to publish' : 'Up to date') : holes ? `${holes} part${holes === 1 ? '' : 's'} to fill in first` : 'Ready to publish');
         _paintSiteVisitDetail(live && s ? s : null);
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12226,6 +12350,7 @@ function _paintSiteVisitDetail(s) {
 // site-audits.ts `performance` — this assistant publishes nothing, so the shared endpoint
 // (post_insights) would report "nothing published" for ever.
 async function _loadSiteAuditMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12235,8 +12360,10 @@ async function _loadSiteAuditMetrics(assistantId) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: 'performance', assistantId }),
         });
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
         if (!data.hasData) { _setMetricsEmptyState('site-no-data'); return; }
         _setMetricsEmptyState('cards');
         const note = document.getElementById('metrics-status-note');
@@ -12269,6 +12396,7 @@ async function _loadSiteAuditMetrics(assistantId) {
             if (trendEl('value')) trendEl('value').textContent = m.competitorCount ? '—' : 'Add competitors on the Website tab';
         }
     } catch {
+        if (stale()) return;
         _setMetricsEmptyState('error');
     }
 }
@@ -12284,6 +12412,7 @@ async function _loadSiteAuditMetrics(assistantId) {
 // `periodDays` rather than left at the markup's "Last 30 days". A lead pipeline read over 30 days
 // reports zero closed deals for a perfectly healthy quarter.
 async function _loadLeadMetrics(assistantId) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12306,8 +12435,10 @@ async function _loadLeadMetrics(assistantId) {
 
     try {
         const res = await fetch(`/.netlify/functions/get-lead-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
 
         // Nothing has happened in the window. Four zeroes would read as an assistant that tried and
         // failed rather than one that has not been given anything to do.
@@ -12367,6 +12498,7 @@ async function _loadLeadMetrics(assistantId) {
             setDot('value', c.won ? 'up' : 'none');
         }
     } catch {
+        if (stale()) return;
         // Network/parse failure. We don't know whether there is data, so say that rather than
         // leaving four "—" cards that read as broken.
         _setMetricsEmptyState('error');
@@ -12374,6 +12506,7 @@ async function _loadLeadMetrics(assistantId) {
 }
 
 async function _loadAssistantMetrics(assistantId, roleKey) {
+    const stale = _detailTicket();
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -12464,8 +12597,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
         // the Created/Scheduled/Published totals and has never returned the KPI shape read below.
         // Pointing here at that endpoint is exactly what left these four cards permanently blank.
         const res = await fetch(`/.netlify/functions/get-assistant-performance?id=${assistantId}`);
+        if (stale()) return;
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
+        if (stale()) return;
 
         if (!data.hasData) {
             // `published` says what actually went out in the window. Without it (older server, or
@@ -12542,6 +12677,7 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
             }
         }
     } catch {
+        if (stale()) return;
         // Network/parse failure. We don't know whether there's data, so say that rather than
         // leaving four "—" cards that read as broken.
         _setMetricsEmptyState('error');
@@ -12614,6 +12750,7 @@ function _setRulesStatus(text, isError) {
 }
 
 async function _fetchAndRenderAssistantRules(assistantId) {
+    const stale = _detailTicket();
     _rulesAssistantId = parseInt(assistantId);
     const editor = document.getElementById('assistant-rules-editor');
     if (!editor) return;
@@ -12625,14 +12762,17 @@ async function _fetchAndRenderAssistantRules(assistantId) {
     let rules = [];
     try {
         const res = await _cachedGet(`${RULES_API}?assistantId=${_rulesAssistantId}`);
+        if (stale()) return;
         if (res.ok) {
             const data = await res.json();
+            if (stale()) return;
             rules = data.rules || [];
             _rulesCanManageWorkspace = data.canManageWorkspaceRules === true;
         }
     } catch (e) {
         console.warn('Could not load assistant rules:', e);
     }
+    if (stale()) return;
 
     // Group rules by known category; anything else (legacy / rejection_feedback) → "Other rules"
     const byCat = {};
@@ -13025,6 +13165,7 @@ function _fmtGoalPair(latest, target, unit) {
 }
 
 async function _fetchAndRenderGoals(assistantId) {
+    const stale = _detailTicket();
     _goalsAssistantId = parseInt(assistantId);
     const list = document.getElementById('goals-list');
     if (!list) return;
@@ -13032,9 +13173,11 @@ async function _fetchAndRenderGoals(assistantId) {
     let goals = [];
     try {
         const res = await _fetchPrefetched(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
+        if (stale()) return;
         _goalsLoadFailed = !res.ok;
         if (res.ok) {
             const data = await res.json();
+            if (stale()) return;
             goals = data.goals || [];
             _goalHeadlineId = data.headlineGoalId ?? null;
             _goalPollCadenceHours = data.pollCadenceHours ?? null;
@@ -13047,6 +13190,7 @@ async function _fetchAndRenderGoals(assistantId) {
             _mediaSources = _normalizeMediaSources(data.mediaSources);
         }
     } catch (e) {
+        if (stale()) return;
         _goalsLoadFailed = true;
         console.warn('Could not load goals:', e);
     }

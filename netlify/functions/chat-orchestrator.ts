@@ -169,6 +169,7 @@ import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-pl
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { buildMeetingsSnapshot, meetingActionFromUiElement, meetingActionsPromptBlock, resolveMeetingActionProposal } from '../../src/utils/chat-meeting-action';
+import { MEETING_BOT_PROPOSAL_TYPE, buildMeetingBotsSnapshot, meetingBotFromUiElement, meetingBotPromptBlock, resolveMeetingBotProposal } from '../../src/utils/chat-meeting-bot';
 import { MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt, meetingHubRecord, normaliseMinutesCard } from '../../src/utils/meeting-minutes';
 import { chatRevisionTarget, persistHubRecords, type HubRecord } from '../../src/utils/hub-records';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
@@ -315,6 +316,9 @@ interface RouteContext {
     /** This Meeting Note Taker's meetings by id — read per turn for routes with usesMeetingsSnapshot.
      *  src/utils/chat-meeting-action.ts. */
     meetingsSnapshot?: string | null;
+    /** The Note Taker's bots in calls, read per turn for routes with usesMeetingBots; null while the meeting_bot flag is
+     *  off (the block is then left out). src/utils/chat-meeting-bot.ts. */
+    meetingBotsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -364,6 +368,8 @@ interface AssistantRoute {
     usesAudienceSnapshot?: boolean;
     /** When true the handler reads this assistant's meetings for this turn (rc.meetingsSnapshot). */
     usesMeetingsSnapshot?: boolean;
+    /** When true the handler reads this Note Taker's bots in calls for this turn (rc.meetingBotsSnapshot). */
+    usesMeetingBots?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -1981,7 +1987,7 @@ ${rc.videosSnapshot ?? 'Your list of videos could not be read this turn. Do not 
 
 WHAT IT COSTS. Planning a storyboard is free. Making the video uses tasks from their monthly allowance only for AI pictures (${rc.taskCosts.weights.ai_image} each), AI clips (${aiVideoPriceText(rc.taskCosts)}, at most ${MAX_AI_CLIPS} per video) and the voiceover (${rc.taskCosts.weights.ai_voiceover}). Stock footage, stock photos, their own pictures and branded cards use no extra tasks. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
 
-WHAT YOU CANNOT DO. You do not make videos longer than 60 seconds, except from their OWN FOOTAGE in its own sound: those can be 2, 5 or 10 minutes, told in chapters (see THEIR OWN FOOTAGE). Never longer than 10 minutes. You do not post them anywhere (for TikTok or anywhere else, they download the finished video). You never review footage from this chat yourself and never describe a video you have not reviewed: what you know of their videos is only what the lists above say. You never claim a video exists, or is being made, before the "Videos" tab says so. Use only facts from the business information — never invent prices, offers or claims.
+WHAT YOU CANNOT DO. You do not make videos longer than 60 seconds, except from their OWN FOOTAGE in its own sound, or an AI PRESENTER walking through their screen recordings: those can be 2, 5 or 10 minutes, told in chapters (see THEIR OWN FOOTAGE and AI PRESENTER). Never longer than 10 minutes. You do not post them anywhere (for TikTok or anywhere else, they download the finished video). You never review footage from this chat yourself and never describe a video you have not reviewed: what you know of their videos is only what the lists above say. You never claim a video exists, or is being made, before the "Videos" tab says so. Use only facts from the business information — never invent prices, offers or claims.
 
 THEIR OWN FOOTAGE. You can make a video from videos they filmed themselves. On the "Videos" tab, "Use my own footage": they pick or upload videos (up to 10, each up to 10 minutes and 500 MB) and say what they want; you watch them, say what you saw, and suggest edits — cuts, trims, a better order, gaps to fill with stock, a branded card or an AI clip, words on screen, captions, keeping their own sound or adding a voiceover. Each suggestion has a tick box; only the ticked ones go into the storyboard, which they then check like any other. When the video keeps their own sound, pauses, "um"s and repeated takes are cut out of their clips automatically (it says so on each scene, with how many seconds it saved); "Keep as filmed" on a scene puts it back, and "Tighten my clips" on the form turns it off for the whole video. Their videos are never changed. Reviewing a video you haven't seen before uses ${rc.taskCosts.weights.footage_review} tasks; videos already reviewed are free, and planning again from the same review is free. When they want a video from their own footage, emit a footage_review_proposal naming the videos from THEIR OWN VIDEOS by id (leave assetIds empty if they haven't said which, or haven't uploaded them yet). It opens that form filled in — they tick the permission box and press "Review my footage" themselves, so never say the review has started. When a review is listed above, you can talk through what you saw and the suggested edits, and tell them to tick the ones they want and press "Make the storyboard".
 
@@ -2019,7 +2025,7 @@ USING A FINISHED VIDEO. A READY video is saved in My Content, and they can downl
 
 CHANGING A FINISHED VIDEO. A READY video is never changed in place: approving a replan or scene-edit card on it makes a NEW VERSION (everything already made is kept, so only what changes is made and paid for again), and the finished one stays in My Content. Tell them that. "Change it" on the "Videos" tab does the same. The list shows a READY video's scenes by number: when they ask for changes to it ("remove the branded card in scene 1", "cut the coughing", "take the words off"), offer the card yourself — a video_replan_proposal with all their notes for several changes, or a video_scene_edit for one scene. Never tell them to make the change on the "Videos" tab instead, and never say you can't change a finished video from this chat.
 
-CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" | "ai_presenter" (only if it changes; "ai_presenter" only on a video with a presenter — they speak that scene's line), "picture": "<only if it changes: what to show or search for, under 120 characters>", "nameCaption": { "name": "...", "role": "..." } (only if it changes; null takes it off), "summary": "<one sentence: what changes>" }. Changing only the words keeps the scene's picture. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. On a scene of THEIR OWN footage, or an AI presenter's scene (where "cover" is not allowed: the presenter is never hidden), you can also change what people see while they talk (walkthrough layouts): add "layout": "bubble" (the screen fills the frame, them in a round corner bubble) | "cover" (the screen only; heard, not seen) | "window" (them full frame, the screen in a small corner window) | "presenter" (back to them full frame), with what's on the screen — "screenVideo": <the id of one of THAT video's own videos, from its list above>, optionally "screenStartS": <seconds into that video>, or "screenSearch": "<stock footage search words>" — and optionally "corner": "br" | "bl" | "tr" | "tl" and "bubbleSize": "small" | "medium". A screen recording is shown whole. Only their own videos chosen for that video can be the screen. On a scene of THEIR OWN footage in its own sound, you can cut words they said ("take out 'basically'", "cut the bit where I say the price"): add "cutPhrase": "<the words exactly as said, from that scene's words>" to the video_scene_edit; they're cut when the video is made. On the tab they can also press "✎ Edit the words" on the scene and click words to cut or keep them, like editing a transcript. The voice belongs to the whole video, not one scene, so a different voice means a new video.
+CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters (1200 in a 2, 5 or 10-minute video)>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" | "ai_presenter" (only if it changes; "ai_presenter" only on a video with a presenter — they speak that scene's line), "picture": "<only if it changes: what to show or search for, under 120 characters>", "nameCaption": { "name": "...", "role": "..." } (only if it changes; null takes it off), "summary": "<one sentence: what changes>" }. Changing only the words keeps the scene's picture. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. On a scene of THEIR OWN footage, or an AI presenter's scene (where "cover" is not allowed: the presenter is never hidden), you can also change what people see while they talk (walkthrough layouts): add "layout": "bubble" (the screen fills the frame, them in a round corner bubble) | "cover" (the screen only; heard, not seen) | "window" (them full frame, the screen in a small corner window) | "presenter" (back to them full frame), with what's on the screen — "screenVideo": <the id of one of THAT video's own videos, from its list above>, optionally "screenStartS": <seconds into that video>, or "screenSearch": "<stock footage search words>" — and optionally "corner": "br" | "bl" | "tr" | "tl" and "bubbleSize": "small" | "medium". A screen recording is shown whole. Only their own videos chosen for that video can be the screen. On a scene of THEIR OWN footage in its own sound, you can cut words they said ("take out 'basically'", "cut the bit where I say the price"): add "cutPhrase": "<the words exactly as said, from that scene's words>" to the video_scene_edit; they're cut when the video is made. On the tab they can also press "✎ Edit the words" on the scene and click words to cut or keep them, like editing a transcript. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
 {
@@ -2046,7 +2052,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
   }
 }
 
-AI PRESENTER. Only when "AI PRESENTERS" are listed above: a made-up person can speak the script to camera at the key moments (opening, call to action, one more), or throughout when the user asks ("presenterThroughout": true). Set "presenter" to one of the listed ids — the one the user names, else one matching who they describe. Say they are made by AI, that the video is labelled as made with AI, and that it uses the listed tasks per second on screen, shown before anything is made. They speak in their own voice, so leave "voice" out. Never with their own footage. To walk viewers through their own screen recordings with the presenter in a corner bubble, the user ticks them under "Screen recordings" on the New video form after choosing a presenter (it asks their permission for the videos), so send them there rather than proposing it.
+AI PRESENTER. Only when "AI PRESENTERS" are listed above: a made-up person can speak the script to camera at the key moments (opening, call to action, one more), or throughout when the user asks ("presenterThroughout": true). Set "presenter" to one of the listed ids — the one the user names, else one matching who they describe. Say they are made by AI, that the video is labelled as made with AI, and that it uses the listed tasks per second on screen, shown before anything is made. They speak in their own voice, so leave "voice" out. Never with their own footage. To walk viewers through their own screen recordings with the presenter in a corner bubble, the user ticks them under "Screen recordings" on the New video form after choosing a presenter (it asks their permission for the videos), so send them there rather than proposing it. A presenter walking through screen recordings can also make a LONG walkthrough — 2, 5 or 10 minutes, told in chapters — chosen there as the Length (it uses the listed tasks per second the presenter is on screen, so say a long one adds up; the exact number shows before anything is made). Your brief card is always 15, 30 or 60 seconds.
 
 ${voiceOptionsBlock()}
 
@@ -2727,6 +2733,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         acceptsAttachments: true,
         transcriptAttachments: true,
         usesMeetingsSnapshot: true,
+        usesMeetingBots: true,
         // The rules and JSON shape are shared with the "New meeting" form (src/utils/meeting-minutes.ts).
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
@@ -2741,7 +2748,9 @@ ${rc.attachmentsBlock ?? 'No transcript file is attached in this conversation.'}
             }),
             // Chat only: its meetings, and the confirm card that acts on one (finish plan step 6).
             meetingActionsPromptBlock(rc.meetingsSnapshot ?? null),
-        ].join('\n\n'),
+            // Chat only, while the meeting_bot flag is on: send the Note Taker into a call (docs/note-taker-bot-plan.md).
+            meetingBotPromptBlock(rc.meetingBotsSnapshot ?? null),
+        ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
 
@@ -3588,6 +3597,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const audienceSnapshot = route.usesAudienceSnapshot ? await buildAudienceSnapshot(db, orgId) : null;
     // Per turn: a meeting approved or edited in the Inbox a moment ago must not be offered again.
     const meetingsSnapshot = route.usesMeetingsSnapshot ? await buildMeetingsSnapshot(db, orgId, session.aiAssistantId) : null;
+    const meetingBotsSnapshot = route.usesMeetingBots ? await buildMeetingBotsSnapshot(db, orgId, session.aiAssistantId) : null;
 
     // Per turn: an edit made on the Website tab a moment ago must be visible to the next message.
     const siteSnapshot = route.usesSiteSnapshot
@@ -3664,6 +3674,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         shopSnapshot,
         audienceSnapshot,
         meetingsSnapshot,
+        meetingBotsSnapshot,
         mentorSnapshot,
         attachmentsBlock,
     });
@@ -4053,6 +4064,18 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === 'meeting_action_proposal') {
             uiElement = meetingActionReq ? await resolveMeetingActionProposal(db, orgId, session.aiAssistantId, meetingActionReq) : null;
             if (!uiElement) content = 'I couldn’t find that meeting among this assistant’s meetings, so I haven’t set anything up. Which one do you mean? You can also open it on the Inbox tab.';
+        }
+        // Send the Note Taker into a call, or take one out (src/utils/chat-meeting-bot.ts): rebuilt from facts; only the
+        // click acts, through the same server action as the Inbox's "Send to a call".
+        if (route === ROUTES.meeting_note_taker && (uiElement as { type?: unknown } | null)?.type === MEETING_BOT_PROPOSAL_TYPE) {
+            const asked = (uiElement as { action?: unknown }).action;
+            const botReq = meetingBotFromUiElement(uiElement);
+            uiElement = botReq ? await resolveMeetingBotProposal(db, orgId, session.aiAssistantId, botReq) : null;
+            if (!uiElement) {
+                content = asked === 'send'
+                    ? 'Which meeting should the Note Taker join? Paste the Google Meet or Microsoft Teams link from the invite.'
+                    : 'I couldn’t find that Note Taker booking, so I haven’t set anything up. Which one do you mean? They’re listed above the Inbox.';
+            }
         }
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;

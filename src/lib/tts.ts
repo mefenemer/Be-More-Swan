@@ -50,8 +50,18 @@ export function elevenLabsSpeechCostUsd(chars: number): string {
 
 /** ~80 seconds of speech at a natural pace — longer than any short-form video needs. */
 export const VOICEOVER_MAX_CHARS = 1200;
+/**
+ * A long video's script (Phase 4c: 2, 5 or 10 minutes). The fastest voices speak ~3.8 words a second (measured,
+ * scripts/measure-voice-pace.mjs), so 10 minutes can be ~2200 words, ~13,000 characters: 10,000 was too few.
+ */
+export const LONG_VOICEOVER_MAX_CHARS = 15_000;
+/** Spoken in parts of at most this many characters (~2½ minutes), side by side, then joined (src/lib/mp3-join.ts). */
+export const SPEECH_PART_CHARS = 2400;
+/** How many parts are spoken at once. */
+const SPEECH_PARTS_AT_ONCE = 3;
 
 import CATALOGUE from '../public/voice-catalogue.json';
+import { joinMp3 } from './mp3-join';
 
 /**
  * The voices offered: src/public/voice-catalogue.json, the ONE list the server and the voice picker
@@ -76,6 +86,13 @@ export const DEFAULT_VOICE: VoiceId = 'british_woman';
 export const OFFERED_VOICES: readonly Voice[] = VOICES.filter((v) => !v.legacy);
 
 /** The language a voice speaks, by code ('en' when unknown). Pure. */
+/** How fast a voice really speaks, in words a second, as measured (catalogue `wps`). Null when not measured (Japanese). Pure. */
+export function voicePace(voice: string | null | undefined): number | null {
+    const v = VOICES.find((x) => x.id === voice) as { wps?: unknown } | undefined;
+    const n = Number(v?.wps);
+    return Number.isFinite(n) && n > 0.5 && n < 8 ? n : null;
+}
+
 export function voiceLanguage(voice: VoiceId): string {
     return VOICES.find((v) => v.id === voice)?.lang ?? 'en';
 }
@@ -105,13 +122,41 @@ export class TtsError extends Error {
 }
 
 /** Tidy a script for speech. Pure: collapses whitespace, strips markdown and URLs (read aloud they are noise). */
-export function cleanScript(text: string): string {
+export function cleanScript(text: string, maxChars: number = VOICEOVER_MAX_CHARS): string {
     return String(text || '')
         .replace(/https?:\/\/\S+/g, '')
         .replace(/[*_#`>~]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
-        .slice(0, VOICEOVER_MAX_CHARS);
+        .slice(0, maxChars);
+}
+
+/**
+ * A long script in parts of at most `max` characters, each ending at a sentence (else a comma, else a space),
+ * so no part starts mid-word or mid-sentence where it can be helped. Pure; the parts joined give the script back.
+ */
+export function splitForSpeech(text: string, max: number = SPEECH_PART_CHARS): string[] {
+    const t = String(text || '').trim();
+    if (t.length <= max) return t ? [t] : [];
+    const parts: string[] = [];
+    let rest = t;
+    while (rest.length > max) {
+        const window = rest.slice(0, max + 1);
+        const at = (re: RegExp) => { let last = -1; for (const m of window.matchAll(re)) last = (m.index ?? 0) + m[0].length; return last; };
+        let cut = at(/[.!?…]["')\]]?\s/g);
+        if (cut < max * 0.5) cut = Math.max(cut, at(/[,;:]\s/g));
+        if (cut < max * 0.5) cut = Math.max(cut, at(/\s/g));
+        if (cut <= 0) cut = max;
+        parts.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+    }
+    if (rest) parts.push(rest);
+    return parts;
+}
+
+/** How long to wait for one spoken part: the short-script wait, plus about 15 ms a character. Pure. */
+export function speechTimeoutMs(chars: number, base = 12_000): number {
+    return base + Math.max(0, chars - VOICEOVER_MAX_CHARS) * 15;
 }
 
 /**
@@ -171,7 +216,7 @@ function classifyElevenLabs(status: number, body: string): TtsError {
 }
 
 /** Speak `text` with an ElevenLabs voice. Returns mp3 bytes. */
-export async function synthesizeElevenLabs(text: string, voiceId: string, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
+export async function synthesizeElevenLabs(text: string, voiceId: string, fetchImpl: typeof fetch = fetch, timeoutMs: number = 12_000): Promise<Buffer> {
     const key = process.env.ELEVENLABS_API_KEY;
     if (!key) throw new TtsError('ElevenLabs is not configured.', 'not_configured');
     const res = await fetchImpl(`${ELEVENLABS_URL}/${voiceId}?output_format=mp3_44100_128`, {
@@ -179,8 +224,9 @@ export async function synthesizeElevenLabs(text: string, voiceId: string, fetchI
         headers: { 'Content-Type': 'application/json', 'xi-api-key': key },
         // Settings the owner heard in the trials: a little expressive, true to the speaker.
         body: JSON.stringify({ text, model_id: ELEVENLABS_MODEL, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
-        // Leaves room for the transcription inside the request (there is no fallback voice to wait for).
-        signal: AbortSignal.timeout(12_000),
+        // Leaves room for the transcription inside the request (there is no fallback voice to wait for). A long
+        // video's part (built in the background, Phase 4c) gets longer: speechTimeoutMs.
+        signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) throw classifyElevenLabs(res.status, await res.text().catch(() => ''));
     return Buffer.from(await res.arrayBuffer());
@@ -193,8 +239,23 @@ export async function synthesizeElevenLabs(text: string, voiceId: string, fetchI
  */
 export async function speakVoiceover(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<{ mp3: Buffer; provider: TtsProvider; model: string }> {
     const eleven = elevenLabsVoice(voice);
-    if (eleven) return { mp3: await synthesizeElevenLabs(text, eleven, fetchImpl), provider: 'elevenlabs', model: ELEVENLABS_MODEL };
-    return { mp3: await synthesizeSpeech(text, voice, fetchImpl), provider: 'openai', model: TTS_MODEL };
+    const speak = (part: string) => eleven
+        ? synthesizeElevenLabs(part, eleven, fetchImpl, speechTimeoutMs(part.length))
+        : synthesizeSpeech(part, voice, fetchImpl, speechTimeoutMs(part.length, 15_000));
+    // A long video's script (Phase 4c) is spoken in parts, a few at a time, and joined. A short one is one call,
+    // exactly as before: only a long build (in the background) ever passes SPEECH_PART_CHARS.
+    const parts = splitForSpeech(text);
+    let mp3: Buffer;
+    if (parts.length <= 1) mp3 = await speak(text);
+    else {
+        const out: Buffer[] = new Array(parts.length);
+        for (let i = 0; i < parts.length; i += SPEECH_PARTS_AT_ONCE) {
+            const batch = parts.slice(i, i + SPEECH_PARTS_AT_ONCE);
+            (await Promise.all(batch.map(speak))).forEach((b, k) => { out[i + k] = b; });
+        }
+        mp3 = joinMp3(out);
+    }
+    return eleven ? { mp3, provider: 'elevenlabs', model: ELEVENLABS_MODEL } : { mp3, provider: 'openai', model: TTS_MODEL };
 }
 
 /** Is there a key for the provider that speaks this voice? Pure over the environment. */
@@ -219,7 +280,7 @@ export function voiceRequest(voice: VoiceId): { speaker: string; instructions: s
 }
 
 /** Speak `text` in `voice`. Returns mp3 bytes. */
-export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
+export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch, timeoutMs: number = 15_000): Promise<Buffer> {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new TtsError('Voiceovers are not configured.', 'not_configured');
     const { speaker, instructions } = voiceRequest(voice);
@@ -227,7 +288,7 @@ export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model: TTS_MODEL, voice: speaker, input: text, instructions, response_format: 'mp3' }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) throw classify(res.status, await res.text().catch(() => ''));
     return Buffer.from(await res.arrayBuffer());
@@ -238,7 +299,16 @@ export interface Transcript { words: SpokenWord[]; durationS: number | null; pro
 
 /** Word timings + duration for an mp3. A failure here is NOT fatal to the voiceover — callers keep the audio. */
 export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch): Promise<Transcript> {
-    return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg' }, fetchImpl);
+    return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg', timeoutMs: transcribeTimeoutMs(mp3.byteLength) }, fetchImpl);
+}
+
+/**
+ * How long to wait for word timings: 8 s for a short voiceover (as before), plus 10 s a MB beyond 1 MB, so a
+ * 10-minute voiceover (~9.6 MB at 128 kbps, Phase 4c) gets about 95 s instead of timing out with no captions. Pure.
+ */
+export function transcribeTimeoutMs(bytes: number): number {
+    const mb = Math.max(0, bytes) / (1024 * 1024);
+    return Math.round(8_000 + Math.max(0, mb - 1) * 10_000);
 }
 
 export interface TranscribeOptions {
