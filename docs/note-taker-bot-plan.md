@@ -109,7 +109,7 @@ The help article says each of these in plain words. The Note Taker's live status
      - **Transcript:** ready **at once**. 33 words in 1 block under the host's Teams display name, with no unlabelled lines. Word-for-word accurate.
      - **Clean-up:** media deleted.
      - **Chat notice:** ✅ shown in the Teams chat (owner, 2026-11-19). **Not yet checked:** a business tenant that blocks anonymous guests.
-1. **Legal and copy first.**
+1. **Legal and copy first.** ✅ **Drafted 2026-11-19 in `docs/note-taker-bot-legal.md` (PR #766), with the publication timeline.** Owner: one DPA 1.2 for the bot and the Email Assistant; Terms 2.5 published at launch.
    - Add Recall.ai to the Trust page sub-processors (with ElevenLabs, if it isn't added yet).
    - Update the privacy notice and DPA (what the bot records, retention), and add the Terms clause: *you must tell the people in your meeting that the Note Taker is there and recording*.
    - Write the new charge's 30-day notice and a short DPIA.
