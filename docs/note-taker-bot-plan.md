@@ -123,6 +123,8 @@ The help article says each of these in plain words. The Note Taker's live status
 
 The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pick-up plan Phases 2–4) mainly helps paid accounts, and they can use the bot too. **Pause Phases 2–4 until the bot is live** (decision B8). Then decide whether a cheaper, bot-free pick-up for paid accounts is worth its three provider reviews. Google Meet's API is already proven (pick-up plan Phase 0), so that work isn't lost.
 
+**Where it stands (2026-11-19):** pick-up Phase 2, Google Meet, was already built and merged to staging (#760) before B8 was agreed. It is dark behind the `meeting_pickup` flag (OFF), with `GOOGLE_MEET_CLIENT_ID/SECRET` not yet set. Under B8 it **stays dark**, and Teams and Zoom pick-up (Phases 3–4) are not started. Switching Meet pick-up on for paid Workspace customers later is a separate owner decision, not part of this plan.
+
 ## 8. Decisions for the owner
 
 - **B1. Vendor.** ✅ **Agreed 2026-11-19 (owner): Recall.ai, with Meeting BaaS as the tested fallback.** Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
