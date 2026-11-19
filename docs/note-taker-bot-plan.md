@@ -93,6 +93,15 @@ The help article says each of these in plain words. The Note Taker's live status
    - Ask Recall in writing: their DPA and sub-processors, EU processing, deleting media on request, the Zoom OBF feature flag, and what the join message can say.
 
    Done when one real minutes record exists from each of Meet and Teams through the existing writer.
+
+   **Results so far:**
+   - **Run 1, 2026-11-19, free Google Meet, Recall US West (`us-west-2`):**
+     - **Joining:** the bot was sent, asked to join, was admitted by the host, and was recording within 0.6 minutes. Its waiting-room step was too quick for the script's 30-second checks to see.
+     - **The call:** about 1.1 minutes in the call, then the host ended it.
+     - **Transcript:** ready **at once** when the bot finished. The streaming transcript needs no post-call wait. 94 words in 1 block, all under the host's Meet display name, with no unlabelled lines. The words read accurately, including three spoken tasks.
+     - **Clean-up:** Recall's copy of the media was deleted (`delete_media` returned 2xx).
+     - ⚠️ **One speaker label for what sounded like two voices.** Names come from Meet participants, so two people sharing one device show as one speaker. To check: a second person on a **separate** device should get their own name.
+     - **Not yet checked:** the pinned chat notice (look in the call), and running this transcript through the minutes writer.
 1. **Legal and copy first.**
    - Add Recall.ai to the Trust page sub-processors (with ElevenLabs, if it isn't added yet).
    - Update the privacy notice and DPA (what the bot records, retention), and add the Terms clause: *you must tell the people in your meeting that the Note Taker is there and recording*.
