@@ -51,8 +51,14 @@ for (const [role, tab, newWords] of TABS) {
         });
         expect(gap).toBeLessThan(40);
         if (newWords) {
-            const next = await full.evaluateHandle((el) => el.nextElementSibling);
-            expect(await next.evaluate((el) => (el as HTMLElement | null)?.innerText?.trim() ?? '')).toBe(newWords);
+            // The next button a person can SEE: a role's hidden buttons sit in the same row (the Inbox's "Send to a call",
+            // shown only for the Note Taker, #774), and a hidden element still reports its text.
+            const nextWords = await full.evaluate((el) => {
+                let n = el.nextElementSibling as HTMLElement | null;
+                while (n && (n.hidden || n.classList.contains('hidden') || getComputedStyle(n).display === 'none')) n = n.nextElementSibling as HTMLElement | null;
+                return n?.innerText?.trim() ?? '';
+            });
+            expect(nextWords).toBe(newWords);
         }
         await full.click();
         const exit = panel.getByRole('button', { name: 'Exit full screen', exact: true }).first();
