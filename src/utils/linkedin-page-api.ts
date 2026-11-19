@@ -178,7 +178,7 @@ export function parseCommentsResponse(body: unknown): LinkedInComment[] {
     return Array.isArray(elements) ? elements.map(parseComment).filter((c): c is LinkedInComment => !!c) : [];
 }
 
-/** The people's names, asked for as a projection. LinkedIn may refuse it — then we ask without. */
+/** Comments read per post per call — LinkedIn's page size for socialActions comments. */
 const COMMENTS_PAGE = 50;
 
 /** Why a comments read came back empty-handed — the caller reports it (the ingest's result carries
