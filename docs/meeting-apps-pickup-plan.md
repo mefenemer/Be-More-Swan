@@ -81,8 +81,9 @@ person approves.
        read the entries.
      - People correct the minutes in the Inbox, as they do for pasted meetings.
    - **Not yet seen:** a 2-person call read through the API. Later test calls never appeared in `conferenceRecords`,
-     most likely because another account hosted them. The list only returns calls the signed-in account hosted, so
-     help text must say "the call must be started from the connected account".
+     probably because another account hosted them. To confirm with one more call hosted by the connected account. If
+     the list really only returns calls that account hosted, the help text must say "start the call from the connected
+     account".
 1. **Shared engine (about 1 week):** the table, the scheduled job, the background writer, dedupe, metering, the Inbox
    pill, the chat line, tests with stubbed platforms.
 2. **Google Meet (3–4 days plus Google re-verification):** add the scope to the Google project, poll
