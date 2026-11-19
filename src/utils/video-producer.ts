@@ -21,7 +21,7 @@
 // ⚠️ Still scenes need a Remotion bundle from 2026-10-31 or later — redeploy both sites first.
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, organisations, scheduledPosts, videoProjects } from '../../db/schema';
 import { videoResults, type ResultRow } from '../lib/video-results';
@@ -892,6 +892,24 @@ export function presenterJobKey(projectId: number, voiceoverAssetId: number, pie
     return `video_project:${projectId}:vo${voiceoverAssetId}:${pieceKey}:${w.startS.toFixed(2)}-${w.endS.toFixed(2)}`;
 }
 
+/** A piece's clip length from its job key: its window plus the tail every piece carries. Null when it can't be read. Pure. */
+export function pieceSecondsFromKey(key: string): number | null {
+    const m = /:(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(key);
+    if (!m) return null;
+    const len = Number(m[2]) - Number(m[1]);
+    return len > 0 ? Math.round((len + PRESENTER_AUDIO_TAIL_S) * 100) / 100 : null;
+}
+
+/** A video's presenter pieces still at the model: cancelled there and marked failed (a failed or swept build). */
+export async function abandonPresenterPieces(db: Db, projectId: number): Promise<void> {
+    const rows = await db.select({ id: mediaGenerationJobs.id, falStatusUrl: mediaGenerationJobs.falStatusUrl }).from(mediaGenerationJobs)
+        .where(and(like(mediaGenerationJobs.prompt, `video_project:${projectId}:%`), eq(mediaGenerationJobs.status, 'processing')));
+    for (const r of rows) {
+        if (r.falStatusUrl) await falCancel(r.falStatusUrl);
+        await db.update(mediaGenerationJobs).set({ status: 'failed', errorMessage: 'the build stopped', updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, r.id));
+    }
+}
+
 type Pcm = NonNullable<Awaited<ReturnType<typeof decodeAudio>>>;
 
 /**
@@ -930,12 +948,14 @@ async function submitPresenterPiece(db: Db, args: {
 /** A finished piece at fal: stored in R2 as a content asset, its job row marked done. Returns the asset id. */
 async function finishPresenterPiece(db: Db, args: {
     orgId: number; userId: number; assistantId: number | null; presenterId: string; shape: VideoShape;
-    job: { id: number; falResponseUrl: string | null; durationSeconds: number | null }; label: string;
+    job: { id: number; prompt: string; falResponseUrl: string | null; durationSeconds: number | null }; label: string;
 }): Promise<number> {
     const p = presenterById(args.presenterId);
     if (!p || !args.job.falResponseUrl) throw new Error('The presenter clip could not be collected.');
     const v = extractVideo(await falResult(args.job.falResponseUrl));
-    const seconds = args.job.durationSeconds ?? 0;
+    // The EXACT length, from the window in the job key: the job row's duration_seconds is a whole number, and a
+    // rounded-up length put every later piece out of step and ran slots past their file (review of #757).
+    const seconds = pieceSecondsFromKey(args.job.prompt) ?? args.job.durationSeconds ?? 0;
     await logMediaCost(PRESENTER_MODEL, { durationSeconds: seconds }, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId, sessionId: 'fal-presenter' });
     const stored = await persistRemoteMediaToR2({ orgId: args.orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI presenter' });
     const [asset] = await db.insert(contentAssets).values({
@@ -1125,14 +1145,34 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                         if (!row) throw new Error('A presenter piece was not sent.');
                         const madeId = Array.isArray(row.resultAssetIds) ? Number(row.resultAssetIds[0]) : 0;
                         if (row.status === 'completed' && madeId > 0) { done[keys[k]] = madeId; continue; }
+                        // Finished at the model first: a piece done long ago is collected, never thrown away (review of #757).
+                        const state = row.falStatusUrl ? await falStatus(row.falStatusUrl) : 'IN_PROGRESS';
+                        if (state === 'COMPLETED') {
+                            // Claim it, so a second run of the same build can't collect (and log the cost of) it too.
+                            const [claim] = await db.update(mediaGenerationJobs)
+                                .set({ errorMessage: `collecting:${runStarted}`, updatedAt: new Date() })
+                                .where(and(eq(mediaGenerationJobs.id, row.id), eq(mediaGenerationJobs.status, 'processing'),
+                                    or(isNull(mediaGenerationJobs.errorMessage), lt(mediaGenerationJobs.updatedAt, new Date(Date.now() - 10 * 60 * 1000)))))
+                                .returning({ id: mediaGenerationJobs.id });
+                            if (!claim) {
+                                // Another run has it: read what it made on the next round.
+                                const [again] = await db.select({ status: mediaGenerationJobs.status, resultAssetIds: mediaGenerationJobs.resultAssetIds }).from(mediaGenerationJobs).where(eq(mediaGenerationJobs.id, row.id)).limit(1);
+                                if (again) Object.assign(row, again);
+                                continue;
+                            }
+                            try {
+                                done[keys[k]] = await finishPresenterPiece(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id,
+                                    shape: brief.shape ?? '9:16', job: row, label: pieces.length > 1 ? `scene ${i + 1}, part ${k + 1}` : `scene ${i + 1}` });
+                            } catch (err) {
+                                await db.update(mediaGenerationJobs).set({ errorMessage: null, updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, row.id));
+                                throw err;
+                            }
+                            continue;
+                        }
                         if (Date.now() - new Date(row.createdAt).getTime() > PRESENTER_PIECE_MAX_MS) {
                             if (row.falStatusUrl) await falCancel(row.falStatusUrl);
                             await db.update(mediaGenerationJobs).set({ status: 'failed', errorMessage: 'took too long', updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, row.id));
                             throw new Error('The presenter clip took too long and was abandoned.');
-                        }
-                        if (row.falStatusUrl && (await falStatus(row.falStatusUrl)) === 'COMPLETED') {
-                            done[keys[k]] = await finishPresenterPiece(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, presenterId: presenterBrief.id,
-                                shape: brief.shape ?? '9:16', job: row, label: pieces.length > 1 ? `scene ${i + 1}, part ${k + 1}` : `scene ${i + 1}` });
                         }
                     }
                     if (keys.every((key) => done[key])) break;
@@ -1140,6 +1180,10 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                     await save({});   // keeps updatedAt fresh, so the stuck sweep leaves a long build alone
                     await sleep(AI_CLIP_POLL_MS);
                 }
+                // Another run of this build finished the scene first: take its clip, and leave the charge to it.
+                const [cur] = await db.select({ sceneAssets: videoProjects.sceneAssets }).from(videoProjects).where(eq(videoProjects.id, projectId)).limit(1);
+                const already = Number((cur?.sceneAssets as Record<string, number> | null)?.[scene.id]);
+                if (already > 0) { done[scene.id] = already; return; }
                 // The scene is made: its first piece stands for it (the build's "already made" check), the rest follow it.
                 done[scene.id] = done[keys[0]];
                 made = true;
@@ -1184,7 +1228,17 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // here — the project stays "building", made scenes and pieces are kept, sent pieces are collected, not re-sent.
         if (handOver) {
             console.log(`[video-producer] build ${projectId}: presenter pieces still being made — handing over to a fresh run`);
-            await wakeVideoWorker({ projectId, action: 'build' });
+            // A scene that failed in this run is tried once more by the next one — said on the card, not silently (review of #757).
+            if (failed.size) {
+                const which = [...failed].sort((a, b) => a - b).map((i) => i + 1).join(', ');
+                await save({ note: `Still making the presenter. Scene${failed.size === 1 ? '' : 's'} ${which} couldn’t be made and ${failed.size === 1 ? 'is' : 'are'} being tried again.` });
+            }
+            let woken = false;
+            for (let attempt = 0; attempt < 3 && !woken; attempt++) {
+                if (attempt) await sleep(2000 * attempt);
+                woken = await wakeVideoWorker({ projectId, action: 'build' });
+            }
+            if (!woken) console.error(`[video-producer] build ${projectId}: the next run could not be woken — the stuck sweep will stop it in 20 minutes`);
             return;
         }
         // 2b. Walkthrough screens (src/lib/scene-cover.ts): each sourced like a scene as long as its stretch,
@@ -1384,6 +1438,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }
         await save({ status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The video could not be made.' }).catch(() => {});
+        // Presenter pieces still at the model stop there, and stop counting as running work (review of #757).
+        await abandonPresenterPieces(db, projectId).catch((e) => console.error(`[video-producer] build ${projectId}: pieces not stopped`, e));
     }
 }
 
@@ -1513,6 +1569,8 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
             .where(and(eq(videoProjects.id, p.id), inArray(videoProjects.status, ['reviewing', 'planning', 'building'])))
             .returning({ id: videoProjects.id });
         if (claimed && p.creditHold > 0) await settleHold(db, { orgId, amount: p.creditHold, success: false, mediaType: 'image', userId: p.createdBy });
+        // Its presenter pieces still at the model stop there too (Phase 4c-2, review of #757).
+        if (claimed) await abandonPresenterPieces(db, p.id).catch((err) => console.error('[video-producer] sweep: pieces not stopped', err));
     }
     return stuck.length;
 }

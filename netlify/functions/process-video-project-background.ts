@@ -5,8 +5,10 @@
 //        both keep every scene's picture (src/lib/video-notes.ts)
 //   POST { projectId, action: 'build' }             → buildProject (building → built | failed)
 //   POST { projectId, action: 'review' }            → reviewProject (reviewing → reviewed | failed) — own footage
-// Both act only when the project is in the matching state, so a duplicate wake is a no-op rather
-// than a second plan or a second paid build. Every exit leaves the project in a terminal state.
+// Each acts only when the project is in the matching state. A long build (Phase 4c-2) hands over to a fresh run of
+// itself while presenter pieces are still at the model: that second 'build' wake is normal, and the project stays
+// "building" between runs. Pieces are claimed before they're collected and a scene is charged once, so an
+// overlapping duplicate run doesn't make or charge anything twice. Every other exit leaves a terminal state.
 
 import type { HandlerEvent } from '@netlify/functions';
 import { getDb } from '../../db/client';

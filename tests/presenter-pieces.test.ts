@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { presenterPieces, PRESENTER_PIECE_S, PRESENTER_MAX_PIECE_S, PRESENTER_AUDIO_TAIL_S } from '../src/lib/presenters';
-import { presenterPieceKey, presenterPieceKeys, dropPresenterScene, presenterJobKey, sceneClips, buildRunBudgetMs } from '../src/utils/video-producer';
+import { presenterPieceKey, presenterPieceKeys, dropPresenterScene, presenterJobKey, sceneClips, buildRunBudgetMs, pieceSecondsFromKey } from '../src/utils/video-producer';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -100,11 +100,42 @@ check('every piece is recorded as a job, collected by the next run, and a run ha
     assert.strictEqual(buildRunBudgetMs({ VIDEO_BUILD_RUN_BUDGET_MS: '90000' }), 90_000, 'lowered to test a hand-over');
     assert.strictEqual(buildRunBudgetMs({ VIDEO_BUILD_RUN_BUDGET_MS: '99999999' }), 11 * 60 * 1000, 'never raised past the ceiling');
     assert.strictEqual(buildRunBudgetMs({ VIDEO_BUILD_RUN_BUDGET_MS: '5' }), 11 * 60 * 1000, 'junk ignored');
-    assert.match(vp, /if \(handOver\) \{[\s\S]{0,200}await wakeVideoWorker\(\{ projectId, action: 'build' \}\);\s*return;/);
+    assert.match(vp, /if \(handOver\) \{[\s\S]{0,1200}woken = await wakeVideoWorker\(\{ projectId, action: 'build' \}\);[\s\S]{0,300}return;/);
     assert.match(vp, /await save\(\{\}\);   \/\/ keeps updatedAt fresh/, 'the stuck sweep leaves a long build alone');
     assert.match(vp, /done\[scene\.id\] = done\[keys\[0\]\];/, 'the scene counts as made only when every piece is in');
     assert.match(vp, /const loadVoice = \(\) => \(voicePcm \?\?= /, 'the voiceover is decoded once a run, not once a scene');
     assert.match(read('netlify/functions/video-projects.ts'), /dropPresenterScene\(assets, scene\.id\);/);
+});
+
+console.log('review of #757');
+
+check('a piece\'s clip length is exact (from its window plus the tail), never a rounded-up whole second', () => {
+    assert.strictEqual(pieceSecondsFromKey('video_project:48:vo400:s2~p1:10.00-24.31'), 14.61);
+    assert.strictEqual(pieceSecondsFromKey('nonsense'), null);
+    assert.match(read('src/utils/video-producer.ts'), /const seconds = pieceSecondsFromKey\(args\.job\.prompt\) \?\? args\.job\.durationSeconds \?\? 0;/);
+});
+
+check('pieces never count as running tasks or show in the Activity feed: they are in the video\'s build hold', () => {
+    assert.match(read('src/utils/work-metering.ts'), /AND prompt NOT LIKE 'video_project:%'/);
+    assert.match(read('src/utils/task-balance.ts'), /AND prompt NOT LIKE 'video_project:%'/);
+    assert.match(read('netlify/functions/get-assistant-activity.ts'), /notLike\(mediaGenerationJobs\.prompt, 'video_project:%'\)/);
+});
+
+check('a piece finished at the model is collected before any timeout; collecting is claimed; a scene is charged once', () => {
+    const vp = read('src/utils/video-producer.ts');
+    const status = vp.indexOf("const state = row.falStatusUrl ? await falStatus(row.falStatusUrl) : 'IN_PROGRESS';");
+    const timeout = vp.indexOf('> PRESENTER_PIECE_MAX_MS) {');
+    assert.ok(status > 0 && timeout > status, 'falStatus is read before the 45-minute timeout');
+    assert.match(vp, /\.set\(\{ errorMessage: `collecting:\$\{runStarted\}`, updatedAt: new Date\(\) \}\)/);
+    assert.match(vp, /if \(already > 0\) \{ done\[scene\.id\] = already; return; \}/, 'another run finished the scene: no second charge');
+});
+
+check('a failed or swept build stops its pieces; a hand-over says which scenes failed and retries the wake', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.match(vp, /await abandonPresenterPieces\(db, projectId\)/);
+    assert.match(vp, /if \(claimed\) await abandonPresenterPieces\(db, p\.id\)/);
+    assert.match(vp, /couldn’t be made and \$\{failed\.size === 1 \? 'is' : 'are'\} being tried again/);
+    assert.match(vp, /for \(let attempt = 0; attempt < 3 && !woken; attempt\+\+\)/);
 });
 
 console.log(`\n${passed} checks passed.`);

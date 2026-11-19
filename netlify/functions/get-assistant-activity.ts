@@ -7,7 +7,7 @@
 
 import { roleActivityItems } from '../../src/utils/role-activity';
 import { Handler } from '@netlify/functions';
-import { eq, and, desc, inArray, gte, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, gte, notLike, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import {
     aiAssistants,
@@ -144,6 +144,8 @@ export default withLambda(async (event) => {
             .where(withCutoff(mediaGenerationJobs.createdAt, and(
                 eq(mediaGenerationJobs.assistantId, aId),
                 eq(mediaGenerationJobs.organisationId, orgId),
+                // A video's presenter pieces (Phase 4c-2) are part of that video, not activity of their own.
+                notLike(mediaGenerationJobs.prompt, 'video_project:%'),
             )))
             .orderBy(desc(mediaGenerationJobs.createdAt))
             .limit(limit),
