@@ -1,6 +1,6 @@
 # Note Taker joins the call — a bot for free Google Meet, Teams and Zoom (PLAN, nothing built)
 
-**Status:** plan for the owner, 2026-11-19. Nothing built. B1 (vendor) agreed; B2–B9 in §8 are open.
+**Status:** plan for the owner, 2026-11-19. Nothing built. All nine decisions in §8 agreed by the owner on 2026-11-19.
 
 **Why:** owner, 2026-11-19: *most small businesses use free Meet, Teams and Zoom accounts. Those accounts make no transcript, so the transcript pick-up (`docs/meeting-apps-pickup-plan.md`) can't reach them. The Note Taker should be invited to the meeting and take the notes itself.*
 
@@ -133,14 +133,14 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
   - a well-funded company.
 
   It is not the cheapest: about $0.65/h all-in against MeetStream's $0.45. But its startup programme ($0.25/h for the first 10,000 hours) would make it the cheapest for our first year, if we qualify. Meeting BaaS is the best EU-only choice: hosted in Paris, with a UK-addendum DPA. It has no US region or SOC 2 report of its own. Building our own: no (§1).
-- **B2. Transcript.** *Recommended:* **Recall's own transcript** ($0.15/h). Speaker names come from the meeting platform, and no audio ever reaches us. The alternative, downloading the audio and sending it to ElevenLabs Scribe, guesses speakers from audio and brings audio handling back.
-- **B3. Charging.** *Recommended:* **1 task per started 5 minutes in the call**, minimum 1, nothing if never admitted. See §2 for the 3-minute alternative that covers cost on every plan.
-- **B4. Length limit.** *Recommended:* **2 hours by default**, changeable in settings up to 4. The allowance check before sending reserves the limit's tasks.
-- **B5. Bot name and join message.** *Recommended:* as in §6.
-- **B6. How it is sent.** *Recommended:* **v1 = link or chat card. v2 = calendar auto-join, off by default**, with *Meetings I organise* as the first choice.
-- **B7. Zoom timing.** *Recommended:* **launch Meet and Teams first.** Zoom follows when its Marketplace review passes; its card stays Coming soon until then.
-- **B8. Transcript pick-up.** *Recommended:* **pause pick-up Phases 2–4** and keep the #756 engine (§7).
-- **B9. Plans.** *Recommended:* **every plan**, limited by the task allowance like everything else.
+- **B2. Transcript.** ✅ **Agreed 2026-11-19 (owner):** **Recall's own transcript** ($0.15/h). Speaker names come from the meeting platform, and no audio ever reaches us. The alternative, downloading the audio and sending it to ElevenLabs Scribe, guesses speakers from audio and brings audio handling back.
+- **B3. Charging.** ✅ **Agreed 2026-11-19 (owner):** **1 task per started 5 minutes in the call**, minimum 1, nothing if never admitted. See §2 for the 3-minute alternative that covers cost on every plan.
+- **B4. Length limit.** ✅ **Agreed 2026-11-19 (owner):** **2 hours by default**, changeable in settings up to 4. The allowance check before sending reserves the limit's tasks.
+- **B5. Bot name and join message.** ✅ **Agreed 2026-11-19 (owner):** as in §6.
+- **B6. How it is sent.** ✅ **Agreed 2026-11-19 (owner):** **v1 = link or chat card. v2 = calendar auto-join, off by default**, with *Meetings I organise* as the first choice.
+- **B7. Zoom timing.** ✅ **Agreed 2026-11-19 (owner):** **launch Meet and Teams first.** Zoom follows when its Marketplace review passes; its card stays Coming soon until then.
+- **B8. Transcript pick-up.** ✅ **Agreed 2026-11-19 (owner):** **pause pick-up Phases 2–4** and keep the #756 engine (§7).
+- **B9. Plans.** ✅ **Agreed 2026-11-19 (owner):** **every plan**, limited by the task allowance like everything else.
 
 ## 9. Risks
 
