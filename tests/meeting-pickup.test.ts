@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-    CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, TASK_LIMIT_WAIT_MS, MEETING_SOURCES, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
+    CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, TASK_LIMIT_WAIT_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
     checkWindowStart, discoverMeetings, pickedUpFrom, pickupMessage, speakerLines, transcriptRetryAt, writeImport,
     type FinishedMeeting, type ImportRelease, type ImportRow, type MeetingSource, type PickedTranscript,
     type PickupAccount, type PickupPlatform, type PickupStore, type WriterDeps,
@@ -179,8 +179,9 @@ await test('a failed check keeps the window where it was and records the error',
     assert.match(state.get('58:google_meet')!.error!, /403/);
 });
 
-await test('no platforms switched on yet', () => {
-    assert.equal(MEETING_SOURCES.length, 0);
+await test('Google Meet is the one platform, behind the meeting_pickup flag', () => {
+    assert.equal(MEETING_PICKUP_FLAG, 'meeting_pickup');
+    assert.match(readFileSync('src/utils/meeting-pickup-db.ts', 'utf8'), /return \[googleMeetSource\(db\)\];/);
 });
 
 // ── writeImport ──────────────────────────────────────────────────────────────────────────────────

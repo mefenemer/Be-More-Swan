@@ -1,7 +1,7 @@
 // The database half of meeting pick-up (src/utils/meeting-pickup.ts holds the rules): the meeting_imports store,
 // the real writer dependencies, and the hand-off to the background writer. db/z-meeting-imports.sql.
 
-import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, masterAssistants, meetingImports, meetingPickupState } from '../../db/schema';
 import { resolveBaseUrl } from './base-url';
@@ -9,14 +9,59 @@ import { persistHubRecordsWithTitles } from './hub-records';
 import { meetingHubRecord } from './meeting-minutes';
 import { writeMeetingMinutes } from './meeting-minutes-writer';
 import {
-    DUE_PER_RUN, LEASE_MS, MEETING_SOURCES, PICKUP_CHANNEL_BLOCK, SETTLE_MS, discoverMeetings,
+    DUE_PER_RUN, LEASE_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, SETTLE_MS, discoverMeetings,
     type ImportRow, type MeetingSource, type PickupPlatform, type PickupStore, type WriterDeps,
 } from './meeting-pickup';
+import { googleMeetSource } from './meeting-sources/google-meet';
 import { enforcePromptModeration } from './moderation';
+import { isFeatureEnabled } from './feature-flags';
+import { getIntegration } from './workspace-integrations';
 import { getTaskCosts } from './task-costs';
 import { hasTaskCapacity, recordCompletedWork } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
+
+export interface MeetingAppState {
+    provider: 'google_meet';
+    connected: boolean;
+    /** A row that exists but is not active: needs reconnecting. */
+    status: string | null;
+    accountName: string | null;
+    lastCheckedAt: string | null;
+    lastFound: number;
+    lastError: string | null;
+    /** Meetings written up from this app in the last 30 days. */
+    writtenRecently: number;
+}
+
+/** What the Connections tab shows per meeting app, or null when pick-up is not switched on for the workspace. */
+export async function loadMeetingApps(db: Db, organisationId: number): Promise<MeetingAppState[] | null> {
+    if (!(await isFeatureEnabled(organisationId, MEETING_PICKUP_FLAG))) return null;
+    const row = await getIntegration(db, organisationId, 'google_meet');
+    const [st] = await db.select().from(meetingPickupState)
+        .where(and(eq(meetingPickupState.organisationId, organisationId), eq(meetingPickupState.platform, 'google_meet'))).limit(1)
+        .catch(() => [] as (typeof meetingPickupState.$inferSelect)[]);
+    const [w] = await db.select({ n: sql<number>`count(*)::int` }).from(meetingImports).where(and(
+        eq(meetingImports.organisationId, organisationId), eq(meetingImports.platform, 'google_meet'), eq(meetingImports.status, 'written'),
+        gt(meetingImports.writtenAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+    )).catch(() => [{ n: 0 }]);
+    return [{
+        provider: 'google_meet',
+        connected: row?.status === 'active',
+        status: row?.status ?? null,
+        accountName: row?.externalAccountName ?? null,
+        lastCheckedAt: st?.lastCheckedAt ? st.lastCheckedAt.toISOString() : null,
+        lastFound: st?.lastFound ?? 0,
+        // A platform error, shown so the owner knows to reconnect; never a transcript.
+        lastError: st?.lastError ?? null,
+        writtenRecently: w?.n ?? 0,
+    }];
+}
+
+/** The platforms meetings are picked up from. Each one only lists workspaces with the meeting_pickup flag on. */
+export function meetingSources(db: Db): MeetingSource[] {
+    return [googleMeetSource(db)];
+}
 
 export function pickupStore(db: Db): PickupStore {
     return {
@@ -95,7 +140,7 @@ export function pickupStore(db: Db): PickupStore {
     };
 }
 
-export function writerDeps(db: Db, sources: readonly MeetingSource[] = MEETING_SOURCES): WriterDeps {
+export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSources(db)): WriterDeps {
     return {
         store: pickupStore(db),
         sources,
@@ -166,7 +211,7 @@ export async function triggerMeetingImport(importId: number): Promise<boolean> {
 }
 
 /** The 15-minute check: find finished meetings, then hand each due one to a writer. Shared with run-meeting-pickup.ts. */
-export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[] = MEETING_SOURCES): Promise<{ accounts: number; found: number; due: number; dispatched: number; errors: number }> {
+export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[] = meetingSources(db)): Promise<{ accounts: number; found: number; due: number; dispatched: number; errors: number }> {
     if (!sources.length) return { accounts: 0, found: 0, due: 0, dispatched: 0, errors: 0 };
     const store = pickupStore(db);
     const now = new Date();
