@@ -135,7 +135,7 @@ check('every precondition runs before activation', () => {
         'hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE)',
         "campaign.mode !== 'paid'",
         'LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)',
-        'assessAdsReadiness(',
+        'await adapterForCampaign(',
         'body.confirmDailyBudgetGbp',
         'await adapter.checkControl(',
     ]) {
@@ -169,7 +169,7 @@ check('the audit row is written only AFTER activation actually succeeded', () =>
 check('the confirmation states the daily figure and how to stop it', () => {
     // A launch confirmation with no route back is the pattern connection-pause-needs-a-resume is
     // named after.
-    assert.match(act, /Live on LinkedIn, spending up to £\$\{dailyBudget\.toFixed\(2\)\} a day/);
+    assert.match(act, /Live on \$\{approveLabel\}, spending up to £\$\{dailyBudget\.toFixed\(2\)\} a day/);
     assert.match(act, /You can pause it from this page at any time/);
 });
 

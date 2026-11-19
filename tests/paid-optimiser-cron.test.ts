@@ -154,7 +154,7 @@ console.log('\n──── the stamp, and what depends on it ────');
 check('the run is stamped only after the campaign was actually examined', () => {
     // Stamping on the halt path would tell the next run "we checked, all fine" about a campaign we
     // just stopped.
-    const halted = cron.slice(landmark(cron, 'if (beat.stale) {'), landmark(cron, 'const readiness = assessAdsReadiness'));
+    const halted = cron.slice(landmark(cron, 'if (beat.stale) {'), landmark(cron, 'const resolved = await adapterForCampaign'));
     assert.ok(!/stamp\(/.test(halted), 'a halted campaign is being stamped as freshly checked');
     assert.match(code(cron), /await stamp\(db, c\.id, now\);\s*\n\s*examined\+\+;/);
 });
@@ -178,7 +178,7 @@ check('a halt writes locally even when the network pause fails', () => {
 
 check('an unconfirmed stop is reported as unconfirmed', () => {
     const fn = cron.slice(landmark(cron, 'async function haltCampaign'));
-    assert.match(fn, /could not confirm it stopped on LinkedIn/);
+    assert.match(fn, /could not confirm it stopped on \$\{networkLabel\(c\.adNetwork\)\}/);
     assert.match(fn, /controlState: 'lost'/);
 });
 

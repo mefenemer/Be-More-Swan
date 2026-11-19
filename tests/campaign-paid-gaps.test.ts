@@ -339,7 +339,7 @@ check('a missing image REFUSES before any work is thrown away', () => {
     // Without an upload path every stage would be rejected by the API, AFTER the user had written
     // three ads and chosen their targeting.
     assert.match(stage, /code: 'creative_media_required'/);
-    assert.match(stage, /we cannot upload one for you yet/);
+    assert.match(stage, /adverts need an image\. Upload one first/);
     assert.ok(landmark(stage, 'creative_media_required') < landmark(stage, 'await adapter.stageCampaign('),
         'the media check runs after the network call');
 });
