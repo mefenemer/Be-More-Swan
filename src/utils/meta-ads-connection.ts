@@ -119,6 +119,15 @@ export function assessMetaAdsReadiness(connection: MetaAdsConnection | null): Me
     return { ready: true, connection };
 }
 
+/** True when the fix is the Meta ads sign-in again (the surface offers the connect link). */
+export function metaAdsNeedsReconnect(connection: MetaAdsConnection | null): boolean {
+    if (!connection) return false;
+    if (connection.status !== 'active' || connection.adAccounts === null || connection.pages === null) return true;
+    if (connection.scopes === null) return false;
+    const held = new Set(connection.scopes.split(/[\s,]+/).filter(Boolean));
+    return META_ADS_CREATE_PERMISSIONS.some((p) => !held.has(p));
+}
+
 /** A reason creating adverts is blocked, or null. Only the create paths and the surfaces call this. */
 export function metaAdsCreateProblem(connection: MetaAdsConnection | null): string | null {
     if (!connection) return null;

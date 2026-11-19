@@ -189,6 +189,35 @@ check('stage_paid routes Meta; approve and the optimiser pick the adapter by the
     assert.ok(!opt.includes('metaAdsCreateProblem') && !opt.includes('adsScopeProblem'), 'the optimiser must keep pausing');
 });
 
+console.log('\n──── the paid surface is reachable where the adapters can run ────');
+
+check('off production the surface offers LinkedIn and Meta; in production only the (empty) registry', () => {
+    const camp = code(read('netlify/functions/campaigns.ts'));
+    assert.ok(camp.includes('const devAdaptersAllowed = !isProductionDeploy('));
+    assert.ok(camp.includes("? ['linkedin', 'meta']"));
+    assert.ok(camp.includes(': networkAvailability().filter((n) => n.available).map((n) => n.network);'));
+    assert.ok(camp.includes('anyNetwork: anyNetworkAvailable() || offeredNetworks.length > 0,'));
+    // The registry itself stays empty — production is still locked.
+    assert.equal(anyNetworkAvailable(), false);
+});
+
+check('the panel reports Meta readiness beside LinkedIn\'s, and campaigns carry their network', () => {
+    const camp = code(read('netlify/functions/campaigns.ts'));
+    assert.ok(camp.includes('meta: {') && camp.includes('needsReconnect: metaAdsNeedsReconnect(metaConnection),'));
+    assert.ok(camp.includes('adNetwork: campaigns.adNetwork,'));
+});
+
+check('the panel switches network, and stage/upload/approve follow it', () => {
+    const ui = read('src/components/assistant-campaigns.js');
+    assert.ok(ui.includes('data-cmp-paid-net='), 'no network switch');
+    assert.ok(ui.includes("network === 'meta' ? 'meta-ads-media' : 'linkedin-ads-media'"), 'upload not routed');
+    assert.ok(/action: 'stage_paid',\s*\n\s*network,/.test(ui), 'stage_paid not sent the network');
+    assert.ok(ui.includes('? { countries }'), 'Meta targeting not sent');
+    assert.ok(ui.includes('data-cmp-network="${esc(network)}"'), 'approve does not know its network');
+    assert.ok(ui.includes('/.netlify/functions/meta-ads-oauth-init'), 'no Meta connect link');
+    assert.ok(ui.includes('data-cmp-meta-save'), 'no Meta account/Page save');
+});
+
 // ── A mocked end-to-end stage. Async, so it runs in main() (the runner is CJS: no top-level await).
 async function main(): Promise<void> {
     const name = 'stageCampaign: campaign PAUSED first, then ad set, creative, ad — ids read from bodies, token never in a URL';

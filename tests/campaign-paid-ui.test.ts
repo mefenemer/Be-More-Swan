@@ -32,7 +32,7 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\
 
 const ui = read('src/components/assistant-campaigns.js');
 const api = read('netlify/functions/campaigns.ts');
-const locked = ui.slice(landmark(ui, 'function paidLockedHtml()'), landmark(ui, 'function variantRow('));
+const locked = ui.slice(landmark(ui, 'function paidLockedHtml(network)'), landmark(ui, 'function variantRow('));
 
 console.log('\n──── the locked state, which is what almost everyone sees ────');
 
@@ -102,10 +102,10 @@ check('the confirm dialog states the amount and that charging starts', () => {
     // ⚠️ The end landmark is searched FROM the start index. Without that, `if (!ok) return;`
     // matches the stop_all handler earlier in the file, start > end, and slice() returns an EMPTY
     // STRING — so every assertion below would fail against perfectly correct code.
-    const confirmAt = landmark(ui, "const ok = await window.confirmModal(\n      'Your ads go live immediately");
+    const confirmAt = landmark(ui, "const ok = await window.confirmModal(\n      `Your ads go live immediately");
     const confirm = ui.slice(confirmAt, landmark(ui, 'if (!ok) return;', confirmAt));
     assert.match(confirm, /£\$\{budget\.toFixed\(2\)\} a day/);
-    assert.match(confirm, /LinkedIn begins charging/);
+    assert.match(confirm, /\$\{approveLabel\} begins charging/);
     // And a way back, or it is a one-way door.
     assert.match(confirm, /pause them from this page/);
 });
@@ -125,7 +125,7 @@ check('a rejected approval RELOADS, so the user sees the real number', () => {
 console.log('\n──── staging says what it does and does not do ────');
 
 check('the form states that nothing is spent at staging', () => {
-    assert.match(panel, /created on LinkedIn <span class="font-bold">paused<\/span>/);
+    assert.match(panel, /created on \$\{esc\(label\)\} <span class="font-bold">paused<\/span>/);
     assert.match(panel, /nothing is spent until you approve them/);
 });
 
@@ -133,14 +133,15 @@ check('the staging button is NOT styled like the money button', () => {
     // Staging is neutral; approving is the committing act. Two identical buttons would make the
     // difference invisible at a glance.
     // Button system (2026-10-03): staging is SECONDARY, approving commits money — GO-LIVE.
-    assert.match(panel, /data-cmp-stage="[^"]*"\s*\n\s*class="btn-secondary /);
+    assert.match(panel, /data-cmp-stage="[^"]*" data-cmp-network="[^"]*"\s*\n\s*class="btn-secondary /);
     assert.match(panel, /data-cmp-approve="[^"]*"[^>]*\n\s*class="btn-golive /);
 });
 
 check('a failed stage does NOT re-render, so three written ads survive', () => {
     // render() rewrites the tab's innerHTML. The same rule the tracked-link form follows, and it
     // matters more here because there is more to lose.
-    const branch = ui.slice(landmark(ui, "sayPaid(id, err.message || 'LinkedIn would not accept that.'"), landmark(ui, 'stageBtn.disabled = false;'));
+    const failAt = landmark(ui, "sayPaid(id, err.message || `${label} would not accept that.`");
+    const branch = ui.slice(failAt, landmark(ui, 'stageBtn.disabled = false;', failAt));
     assert.ok(!/render\(\)/.test(branch));
 });
 
