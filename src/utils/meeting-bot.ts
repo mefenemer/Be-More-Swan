@@ -9,6 +9,8 @@ import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 import type { PickupPlatform } from './meeting-pickup';
 
 export const MEETING_BOT_FLAG = 'meeting_bot';
+/** Plan B7: Zoom joins only once our Zoom app passes Zoom's review (OBF). No row needed: absent = off. */
+export const MEETING_BOT_ZOOM_FLAG = 'meeting_bot_zoom';
 
 /**
  * How the minutes writer is told a bot meeting reached it (instead of meeting-pickup.ts PICKUP_CHANNEL_BLOCK). Carries the

@@ -14,7 +14,7 @@ import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, mee
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type RecallRegion,
 } from './meeting-bot';
@@ -122,6 +122,10 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
 
     const link = cleanMeetingLink(i.meetingUrl);
     if (!link.ok) return fail(400, 'bad_link', link.error);
+    // Plan B7: Google Meet and Teams first. Zoom needs our own approved Zoom app (OBF), behind its own flag.
+    if (link.platform === 'zoom' && !(await isFeatureEnabled(i.organisationId, MEETING_BOT_ZOOM_FLAG))) {
+        return fail(400, 'zoom_soon', 'The Note Taker can join Google Meet and Microsoft Teams calls. Zoom is coming soon.');
+    }
     const when = cleanJoinAt(i.joinAt, now);
     if (!when.ok) return fail(400, 'bad_time', when.error);
     const title = typeof i.title === 'string' && i.title.trim() ? i.title.replace(/\s+/g, ' ').trim().slice(0, 200) : null;
@@ -312,13 +316,16 @@ export interface BotPollResult { checked: number; moved: number; imported: numbe
 /** The poll's share of the scheduled run (Netlify scheduled functions stop at 30 s; the pick-up check runs first). */
 export const BOT_POLL_BUDGET_MS = 15_000;
 const POLL_BATCH = 5;
+/** Each Recall call the poll makes is cut off after this, so a batch can never outlast the time left (review of #769). */
+export const POLL_CALL_TIMEOUT_MS = 5_000;
 
 export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Promise<boolean>, now: Date = new Date(), budgetMs = BOT_POLL_BUDGET_MS): Promise<BotPollResult> {
     const out: BotPollResult = { checked: 0, moved: 0, imported: 0, mediaDeleted: 0, errors: 0 };
     // Stops starting new Recall calls once its budget is spent, so the run never overruns and every step gets a turn;
     // what is left is picked up next run (oldest-checked first).
     const started = Date.now();
-    const timeLeft = () => Date.now() - started < budgetMs;
+    // A batch only starts when a whole call still fits, so the last one can't run past the budget.
+    const timeLeft = () => Date.now() - started + POLL_CALL_TIMEOUT_MS <= budgetMs;
     const quiet = new Date(now.getTime() - 5 * 60 * 1000);
 
     await db.update(meetingBots).set({ status: 'failed', statusReason: 'not_sent', updatedAt: now }).where(and(
@@ -331,7 +338,7 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
     const pollOne = async (row: BotRow) => {
         out.checked++;
         try {
-            const bot = await getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!);
+            const bot = await getRecallBot(row.recallRegion as RecallRegion, row.recallBotId!, POLL_CALL_TIMEOUT_MS);
             const before = row.status;
             // EVERY change, replayed in order: the last one alone would lose a call whose webhooks were all missed.
             const patch = replayBotState({ status: row.status as BotStatus, joinedAt: row.joinedAt, leftAt: row.leftAt, statusReason: row.statusReason }, bot.changes);
@@ -364,8 +371,8 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
                 lt(meetingBots.updatedAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
             ),
         )).limit(25);
-    for (let i = 0; i < finished.length && Date.now() - mediaStarted < 5_000; i += POLL_BATCH) {
-        const done = await Promise.all(finished.slice(i, i + POLL_BATCH).map(({ bot }) => deleteBotMedia(db, bot)));
+    for (let i = 0; i < finished.length && Date.now() - mediaStarted + POLL_CALL_TIMEOUT_MS <= 5_000; i += POLL_BATCH) {
+        const done = await Promise.all(finished.slice(i, i + POLL_BATCH).map(({ bot }) => deleteBotMedia(db, bot, POLL_CALL_TIMEOUT_MS)));
         out.mediaDeleted += done.filter(Boolean).length;
     }
     return out;
@@ -380,6 +387,12 @@ export async function pollMeetingBots(db: Db, dispatch: (importId: number) => Pr
 export async function withdrawMeetingBots(db: Db, organisationId: number, assistantIds?: readonly number[]): Promise<number> {
     try {
         if (assistantIds && !assistantIds.length) return 0;
+        // A bot still being sent (no Recall id yet) is cancelled now: when Recall answers, the send saves its id only
+        // onto an OPEN row, so it withdraws the bot instead of letting it join for a removed assistant (review of #769).
+        await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() }).where(and(
+            eq(meetingBots.organisationId, organisationId), isNull(meetingBots.recallBotId), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]),
+            ...(assistantIds ? [inArray(meetingBots.aiAssistantId, [...assistantIds])] : []),
+        ));
         const rows = await db.select().from(meetingBots).where(and(
             eq(meetingBots.organisationId, organisationId), isNotNull(meetingBots.recallBotId),
             ...(assistantIds ? [inArray(meetingBots.aiAssistantId, [...assistantIds])] : []),
@@ -400,9 +413,9 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
 }
 
 /** Deletes Recall's copy of the recording; marks the row once Recall agrees. */
-export async function deleteBotMedia(db: Db, row: BotRow): Promise<boolean> {
+export async function deleteBotMedia(db: Db, row: BotRow, timeoutMs?: number): Promise<boolean> {
     if (!row.recallBotId || row.mediaDeletedAt) return false;
-    const done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId).catch(() => false);
+    const done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
     if (done) await db.update(meetingBots).set({ mediaDeletedAt: new Date(), updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
     return done;
 }
