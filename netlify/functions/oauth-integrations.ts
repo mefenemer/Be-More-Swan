@@ -58,9 +58,11 @@ import {
 } from '../../src/utils/workspace-integrations';
 import { forgetMicrosoft, syncMicrosoft } from '../../src/utils/calendar-microsoft';
 import { forgetGoogle, GOOGLE_CALENDAR_SCOPE, syncGoogle } from '../../src/utils/calendar-google';
+import { GOOGLE_MEET_SCOPE, GOOGLE_MEET_READ_SCOPE } from '../../src/utils/meeting-sources/google-meet';
+import { MEETING_PICKUP_FLAG } from '../../src/utils/meeting-pickup';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { forgetSearchQueries } from '../../src/utils/gsc-queries';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { YT_EXTENDED_SCOPES_FLAG, youtubeScopes } from '../../src/lib/youtube-extras';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -93,6 +95,10 @@ const SCOPES: Record<IntegrationProvider, string> = {
     outlook_calendar: OUTLOOK_CALENDAR_SCOPE,
     // The booking calendar on Google (calendar-google.ts) — its OWN Google Cloud project. ⚠️ The console must list exactly these.
     google_calendar: GOOGLE_CALENDAR_SCOPE,
+    // The Note Taker picking up Meet transcripts (docs/meeting-apps-pickup-plan.md): read-only conference records,
+    // participants and transcript entries. Sensitive, NOT Restricted: no Drive scope (the edited transcript Doc is not
+    // read). openid email only labels the card. ⚠️ The Google console must list exactly these.
+    google_meet: GOOGLE_MEET_SCOPE,
     // Phase 4 actions: Threads post publishing, TikTok video uploads, YouTube video uploads.
     threads: 'threads_basic,threads_content_publish',
     tiktok: 'user.info.basic,video.upload',
@@ -283,6 +289,10 @@ export default withLambda(async (event) => {
 
         const clientId = process.env[`${envVarPrefix(provider)}_CLIENT_ID`];
         if (!clientId) return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
+        // Meeting pick-up is switched on per workspace until Google approves the Meet scope and the Terms notice has run.
+        if (provider === 'google_meet' && !(await isFeatureEnabled(organisationId, MEETING_PICKUP_FLAG))) {
+            return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
+        }
         // One signed-in booking calendar at a time: both write the business's busy times, and each would
         // wipe the other's (calendar-microsoft.ts / calendar-google.ts). Disconnect one to use the other.
         if (provider === 'outlook_calendar' || provider === 'google_calendar') {
@@ -406,6 +416,10 @@ export default withLambda(async (event) => {
             // Google consent — offline + consent forces a refresh token for the 15-minute sync; select_account
             // so the owner picks the calendar's account, not whichever Google account the browser holds.
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.google_calendar)}&access_type=offline&prompt=${encodeURIComponent('consent select_account')}&include_granted_scopes=false&state=${state}`;
+        } else if (provider === 'google_meet') {
+            // offline + consent forces a refresh token for the 15-minute check; select_account so they pick the account
+            // that HOSTS their calls (Meet lists only calls that account organised).
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.google_meet)}&access_type=offline&prompt=${encodeURIComponent('consent select_account')}&include_granted_scopes=false&state=${state}`;
         } else if (provider === 'searchconsole') {
             // Google consent — offline + consent forces a refresh token for the daily ingest cron.
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.searchconsole)}&access_type=offline&prompt=consent&state=${state}`;
@@ -952,6 +966,38 @@ export default withLambda(async (event) => {
                 });
                 // First sync now, so the owner lands on a working card (never fails the connect).
                 await syncGoogle(db, Number(organisationId), new Date()).catch(() => undefined);
+            } else if (provider === 'google_meet') {
+                const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.GOOGLE_MEET_CLIENT_ID ?? '',
+                        client_secret: process.env.GOOGLE_MEET_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; id_token?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=google_meet`);
+                // Without the Meet read scope nothing can be picked up: an unticked box on the consent screen is a failed connect.
+                if (!String(tokenData.scope || '').includes(GOOGLE_MEET_READ_SCOPE)) {
+                    return redirect('/integrations.html?oauth_error=scope_missing&provider=google_meet');
+                }
+                let emailAddress: string | null = null;
+                try {
+                    const payload = JSON.parse(Buffer.from(String(tokenData.id_token || '').split('.')[1] || '', 'base64url').toString('utf8')) as { email?: string };
+                    emailAddress = typeof payload.email === 'string' ? payload.email.slice(0, 254) : null;
+                } catch { /* label only — connection still succeeds */ }
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'google_meet',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: emailAddress,
+                    externalAccountName: emailAddress,
+                    scopes: grantedScopes(tokenData.scope),
+                });
             } else if (provider === 'searchconsole') {
                 const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
                     method: 'POST',

@@ -1,6 +1,6 @@
 // netlify/functions/meeting-pickup.ts — every 15 minutes, find meetings that ended on Google Meet, Teams or Zoom and
 // hand each one with a transcript to the background writer (docs/meeting-apps-pickup-plan.md §2,
-// src/utils/meeting-pickup.ts). No platform is switched on yet (MEETING_SOURCES is empty), so today it finds nothing.
+// src/utils/meeting-pickup.ts). Google Meet only, for workspaces with the meeting_pickup flag on.
 //
 // ⚠️ Netlify runs scheduled functions on PRODUCTION only, and answers a direct URL call to one with a bare 403 before
 // this handler runs. Staging is poked through run-meeting-pickup.ts instead.

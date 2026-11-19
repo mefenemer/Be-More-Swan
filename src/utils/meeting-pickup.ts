@@ -13,8 +13,7 @@
 //
 // This file holds the rules and nothing that touches the database or a platform, so tests can drive it with a
 // fake platform and an in-memory store. meeting-pickup-db.ts is the real store and wiring. Each platform is a
-// MeetingSource; MEETING_SOURCES is empty until the first one (Google Meet, plan Phase 2) is built, so today the
-// check runs and finds nothing.
+// MeetingSource (src/utils/meeting-sources/), listed in meeting-pickup-db.ts meetingSources.
 
 import type { WriteMinutesResult, MinutesAssistant } from './meeting-minutes-writer';
 
@@ -83,8 +82,12 @@ export interface MeetingSource {
     fetchTranscript(account: PickupAccount, externalId: string): Promise<PickedTranscript | null>;
 }
 
-/** The platforms that are switched on. Empty until Google Meet is built (plan Phase 2). */
-export const MEETING_SOURCES: readonly MeetingSource[] = [];
+/**
+ * Pick-up is switched on per workspace (feature_flags 'meeting_pickup', db/z-meeting-pickup-flag.sql) until Google
+ * approves the Meet scope and the Terms notice for the new charge has run. The platforms themselves are listed in
+ * meeting-pickup-db.ts meetingSources (Google Meet first, plan Phase 2).
+ */
+export const MEETING_PICKUP_FLAG = 'meeting_pickup';
 
 // ── Turning a transcript into the writer's message ────────────────────────────────────────────────
 

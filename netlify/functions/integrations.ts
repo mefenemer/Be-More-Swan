@@ -6,7 +6,8 @@ import { systemConnections, scheduledPosts, users, auditLogs, workspaceIntegrati
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
-import { isServiceAllowedForAssistant, isConnectAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
+import { isServiceAllowedForAssistant, isConnectAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER, usesMeetingApps } from '../../src/utils/connection-map';
+import { loadMeetingApps } from '../../src/utils/meeting-pickup-db';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -273,7 +274,10 @@ export default withLambda(async (event) => {
                         };
                     })()
                     : null;
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
+                // The Note Taker's meeting apps (Google Meet), with when meetings were last checked — only while the
+                // meeting_pickup flag is on for this workspace; otherwise the category stays "Coming soon".
+                const meetingApps = usesMeetingApps(assistant) && currentOrgId ? await loadMeetingApps(db, currentOrgId) : null;
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, meetingApps, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
             }
 
             return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
