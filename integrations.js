@@ -618,8 +618,12 @@ window.initAssistantConnections = async function (assistantId, currentData) {
         ...((window.cachedContext?.linked_integrations) || []).map(Number),
     ]);
 
+    // The assistant page's ticket (assistants.js _detailTicket): a slow load for the assistant the
+    // user just left must not draw its connections into the next one's card.
+    const stale = typeof window._detailTicket === 'function' ? window._detailTicket() : () => false;
     await _loadSocialHandles();
-    await _loadConnections();
+    if (stale()) return;
+    await _loadConnections(stale);
 
 };
 
@@ -695,7 +699,9 @@ document.addEventListener('assistant:platformsChanged', (e) => {
 });
 
 // ── Load & render platform cards ─────────────────────────────────
-async function _loadConnections() {
+// isStale: only from initAssistantConnections. Other callers pass nothing (or an Event, as a listener).
+async function _loadConnections(isStale) {
+    const stale = () => typeof isStale === 'function' && isStale();
     const grid = document.getElementById('connections-grid');
     if (!grid) return;
 
@@ -706,6 +712,7 @@ async function _loadConnections() {
         const res = await fetch(url);
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
+        if (stale()) return;
         _userConnections = (data.connections || []).filter(c => c.userId !== null);
         // Server-authoritative relevance allow-list (undefined when no assistant scope).
         _allowedServices = Array.isArray(data.allowedServices) ? data.allowedServices : null;
@@ -726,6 +733,7 @@ async function _loadConnections() {
     // Blog destinations (cms category) — a separate subsystem, loaded only when it's live for
     // this assistant so the OAuth-only pages never call it.
     await _loadBlogDestinations();
+    if (stale()) return;
 
     _renderConnectionsGrid();
 }

@@ -37,7 +37,7 @@ const STALE = 'if (_detailStale()) return;';
 console.log('\ninitAssistantDetail ignores a superseded response');
 
 check('a module-level ticket counter, bumped once per call', () => {
-    assert.ok(js.slice(start - 600, start).includes('let _detailInitSeq = 0;'), 'counter declared just above the function');
+    assert.ok(js.slice(start - 1600, start).includes('let _detailInitSeq = 0;'), 'counter declared just above the function');
     assert.ok(fn.includes('const _detailSeq = ++_detailInitSeq;'), 'each call takes a ticket');
     assert.ok(fn.includes('const _detailStale = () => _detailSeq !== _detailInitSeq;'), 'stale = a newer call exists');
     // Taken before the first await, or two overlapping calls could hold the same ticket.

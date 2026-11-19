@@ -3289,7 +3289,12 @@ function formatCurrency(amount, currency) {
               ? (contentContainer.querySelector('.main-tab-btn.active-tab')?.dataset.maintab || null) : null,
           };
         }
-        if (routeKey !== 'assistant-detail') window._currentAssistantId = null;
+        if (routeKey !== 'assistant-detail') {
+          window._currentAssistantId = null;
+          // A load for the assistant page still in flight must not paint the view we're going to
+          // (assistants.js _detailTicket): it would set _currentAssistantName / _detailReviewQueue.
+          window._leaveAssistantDetail?.();
+        }
 
         contentContainer.innerHTML = viewHtml;
 
