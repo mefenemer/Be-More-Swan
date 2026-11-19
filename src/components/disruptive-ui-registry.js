@@ -5019,6 +5019,78 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('meeting_action_proposal', renderMeetingActionProposalCard);
 
+  // ── Note Taker: send it into a call, or take one out (docs/note-taker-bot-plan.md step 3) ──────
+  // { type: 'meeting_bot_proposal', action: 'send', assistantId, meetingUrl, platformLabel, title, joinAt|null,
+  //   tasksPer5Min, blocked? }  |  { action: 'remove', assistantId, botId, platformLabel, title, joinAt, live,
+  //   statusWords, blocked? }. Rebuilt from facts by src/utils/chat-meeting-bot.ts; the click is the SAME server
+  //   action as the Inbox's "Send to a call" (netlify/functions/meeting-bots.ts), source 'chat'.
+  function renderMeetingBotProposalCard(ui, esc) {
+    if (ui.action !== 'send' && ui.action !== 'remove') return null;
+    if (ui.action === 'remove' && !Number(ui.botId)) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const when = ui.joinAt ? new Date(ui.joinAt) : null;
+    const whenWords = when && !Number.isNaN(when.getTime())
+      ? when.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : 'Now';
+    const send = ui.action === 'send';
+    const w = Number(ui.tasksPer5Min) || 0;
+    const head = send ? 'Send the Note Taker' : (ui.live ? 'Remove from the call' : 'Cancel the booking');
+    const button = send ? (ui.joinAt ? 'Book it' : 'Send it now') : (ui.live ? 'Remove from call' : 'Cancel booking');
+    const detail = send ? `
+      <p class="text-sm text-gray-700 mt-2 break-all">${esc(ui.meetingUrl || '')}</p>
+      <p class="text-sm text-gray-700 mt-1">${ui.platformLabel ? `${esc(ui.platformLabel)} · ` : ''}${esc(whenWords)}</p>
+      ${blocked ? '' : `<p class="text-xs text-gray-600 mt-2">${w > 0 ? `Uses ${w} task${w === 1 ? '' : 's'} for each started 5 minutes it’s in the call (about ${w * 12} an hour). Nothing if it isn’t let in.` : 'Nothing is charged for this yet.'}</p>
+      <p class="text-xs text-gray-600 mt-1"><strong>Tell everyone in the meeting</strong> that the Note Taker is recording. In some places you need their consent.</p>`}`
+      : `<p class="text-sm text-gray-700 mt-2">${ui.platformLabel ? `${esc(ui.platformLabel)} · ` : ''}${esc(ui.statusWords || '')}</p>
+      ${ui.live && !blocked ? '<p class="text-xs text-gray-600 mt-1">It leaves the call. What it heard so far is still written up.</p>' : ''}`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.setAttribute('data-meeting-bot', ui.action);
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="font-bold text-gray-900 mt-1 break-words">${esc(ui.title || 'Meeting')}</p>
+      ${detail}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : `
+      <div class="flex flex-wrap items-center gap-2 mt-4">
+        <button type="button" data-mbp-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(button)}</button>
+        <button type="button" data-mbp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>`}
+      <p class="hidden mt-2 text-xs font-semibold" data-mbp-status role="status" aria-live="polite"></p>`;
+    if (blocked) return el;
+    const status = el.querySelector('[data-mbp-status]');
+    const go = el.querySelector('[data-mbp-go]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-mbp-go], [data-mbp-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-mbp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-mbp-go]') || go.disabled) return;
+      const body = send
+        ? { action: 'send', assistantId: Number(ui.assistantId), meetingUrl: ui.meetingUrl, title: ui.title || '', joinAt: ui.joinAt || null, source: 'chat' }
+        : { action: 'remove', botId: Number(ui.botId) };
+      setBusy(true);
+      go.textContent = send ? 'Sending…' : 'Working…';
+      try {
+        const res = await fetch('/.netlify/functions/meeting-bots', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn’t work. Nothing was changed.');
+        go.textContent = 'Done ✓';
+        say(!send ? (ui.live ? 'It’s leaving the call.' : 'Booking cancelled.')
+          : data.alreadySent ? 'It’s already on its way to that meeting.'
+          : data.bot && data.bot.status === 'scheduled' ? 'Booked. It joins at that time.' : 'On its way. Let it in when it asks to join.');
+        window.MeetingBots?.refresh?.();
+      } catch (err) {
+        setBusy(false);
+        go.textContent = 'Try again';
+        say(err.message || 'That didn’t work. Nothing was changed.', 'error');
+      }
+    });
+    return el;
+  }
+
+  register('meeting_bot_proposal', renderMeetingBotProposalCard);
+
   // ── Built-in: Social Publish Card ───────────────────────────────────────────
   // Renderer for the social-media-manager publish wire shape:
   // { type: 'social_publish_card', platform, caption?, hashtags?, mediaUrl?,
