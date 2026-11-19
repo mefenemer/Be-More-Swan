@@ -92,7 +92,7 @@ The help article says each of these in plain words. The Note Taker's live status
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
    - Ask Recall in writing: their DPA and sub-processors, EU processing, deleting media on request, the Zoom OBF feature flag, and what the join message can say.
 
-   Done when one real minutes record exists from each of Meet and Teams through the existing writer. (Runs 1–2 below prove joining and transcripts on both; the minutes-writer step is still open.)
+   Done when one real minutes record exists from each of Meet and Teams through the existing writer. (Runs 1–2 below prove joining, the chat notice and transcripts on both, and the Meet transcript produced correct minutes. Left: the EU account.)
 
    **Results so far:**
    - **Run 1, 2026-11-19, free Google Meet, Recall US West (`us-west-2`):**
@@ -101,7 +101,8 @@ The help article says each of these in plain words. The Note Taker's live status
      - **Transcript:** ready **at once** when the bot finished. The streaming transcript needs no post-call wait. 94 words in 1 block, all under the host's Meet display name, with no unlabelled lines. The words read accurately, including three spoken tasks.
      - **Clean-up:** Recall's copy of the media was deleted (`delete_media` returned 2xx).
      - **Speaker labels:** correct. The host was the only participant, so one label is right. Any other voice was someone in the same room on the host's device, and that is always one speaker, because names come from Meet participants. The two-device check (a second participant getting their own name) was **skipped by the owner, 2026-11-19**. Recall documents per-participant names, so it is checked in the real-account run before go-live (step 6) instead. The help article should say "everyone in one room shares one name".
-     - **Chat notice:** ✅ shown in the meeting chat (owner, 2026-11-19). **Not yet checked:** running this transcript through the minutes writer.
+     - **Chat notice:** ✅ shown in the meeting chat (owner, 2026-11-19).
+     - **Minutes:** ✅ the transcript went through the Note Taker's shared minutes prompt (`buildMeetingMinutesPrompt` + `pickupMessage` + `PICKUP_CHANNEL_BLOCK`, model `claude-haiku-5-5`, card cleaned by `normaliseMinutesCard`). The database parts of `writeMeetingMinutes` (business row, rules, usage log) were left out, so nothing was saved (`scripts/probe-bot-minutes.ts`). Result in 3.8 s: a correct card with the attendee by name, all three spoken tasks marked Unassigned (no owner was said), no invented decisions or risks, and a sensible follow-up email.
    - **Run 2, 2026-11-19, Microsoft Teams (`teams.microsoft.com/meet/…` link, passcode in the link), Recall US West:**
      - **Joining:** the bot joined as an anonymous guest and waited in the lobby. The host admitted it, and it was recording within 0.6 minutes. No CAPTCHA or sign-in block on this meeting.
      - **The call:** about 1 minute in the call, host only.
