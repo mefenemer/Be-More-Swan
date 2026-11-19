@@ -311,8 +311,13 @@ export default withLambda(async () => {
 
             // The public address, so the "published" notification has something to open.
             const liveUrl = livePostUrl(post.platform, result.id);
+            // Record the account it actually went out on. A post queued with no connection_id was
+            // published through the (organisation, platform) fallback above, and anything that later
+            // reads the post back — LinkedIn Page stats and comments join on this column — needs to
+            // know which account that was. COALESCE: never overwrite a connection the post already named.
+            const usedConnection = Number.isInteger(creds.connectionId) ? `, connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})` : '';
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''} WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''}${usedConnection} WHERE id = ${post.id}`
             );
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent;
             // covers autonomous posts that bypass manual approval). Never blocks publish success.

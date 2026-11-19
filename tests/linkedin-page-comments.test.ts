@@ -338,4 +338,22 @@ check('only postReply calls LinkedIn’s write endpoint', () => {
     assert.ok(src.indexOf('replyToComment(') > src.indexOf('export async function postReply('));
 });
 
+check('a post published with no connection_id still reaches stats and comments', () => {
+    // Staging 2026-11-19: "Post it now" queues with connection_id NULL; the publisher falls back to the
+    // org's newest active LinkedIn connection and never wrote it back, so loadPagePosts' plain join
+    // found zero Page posts. Both halves of the fix must stay.
+    const pc = read('src/utils/page-comments.ts');
+    const fn = pc.slice(pc.indexOf('export async function loadPagePosts('), pc.indexOf('export async function pageToken('));
+    assert.ok(fn.length > 0, 'loadPagePosts found');
+    assert.ok(fn.includes('COALESCE(${scheduledPosts.connectionId}'), 'join falls back when connection_id is NULL');
+    assert.ok(fn.includes("AND sc2.service_name = 'linkedin'") && fn.includes('AND sc2.created_at <= ${scheduledPosts.publishedAt}'), 'counts the LinkedIn connections that existed when it went out, disconnected ones included');
+    assert.ok(fn.includes('eq(systemConnections.isActive, true)'), 'and that one must still be live');
+    assert.ok(fn.includes('HAVING count(*) = 1'), 'a NULL row is attributed only when the org has ONE LinkedIn connection — never guessed between a profile and a Page');
+    assert.ok(!fn.includes('ORDER BY sc2.updated_at'), 'no newest-wins guess: updated_at moves on every token refresh');
+    assert.ok(fn.includes('connectionId: systemConnections.id,'), 'groups by the resolved connection, not the NULL column');
+    assert.ok(!fn.includes('eq(systemConnections.id, scheduledPosts.connectionId)'), 'the plain join is gone');
+    const pub = read('netlify/functions/publish-social-posts.ts');
+    assert.ok(pub.includes('connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})'), 'publisher records the account it used');
+});
+
 queue.then(() => console.log(`\n${passed} passed`));
