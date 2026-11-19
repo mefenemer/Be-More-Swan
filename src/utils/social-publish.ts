@@ -1060,8 +1060,10 @@ export async function publishLinkedInPagePost(
         return { ok: true, id: String(id) };
     }
     const message = await liMessage(res);
-    if (stillProcessing && res.status >= 400 && res.status < 500) {
-        return { ok: false, status: 503, error: 'LinkedIn is still processing the video. It will be tried again shortly.' };
+    // Only the refusals a not-yet-ready video plausibly causes become a retry; a permission (401/403), size
+    // or rate limit keeps LinkedIn's own status. Either way LinkedIn's message is kept for the queue.
+    if (stillProcessing && [400, 409, 422].includes(res.status)) {
+        return { ok: false, status: 503, error: `LinkedIn is still processing the video, so the post will be tried again shortly.${message ? ` LinkedIn said: ${message}` : ''}` };
     }
     return { ok: false, status: res.status, error: message || `LinkedIn API error (${res.status})` };
 }

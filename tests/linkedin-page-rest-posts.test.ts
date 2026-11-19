@@ -130,7 +130,13 @@ check('a video still processing: posted anyway; a refusal then is a retry (503),
         const r = await publishLinkedInPagePost('Clip', 'tok', ORG, VID, { pollMs: 0 });
         assert.equal(r.ok, false);
         assert.equal((r as { status: number }).status, 503);
+        assert.match((r as { error: string }).error, /media not ready/, "LinkedIn's own words are kept");
         assert.ok(calls.some((c) => c.url === 'https://api.linkedin.com/rest/posts'), 'the post was tried');
+    });
+    await withFetch(linkedin({ videoStatus: () => json({ status: 'PROCESSING' }), post: () => json({ message: 'Not enough permissions to post as this organization' }, 403) }), async () => {
+        const r = await publishLinkedInPagePost('Clip', 'tok', ORG, VID, { pollMs: 0 });
+        assert.equal((r as { status: number }).status, 403, 'a permission refusal is not dressed up as "still processing"');
+        assert.match((r as { error: string }).error, /Not enough permissions/);
     });
     await withFetch(linkedin({ videoStatus: () => json({ status: 'PROCESSING_FAILED', processingFailureReason: 'BAD_CODEC' }) }), async (calls) => {
         const r = await publishLinkedInPagePost('Clip', 'tok', ORG, VID, { pollMs: 0 });
