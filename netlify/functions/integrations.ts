@@ -481,7 +481,14 @@ export default withLambda(async (event) => {
                         if (!(await pageStillInUse(db, fbPageId, connIdInt).catch(() => true))) {
                             const { getSecret: readSecret } = await import('../../src/utils/vault');
                             const s = await readSecret(db, conn.vaultRefKey).catch(() => null) as { token?: string } | null;
-                            if (s?.token) await unsubscribePageFromMessages(s.token, fbPageId);
+                            const unsub = s?.token ? await unsubscribePageFromMessages(s.token, fbPageId) : null;
+                            // Record it, so a later reconnect doesn't carry over a subscription Meta no longer has.
+                            if (unsub?.ok) {
+                                await db.update(systemConnections)
+                                    .set({ metadata: { ...(conn.metadata as Record<string, unknown> ?? {}), messaging: { subscribed: false, unsubscribedAt: new Date().toISOString() } } })
+                                    .where(eq(systemConnections.id, connIdInt))
+                                    .catch(() => {});
+                            }
                         }
                     }
                 }

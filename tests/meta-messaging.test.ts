@@ -251,6 +251,7 @@ async function main() {
         const deleteAt = src.indexOf('if (plan.deleteVaultSecret) await deleteSecret(');
         assert.ok(unsubAt !== -1 && inUseAt !== -1 && revokeAt !== -1 && deleteAt !== -1);
         assert.ok(inUseAt < unsubAt && unsubAt < revokeAt && unsubAt < deleteAt);
+        assert.ok(src.includes("messaging: { subscribed: false, unsubscribedAt:"), 'a successful unsubscribe is recorded on the row');
         const subAt = src.indexOf('?.messaging?.subscribed === true');
         assert.ok(subAt !== -1 && subAt < inUseAt, 'only a row that subscribed the Page unsubscribes it');
     });

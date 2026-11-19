@@ -166,6 +166,12 @@ async function main() {
             assert.equal(rows.length, 2);
             assert.equal(Number(rows[0].connection_id), fbConn);
         });
+        await check("a reconnect that moved the connection to another assistant moves its conversations too", async () => {
+            await sql.unsafe(`UPDATE system_connections SET assistant_id = 9 WHERE id = $1`, [fbConn]);
+            await storeMessagingEvent(db, msg({ mid: 'x6', sentAt: at(200) }));
+            const [r] = await sql.unsafe(`SELECT ai_assistant_id FROM social_conversations WHERE connection_id = $1`, [fbConn]) as any[];
+            assert.equal(r.ai_assistant_id, 9);
+        });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();

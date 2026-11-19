@@ -215,7 +215,12 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
         })
         .onConflictDoUpdate({
             target: [socialConversations.connectionId, socialConversations.participantId],
-            set: { updatedAt: sql`${socialConversations.updatedAt}` },
+            // Follow the connection if a reconnect moved it to another assistant, so its earlier
+            // conversations show on the new one. updatedAt untouched: this is bookkeeping, not news.
+            set: {
+                aiAssistantId: conn.assistantId ?? sql`${socialConversations.aiAssistantId}`,
+                updatedAt: sql`${socialConversations.updatedAt}`,
+            },
         })
         .returning({ id: socialConversations.id });
 
