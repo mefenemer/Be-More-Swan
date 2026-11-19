@@ -92,7 +92,7 @@ The help article says each of these in plain words. The Note Taker's live status
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
    - Ask Recall in writing: their DPA and sub-processors, EU processing, deleting media on request, the Zoom OBF feature flag, and what the join message can say.
 
-   Done when one real minutes record exists from each of Meet and Teams through the existing writer. (Runs 1–2 below prove joining, the chat notice and transcripts on both, and the Meet transcript produced correct minutes. Left: the EU account.)
+   Done when one real minutes record exists from each of Meet and Teams through the existing writer. (Runs 1–2 below prove joining, the chat notice and transcripts on both, and the Meet transcript produced correct minutes. The EU-account run was **skipped by the owner, 2026-11-19**. Recall confirmed in writing that the EU region works on pay-as-you-go, so it is checked in the go-live run (step 6). **Phase 0 closed 2026-11-19.**)
 
    **Results so far:**
    - **Run 1, 2026-11-19, free Google Meet, Recall US West (`us-west-2`):**
