@@ -101,13 +101,13 @@ The help article says each of these in plain words. The Note Taker's live status
      - **Transcript:** ready **at once** when the bot finished. The streaming transcript needs no post-call wait. 94 words in 1 block, all under the host's Meet display name, with no unlabelled lines. The words read accurately, including three spoken tasks.
      - **Clean-up:** Recall's copy of the media was deleted (`delete_media` returned 2xx).
      - **Speaker labels:** correct. The host was the only participant, so one label is right. Any other voice was someone in the same room on the host's device, and that is always one speaker, because names come from Meet participants. The two-device check (a second participant getting their own name) was **skipped by the owner, 2026-11-19**. Recall documents per-participant names, so it is checked in the real-account run before go-live (step 6) instead. The help article should say "everyone in one room shares one name".
-     - **Not yet checked:** the pinned chat notice (look in the call), and running this transcript through the minutes writer.
+     - **Chat notice:** ✅ shown in the meeting chat (owner, 2026-11-19). **Not yet checked:** running this transcript through the minutes writer.
    - **Run 2, 2026-11-19, Microsoft Teams (`teams.microsoft.com/meet/…` link, passcode in the link), Recall US West:**
      - **Joining:** the bot joined as an anonymous guest and waited in the lobby. The host admitted it, and it was recording within 0.6 minutes. No CAPTCHA or sign-in block on this meeting.
      - **The call:** about 1 minute in the call, host only.
      - **Transcript:** ready **at once**. 33 words in 1 block under the host's Teams display name, with no unlabelled lines. Word-for-word accurate.
      - **Clean-up:** media deleted.
-     - **Not yet checked:** whether Teams showed the chat notice; a business tenant that blocks anonymous guests.
+     - **Chat notice:** ✅ shown in the Teams chat (owner, 2026-11-19). **Not yet checked:** a business tenant that blocks anonymous guests.
 1. **Legal and copy first.**
    - Add Recall.ai to the Trust page sub-processors (with ElevenLabs, if it isn't added yet).
    - Update the privacy notice and DPA (what the bot records, retention), and add the Terms clause: *you must tell the people in your meeting that the Note Taker is there and recording*.
