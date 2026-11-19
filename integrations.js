@@ -777,7 +777,7 @@ function _renderConnectionsGrid() {
         if (_searchConsole) rows.push({ cat: 'search_console', html: _searchConsoleCard(_searchConsole), on: !!_searchConsole.connected });
         if (_meetingApps) {
             for (const m of _meetingApps) rows.push({ cat: 'meeting_apps', html: _meetingAppCard(m), on: !!m.connected });
-            for (const label of ['Microsoft Teams', 'Zoom']) rows.push({ cat: 'meeting_apps', html: _comingSoonCard({ key: 'meeting_apps', label, description: 'Picks up the meeting when it has a transcript.' }), on: false, soon: true, title: label });
+            for (const [key, label] of [['teams_pickup', 'Microsoft Teams'], ['zoom_pickup', 'Zoom']]) rows.push({ cat: 'meeting_apps', html: _comingSoonCard({ key, label, description: 'Picks up the meeting when it has a transcript.' }), on: false, soon: true, title: label });
         }
         for (const t of comingSoon) rows.push({ cat: t.key, html: _comingSoonCard(t), on: false, soon: true, title: t.label });
         const sectionsHtml = _connSections(rows, groups);

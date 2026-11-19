@@ -1,7 +1,7 @@
 // The database half of meeting pick-up (src/utils/meeting-pickup.ts holds the rules): the meeting_imports store,
 // the real writer dependencies, and the hand-off to the background writer. db/z-meeting-imports.sql.
 
-import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, masterAssistants, meetingImports, meetingPickupState } from '../../db/schema';
 import { resolveBaseUrl } from './base-url';
@@ -43,7 +43,7 @@ export async function loadMeetingApps(db: Db, organisationId: number): Promise<M
         .catch(() => [] as (typeof meetingPickupState.$inferSelect)[]);
     const [w] = await db.select({ n: sql<number>`count(*)::int` }).from(meetingImports).where(and(
         eq(meetingImports.organisationId, organisationId), eq(meetingImports.platform, 'google_meet'), eq(meetingImports.status, 'written'),
-        sql`${meetingImports.writtenAt} > now() - interval '30 days'`,
+        gt(meetingImports.writtenAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
     )).catch(() => [{ n: 0 }]);
     return [{
         provider: 'google_meet',

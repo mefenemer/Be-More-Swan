@@ -103,17 +103,28 @@ export async function listEndedCalls(get: MeetFetch, since: Date, now: Date): Pr
     return out.sort((a, b) => a.endedAt.getTime() - b.endedAt.getTime());
 }
 
-/** The call's transcript as speaker lines, or null when Meet has none ready yet. */
-export async function readTranscript(get: MeetFetch, recordName: string): Promise<PickedTranscript | null> {
-    const transcripts = (await listAll<MeetTranscript>(get, `${recordName}/transcripts`, 'transcripts'))
-        .filter((t) => t.state === 'ENDED' || t.state === 'FILE_GENERATED');
-    if (!transcripts.length) return null;
+/** How long after a call a transcript that is ENDED but never reached FILE_GENERATED is read anyway. */
+export const ENDED_GRACE_MS = 30 * 60 * 1000;
+
+/**
+ * The call's transcript as speaker lines, or null when Meet has none ready yet. Ready means FILE_GENERATED (Google
+ * has finished it). ENDED alone can still be filling in, so it is read only once the call is ENDED_GRACE_MS old — a
+ * transcript whose Doc export failed would otherwise never be picked up. Any transcript still STARTED waits.
+ */
+export async function readTranscript(get: MeetFetch, recordName: string, endedAt?: Date | null, now: Date = new Date()): Promise<PickedTranscript | null> {
+    const all = await listAll<MeetTranscript>(get, `${recordName}/transcripts`, 'transcripts');
+    const graceOver = !!endedAt && now.getTime() - endedAt.getTime() >= ENDED_GRACE_MS;
+    const ready = (t: MeetTranscript) => t.state === 'FILE_GENERATED' || (t.state === 'ENDED' && graceOver);
+    if (!all.length || all.some((t) => !ready(t))) return null;
+    const transcripts = all;
     const participants = await listAll<MeetParticipant>(get, `${recordName}/participants`, 'participants');
     const names = new Map(participants.map((p) => [p.name, participantName(p)]));
     const entries: MeetTranscriptEntry[] = [];
     // A call can have several transcripts (transcription stopped and started again): read them all, in time order.
     for (const t of transcripts) entries.push(...await listAll<MeetTranscriptEntry>(get, `${t.name}/entries`, 'transcriptEntries'));
-    entries.sort((a, b) => String(a.startTime ?? '').localeCompare(String(b.startTime ?? '')));
+    // By time, not by string: Meet writes some times with fractions of a second and some without.
+    const at = (e: MeetTranscriptEntry) => { const t = Date.parse(String(e.startTime ?? '')); return Number.isNaN(t) ? 0 : t; };
+    entries.sort((a, b) => at(a) - at(b));
     return {
         lines: entries.map((e) => ({ speaker: (e.participant && names.get(e.participant)) || null, text: String(e.text ?? '') })),
         attendees: [...names.values()].filter((n): n is string => !!n),
@@ -152,6 +163,6 @@ export function googleMeetSource(db: Db): MeetingSource {
         accounts: () => googleMeetAccounts(db),
         account: async (organisationId) => (await googleMeetAccounts(db, organisationId))[0] ?? null,
         listFinished: async (account, since, now) => listEndedCalls(await getter(account.organisationId), since, now),
-        fetchTranscript: async (account, externalId) => readTranscript(await getter(account.organisationId), externalId),
+        fetchTranscript: async (account, externalId, endedAt) => readTranscript(await getter(account.organisationId), externalId, endedAt),
     };
 }

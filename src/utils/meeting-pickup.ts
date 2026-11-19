@@ -79,7 +79,7 @@ export interface MeetingSource {
     /** Meetings that ended between `since` and `now`. */
     listFinished(account: PickupAccount, since: Date, now: Date): Promise<FinishedMeeting[]>;
     /** The transcript, or null when the platform has not finished it (or the meeting has none). */
-    fetchTranscript(account: PickupAccount, externalId: string): Promise<PickedTranscript | null>;
+    fetchTranscript(account: PickupAccount, externalId: string, endedAt: Date | null): Promise<PickedTranscript | null>;
 }
 
 /**
@@ -273,7 +273,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             return 'skipped_disconnected';
         }
 
-        const transcript = await source.fetchTranscript(account, row.externalId);
+        const transcript = await source.fetchTranscript(account, row.externalId, row.endedAt);
         const lines = transcript ? speakerLines(transcript.lines) : [];
         if (!lines.length) {
             const retryAt = transcriptRetryAt(row.endedAt, d.now());

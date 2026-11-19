@@ -83,6 +83,15 @@ import { speakerLines } from '../src/utils/meeting-pickup';
         { name: `${REC}/participants/3`, phoneUser: { displayName: 'Cara' } },
     ] };
 
+    await test('ENDED waits for the grace period; any STARTED transcript waits', async () => {
+        const ended = { [`${REC}/transcripts`]: { transcripts: [{ name: `${REC}/transcripts/t1`, state: 'ENDED' }] }, [`${REC}/participants`]: participants, [`${REC}/transcripts/t1/entries`]: { transcriptEntries: [{ participant: `${REC}/participants/1`, text: 'Hi' }] } };
+        const t0 = new Date('2026-11-19T05:00:00Z');
+        assert.equal(await readTranscript(fakeMeet(ended), REC, new Date(t0.getTime() - 5 * 60 * 1000), t0), null, 'ENDED 5 minutes after the call: not yet');
+        assert.ok(await readTranscript(fakeMeet(ended), REC, new Date(t0.getTime() - 31 * 60 * 1000), t0), 'ENDED 31 minutes after: read');
+        const mixed = fakeMeet({ [`${REC}/transcripts`]: { transcripts: [{ name: 'a', state: 'FILE_GENERATED' }, { name: 'b', state: 'STARTED' }] } });
+        assert.equal(await readTranscript(mixed, REC, new Date(0), t0), null, 'a second transcript still running: wait for all of it');
+    });
+
     await test('transcript not ready (STARTED) or missing: null, nothing else read', async () => {
         const started = fakeMeet({ [`${REC}/transcripts`]: { transcripts: [{ name: `${REC}/transcripts/t1`, state: 'STARTED' }] } });
         assert.equal(await readTranscript(started, REC), null);
@@ -103,11 +112,11 @@ import { speakerLines } from '../src/utils/meeting-pickup';
                 { participant: `${REC}/participants/1`, text: 'Bo, send the contract by Friday.', startTime: '2026-11-19T04:10:53Z' },
             ] },
             [`${REC}/transcripts/t2/entries`]: { transcriptEntries: [
-                { participant: `${REC}/participants/2`, text: ' Will do. Legal may be slow.', startTime: '2026-11-19T04:20:00Z' },
-                { participant: `${REC}/participants/9`, text: 'Someone who left the list', startTime: '2026-11-19T04:21:00Z' },
+                { participant: `${REC}/participants/2`, text: ' Will do. Legal may be slow.', startTime: '2026-11-19T04:20:00.512Z' },
+                { participant: `${REC}/participants/9`, text: 'Someone who left the list', startTime: '2026-11-19T04:20:00.9Z' },
             ] },
         });
-        const t = (await readTranscript(get, REC))!;
+        const t = (await readTranscript(get, REC, new Date('2026-11-19T04:30:00Z'), new Date('2026-11-19T06:00:00Z')))!;
         assert.deepEqual(speakerLines(t.lines), [
             'Ana Lopez: We go with vendor A. Bo, send the contract by Friday.',
             'Bo Chen: Will do. Legal may be slow.',
@@ -152,7 +161,8 @@ import { speakerLines } from '../src/utils/meeting-pickup';
         assert.match(j, /!\(t\.key === 'meeting_apps' && _meetingApps\)/);
         assert.match(j, /function _meetingAppCard\(m\)/);
         assert.match(j, /\/api\/oauth\/google_meet\/connect/);
-        assert.match(j, /for \(const label of \['Microsoft Teams', 'Zoom'\]\)/);
+        assert.match(j, /\[\['teams_pickup', 'Microsoft Teams'\], \['zoom_pickup', 'Zoom'\]\]/);
+        assert.match(readFileSync('netlify/functions/oauth-integrations.ts', 'utf8'), /db\.delete\(meetingPickupState\)/, 'a reconnect restarts the look-back');
         assert.match(readFileSync('netlify/functions/integrations.ts', 'utf8'), /usesMeetingApps\(assistant\) && currentOrgId \? await loadMeetingApps\(db, currentOrgId\) : null/);
     });
 

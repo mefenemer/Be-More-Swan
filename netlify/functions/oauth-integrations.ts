@@ -39,7 +39,7 @@ import { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { and, eq } from 'drizzle-orm';
-import { workspaceIntegrations } from '../../db/schema';
+import { meetingPickupState, workspaceIntegrations } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
@@ -989,6 +989,10 @@ export default withLambda(async (event) => {
                     const payload = JSON.parse(Buffer.from(String(tokenData.id_token || '').split('.')[1] || '', 'base64url').toString('utf8')) as { email?: string };
                     emailAddress = typeof payload.email === 'string' ? payload.email.slice(0, 254) : null;
                 } catch { /* label only — connection still succeeds */ }
+                // A (re)connect may be a different Google account: its calls start a fresh 24-hour look-back, not
+                // the old account's window. Meetings already written up stay deduplicated by meeting_imports.
+                await db.delete(meetingPickupState).where(and(eq(meetingPickupState.organisationId, Number(organisationId)), eq(meetingPickupState.platform, 'google_meet')))
+                    .catch(() => undefined);
                 await saveIntegration(db, {
                     organisationId, userId, provider: 'google_meet',
                     accessToken: tokenData.access_token,
