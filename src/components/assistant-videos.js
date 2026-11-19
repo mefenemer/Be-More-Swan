@@ -862,7 +862,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <form data-vid-scene-form data-id="${v.id}" data-scene="${esc(s.id)}" class="space-y-2">
             <p class="text-xs font-bold text-gray-700">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)}</p>
             <label class="block"><span class="block text-[11px] font-bold text-gray-600">Voiceover</span>
-              <textarea name="voiceover" rows="2" maxlength="240" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${esc(s.voiceover)}</textarea></label>
+              <textarea name="voiceover" rows="${Number(v.brief && v.brief.lengthS) >= 120 ? 5 : 2}" maxlength="${Number(v.brief && v.brief.lengthS) >= 120 ? 1200 : 240}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${esc(s.voiceover)}</textarea></label>
             ${textGroupHtml(v, s, thumb, isVideo)}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Picture from</span>

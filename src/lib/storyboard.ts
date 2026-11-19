@@ -284,6 +284,11 @@ export function allowsLongLength(brief: Pick<VideoBrief, 'voiceover' | 'footageA
     return keepsOwnSound(brief) && !brief.presenter;
 }
 
+/** A scene's voiceover line, at most: 240 characters (about 16 s), or 1200 in a long video (Phase 4c: a chapter of 30 s or more). Pure. */
+export function maxLineChars(brief: Pick<VideoBrief, 'lengthS'>): number {
+    return isLongLength(brief.lengthS) ? 1200 : 240;
+}
+
 /** The most scenes this brief may have: 20 for a long video, 8 otherwise. Pure. */
 export function maxScenesFor(brief: Pick<VideoBrief, 'lengthS'>): number {
     return isLongLength(brief.lengthS) ? MAX_LONG_SCENES : MAX_SCENES;
@@ -347,7 +352,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         const scene: Scene = {
             id: `s${i + 1}`,
             beat,
-            voiceover: clip(o.voiceover, 240),
+            voiceover: clip(o.voiceover, maxLineChars(brief)),
             source,
             targetS: Math.max(MIN_SCENE_S, Number(o.targetS) || brief.lengthS / 5),
         };
@@ -789,7 +794,7 @@ export function storyboardUserPrompt(args: {
 
 /** The current scenes, numbered, as the planner sees them for a words-only change. Pure. */
 function scenesListing(sb: Storyboard): string {
-    return sb.scenes.map((s, i) => `${i + 1}. [${s.beat}; picture: ${s.source}${s.keywords ? ` "${clip(s.keywords, 60)}"` : s.prompt ? ` "${clip(s.prompt, 80)}"` : ''}] voiceover: "${clip(s.voiceover, 240)}"${s.onScreenText ? `; on screen: "${clip(s.onScreenText, 60)}"` : ''}`).join('\n');
+    return sb.scenes.map((s, i) => `${i + 1}. [${s.beat}; picture: ${s.source}${s.keywords ? ` "${clip(s.keywords, 60)}"` : s.prompt ? ` "${clip(s.prompt, 80)}"` : ''}] voiceover: "${clip(s.voiceover, 1200)}"${s.onScreenText ? `; on screen: "${clip(s.onScreenText, 60)}"` : ''}`).join('\n');
 }
 
 /** "Rewrite the script": same scenes, same pictures, new words. Pure. */

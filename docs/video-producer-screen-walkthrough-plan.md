@@ -476,3 +476,29 @@ AI voiceover. Recommendation: **don't charge tasks for rendering**, at any lengt
 - **Form and chat:** the footage form offers 2, 5 and 10 minutes, closed unless "Keep the sound in my videos" is chosen.
   The chat footage card and chat wording follow. Help SQL `db/help-articles-2026-12zzz…-video-long-own-footage.sql`;
   FAQ; showcase.
+
+### 4c design (2026-11-19): long AI presenter videos over screen recordings
+
+**The number that shapes it:** Kling AI Avatar v2 Standard took **12 min 26 s for a 37.6 s clip** (A0), about
+20 s of making per second of video. A 10-minute video with the presenter throughout can't be one call per scene, and
+can't finish inside one 15-minute background run. So three pieces of work, three PRs:
+
+- **4c-1. Voiceover at length.** The script cap rises for long videos: 1200 characters today, 10,000 for long ones.
+  A scene's line goes up to 1200 characters instead of 240. A long script is spoken in parts at sentence boundaries,
+  side by side, and joined. Voice and word-timing timeouts scale with length (today they're 12, 15 and 8 s).
+  Customers see no change yet.
+- **4c-2. Presenter in pieces, build across runs.**
+  - A presenter scene's speech is cut at pauses into pieces of about 15 s.
+  - Every piece is sent to fal at once and the request ids are saved on the project.
+  - The build polls them. When a run nears its 15 minutes, it hands over to a fresh run, and the project stays
+    "building".
+  - The voiceover is decoded once, not once per scene.
+  - The scene plays its pieces in order. Covers and bubbles still apply across them.
+- **4c-3. The long lengths for presenter videos.**
+  - `allowsLongLength` adds "AI presenter + measured screen recordings".
+  - The New video form offers 2/5/10 minutes once a presenter and a screen are chosen.
+  - The chat card, help and a real staging video follow.
+
+**Cost to us:** Kling at $0.0562 a second, so a 10-minute presenter throughout is about $34. That's 1200 tasks at
+2 a second from 19 December, quoted before making. By default the presenter is in at most 3 scenes. With screen
+recordings they're in every scene: in a bubble, which is still a presenter clip.
