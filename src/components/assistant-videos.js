@@ -325,6 +325,19 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (!own && LONG_LENGTHS.includes(select.value)) select.value = '60';
   }
 
+  /**
+   * New video (Phase 4c-3): the long lengths are open only for an AI presenter walking through at least one screen
+   * recording (allowsLongLength in src/lib/storyboard.ts; the server makes any other long brief 60 s).
+   */
+  function paintNewLongLengths(form) {
+    const select = form.querySelector('[data-vid-new-length]');
+    if (!select) return;
+    const presenter = !!(form.elements.presenterId && form.elements.presenterId.value);
+    const screen = !!form.querySelector('input[name="screenIds"]:checked');
+    select.querySelectorAll('option[data-long]').forEach((o) => { o.disabled = !(presenter && screen); });
+    if (!(presenter && screen) && LONG_LENGTHS.includes(select.value)) select.value = '60';
+  }
+
   /** A presenter speaks in their own voice: the voice choices step aside while one is chosen. */
   function paintPresenterChoice(form) {
     const on = !!(form.elements.presenterId && form.elements.presenterId.value);
@@ -333,6 +346,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     block.classList.toggle('opacity-60', on);
     ['noVoice', 'ownVoice'].forEach((n) => { const el = form.elements[n]; if (el) { if (on) el.checked = false; el.disabled = on; } });
     form.querySelector('[data-vid-presenter-voice]')?.classList.toggle('hidden', !on);
+    paintNewLongLengths(form);
     // Screen recordings beside the presenter (A3): the workspace's own uploads, listed once a presenter is chosen.
     const screens = form.querySelector('[data-vid-screens]');
     if (!screens) return;
@@ -360,7 +374,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <textarea name="message" rows="3" maxlength="1200" required class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Our autumn menu is here — pumpkin spice latte and cinnamon buns, this week only."></textarea></label>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Length</span>
-            <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${['15', '30', '60'].map((n) => `<option value="${n}"${sel(d.lengthS === n)}>${n} seconds</option>`).join('')}</select></label>
+            <select name="lengthS" data-vid-new-length class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${FOOTAGE_LENGTHS.map((n) => `<option value="${n}"${sel(d.lengthS === n)}${LONG_LENGTHS.includes(n) ? ' data-long disabled' : ''}>${lengthLabel(n)}</option>`).join('')}</select>
+            ${state.aiPresenter ? '<span class="block text-[11px] text-gray-500 mt-0.5">2, 5 and 10 minutes: choose an AI presenter and a screen recording to walk through.</span>' : ''}</label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Call to action (optional)</span>
             <input name="cta" maxlength="200" value="${esc(d.cta)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Pop in this week"></label>
           ${presenterFieldHtml()}
@@ -1991,6 +2006,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const t = e.target;
     if (t && t.name === 'presenterId' && host() && host().contains(t) && t.form) paintPresenterChoice(t.form);
     if (t && t.name === 'sound' && host() && host().contains(t) && t.form) paintLongLengths(t.form);
+    if (t && t.name === 'screenIds' && host() && host().contains(t) && t.form) paintNewLongLengths(t.form);
   });
 
   document.addEventListener('change', (e) => {

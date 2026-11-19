@@ -167,7 +167,7 @@ check('the chat footage card carries a long length only in own sound, and the ch
     const r = read('src/components/disruptive-ui-registry.js');
     assert.match(r, /\[120, 300, 600\]\.includes\(Number\(ui\.lengthS\)\) && ui\.voiceover !== true/);
     const c = read('netlify/functions/chat-orchestrator.ts');
-    assert.match(c, /except from their OWN FOOTAGE in its own sound: those can be 2, 5 or 10 minutes/);
+    assert.match(c, /except from their OWN FOOTAGE in its own sound, or an AI PRESENTER walking through their screen recordings: those can be 2, 5 or 10 minutes/);
     assert.match(c, /"lengthS": 15 \| 30 \| 60 \| 120 \| 300 \| 600, "voiceover": true \| false/);
 });
 

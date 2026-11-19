@@ -50,7 +50,7 @@ import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
-    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength,
+    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
@@ -1018,7 +1018,10 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // 1. The voiceover — it decides how long every scene is.
         let voiceoverAssetId = p.voiceoverAssetId ?? null;
         let words: Array<{ start: number; end: number }> = [];
-        // A long video's script (Phase 4c) may run to 10,000 characters; it is spoken in parts (speakVoiceover).
+        // A long video's script (Phase 4c) may run to 10,000 characters; it is spoken in parts (speakVoiceover). Over that,
+        // refused here, before anything is spent, rather than cut (review of #754: the last scenes would be silent).
+        const tooLong = scriptTooLong(storyboard, brief);
+        if (tooLong) throw new Error(tooLong);
         const script = cleanScript(scriptOf(storyboard), isLongLength(brief.lengthS) ? LONG_VOICEOVER_MAX_CHARS : VOICEOVER_MAX_CHARS);
         // The owner's own voice, line by line (own-voice.ts): no voice is made — each scene's recording
         // is placed at its scene below. One recording of the whole script is the voiceover asset, as an AI one is.
@@ -1433,7 +1436,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
     } catch (err) {
         console.error(`[video-producer] build ${projectId} failed:`, err);
         // Not a fault: the user is told to change those scenes; the person who started it has left.
-        if (!/^(Couldn't find pictures|The person who started)/.test(err instanceof Error ? err.message : '')) {
+        if (!/^(Couldn't find pictures|The person who started|The script is)/.test(err instanceof Error ? err.message : '')) {
             await recordPlatformIncident(db, { kind: 'video_build', error: err, organisationId: orgId, role: 'video_producer', view: 'video-producer', ids: { projectId } });
         }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }

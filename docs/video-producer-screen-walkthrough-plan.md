@@ -502,3 +502,24 @@ can't finish inside one 15-minute background run. So three pieces of work, three
 **Cost to us:** Kling at $0.0562 a second, so a 10-minute presenter throughout is about $34. That's 1200 tasks at
 2 a second from 19 December, quoted before making. By default the presenter is in at most 3 scenes. With screen
 recordings they're in every scene: in a bubble, which is still a presenter clip.
+
+### 4c as built (2026-11-19)
+
+- **4c-1 (#754, merged):** long voiceovers spoken in parts and joined (`src/lib/mp3-join.ts`), waits scale with length,
+  a scene line up to 1200 characters in a long video.
+- **4c-2 (#757, merged):**
+  - Presenter scenes are made in ~15 s pieces at pauses, played back to back.
+  - Each piece is a `media_generation_jobs` row (prompt `video_project:<id>:…`), claimed when it's collected. Pieces are
+    left out of task counts and the Activity feed, and stopped if the build fails or is swept.
+  - A build run hands over after 11 minutes. `VIDEO_BUILD_RUN_BUDGET_MS` lowers that for a test.
+- **4c-3:**
+  - `allowsLongLength` takes an AI presenter with screen recordings.
+  - The planner's long line works in chapters, written to each chapter's length.
+  - `scriptTooLong` refuses a script over 10,000 characters before anything is spent.
+  - The New video form opens 2/5/10 minutes for a presenter with a screen ticked. The chat says to use the form; its
+    card stays at 15/30/60. A help SQL section is added.
+
+**Owner decisions still open:**
+- **Voiceover charge.** A voiceover is 1 task however long. A 10-minute one costs us ~8× a short one at ElevenLabs
+  (~$1.35 vs ~$0.18).
+- **Hand-over test.** Testing the run hand-over on staging needs `VIDEO_BUILD_RUN_BUDGET_MS` set there.
