@@ -112,6 +112,40 @@ export function presenterAudioWindow(startS: number, endS: number, voiceS: numbe
 }
 
 /**
+ * Pieces of a presenter's stretch of speech (Phase 4c-2). Kling took 12 min 26 s for a 37.6 s clip, so a long
+ * scene is made as several short clips side by side, played back to back. Pieces aim for PRESENTER_PIECE_S and
+ * never pass PRESENTER_MAX_PIECE_S. Each cut falls in the widest pause between words near its aim (the lips are
+ * still there), else at the longest a piece may be. Times are on the video's clock. Pure.
+ */
+export const PRESENTER_PIECE_S = 15;
+export const PRESENTER_MAX_PIECE_S = 20;
+export function presenterPieces(startS: number, endS: number, words: Array<{ start: number; end: number }> = []): Array<{ startS: number; endS: number }> {
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    if (!(endS - startS > PRESENTER_MAX_PIECE_S)) return [{ startS: r(startS), endS: r(endS) }];
+    // The gaps between words inside the stretch, as candidate cut points (their middles).
+    const ws = words.filter((w) => w.end > startS && w.start < endS).slice().sort((a, b) => a.start - b.start);
+    const gaps: Array<{ at: number; width: number }> = [];
+    for (let i = 1; i < ws.length; i++) {
+        const width = ws[i].start - ws[i - 1].end;
+        if (width > 0.04) gaps.push({ at: (ws[i - 1].end + ws[i].start) / 2, width });
+    }
+    const out: Array<{ startS: number; endS: number }> = [];
+    let from = startS;
+    while (endS - from > PRESENTER_MAX_PIECE_S) {
+        const lo = from + PRESENTER_PIECE_S * 0.6, hi = from + PRESENTER_MAX_PIECE_S;
+        // The widest pause in reach; ties go to the one nearest the aim.
+        const aim = from + PRESENTER_PIECE_S;
+        const pick = gaps.filter((g) => g.at > lo && g.at < hi && endS - g.at >= 1)
+            .sort((a, b) => (b.width - a.width) || (Math.abs(a.at - aim) - Math.abs(b.at - aim)))[0];
+        const cut = pick ? pick.at : Math.min(hi, endS - 1);
+        out.push({ startS: r(from), endS: r(cut) });
+        from = cut;
+    }
+    out.push({ startS: r(from), endS: r(endS) });
+    return out;
+}
+
+/**
  * Why a brief's screen recordings can't be used (A3), or null when they can: the owner's permission tick, every one
  * the workspace's own upload (`owned` = what an ownership query of those ids returned), and every one measured (a
  * screen is laid out by its length). Status and message for the create response. Pure (review of #725).

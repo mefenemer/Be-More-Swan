@@ -186,7 +186,7 @@ check('words-only scene edits keep the clip; a branded card or a new picture is 
     // The rule moved to video-producer.ts sceneLooks (shared with the script rewrite and notes).
     assert.ok(read('src/utils/video-producer.ts').includes("s.source === 'brand_card' ? (s.onScreenText ?? '') : ''"));
     assert.ok(ep.includes('const looks = sceneLooks;'));
-    assert.ok(ep.includes('if (!after || looks(after) !== before) delete assets[scene.id];'));
+    assert.ok(ep.includes('if (!after || looks(after) !== before) dropPresenterScene(assets, scene.id);'));
 });
 
 check('a ready or rendering video has no "Plan it again" / "Cancel" row — it has Change it', () => {

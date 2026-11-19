@@ -276,7 +276,7 @@ check('notes are stored on the video, move to the new version, and the planner k
     assert.ok(ep.includes("action: 'plan', mode: 'notes'"));
     const vp = read('src/utils/video-producer.ts');
     // …and, since 2026-11-17, a presenter scene whose spoken line changed or moved (its clip IS that line, A2).
-    assert.ok(vp.includes("if (!b || sceneLooks(b) !== sceneLooks(sc) || (sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))) delete assets[sc.id];"), 'only a scene whose picture changed is made again');
+    assert.ok(vp.includes("if (!b || sceneLooks(b) !== sceneLooks(sc) || (sc.source === 'ai_presenter' && (b.voiceover || '') !== (sc.voiceover || ''))) dropPresenterScene(assets, sc.id);"), 'only a scene whose picture changed is made again (with its presenter pieces, Phase 4c-2)');
     assert.ok(read('netlify/functions/process-video-project-background.ts').includes("mode: body.mode === 'script' || body.mode === 'notes' ? body.mode : null"));
     const ui = read('src/components/assistant-videos.js');
     assert.ok(ui.includes('data-vid-strip=') && ui.includes('Note on this moment') && ui.includes('Make a new version from my notes — free'));

@@ -54,7 +54,7 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
+import { startClip, dropPresenterScene, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
 import { enforceStoryboard, isLongLength, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
@@ -633,7 +633,7 @@ export default withLambda(async (event) => {
         const changes = [...enforced.changes, ...tightened.changes];
         const assets = { ...(row.sceneAssets as Record<string, number>) };
         const after = storyboard.scenes.find((s) => s.id === scene.id);
-        if (!after || looks(after) !== before) delete assets[scene.id];   // re-sourced on the next build
+        if (!after || looks(after) !== before) dropPresenterScene(assets, scene.id);   // re-sourced on the next build (a presenter's pieces too, Phase 4c-2)
         // A different screen (or none) is found again; a new layout, corner or time over the same screen keeps it.
         const coverAfter = JSON.stringify(after?.cover ? { s: after.cover.source, a: after.cover.assetId ?? null, k: after.cover.keywords ?? null } : null);
         if (coverAfter !== coverBefore || !after?.cover) delete assets[`${scene.id}~cover`];
