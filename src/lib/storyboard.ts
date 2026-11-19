@@ -295,8 +295,17 @@ export function allowsLongLength(brief: Pick<VideoBrief, 'voiceover' | 'footageA
  * silent and untimed (review of #754). Refused before anything is spent, with the length to cut to. Pure.
  */
 export const LONG_SCRIPT_CHARS = LONG_VOICEOVER_MAX_CHARS;
-export function scriptTooLong(storyboard: Pick<Storyboard, 'scenes'>, brief: Pick<VideoBrief, 'lengthS' | 'voiceover'>): string | null {
+export function scriptTooLong(storyboard: Pick<Storyboard, 'scenes'>, brief: Pick<VideoBrief, 'lengthS' | 'voiceover' | 'voice'>): string | null {
     if (!brief.voiceover) return null;
+    // Spoken past the render's 10 minutes at the voice's measured pace: the end would be cut off (review of #765).
+    if (isLongLength(brief.lengthS)) {
+        const pace = voicePace(brief.voice ?? null);
+        const words = scriptOf(storyboard as Storyboard).split(/\s+/).filter(Boolean).length;
+        if (pace && words / pace > MAX_VIDEO_S + 5) {
+            const over = Math.ceil(words - MAX_VIDEO_S * pace);
+            return `The script is about ${Math.round(words / pace / 60 * 10) / 10} minutes of speech in this voice, more than the 10 a video can hold. Shorten some lines by about ${over.toLocaleString('en-GB')} words, then make the video.`;
+        }
+    }
     // Measured as it will be spoken: markdown and links don't count (cleanScript, review of #761).
     const chars = cleanScript(scriptOf(storyboard as Storyboard), Number.MAX_SAFE_INTEGER).length;
     const max = isLongLength(brief.lengthS) ? LONG_SCRIPT_CHARS : null;
@@ -811,7 +820,7 @@ export function storyboardUserPrompt(args: {
                 ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most, never more), 2–${MAX_LONG_SCENES} scenes. A long video is told in CHAPTERS: each scene is one topic or step, and becomes a chapter. Split a long take into several own_video scenes at the start of a new topic — consecutive scenes may continue in the same video (the next scene's inS where the last one's outS was), always at a sentence boundary, never mid-sentence. Keep the best takes; leave out repeats, false starts and off-topic stretches. The opening scene still gets to the point fast; a closing branded card is its own scene.`
                 : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
             : isLongLength(brief.lengthS)
-                ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most), ${Math.max(MIN_SCENES, Math.ceil(brief.lengthS / 75))}–${MAX_LONG_SCENES} scenes, scene lengths adding up to about ${brief.lengthS} seconds. A long video is told in CHAPTERS: each scene is one topic or step of the walkthrough and becomes a chapter. Write each scene's voiceover for its length (this voice speaks about ${wordsPerSecondFor(brief)} words a second — a 30-second chapter is about ${Math.round(30 * wordsPerSecondFor(brief))} words), never more than 1200 characters a scene, in short spoken sentences — the whole voiceover about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words in all, because the voice sets the video's length, with the screen recording showing what is being said. Open with what the viewer will learn, end with the call to action.`
+                ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most), ${Math.min(MAX_LONG_SCENES, Math.max(MIN_SCENES, Math.ceil(brief.lengthS * wordsPerSecondFor(brief) / 180)))}–${MAX_LONG_SCENES} scenes, scene lengths adding up to about ${brief.lengthS} seconds. A long video is told in CHAPTERS: each scene is one topic or step of the walkthrough and becomes a chapter. Write each scene's voiceover for its length (this voice speaks about ${wordsPerSecondFor(brief)} words a second — a 30-second chapter is about ${Math.round(30 * wordsPerSecondFor(brief))} words), never more than 1200 characters a scene, in short spoken sentences — the whole voiceover about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words in all, because the voice sets the video's length, with the screen recording showing what is being said. Open with what the viewer will learn, end with the call to action.`
                 : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',

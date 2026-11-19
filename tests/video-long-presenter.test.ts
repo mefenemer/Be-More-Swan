@@ -43,7 +43,7 @@ console.log('the plan and the script');
 check('the planner is told a long presenter video is in chapters, written to each chapter\'s length', () => {
     const brief: VideoBrief = { purpose: 'walkthrough', lengthS: 300, message: 'A tour of the booking system', voiceover: true, allowAi: 'stock_only', presenter: { id: 'amara' }, screenAssetIds: [5] };
     const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
-    assert.match(p, /a 5 minutes walkthrough video \(300 seconds at most\), 4–20 scenes/, 'at least one chapter per ~75 s (review of #761)');
+    assert.match(p, /a 5 minutes walkthrough video \(300 seconds at most\), 5–20 scenes/, 'enough chapters for the words: ~180 words each (reviews of #761, #765)');
     assert.match(p, /never more than 1200 characters a scene/);
     assert.match(p, /told in CHAPTERS/);
     assert.match(p, /a 30-second chapter is about 75 words/);
@@ -120,6 +120,24 @@ check('a long voiced video writes to its voice\'s measured pace (staging project
     const cat = JSON.parse(read('src/public/voice-catalogue.json'));
     const missing = cat.voices.filter((v: { lang: string; wps?: number }) => v.lang !== 'ja' && !(v.wps! > 0)).map((v: { id: string }) => v.id);
     assert.deepStrictEqual(missing, [], 'run scripts/measure-voice-pace.mjs --write for new voices');
+});
+
+check('review of #765: the card counts seconds at the voice\'s pace; nothing past 10 minutes; chapters from the word budget', () => {
+    assert.match(read('src/utils/video-producer.ts'), /wordsPerSecond: row\.brief \? wordsPerSecondFor\(row\.brief as VideoBrief\) : WORDS_PER_SECOND,/);
+    assert.match(read('src/components/assistant-videos.js'), /about \$\{Math\.round\(n \/ \(Number\(v\.wordsPerSecond\) > 0 \? Number\(v\.wordsPerSecond\) : 2\.5\)\)\} seconds spoken/);
+    const priya = (lengthS: number) => ({ purpose: 'walkthrough', lengthS, message: 'A tour', voiceover: true, voice: 'en_gb_lucy', allowAi: 'stock_only', presenter: { id: 'priya' }, screenAssetIds: [5] }) as VideoBrief;
+    const sb = (words: number) => ({ title: 'T', caption: 'C', scenes: [{ id: 's1', beat: 'hook', voiceover: Array.from({ length: words }, () => 'word').join(' '), source: 'ai_presenter', targetS: 600 }] }) as never;
+    // 10 minutes for Priya: budget 2184 words, no 20% allowance (it would run ~11 minutes).
+    assert.ok(scriptOverBudget(sb(2300), priya(600)), 'over the budget at 10 minutes is over');
+    assert.strictEqual(scriptOverBudget(sb(2150), priya(600)), null);
+    assert.strictEqual(scriptOverBudget(sb(500), priya(120)), null, '2 minutes keeps the 20% (437 → 524)');
+    // Spoken past 10 minutes in this voice: refused, with words to cut.
+    const msg = scriptTooLong(sb(2400), priya(600));
+    assert.ok(msg && /minutes of speech in this voice, more than the 10/.test(msg), String(msg));
+    assert.strictEqual(scriptTooLong(sb(2200), priya(600)), null);
+    // Enough chapters for the words: 10 minutes with Priya needs 13 (2184 / 180).
+    const p = storyboardUserPrompt({ brief: priya(600), businessName: 'B', library: [], today: '2026-11-19' } as never);
+    assert.match(p, /a 10 minutes walkthrough video \(600 seconds at most\), 13–20 scenes/);
 });
 
 console.log('form, chat and help');

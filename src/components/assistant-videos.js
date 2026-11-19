@@ -1016,7 +1016,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <div class="mt-3 border border-indigo-200 bg-indigo-50/40 rounded-lg p-3">
         <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words${isOwn(v) ? ' (you’ll record them next)' : ''}</p>
         <p class="text-sm text-gray-900 mt-1 whitespace-pre-line break-words">${esc(words)}</p>
-        <p class="text-[11px] text-gray-500 mt-1">${n} words · about ${Math.round(n / 2.5)} seconds spoken. Approving is free and makes nothing yet — the pictures come next.</p>
+        <p class="text-[11px] text-gray-500 mt-1">${n} words · about ${Math.round(n / (Number(v.wordsPerSecond) > 0 ? Number(v.wordsPerSecond) : 2.5))} seconds spoken. Approving is free and makes nothing yet — the pictures come next.</p>
         <div class="flex flex-wrap gap-2 mt-2">
           <button type="button" data-vid-act="approve-script" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Approve the script — free</button>
           ${rewriting ? '' : `<button type="button" data-vid-act="rewrite" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Rewrite the words</button>`}

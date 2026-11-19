@@ -50,7 +50,7 @@ import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
-    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong, lengthLabel, wordsPerSecondFor,
+    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong, lengthLabel, wordsPerSecondFor, MAX_VIDEO_S,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
@@ -472,7 +472,9 @@ export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { w
     if (!brief.voiceover) return null;
     const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
     const budget = Math.round(brief.lengthS * wordsPerSecondFor(brief));   // the voice's own pace for a long video
-    return words > budget * 1.2 ? { words, budget } : null;
+    // A long video's 20% allowance never reaches past the render's 10 minutes: a 10-minute script gets none (review of #765).
+    const allowance = isLongLength(brief.lengthS) ? Math.min(1.2, MAX_VIDEO_S / brief.lengthS) : 1.2;
+    return words > budget * allowance ? { words, budget } : null;
 }
 
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
@@ -1657,6 +1659,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     }
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
+        // The pace the script is written to (the voice's own for a long video): the script card's "about N seconds" uses it (review of #765).
+        wordsPerSecond: row.brief ? wordsPerSecondFor(row.brief as VideoBrief) : WORDS_PER_SECOND,
         screenNote: (row.timeline as ProjectTimeline | null)?.coverNote ?? null,
         // The screen recordings beside a presenter, by name, for the Change form's "On the screen" list (A3).
         screens: (row.brief as VideoBrief | null)?.screenAssetIds?.length
