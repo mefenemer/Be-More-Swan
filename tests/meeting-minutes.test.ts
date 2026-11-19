@@ -82,16 +82,19 @@ assert.match(meetingFormMessage({ text: 'Tom left early', fileText: 'Ana: Hi.', 
 const orch = read('netlify/functions/chat-orchestrator.ts');
 const fn = read('netlify/functions/meeting-minutes.ts');
 // The form calls persistHubRecordsWithTitles (it returns the saved title) — the same writer in hub-records.ts.
+// The form's model call lives in src/utils/meeting-minutes-writer.ts, shared with automatic pick-up (meeting-pickup.ts).
+const writer = read('src/utils/meeting-minutes-writer.ts');
+assert.ok(fn.includes('writeMeetingMinutes(db, {'), 'the form calls the shared minutes writer');
 for (const name of ['buildMeetingMinutesPrompt(', 'normaliseMinutesCard(', 'meetingHubRecord(', 'persistHubRecords', 'MEETING_MINUTES_MODEL', 'MEETING_MINUTES_MAX_TOKENS']) {
     assert.ok(orch.includes(name), `chat uses ${name}`);
-    assert.ok(fn.includes(name), `the form uses ${name}`);
+    assert.ok(fn.includes(name) || writer.includes(name), `the form uses ${name}`);
 }
 assert.ok(!orch.includes('async function persistHubRecords('), 'one record writer (src/utils/hub-records.ts)');
 assert.ok(!orch.includes('Attribution rules: assignee is'), 'the rules live only in meeting-minutes.ts');
 // The form keeps the chat's guards: tenant, the meeting role only, transcript limits, moderation, fair use, rules.
 for (const guard of ["requireTenant(event, db)", "assistant.roleKey !== 'meeting_note_taker'", 'readAttachments(db, orgId,', '{ transcripts: true }',
     'enforcePromptModeration(', "meterInteraction(db, orgId, 'chat')", 'loadAssistantRulesBlock(', 'FORM_CHANNEL_BLOCK']) {
-    assert.ok(fn.includes(guard), `the form keeps: ${guard}`);
+    assert.ok(fn.includes(guard) || (guard === 'loadAssistantRulesBlock(' && writer.includes(guard)), `the form keeps: ${guard}`);
 }
 assert.ok(!/sendGmail|postSyncAction|enqueueHandoff|approvalStatus/.test(fn), 'the form sends nothing and approves nothing');
 assert.match(read('netlify.toml'), /\[functions\.meeting-minutes\]\n {2}timeout = 26/);

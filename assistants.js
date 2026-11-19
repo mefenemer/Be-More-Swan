@@ -2446,7 +2446,7 @@ function _rqOutreachPreview(r, statusKey) {
     const subjectEdit = cfg.noSubject ? '' : `<label class="block text-[11px] text-gray-500">Subject
             <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
           </label>`;
-    return `${_rqMeetingFollowupNotSent(r)}<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
+    return `${_rqMeetingPickedUp(r)}${_rqMeetingFollowupNotSent(r)}<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
       <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(heading)}</summary>
       <div class="px-3 pb-3 pt-1 border-t border-gray-200">
         ${sendsLine}
@@ -2476,6 +2476,20 @@ function _rqMeetingFollowupSent(d) {
     if (via === 'gmail') return 'This went to the attendees from your Gmail.';
     if (via === 'outlook') return 'This went to the attendees from your Outlook.';
     return '';
+}
+
+/**
+ * Where a meeting came from when the Note Taker picked it up by itself (data.pickedUpFrom, set by
+ * src/utils/meeting-pickup.ts): "Picked up from Google Meet", with a link to the call when the platform gave one.
+ * '' for pasted or chat meetings.
+ */
+function _rqMeetingPickedUp(r) {
+    const p = r.recordType === 'meeting' && r.data ? r.data.pickedUpFrom : null;
+    if (!p || typeof p.label !== 'string' || !p.label) return '';
+    const link = typeof p.link === 'string' && /^https:\/\//i.test(p.link)
+        ? ` · <a href="${_rqEsc(p.link)}" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-900">Open the call</a>`
+        : '';
+    return `<p class="rq-picked-up mt-2 text-[11px] text-gray-600"><span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 font-bold text-gray-700">Picked up from ${_rqEsc(p.label)}</span> Written from the platform's own transcript${link}</p>`;
 }
 
 /**
