@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { allowsLongLength, scriptTooLong, storyboardUserPrompt, enforceStoryboard, LONG_SCRIPT_CHARS, type VideoBrief } from '../src/lib/storyboard';
-import { readBrief } from '../src/utils/video-producer';
+import { readBrief, scriptUnderBudget } from '../src/utils/video-producer';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -81,6 +81,20 @@ check('an over-long script is refused when "Make the video" is pressed, before t
     const scenes = { scenes: [{ id: 's1', voiceover: 'x'.repeat(9_990) + ' https://example.com/a-very-long-link-that-is-not-spoken' }] } as never;
     assert.strictEqual(scriptTooLong(scenes, { lengthS: 600, voiceover: true }), null, 'the link is not spoken, so it does not count');
     assert.match(read('src/lib/storyboard.ts'), /A LONG video \(2, 5 or 10 minutes; only from the business's own footage, or an AI presenter walking through their screen recordings\)/);
+});
+
+check('a long voiced script well short of its length is planned once more, then said on the card (staging project 50)', () => {
+    const brief: VideoBrief = { purpose: 'walkthrough', lengthS: 120, message: 'A tour', voiceover: true, allowAi: 'stock_only', presenter: { id: 'amara' }, screenAssetIds: [5] };
+    const sb = (words: number) => ({ title: 'T', caption: 'C', scenes: [{ id: 's1', beat: 'hook', voiceover: Array.from({ length: words }, () => 'word').join(' '), source: 'ai_presenter', targetS: 120 }] }) as never;
+    assert.deepStrictEqual(scriptUnderBudget(sb(160), brief), { words: 160, budget: 300 }, 'project 50: 160 words for 2 minutes');
+    assert.strictEqual(scriptUnderBudget(sb(240), brief), null, 'three quarters or more is fine');
+    assert.strictEqual(scriptUnderBudget(sb(20), { ...brief, lengthS: 30 }), null, 'a short video may run short');
+    assert.strictEqual(scriptUnderBudget(sb(20), { ...brief, voiceover: false }), null, 'own sound: nothing to measure');
+    const vp = read('src/utils/video-producer.ts');
+    assert.match(vp, /const under = scriptUnderBudget\(storyboard, brief\);/);
+    assert.match(vp, /shorter than the \$\{lengthLabel\(brief\.lengthS\)\} you chose — the video is as long as what is said/);
+    const p = storyboardUserPrompt({ brief, businessName: 'B', library: [], today: '2026-11-19' } as never);
+    assert.match(p, /the whole voiceover about 300 words in all, because the voice sets the video's length/);
 });
 
 console.log('form, chat and help');

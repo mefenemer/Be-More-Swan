@@ -50,7 +50,7 @@ import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
-    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong,
+    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong, lengthLabel,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
@@ -391,6 +391,17 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
             if (again.storyboard.scenes.length >= minScenesFor(brief) && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
         }
+        // A LONG voiced video the other way: the voiceover sets the length, so a thin script makes a short video — a
+        // "2-minute" walkthrough came back at 1022 characters and played 54 s (staging project 50, 2026-11-19). Under
+        // three quarters of the words → plan once more, told how many it needs. Still free; never a third attempt.
+        const under = scriptUnderBudget(storyboard, brief);
+        if (under) {
+            const again = await ask([opts.feedback, `The voiceover is only ${under.words} words; a ${lengthLabel(brief.lengthS)} video needs about ${under.budget}. Write every chapter fuller to reach about ${under.budget} words in all, at most 1200 characters a scene, or add chapters — more useful detail from what the business offers and what the screen recording shows, never padding.`].filter(Boolean).join(' '));
+            const wordsOf = (sb: Storyboard) => scriptOf(sb).split(/\s+/).filter(Boolean).length;
+            if (again.storyboard.scenes.length >= minScenesFor(brief) && wordsOf(again.storyboard) > under.words) ({ storyboard, changes } = again);
+            const still = scriptUnderBudget(storyboard, brief);
+            if (still) changes = [...changes, `The script is about ${Math.round(still.words / WORDS_PER_SECOND)} seconds of speech, shorter than the ${lengthLabel(brief.lengthS)} you chose — the video is as long as what is said. Add to some lines, or ask for more chapters, to fill it.`];
+        }
         if (storyboard.scenes.length < minScenesFor(brief)) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
         // Footage in its own sound: pauses, "um"s and repeated takes out, from the review's words.
         if (footage.length) {
@@ -441,6 +452,17 @@ export function sceneLooks(s: Scene): string {
  * Is the script too long for the brief's length? The budget is WORDS_PER_SECOND × length (the rate
  * the prompt asks for); more than 20% over returns the count and the budget, otherwise null. Pure.
  */
+/**
+ * A long voiced video's script well short of its length (Phase 4c): under three quarters of the words the length
+ * needs. Short videos may run shorter than their length, and own-sound videos have no script to measure. Pure.
+ */
+export function scriptUnderBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
+    if (!brief.voiceover || !isLongLength(brief.lengthS)) return null;
+    const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
+    const budget = Math.round(brief.lengthS * WORDS_PER_SECOND);
+    return words < budget * 0.75 ? { words, budget } : null;
+}
+
 export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
     if (!brief.voiceover) return null;
     const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
