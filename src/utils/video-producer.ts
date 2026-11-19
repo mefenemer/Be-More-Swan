@@ -50,7 +50,7 @@ import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
-    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong, lengthLabel,
+    storyboardSystemPrompt, storyboardUserPrompt, isVideoLength, isLongLength, allowsLongLength, scriptTooLong, lengthLabel, wordsPerSecondFor, MAX_VIDEO_S,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
@@ -380,7 +380,7 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         };
         // A rewrite of the words keeps to the length too: "warmer, and mention X" made a 15-second
         // video's script 45 words — a 26-second video (staging, 2026-11-10).
-        const budgetLine = mode && brief.voiceover ? `Keep the whole voiceover to about ${Math.round(brief.lengthS * WORDS_PER_SECOND)} words: it is a ${brief.lengthS}-second video.` : null;
+        const budgetLine = mode && brief.voiceover ? `Keep the whole voiceover to about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words: it is a ${lengthLabel(brief.lengthS)} video.` : null;
         let { storyboard, changes } = await ask([opts.feedback, budgetLine].filter(Boolean).join(' ') || null);
         // The voiceover sets the video's length, so a long script makes a long video: a "30-second"
         // sample came out at 45 s and outran the render Lambdas (2026-11-01). Over budget by more than
@@ -405,7 +405,7 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         }
         if (under) {
             const still = scriptUnderBudget(storyboard, brief);
-            if (still) changes = [...changes, `The script is about ${Math.round(still.words / WORDS_PER_SECOND)} seconds of speech, shorter than the ${lengthLabel(brief.lengthS)} you chose — the video is as long as what is said. Add to some lines, or ask for more chapters, to fill it.`];
+            if (still) changes = [...changes, `The script is about ${Math.round(still.words / wordsPerSecondFor(brief))} seconds of speech, shorter than the ${lengthLabel(brief.lengthS)} you chose — the video is as long as what is said. Add to some lines, or ask for more chapters, to fill it.`];
         }
         if (storyboard.scenes.length < minScenesFor(brief)) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
         // Footage in its own sound: pauses, "um"s and repeated takes out, from the review's words.
@@ -460,7 +460,7 @@ export function sceneLooks(s: Scene): string {
 export function scriptUnderBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
     if (!brief.voiceover || !isLongLength(brief.lengthS)) return null;
     const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
-    const budget = Math.round(brief.lengthS * WORDS_PER_SECOND);
+    const budget = Math.round(brief.lengthS * wordsPerSecondFor(brief));   // the voice's own pace for a long video
     return words < budget * 0.75 ? { words, budget } : null;
 }
 
@@ -471,8 +471,10 @@ export function scriptUnderBudget(storyboard: Storyboard, brief: VideoBrief): { 
 export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
     if (!brief.voiceover) return null;
     const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
-    const budget = Math.round(brief.lengthS * WORDS_PER_SECOND);
-    return words > budget * 1.2 ? { words, budget } : null;
+    const budget = Math.round(brief.lengthS * wordsPerSecondFor(brief));   // the voice's own pace for a long video
+    // A long video's 20% allowance never reaches past the render's 10 minutes: a 10-minute script gets none (review of #765).
+    const allowance = isLongLength(brief.lengthS) ? Math.min(1.2, MAX_VIDEO_S / brief.lengthS) : 1.2;
+    return words > budget * allowance ? { words, budget } : null;
 }
 
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
@@ -1657,6 +1659,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     }
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
+        // The pace the script is written to (the voice's own for a long video): the script card's "about N seconds" uses it (review of #765).
+        wordsPerSecond: row.brief ? wordsPerSecondFor(row.brief as VideoBrief) : WORDS_PER_SECOND,
         screenNote: (row.timeline as ProjectTimeline | null)?.coverNote ?? null,
         // The screen recordings beside a presenter, by name, for the Change form's "On the screen" list (A3).
         screens: (row.brief as VideoBrief | null)?.screenAssetIds?.length

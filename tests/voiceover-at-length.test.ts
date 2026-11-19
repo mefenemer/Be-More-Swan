@@ -51,8 +51,8 @@ const part = (fill: number, frames = 3) => Buffer.concat([id3(), infoFrame(), ..
         assert.ok(splitForSpeech(run).every((p) => p.length <= SPEECH_PART_CHARS));
     });
 
-    await check('the script cap: 1200 characters by default, 10,000 when the caller asks (a long video)', () => {
-        const long = 'a'.repeat(12_000);
+    await check('the script cap: 1200 characters by default, 15,000 when the caller asks (a long video)', () => {
+        const long = 'a'.repeat(16_000);
         assert.strictEqual(cleanScript(long).length, VOICEOVER_MAX_CHARS);
         assert.strictEqual(cleanScript(long, LONG_VOICEOVER_MAX_CHARS).length, LONG_VOICEOVER_MAX_CHARS);
         assert.match(read('src/utils/video-producer.ts'), /cleanScript\(scriptOf\(storyboard\), isLongLength\(brief\.lengthS\) \? LONG_VOICEOVER_MAX_CHARS : VOICEOVER_MAX_CHARS\)/);
