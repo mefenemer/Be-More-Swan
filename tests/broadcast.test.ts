@@ -104,4 +104,17 @@ check('the admin page sends only after the number waiting is typed', () => {
     assert.match(html, /runBroadcast\(e\.currentTarget, 'send', \{ key: b\.key, expected: b\.waiting \}\)/);
 });
 
+check('ElevenLabs notice: both lists name it, the copy keeps the 14-day objection route and claims no training promise', () => {
+    const tpl = NOTIFICATION_DEFAULTS.find((t) => t.templateKey === 'subprocessor_elevenlabs_notice')!;
+    const email = TEMPLATE_DEFAULTS.find((t) => t.triggerKey === 'subprocessor_elevenlabs_notice')!;
+    for (const s of ['ElevenLabs', 'privacy@bemoreswan.com', '14 days']) {
+        assert.ok(tpl.message.includes(s), `in-app: ${s}`);
+        assert.ok(email.bodyHtml.includes(s), `email: ${s}`);
+    }
+    assert.doesNotMatch(email.bodyHtml + tpl.message, /\btrain/i, 'ElevenLabs\' DPA makes no training promise, so neither do we');
+    assert.doesNotMatch(email.bodyHtml, /within 14 days of (?:\d|[A-Z][a-z]+ \d)/, 'no fixed objection date: the 14 days run from the send');
+    assert.match(read('trust.html'), /<td[^>]*>ElevenLabs<\/td>/);
+    assert.match(read('privacy.html'), /<td[^>]*>ElevenLabs<\/td>/);
+});
+
 console.log(`\n${passed} checks passed`);

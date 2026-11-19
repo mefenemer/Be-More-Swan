@@ -33,6 +33,11 @@ export const BROADCASTS: readonly BroadcastDef[] = [
         label: 'AI video will count by length (from 3 December 2026)',
         purpose: '30 days\' notice required by terms 5.2 before AI video is priced by the second. Send by 2 November 2026 for a 3 December start.',
     },
+    {
+        key: 'subprocessor_elevenlabs_notice',
+        label: 'New sub-processor: ElevenLabs (voiceovers and transcription)',
+        purpose: 'The 14 days\' notice in DPA clause 5 for adding ElevenLabs to the sub-processor list (Trust page, 19 November 2026). Owners may object to privacy@bemoreswan.com within 14 days of the email.',
+    },
 ];
 
 export function broadcastDef(key: unknown): BroadcastDef | null {
