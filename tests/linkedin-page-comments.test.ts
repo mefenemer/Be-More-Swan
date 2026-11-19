@@ -346,7 +346,8 @@ check('a post published with no connection_id still reaches stats and comments',
     const fn = pc.slice(pc.indexOf('export async function loadPagePosts('), pc.indexOf('export async function pageToken('));
     assert.ok(fn.length > 0, 'loadPagePosts found');
     assert.ok(fn.includes('COALESCE(${scheduledPosts.connectionId}'), 'join falls back when connection_id is NULL');
-    assert.ok(fn.includes("sc2.service_name = 'linkedin' AND sc2.is_active = true"), 'only active LinkedIn connections');
+    assert.ok(fn.includes("AND sc2.service_name = 'linkedin'") && fn.includes('AND sc2.created_at <= ${scheduledPosts.publishedAt}'), 'counts the LinkedIn connections that existed when it went out, disconnected ones included');
+    assert.ok(fn.includes('eq(systemConnections.isActive, true)'), 'and that one must still be live');
     assert.ok(fn.includes('HAVING count(*) = 1'), 'a NULL row is attributed only when the org has ONE LinkedIn connection — never guessed between a profile and a Page');
     assert.ok(!fn.includes('ORDER BY sc2.updated_at'), 'no newest-wins guess: updated_at moves on every token refresh');
     assert.ok(fn.includes('connectionId: systemConnections.id,'), 'groups by the resolved connection, not the NULL column');
