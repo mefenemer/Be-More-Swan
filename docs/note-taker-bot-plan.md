@@ -86,7 +86,7 @@ The help article says each of these in plain words. The Note Taker's live status
 ## 5. Build list (each step one PR)
 
 0. **Proof (you, with me; 2–3 days).**
-   - Recall.ai pay-as-you-go accounts: the US West workspace exists (2026-11-19). Open the **EU** one too at `https://eu-central-1.recall.ai` (a separate account and key) and run the UK tests there, since UK customers will run on it. Keep the key in `.env`, never in chat. Send the bot into each test call with `scripts/probe-meeting-bots.mjs`.
+   - Recall.ai pay-as-you-go accounts: the US West workspace exists (2026-11-19). Owner chose to run the first tests on US West, then repeat on the **EU** account at `https://eu-central-1.recall.ai` (a separate account and key), since UK customers will run there. Keep the key in `.env`, never in chat. Send the bot into each test call with `scripts/probe-meeting-bots.mjs`.
    - From a throwaway script, send a bot to a free Meet call, a Teams (free) call and a business Teams call.
    - For Zoom, send a bot to a meeting on our own Zoom account. External meetings need the OBF route and review (step 4).
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
