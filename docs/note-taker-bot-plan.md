@@ -1,6 +1,6 @@
 # Note Taker joins the call — a bot for free Google Meet, Teams and Zoom (PLAN, nothing built)
 
-**Status:** plan for the owner, 2026-11-19. Nothing built. Decisions in §8 are open.
+**Status:** plan for the owner, 2026-11-19. Nothing built. B1 (vendor) agreed; B2–B9 in §8 are open.
 
 **Why:** owner, 2026-11-19: *most small businesses use free Meet, Teams and Zoom accounts. Those accounts make no transcript, so the transcript pick-up (`docs/meeting-apps-pickup-plan.md`) can't reach them. The Note Taker should be invited to the meeting and take the notes itself.*
 
@@ -125,7 +125,7 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
 
 ## 8. Decisions for the owner
 
-- **B1. Vendor.** *Recommended:* **Recall.ai, with Meeting BaaS as the tested fallback.** Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
+- **B1. Vendor.** ✅ **Agreed 2026-11-19 (owner): Recall.ai, with Meeting BaaS as the tested fallback.** Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
   - Zoom's OBF rule;
   - speaker names from the meeting app;
   - a UK-ready DPA and an EU region;
