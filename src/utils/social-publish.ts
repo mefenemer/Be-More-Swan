@@ -675,14 +675,16 @@ export async function fetchXIdentity(token: string): Promise<DriverResult> {
 }
 
 // ── LinkedIn ─────────────────────────────────────────────────────────────────────────────────────
-// AUDIT: /v2/ugcPosts + /v2/assets registerUpload is the legacy Share API; it still works for apps
-// with the w_member_social scope (which this app uses). The modern equivalent is the versioned
-// /rest/posts + /rest/images API, which requires the "Community Management" product and a
-// LinkedIn-Version header — a scope/product change, not a drop-in swap. Left on ugcPosts and flagged
-// for the harness; migration tracked separately.
+// Two paths, by who the post is from:
+//   • a Company Page (urn:li:organization:…, the Community Management app) → the versioned Posts API
+//     (/rest/posts + /rest/images + /rest/videos), publishLinkedInPagePost below. That app is what goes
+//     to LinkedIn's Standard-tier review, and reviewers expect the current API, not ugcPosts.
+//   • a personal profile (urn:li:person:…, w_member_social) → still the legacy /v2/ugcPosts +
+//     /v2/assets registerUpload here. It works and is live for customers; moving it is its own change.
 export async function publishLinkedIn(text: string, token: string, authorId: string | null, media: PostImage | PostImage[] | null): Promise<DriverResult> {
     if (!authorId) return { ok: false, status: null, error: 'No LinkedIn author URN on connection.' };
     const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
+    if (author.startsWith('urn:li:organization:')) return publishLinkedInPagePost(text, token, author, media);
 
     const items = mediaItems(media);
     if (items.length > 1 && items.some(isVideoMedia)) {
@@ -919,6 +921,149 @@ export async function publishLinkedInDocument(
     }
     const data: any = await res.json().catch(() => ({}));
     return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
+}
+
+// ── LinkedIn Company Page posts (Posts API) ──────────────────────────────────────────────────────
+// learn.microsoft.com/linkedin/marketing/community-management/shares/{posts-api,images-api,videos-api,
+// multiimage-post-api} (li-lms-2026-11). Text, one picture, 2–20 pictures (multiImage) or one video, as
+// the Page. Document carousels already go through publishLinkedInDocument (the same Posts API).
+
+/** LinkedIn's multi-image post holds 2–20 pictures. */
+export const LI_MULTI_IMAGE_MAX = 20;
+/** How long to wait for an uploaded video to finish processing before posting: ~7.5 s, as for documents. */
+export const LI_VIDEO_POLL_MS = 1500;
+export const LI_VIDEO_MAX_POLLS = 5;
+
+/** The Posts API body every post shares; `content` is added for media. Pure. */
+export function linkedInPostBody(author: string, text: string, content?: Record<string, unknown>): Record<string, unknown> {
+    return {
+        author,
+        commentary: littleText(text),
+        visibility: 'PUBLIC',
+        distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
+        ...(content ? { content } : {}),
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
+    };
+}
+
+async function liMessage(res: Response): Promise<string> {
+    const raw = await res.text().catch(() => '');
+    try { return JSON.parse(raw)?.message || ''; } catch { return ''; }
+}
+
+/** initializeUpload → PUT the bytes → the urn:li:image. Throws a MediaUploadError with LinkedIn's reason. */
+async function uploadLinkedInRestImage(image: PostImage, token: string, owner: string): Promise<string> {
+    const init = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+        method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ initializeUploadRequest: { owner } }),
+    });
+    const data: any = await init.json().catch(() => ({}));
+    if (!init.ok) throw new MediaUploadError(data?.message || `LinkedIn image upload could not start (${init.status})`, init.status);
+    const uploadUrl: string | undefined = data?.value?.uploadUrl;
+    const imageUrn: string | undefined = data?.value?.image;
+    if (!uploadUrl || !imageUrn) throw new MediaUploadError(`LinkedIn started the image upload but returned no ${uploadUrl ? 'image id' : 'upload URL'} (${init.status})`, init.status);
+    const put = await fetch(uploadUrl, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: await fetchImageBytes(image.url) });
+    if (!put.ok) throw new MediaUploadError((await liMessage(put)) || `LinkedIn image upload failed (${put.status})`, put.status);
+    return imageUrn;
+}
+
+/**
+ * initializeUpload → PUT each part (no Authorization: the part URLs are pre-signed) collecting its ETag →
+ * finalizeUpload → the urn:li:video. Throws a MediaUploadError with LinkedIn's reason.
+ */
+async function uploadLinkedInRestVideo(video: PostImage, token: string, owner: string): Promise<string> {
+    const bytes = new Uint8Array(await fetchImageBytes(video.url));
+    const init = await fetch('https://api.linkedin.com/rest/videos?action=initializeUpload', {
+        method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ initializeUploadRequest: { owner, fileSizeBytes: bytes.byteLength, uploadCaptions: false, uploadThumbnail: false } }),
+    });
+    const data: any = await init.json().catch(() => ({}));
+    if (!init.ok) throw new MediaUploadError(data?.message || `LinkedIn video upload could not start (${init.status})`, init.status);
+    const videoUrn: string | undefined = data?.value?.video;
+    const parts: { uploadUrl?: string; firstByte?: number; lastByte?: number }[] = Array.isArray(data?.value?.uploadInstructions) ? data.value.uploadInstructions : [];
+    if (!videoUrn || !parts.length) throw new MediaUploadError(`LinkedIn started the video upload but returned no ${videoUrn ? 'upload instructions' : 'video id'} (${init.status})`, init.status);
+    const etags: string[] = [];
+    for (const [i, part] of parts.entries()) {
+        const first = Number(part.firstByte), last = Number(part.lastByte);
+        if (!part.uploadUrl || !Number.isInteger(first) || !Number.isInteger(last) || last < first) {
+            throw new MediaUploadError(`LinkedIn's video upload instructions were incomplete (part ${i + 1})`, init.status);
+        }
+        const put = await fetch(part.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from(bytes.subarray(first, last + 1)) });
+        if (!put.ok) throw new MediaUploadError((await liMessage(put)) || `LinkedIn video upload failed on part ${i + 1} (${put.status})`, put.status);
+        const etag = put.headers.get('etag');
+        if (!etag) throw new MediaUploadError(`LinkedIn accepted video part ${i + 1} but returned no ETag (${put.status})`, put.status);
+        etags.push(etag);
+    }
+    const fin = await fetch('https://api.linkedin.com/rest/videos?action=finalizeUpload', {
+        method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ finalizeUploadRequest: { video: videoUrn, uploadToken: data?.value?.uploadToken ?? '', uploadedPartIds: etags } }),
+    });
+    if (!fin.ok) throw new MediaUploadError((await liMessage(fin)) || `LinkedIn could not finish the video upload (${fin.status})`, fin.status);
+    return videoUrn;
+}
+
+/**
+ * Post as a LinkedIn Company Page through the Posts API. Media is uploaded first; any upload failure comes
+ * back as a media-dropped failure — never a text-only post in its place. Returns the new post's URN.
+ */
+export async function publishLinkedInPagePost(
+    text: string, token: string, author: string, media: PostImage | PostImage[] | null,
+    opts: { pollMs?: number } = {},
+): Promise<DriverResult> {
+    const items = mediaItems(media);
+    if (items.length > 1 && items.some(isVideoMedia)) return { ok: false, status: null, error: 'LinkedIn multi-image posts cannot include a video.' };
+    if (items.length > LI_MULTI_IMAGE_MAX) return { ok: false, status: null, error: `A LinkedIn post holds at most ${LI_MULTI_IMAGE_MAX} pictures — this one has ${items.length}.` };
+
+    let content: Record<string, unknown> | undefined;
+    let videoUrn: string | null = null;
+    try {
+        if (items.length === 1 && isVideoMedia(items[0])) {
+            videoUrn = await uploadLinkedInRestVideo(items[0], token, author);
+            content = { media: { id: videoUrn } };
+        } else if (items.length === 1) {
+            content = { media: { id: await uploadLinkedInRestImage(items[0], token, author) } };
+        } else if (items.length > 1) {
+            const ids: string[] = [];
+            for (const it of items) ids.push(await uploadLinkedInRestImage(it, token, author));
+            content = { multiImage: { images: ids.map((id) => ({ id })) } };
+        }
+    } catch (err) {
+        return mediaDropped('LinkedIn', err);
+    }
+
+    // A video is processed after upload. The docs don't say whether a post may use it before it is
+    // AVAILABLE, so wait briefly; past that, try the post anyway — and if LinkedIn then refuses it, that is
+    // a retry (503), not a permanent failure, since processing simply hadn't finished.
+    let stillProcessing = false;
+    if (videoUrn) {
+        const pollMs = opts.pollMs ?? LI_VIDEO_POLL_MS;
+        for (let i = 0; i < LI_VIDEO_MAX_POLLS; i++) {
+            const st = await fetch(`https://api.linkedin.com/rest/videos/${encodeURIComponent(videoUrn)}`, { headers: liRestHeaders(token) }).catch(() => null);
+            if (!st || !st.ok) { stillProcessing = false; break; }   // can't read it: let the post call decide
+            const v: any = await st.json().catch(() => ({}));
+            if (v?.status === 'AVAILABLE') { stillProcessing = false; break; }
+            if (v?.status === 'PROCESSING_FAILED') {
+                return { ok: false, status: null, error: `LinkedIn could not process the video${v?.processingFailureReason ? ` (${v.processingFailureReason})` : ''}. Check the file and try again.` };
+            }
+            stillProcessing = true;
+            if (i < LI_VIDEO_MAX_POLLS - 1) await sleep(pollMs);
+        }
+    }
+
+    const res = await fetch('https://api.linkedin.com/rest/posts', {
+        method: 'POST', headers: liRestHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(linkedInPostBody(author, text, content)),
+    });
+    if (res.status === 201 || res.ok) {
+        const id = res.headers.get('x-restli-id') || (await res.json().catch(() => ({})) as any)?.id || 'posted';
+        return { ok: true, id: String(id) };
+    }
+    const message = await liMessage(res);
+    if (stillProcessing && res.status >= 400 && res.status < 500) {
+        return { ok: false, status: 503, error: 'LinkedIn is still processing the video. It will be tried again shortly.' };
+    }
+    return { ok: false, status: res.status, error: message || `LinkedIn API error (${res.status})` };
 }
 
 // registerUpload → PUT bytes → return the asset URN, or throw a MediaUploadError carrying
