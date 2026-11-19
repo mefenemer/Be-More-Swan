@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { users, plans, organisations, userOrganisations, gdprErasureLog, jwtBlocklist, aiAssistants, aiUsageLog } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { purgeUserAssets } from '../../src/utils/gdpr-asset-purge';
+import { withdrawMeetingBots } from '../../src/utils/meeting-bot-db';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe    = process.env.STRIPE_SECRET_KEY
@@ -131,6 +132,9 @@ async function executeDeleteions() {
                 void _purgeOrgR2Prefix(user.organisationId).catch(err =>
                     console.warn(`[account-delete-execute] R2 prefix purge failed for org ${user.organisationId}:`, err)
                 );
+                // Meeting bots still with Recall are withdrawn and their recordings deleted BEFORE the cascade removes
+                // their rows (after it, nothing could match a bot to delete it). Never throws.
+                await withdrawMeetingBots(db, user.organisationId);
                 // Sole member — delete org (cascades via ON DELETE CASCADE)
                 await db.delete(organisations).where(eq(organisations.id, user.organisationId)).catch(() => {});
             }

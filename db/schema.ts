@@ -7478,12 +7478,55 @@ export const meetingImports = pgTable("meeting_imports", {
   leaseUntil: timestamp("lease_until"),
   recordId: integer("record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
   writtenAt: timestamp("written_at"),
+  // 'transcript' (the platform's own, picked up) | 'bot' (the Note Taker joined the call). db/z-meeting-bots.sql.
+  via: text("via").notNull().default("transcript"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("meeting_imports_org_platform_external_uq").on(t.organisationId, t.platform, t.externalId),
   check("meeting_imports_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
   check("meeting_imports_status_check", sql`${t.status} IN ('found','writing','written','skipped','failed')`),
+  check("meeting_imports_via_check", sql`${t.via} IN ('transcript','bot')`),
+]);
+
+// The Note Taker joining a call itself: one row per Recall.ai bot sent (docs/note-taker-bot-plan.md §4,
+// db/z-meeting-bots.sql). When the call ends its transcript becomes a meeting_imports row (via 'bot').
+export const meetingBots = pgTable("meeting_bots", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // SET NULL, not cascade: a purged Note Taker's bot rows stay so Recall's copy can still be tracked and deleted.
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  requestedByUserId: integer("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  // 'link' | 'chat' | 'calendar'
+  source: text("source").notNull().default("link"),
+  // 'google_meet' | 'teams' | 'zoom'
+  platform: text("platform").notNull(),
+  meetingUrl: text("meeting_url").notNull(),
+  title: text("title"),
+  joinAt: timestamp("join_at").notNull(),
+  lengthLimitMinutes: integer("length_limit_minutes").notNull().default(120),
+  // 'eu' | 'us': which Recall account. Fixed per bot.
+  recallRegion: text("recall_region").notNull(),
+  recallBotId: text("recall_bot_id"),
+  // scheduled | joining | waiting_room | in_call | ended | done | not_admitted | removed | cancelled | failed
+  status: text("status").notNull().default("scheduled"),
+  // A Recall sub-code or our own short reason; never meeting text.
+  statusReason: text("status_reason"),
+  joinedAt: timestamp("joined_at"),
+  leftAt: timestamp("left_at"),
+  minutesInCall: integer("minutes_in_call"),
+  importId: integer("import_id").references(() => meetingImports.id, { onDelete: "set null" }),
+  mediaDeletedAt: timestamp("media_deleted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Open bots only (z-meeting-bots.sql): a cancelled or finished bot never blocks re-booking the same time.
+  uniqueIndex("meeting_bots_org_url_join_open_uq").on(t.organisationId, t.meetingUrl, t.joinAt)
+    .where(sql`${t.status} IN ('scheduled','joining','waiting_room','in_call','ended')`),
+  check("meeting_bots_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
+  check("meeting_bots_region_check", sql`${t.recallRegion} IN ('eu','us')`),
+  check("meeting_bots_source_check", sql`${t.source} IN ('link','chat','calendar')`),
+  check("meeting_bots_status_check", sql`${t.status} IN ('scheduled','joining','waiting_room','in_call','ended','done','not_admitted','removed','cancelled','failed')`),
 ]);
 
 // Per workspace and platform: when meetings were last checked and how far (the Connections tab's line).
