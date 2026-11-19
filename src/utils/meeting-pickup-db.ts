@@ -10,9 +10,10 @@ import { meetingHubRecord } from './meeting-minutes';
 import { writeMeetingMinutes } from './meeting-minutes-writer';
 import {
     DUE_PER_RUN, LEASE_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, SETTLE_MS, discoverMeetings,
-    type ImportRow, type MeetingSource, type PickupPlatform, type PickupStore, type WriterDeps,
+    type ImportRow, type ImportVia, type MeetingSource, type PickupPlatform, type PickupStore, type WriterDeps,
 } from './meeting-pickup';
 import { googleMeetSource } from './meeting-sources/google-meet';
+import { chargeBotMeeting, meetingBotSource, pollMeetingBots } from './meeting-bot-db';
 import { enforcePromptModeration } from './moderation';
 import { isFeatureEnabled } from './feature-flags';
 import { getIntegration } from './workspace-integrations';
@@ -58,9 +59,12 @@ export async function loadMeetingApps(db: Db, organisationId: number): Promise<M
     }];
 }
 
-/** The platforms meetings are picked up from. Each one only lists workspaces with the meeting_pickup flag on. */
+/**
+ * The platforms meetings are picked up from (each one only lists workspaces with the meeting_pickup flag on), plus the
+ * Note Taker's own bot (docs/note-taker-bot-plan.md), which only reads transcripts of bots already sent.
+ */
 export function meetingSources(db: Db): MeetingSource[] {
-    return [googleMeetSource(db)];
+    return [googleMeetSource(db), meetingBotSource(db)];
 }
 
 export function pickupStore(db: Db): PickupStore {
@@ -115,6 +119,7 @@ export function pickupStore(db: Db): PickupStore {
             return {
                 id: r.id, organisationId: r.organisationId, assistantId: r.aiAssistantId, platform: r.platform as PickupPlatform,
                 externalId: r.externalId, title: r.title, link: r.meetingLink, startedAt: r.startedAt, endedAt: r.endedAt, attempts: r.attempts,
+                via: (r.via === 'bot' ? 'bot' : 'transcript') as ImportVia,
             } satisfies ImportRow;
         },
         async release(id, r, now) {
@@ -155,7 +160,9 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSo
             if (!a || a.roleKey !== 'meeting_note_taker' || a.lifecycleStatus === 'archived') return null;
             return { id: a.id, name: a.name, onboardingContext: a.onboardingContext };
         },
-        async hasCapacity(organisationId) {
+        async hasCapacity(organisationId, row) {
+            // A bot's meeting: the allowance was checked for its whole length before it was sent.
+            if (row.via === 'bot') return true;
             return hasTaskCapacity(db, organisationId, (await getTaskCosts()).weights.meeting_pickup);
         },
         async blocked(organisationId, text) {
@@ -178,7 +185,8 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSo
             const [saved] = await persistHubRecordsWithTitles(db, organisationId, assistantId, [meetingHubRecord(card)]);
             return saved?.id ?? null;
         },
-        async charge(organisationId, assistantId, importId) {
+        async charge(organisationId, assistantId, importId, row) {
+            if (row.via === 'bot') return chargeBotMeeting(db, organisationId, assistantId, importId);
             await recordCompletedWork(db, organisationId, 'meeting_pickup', { ref: `meeting_import:${importId}`, assistantId });
         },
     };
@@ -211,7 +219,7 @@ export async function triggerMeetingImport(importId: number): Promise<boolean> {
 }
 
 /** The 15-minute check: find finished meetings, then hand each due one to a writer. Shared with run-meeting-pickup.ts. */
-export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[] = meetingSources(db)): Promise<{ accounts: number; found: number; due: number; dispatched: number; errors: number }> {
+export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[] = meetingSources(db)): Promise<{ accounts: number; found: number; due: number; dispatched: number; errors: number; bots?: unknown }> {
     if (!sources.length) return { accounts: 0, found: 0, due: 0, dispatched: 0, errors: 0 };
     const store = pickupStore(db);
     const now = new Date();
@@ -226,7 +234,13 @@ export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[]
     }
     // In parallel: each hand-off waits up to 5 s, and 25 in turn could pass the function's time limit.
     const dispatched = (await Promise.all(due.map((id) => triggerMeetingImport(id)))).filter(Boolean).length;
-    const out = { ...found, due: due.length, dispatched };
+    // The Note Taker's own bots: what a missed webhook left, and Recall's media once finished with.
+    const bots = await pollMeetingBots(db, triggerMeetingImport).catch((err) => {
+        // The table may not exist yet (z-meeting-bots.sql not applied).
+        console.error('[meeting-pickup] bot poll could not run', err instanceof Error ? err.message : err);
+        return null;
+    });
+    const out = { ...found, due: due.length, dispatched, ...(bots ? { bots } : {}) };
     console.log('[meeting-pickup]', out);
     return out;
 }

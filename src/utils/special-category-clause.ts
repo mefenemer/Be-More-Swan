@@ -10,12 +10,16 @@
 // step-free?") would be refused. tests/email-assistant.test.ts holds this.
 
 import { EMAIL_SPECIAL_CATEGORY_CLAUSE } from './email-sort';
+import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 
 export const SPECIAL_CATEGORY_MARKER = '<!-- special-category-clause -->';
 
 /** The clause for a role. Pure. */
 export function specialCategoryClauseFor(roleKey: string | null | undefined, generalClause: string): string {
-    return roleKey === 'email_assistant' ? EMAIL_SPECIAL_CATEGORY_CLAUSE : generalClause;
+    if (roleKey === 'email_assistant') return EMAIL_SPECIAL_CATEGORY_CLAUSE;
+    // The Note Taker writes minutes from what people said, which it cannot ask them to resend (docs/note-taker-bot-legal.md §9).
+    if (roleKey === 'meeting_note_taker') return MEETING_SPECIAL_CATEGORY_CLAUSE;
+    return generalClause;
 }
 
 /**
@@ -27,7 +31,7 @@ export function withSpecialCategoryClause(prompt: string | null, roleKey: string
     const clause = specialCategoryClauseFor(roleKey, generalClause);
     if (!prompt) return `${SPECIAL_CATEGORY_MARKER}\n${clause}`;
     if (prompt.includes(SPECIAL_CATEGORY_MARKER)) {
-        if (roleKey === 'email_assistant' && prompt.includes(generalClause)) return prompt.replace(generalClause, clause);
+        if (clause !== generalClause && prompt.includes(generalClause)) return prompt.replace(generalClause, clause);
         return prompt;
     }
     return `${prompt}\n\n${SPECIAL_CATEGORY_MARKER}\n${clause}`;

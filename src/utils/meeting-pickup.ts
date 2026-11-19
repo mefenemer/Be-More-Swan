@@ -70,8 +70,13 @@ export interface PickedTranscript {
     attendees?: string[];
 }
 
+/** How a meeting's transcript reached us: the platform's own (picked up) or our bot's (docs/note-taker-bot-plan.md). */
+export type ImportVia = 'transcript' | 'bot';
+
 export interface MeetingSource {
     platform: PickupPlatform;
+    /** 'bot': the Note Taker's own bot, for meetings on any platform (absent = 'transcript'). */
+    via?: ImportVia;
     /** Every workspace with this platform connected and an active Note Taker. */
     accounts(): Promise<PickupAccount[]>;
     /** One workspace's account, or null when it has since disconnected. */
@@ -88,6 +93,15 @@ export interface MeetingSource {
  * meeting-pickup-db.ts meetingSources (Google Meet first, plan Phase 2).
  */
 export const MEETING_PICKUP_FLAG = 'meeting_pickup';
+
+/**
+ * The source that reads a meeting's transcript: the bot source for a bot's meeting (whatever its platform), otherwise
+ * the platform's own. Pure.
+ */
+export function sourceFor(sources: readonly MeetingSource[], row: { platform: PickupPlatform; via?: ImportVia }): MeetingSource | undefined {
+    const via = row.via ?? 'transcript';
+    return sources.find((s) => (s.via ?? 'transcript') === via && (via === 'bot' || s.platform === row.platform));
+}
 
 // ── Turning a transcript into the writer's message ────────────────────────────────────────────────
 
@@ -124,11 +138,17 @@ export function pickupMessage(i: {
 }
 
 /** What a picked-up meeting record carries so the Inbox and chat can say where it came from. */
-export interface PickedUpFrom { platform: PickupPlatform; label: string; link: string | null; startedAt: string | null; importId: number }
+export interface PickedUpFrom {
+    platform: PickupPlatform; label: string; link: string | null; startedAt: string | null; importId: number;
+    /** 'bot' when the Note Taker joined the call itself; absent for a picked-up platform transcript. */
+    via?: 'bot';
+}
 
-export function pickedUpFrom(platform: PickupPlatform, importId: number, link?: string | null, startedAt?: Date | null): PickedUpFrom {
+export function pickedUpFrom(platform: PickupPlatform, importId: number, link?: string | null, startedAt?: Date | null, via?: ImportVia): PickedUpFrom {
     const safeLink = typeof link === 'string' && /^https:\/\//i.test(link) ? link.slice(0, 500) : null;
-    return { platform, label: PICKUP_PLATFORM_LABELS[platform], link: safeLink, startedAt: startedAt ? startedAt.toISOString() : null, importId };
+    const out: PickedUpFrom = { platform, label: PICKUP_PLATFORM_LABELS[platform], link: safeLink, startedAt: startedAt ? startedAt.toISOString() : null, importId };
+    if (via === 'bot') out.via = 'bot';
+    return out;
 }
 
 /** Where the next check should start from. Pure. */
@@ -162,6 +182,8 @@ export interface ImportRow {
     startedAt: Date | null;
     endedAt: Date | null;
     attempts: number;
+    /** Absent = 'transcript'. */
+    via?: ImportVia;
 }
 
 export type ImportRelease =
@@ -227,8 +249,11 @@ export interface WriterDeps {
     now: () => Date;
     /** The Note Taker, when it is still active in that workspace; null otherwise. */
     assistant(organisationId: number, assistantId: number): Promise<MinutesAssistant | null>;
-    /** Room in the task allowance for one picked-up meeting (fails open, like all background work). */
-    hasCapacity(organisationId: number): Promise<boolean>;
+    /**
+     * Room in the task allowance for one picked-up meeting (fails open, like all background work). A bot's meeting was
+     * checked before the bot was sent, so its deps answer true.
+     */
+    hasCapacity(organisationId: number, row: ImportRow): Promise<boolean>;
     /** true when moderation blocks the text. */
     blocked(organisationId: number, text: string): Promise<boolean>;
     writeMinutes(organisationId: number, assistant: MinutesAssistant, message: string): Promise<WriteMinutesResult>;
@@ -237,8 +262,8 @@ export interface WriterDeps {
      * this import's id (a writer that died between filing and the latch), returns that one instead of filing a second.
      */
     file(organisationId: number, assistantId: number, card: Record<string, unknown>, importId: number): Promise<number | null>;
-    /** Spends the task. Called once, after the latch. */
-    charge(organisationId: number, assistantId: number, importId: number): Promise<void>;
+    /** Spends the task(s). Called once, after the latch. A bot's meeting is charged by its minutes in the call. */
+    charge(organisationId: number, assistantId: number, importId: number, row: ImportRow): Promise<void>;
 }
 
 export type WriteOutcome =
@@ -266,7 +291,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             await d.store.release(row.id, { status: 'skipped', skipReason: 'assistant_gone' }, d.now());
             return 'skipped_assistant_gone';
         }
-        const source = d.sources.find((s) => s.platform === row.platform);
+        const source = sourceFor(d.sources, row);
         const account = source ? await source.account(row.organisationId) : null;
         if (!source || !account) {
             await d.store.release(row.id, { status: 'skipped', skipReason: 'disconnected' }, d.now());
@@ -287,7 +312,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
         }
 
         // Check before, record after (background work spends tasks; fails open).
-        if (!(await d.hasCapacity(row.organisationId))) {
+        if (!(await d.hasCapacity(row.organisationId, row))) {
             const age = d.now().getTime() - (row.endedAt ?? d.now()).getTime();
             if (age >= TASK_LIMIT_WAIT_MS) {
                 await d.store.release(row.id, { status: 'skipped', skipReason: 'task_limit' }, d.now());
@@ -317,7 +342,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             return await failOrRetry('The write-up did not finish.');
         }
 
-        const card = { ...(written.card as unknown as Record<string, unknown>), pickedUpFrom: pickedUpFrom(row.platform, row.id, row.link, row.startedAt) };
+        const card = { ...(written.card as unknown as Record<string, unknown>), pickedUpFrom: pickedUpFrom(row.platform, row.id, row.link, row.startedAt, row.via) };
         const recordId = await d.file(row.organisationId, assistant.id, card, row.id);
         if (!recordId) return await failOrRetry('The minutes could not be saved.');
 
@@ -329,7 +354,7 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             return 'failed';
         }
         if (!latched) return 'lost_latch';
-        await d.charge(row.organisationId, assistant.id, row.id);
+        await d.charge(row.organisationId, assistant.id, row.id, row);
         return 'written';
     } catch (err) {
         return await failOrRetry(errText(err));

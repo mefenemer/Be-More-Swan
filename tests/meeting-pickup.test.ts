@@ -179,9 +179,9 @@ await test('a failed check keeps the window where it was and records the error',
     assert.match(state.get('58:google_meet')!.error!, /403/);
 });
 
-await test('Google Meet is the one platform, behind the meeting_pickup flag', () => {
+await test('Google Meet is the one platform, behind the meeting_pickup flag (plus the Note Taker\'s own bot)', () => {
     assert.equal(MEETING_PICKUP_FLAG, 'meeting_pickup');
-    assert.match(readFileSync('src/utils/meeting-pickup-db.ts', 'utf8'), /return \[googleMeetSource\(db\)\];/);
+    assert.match(readFileSync('src/utils/meeting-pickup-db.ts', 'utf8'), /return \[googleMeetSource\(db\), meetingBotSource\(db\)\];/);
 });
 
 // ── writeImport ──────────────────────────────────────────────────────────────────────────────────
