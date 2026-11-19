@@ -86,7 +86,7 @@ The help article says each of these in plain words. The Note Taker's live status
 ## 5. Build list (each step one PR)
 
 0. **Proof (you, with me; 2–3 days).**
-   - Open a Recall.ai pay-as-you-go account (EU region if allowed) and a **Meeting BaaS** account (the fallback, §10). Keep both keys in `.env`, never in chat. Send both bots into the **same** calls, so speaker names, admission and transcript quality can be compared side by side.
+   - Open a Recall.ai pay-as-you-go account (EU region if allowed). Keep the key in `.env`, never in chat. Send the bot into each test call with `scripts/probe-meeting-bots.mjs`.
    - From a throwaway script, send a bot to a free Meet call, a Teams (free) call and a business Teams call.
    - For Zoom, send a bot to a meeting on our own Zoom account. External meetings need the OBF route and review (step 4).
    - Write down: how admission looks for the host, how long until the transcript arrives, whether the speaker names are right, and the cost on Recall's bill.
@@ -127,14 +127,14 @@ The #756 engine stays: the bot uses it. The per-platform transcript pick-up (pic
 
 ## 8. Decisions for the owner
 
-- **B1. Vendor.** ✅ **Agreed 2026-11-19 (owner): Recall.ai, with Meeting BaaS as the tested fallback.** Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
+- **B1. Vendor.** ✅ **Agreed 2026-11-19 (owner): Recall.ai, with no second vendor.** (Amended the same day: the owner first agreed Meeting BaaS as a tested fallback, then dropped it — there is no backup vendor.) Seven services compared on 2026-11-19 (§10). Recall is the only one that passes every must-have for **both the UK/EU and the US**:
   - Zoom's OBF rule;
   - speaker names from the meeting app;
   - a UK-ready DPA and an EU region;
   - SOC 2 Type II, ISO 27001 and US regions;
   - a well-funded company.
 
-  It is not the cheapest: about $0.65/h all-in against MeetStream's $0.45. But its startup programme ($0.25/h for the first 10,000 hours) would make it the cheapest for our first year, if we qualify. Meeting BaaS is the best EU-only choice: hosted in Paris, with a UK-addendum DPA. It has no US region or SOC 2 report of its own. Building our own: no (§1).
+  It is not the cheapest: about $0.65/h all-in against MeetStream's $0.45. But its startup programme ($0.25/h for the first 10,000 hours) would make it the cheapest for our first year, if we qualify. If Recall ever fails us, §10 is the starting point for a replacement; the vendor sits behind one file (`meeting-bot-recall.ts`), so switching is contained. Building our own: no (§1).
 - **B2. Transcript.** ✅ **Agreed 2026-11-19 (owner):** **Recall's own transcript** ($0.15/h). Speaker names come from the meeting platform, and no audio ever reaches us. The alternative, downloading the audio and sending it to ElevenLabs Scribe, guesses speakers from audio and brings audio handling back.
 - **B3. Charging.** ✅ **Agreed 2026-11-19 (owner):** **1 task per started 5 minutes in the call**, minimum 1, nothing if never admitted. See §2 for the 3-minute alternative that covers cost on every plan.
 - **B4. Length limit.** ✅ **Agreed 2026-11-19 (owner):** **2 hours by default**, changeable in settings up to 4. The allowance check before sending reserves the limit's tasks.
@@ -175,7 +175,7 @@ Researched from each service's own pricing, docs, DPA and security pages; third-
 - **MeetStream**: the cheapest with good tech, but a tiny, very new company without a SOC 2 report yet. Too thin to hold customers' meeting data.
 - **Attendee**: good tech, but publishes nothing on hosted data terms, and self-hosting brings back the servers §1 avoids.
 
-**Left:** Recall.ai (UK, EU and US) and Meeting BaaS (EU only).
+**Left:** Recall.ai (UK, EU and US). Meeting BaaS (EU only) was the runner-up; the owner chose no backup vendor (2026-11-19).
 
 **What to confirm with Recall in writing (Phase 0):**
 1. Can a pay-as-you-go account use the EU (Frankfurt) region for UK and EU customers, alongside a US account for US customers?
