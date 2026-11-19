@@ -355,11 +355,9 @@ check('Page posts are chosen by the account that WROTE them, not by connection_i
     assert.ok(!fn.includes('COALESCE('), 'the NULL-connection guess is gone');
     assert.ok(fn.includes('if (seen.has(row.id)) continue;'), 'a post is read once even if two connections match');
     const pub = read('netlify/functions/publish-social-posts.ts');
-    assert.ok(pub.includes("`UPDATE scheduled_posts SET platform_author_urn = '${esc(String(creds.externalUserId))}' WHERE id = ${post.id}`"), 'publisher records the author');
-    const authorAt = pub.indexOf('SET platform_author_urn');
-    const publishedAt = pub.indexOf("UPDATE scheduled_posts SET status = 'published'");
-    assert.ok(publishedAt > 0 && authorAt > publishedAt, 'after the post is marked published, in its own statement');
-    assert.ok(pub.slice(authorAt, authorAt + 400).includes('.catch('), 'never fatal — a missing column must not strand the post as publishing');
+    assert.ok(pub.includes("const author = creds.externalUserId ? `, platform_author_urn = '${esc(String(creds.externalUserId))}'` : '';"), 'publisher records the author');
+    assert.ok(pub.includes("${usedConnection}${author} WHERE id = ${post.id}`"), 'in the same statement that marks it published — the two can never disagree');
+    assert.ok(!pub.includes('author not recorded for post'), 'no separate, silently-failing author write');
     assert.ok(read('db/schema.ts').includes('platformAuthorUrn: text("platform_author_urn"),'));
     assert.ok(read('db/z-scheduled-posts-author.sql').includes('ADD COLUMN IF NOT EXISTS platform_author_urn TEXT'));
 });

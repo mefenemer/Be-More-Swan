@@ -2,7 +2,7 @@
 --
 -- scheduled_posts.platform_author_urn = the platform's id for the account the publisher used
 -- (LinkedIn: urn:li:organization:<id> for a Company Page, the member id for a personal profile).
--- Written by netlify/functions/publish-social-posts.ts when a post goes out.
+-- Written by netlify/functions/publish-social-posts.ts in the same UPDATE that marks a post published.
 --
 -- Why: a connection row is UPDATED in place on reconnect (social-oauth-callback.ts), so a LinkedIn
 -- connection that published as a personal profile can later point at a Company Page. connection_id

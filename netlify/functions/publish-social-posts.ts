@@ -316,20 +316,16 @@ export default withLambda(async () => {
             // reads the post back — LinkedIn Page stats and comments join on this column — needs to
             // know which account that was. COALESCE: never overwrite a connection the post already named.
             const usedConnection = Number.isInteger(creds.connectionId) ? `, connection_id = COALESCE(connection_id, ${Number(creds.connectionId)})` : '';
+            // And who it went out AS. Reconnecting updates a connection row in place, so a LinkedIn
+            // connection that posts as a personal profile today can point at a Company Page tomorrow —
+            // connection_id can't tell them apart afterwards; this can. LinkedIn Page stats and comments
+            // read only posts whose author is the Page (page-comments.ts loadPagePosts). In the same
+            // statement as 'published', so the two can't disagree. Requires
+            // db/z-scheduled-posts-author.sql — as does every Drizzle read of scheduled_posts.
+            const author = creds.externalUserId ? `, platform_author_urn = '${esc(String(creds.externalUserId))}'` : '';
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''}${usedConnection} WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''}${usedConnection}${author} WHERE id = ${post.id}`
             );
-            // Who it actually went out as. Reconnecting a connection updates the row in place, so a
-            // LinkedIn connection that posts as a personal profile today can point at a Company Page
-            // tomorrow — connection_id can't tell them apart afterwards; this can. LinkedIn Page stats
-            // and comments read only posts whose author is the Page (page-comments.ts loadPagePosts).
-            // Its own statement, and never fatal: the post IS published by now, and nothing here may
-            // leave it stuck as 'publishing' (raw SQL, so it doesn't depend on the Drizzle schema).
-            if (creds.externalUserId) {
-                await db.execute(
-                    `UPDATE scheduled_posts SET platform_author_urn = '${esc(String(creds.externalUserId))}' WHERE id = ${post.id}`
-                ).catch((e: unknown) => console.warn(`[publish-social-posts] author not recorded for post ${post.id}:`, e instanceof Error ? e.message : e));
-            }
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent;
             // covers autonomous posts that bypass manual approval). Never blocks publish success.
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
