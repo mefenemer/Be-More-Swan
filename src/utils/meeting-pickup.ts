@@ -36,6 +36,10 @@ export const SETTLE_MS = 2 * 60 * 1000;
 export const TRANSCRIPT_WAIT_MS = 24 * 60 * 60 * 1000;
 /** Failures (not "transcript not ready yet") before a meeting is given up as 'failed'. */
 export const MAX_ATTEMPTS = 4;
+/** How long a meeting waits for room in the task allowance (it resets on the 1st) before it is given up. */
+export const TASK_LIMIT_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
+/** How often a meeting waiting for the allowance is tried again. */
+export const TASK_LIMIT_RETRY_MS = 6 * 60 * 60 * 1000;
 /** A writer's claim on a meeting; a writer that dies frees it when this runs out. */
 export const LEASE_MS = 20 * 60 * 1000; // longer than a background function may run (15 minutes)
 /** Most meetings handed to writers per check. */
@@ -117,11 +121,11 @@ export function pickupMessage(i: {
 }
 
 /** What a picked-up meeting record carries so the Inbox and chat can say where it came from. */
-export interface PickedUpFrom { platform: PickupPlatform; label: string; link: string | null; startedAt: string | null }
+export interface PickedUpFrom { platform: PickupPlatform; label: string; link: string | null; startedAt: string | null; importId: number }
 
-export function pickedUpFrom(platform: PickupPlatform, link?: string | null, startedAt?: Date | null): PickedUpFrom {
+export function pickedUpFrom(platform: PickupPlatform, importId: number, link?: string | null, startedAt?: Date | null): PickedUpFrom {
     const safeLink = typeof link === 'string' && /^https:\/\//i.test(link) ? link.slice(0, 500) : null;
-    return { platform, label: PICKUP_PLATFORM_LABELS[platform], link: safeLink, startedAt: startedAt ? startedAt.toISOString() : null };
+    return { platform, label: PICKUP_PLATFORM_LABELS[platform], link: safeLink, startedAt: startedAt ? startedAt.toISOString() : null, importId };
 }
 
 /** Where the next check should start from. Pure. */
@@ -191,7 +195,8 @@ export async function discoverMeetings(store: PickupStore, sources: readonly Mee
         }
         for (const account of accounts) {
             out.accounts++;
-            const since = checkWindowStart(await store.checkedThrough(account.organisationId, source.platform), now);
+            const through = await store.checkedThrough(account.organisationId, source.platform);
+            const since = checkWindowStart(through, now);
             try {
                 const meetings = (await source.listFinished(account, since, now))
                     .filter((m) => m.externalId && m.endedAt instanceof Date && !Number.isNaN(m.endedAt.getTime()));
@@ -200,8 +205,9 @@ export async function discoverMeetings(store: PickupStore, sources: readonly Mee
                 await store.saveCheck(account.organisationId, source.platform, { at: now, through: now, found: added, error: null });
             } catch (err) {
                 out.errors++;
-                // The window is NOT moved on, so the next check covers this one again.
-                await store.saveCheck(account.organisationId, source.platform, { at: now, through: null, found: 0, error: errText(err).slice(0, 300) })
+                // The window is NOT moved on, so the next check covers this one again. A platform that has never been
+                // checked successfully is pinned to this first window start, so a run of failures loses no meetings.
+                await store.saveCheck(account.organisationId, source.platform, { at: now, through: through ? null : since, found: 0, error: errText(err).slice(0, 300) })
                     .catch(() => undefined);
                 console.error('[meeting-pickup] check failed', { organisationId: account.organisationId, platform: source.platform, err: errText(err) });
             }
@@ -223,14 +229,17 @@ export interface WriterDeps {
     /** true when moderation blocks the text. */
     blocked(organisationId: number, text: string): Promise<boolean>;
     writeMinutes(organisationId: number, assistant: MinutesAssistant, message: string): Promise<WriteMinutesResult>;
-    /** Files the meeting in the Inbox; its id, or null when it could not be saved. */
-    file(organisationId: number, assistantId: number, card: Record<string, unknown>): Promise<number | null>;
+    /**
+     * Files the meeting in the Inbox; its id, or null when it could not be saved. When a meeting record already carries
+     * this import's id (a writer that died between filing and the latch), returns that one instead of filing a second.
+     */
+    file(organisationId: number, assistantId: number, card: Record<string, unknown>, importId: number): Promise<number | null>;
     /** Spends the task. Called once, after the latch. */
     charge(organisationId: number, assistantId: number, importId: number): Promise<void>;
 }
 
 export type WriteOutcome =
-    | 'not_claimed' | 'written' | 'lost_latch' | 'waiting_for_transcript'
+    | 'not_claimed' | 'written' | 'lost_latch' | 'waiting_for_transcript' | 'waiting_for_tasks'
     | 'skipped_no_transcript' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
     | 'skipped_disconnected' | 'skipped_blocked' | 'retry' | 'failed';
 
@@ -276,8 +285,16 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
 
         // Check before, record after (background work spends tasks; fails open).
         if (!(await d.hasCapacity(row.organisationId))) {
-            await d.store.release(row.id, { status: 'skipped', skipReason: 'task_limit' }, d.now());
-            return 'skipped_task_limit';
+            const age = d.now().getTime() - (row.endedAt ?? d.now()).getTime();
+            if (age >= TASK_LIMIT_WAIT_MS) {
+                await d.store.release(row.id, { status: 'skipped', skipReason: 'task_limit' }, d.now());
+                return 'skipped_task_limit';
+            }
+            // Kept, not dropped: tried again every few hours, so it is written once the allowance resets or tasks are added.
+            await d.store.release(row.id, {
+                status: 'found', retryAt: new Date(d.now().getTime() + TASK_LIMIT_RETRY_MS), refundAttempt: true, lastError: 'task_limit',
+            }, d.now());
+            return 'waiting_for_tasks';
         }
 
         const message = pickupMessage({
@@ -297,8 +314,8 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
             return await failOrRetry('The write-up did not finish.');
         }
 
-        const card = { ...(written.card as unknown as Record<string, unknown>), pickedUpFrom: pickedUpFrom(row.platform, row.link, row.startedAt) };
-        const recordId = await d.file(row.organisationId, assistant.id, card);
+        const card = { ...(written.card as unknown as Record<string, unknown>), pickedUpFrom: pickedUpFrom(row.platform, row.id, row.link, row.startedAt) };
+        const recordId = await d.file(row.organisationId, assistant.id, card, row.id);
         if (!recordId) return await failOrRetry('The minutes could not be saved.');
 
         // From here the meeting IS in the Inbox: never retry (that would file it twice) and never throw.

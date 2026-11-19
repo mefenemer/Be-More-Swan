@@ -2446,7 +2446,7 @@ function _rqOutreachPreview(r, statusKey) {
     const subjectEdit = cfg.noSubject ? '' : `<label class="block text-[11px] text-gray-500">Subject
             <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
           </label>`;
-    return `${_rqMeetingPickedUp(r)}${_rqMeetingFollowupNotSent(r)}<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
+    return `${_rqMeetingFollowupNotSent(r)}<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
       <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(heading)}</summary>
       <div class="px-3 pb-3 pt-1 border-t border-gray-200">
         ${sendsLine}
@@ -3481,7 +3481,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${snippet ? `<p class="text-xs text-gray-500 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
         ${_rqRecipient(r, statusKey)}
         ${_rqAttendeeFix(r, statusKey)}
-        ${_rqOutreachPreview(r, statusKey)}
+        ${_rqMeetingPickedUp(r)}${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
         ${_rqLeadNotes(r)}
         ${_rqDecisionDetail(r, statusKey)}

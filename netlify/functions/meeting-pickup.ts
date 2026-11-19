@@ -8,12 +8,12 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { runMeetingPickup } from '../../src/utils/meeting-pickup-db';
-import { mayPoll } from './poll-mailboxes';
+import { mayRunScheduled } from '../../src/utils/scheduled-run-auth';
 
 export const config = { schedule: '*/15 * * * *' };
 
 export default withLambda(async (event) => {
-    if (!mayPoll(event)) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
+    if (!mayRunScheduled(event)) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
     const result = await runMeetingPickup(getDb());
     return { statusCode: 200, body: JSON.stringify({ ok: true, ...result }) };
 });

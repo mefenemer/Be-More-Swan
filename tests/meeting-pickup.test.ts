@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-    CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, MEETING_SOURCES, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
+    CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, TASK_LIMIT_WAIT_MS, MEETING_SOURCES, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
     checkWindowStart, discoverMeetings, pickedUpFrom, pickupMessage, speakerLines, transcriptRetryAt, writeImport,
     type FinishedMeeting, type ImportRelease, type ImportRow, type MeetingSource, type PickedTranscript,
     type PickupAccount, type PickupPlatform, type PickupStore, type WriterDeps,
@@ -101,7 +101,11 @@ function deps(store: PickupStore, source: MeetingSource, over: Partial<WriterDep
         async hasCapacity() { log.capacityAsked++; return true; },
         async blocked() { return false; },
         async writeMinutes(_o, _a, message): Promise<WriteMinutesResult> { log.written.push(message); return { ok: true, card: CARD as never, model: 'claude-haiku-5-5' }; },
-        async file(_o, _a, card) { log.filed.push(card); return 900 + log.filed.length; },
+        async file(_o, _a, card, importId) {
+            const prev = log.filed.findIndex((c) => (c.pickedUpFrom as { importId?: number })?.importId === importId);
+            if (prev >= 0) return 901 + prev;
+            log.filed.push(card); return 900 + log.filed.length;
+        },
         async charge(_o, _a, id) { log.charged.push(id); },
         ...over,
     };
@@ -128,8 +132,8 @@ await test('pickupMessage names the platform, time, attendees and fences the tra
 });
 
 await test('pickedUpFrom keeps only https links', () => {
-    assert.equal(pickedUpFrom('zoom', 'javascript:alert(1)').link, null);
-    assert.equal(pickedUpFrom('teams', 'https://teams.microsoft.com/l/x').label, 'Microsoft Teams');
+    assert.equal(pickedUpFrom('zoom', 1, 'javascript:alert(1)').link, null);
+    assert.equal(pickedUpFrom('teams', 1, 'https://teams.microsoft.com/l/x').label, 'Microsoft Teams');
 });
 
 await test('the check window: 24 h on first connect, then from the last check less the overlap', () => {
@@ -156,6 +160,14 @@ await test('a meeting seen twice is one row', async () => {
     assert.deepEqual([r1.found, r2.found, rows.size], [2, 0, 2]);
     assert.equal(src.listCalls[1].getTime(), T0.getTime() - CHECK_OVERLAP_MS, 'second check starts at the first one less the overlap');
     assert.equal(state.get('58:google_meet')!.error, null);
+});
+
+await test('checks that keep failing from the start keep the first window start', async () => {
+    const { store } = memStore();
+    const bad = fakeSource({ listThrows: true });
+    await discoverMeetings(store, [bad], T0);
+    await discoverMeetings(store, [bad], new Date(T0.getTime() + 48 * 60 * 60 * 1000));
+    assert.equal(bad.listCalls[1].getTime(), T0.getTime() - FIRST_LOOKBACK_MS - CHECK_OVERLAP_MS, 'day 3 still looks back to the first window');
 });
 
 await test('a failed check keeps the window where it was and records the error', async () => {
@@ -188,7 +200,7 @@ await test('happy path: written, filed with where it came from, charged once aft
     assert.match(log.written[0], /^Meeting on Google Meet: Vendor call/);
     assert.match(log.written[0], /Ana Lopez: We go with vendor A\. Bo, send the contract by Friday\.\nBo Chen:/);
     assert.match(log.written[0], /Present: Ana Lopez, Bo Chen, Cara \(silent\)/);
-    assert.deepEqual(log.filed[0].pickedUpFrom, { platform: 'google_meet', label: 'Google Meet', link: 'https://meet.google.com/abc-defg-hij', startedAt: '2026-11-19T09:30:00.000Z' });
+    assert.deepEqual(log.filed[0].pickedUpFrom, { platform: 'google_meet', label: 'Google Meet', link: 'https://meet.google.com/abc-defg-hij', startedAt: '2026-11-19T09:30:00.000Z', importId: id });
     assert.equal(await writeImport(id, d), 'not_claimed', 'a written meeting is never written again');
     assert.equal(log.charged.length, 1);
 });
@@ -212,11 +224,31 @@ await test('no transcript after 24 h: skipped', async () => {
     assert.equal(m.rows.get(1)!.skipReason, 'no_transcript');
 });
 
-await test('task allowance used up: skipped before the model is called', async () => {
+await test('task allowance used up: kept and tried again later, model not called; given up after 7 days', async () => {
     const { store, rows, src, id } = await oneFound();
     const { d, log } = deps(store, src, { async hasCapacity() { return false; } });
-    assert.equal(await writeImport(id, d), 'skipped_task_limit');
-    assert.deepEqual([rows.get(id)!.skipReason, log.written.length, log.charged.length], ['task_limit', 0, 0]);
+    assert.equal(await writeImport(id, d), 'waiting_for_tasks');
+    const r = rows.get(id)!;
+    assert.deepEqual([r.status, r.attempts, r.lastError, log.written.length, log.charged.length], ['found', 0, 'task_limit', 0, 0]);
+    assert.ok(r.leaseUntil && r.leaseUntil > d.now());
+    const m = memStore();
+    const old = fakeSource({ meetings: [meeting('conferenceRecords/week-old', TASK_LIMIT_WAIT_MS / 60000 + 60)] });
+    await discoverMeetings(m.store, [old], T0);
+    assert.equal(await writeImport(1, deps(m.store, old, { async hasCapacity() { return false; } }).d), 'skipped_task_limit');
+    assert.equal(m.rows.get(1)!.skipReason, 'task_limit');
+});
+
+await test('a writer that died after filing: the next writer reuses that record, no second copy', async () => {
+    const { store, rows, src, id } = await oneFound();
+    let clock = new Date(T0.getTime() + 30 * 60 * 1000);
+    let crash = true;
+    const crashing: PickupStore = { ...store, async markWritten(i, rec, now) { if (crash) { crash = false; return new Promise<boolean>(() => undefined) as never; } return store.markWritten(i, rec, now); } };
+    const { d, log } = deps(crashing, src, { now: () => clock });
+    void writeImport(id, d); // never finishes: the worker "died" holding the lease
+    await new Promise((r) => setTimeout(r, 10));
+    clock = new Date(clock.getTime() + 21 * 60 * 1000);
+    assert.equal(await writeImport(id, d), 'written');
+    assert.deepEqual([log.filed.length, rows.get(id)!.recordId, log.charged.length], [1, 901, 1]);
 });
 
 await test('no meeting in the transcript (a sound check): skipped, not charged', async () => {
@@ -310,7 +342,8 @@ await test('the form and pick-up share one minutes writer', () => {
 
 await test('Inbox and chat say where a meeting came from', () => {
     const js = readFileSync('assistants.js', 'utf8');
-    assert.match(js, /\$\{_rqMeetingPickedUp\(r\)\}\$\{_rqMeetingFollowupNotSent\(r\)\}/);
+    // With the card, not inside the follow-up preview (which is empty when a meeting has no follow-up email).
+    assert.match(js, /\$\{_rqMeetingPickedUp\(r\)\}\$\{_rqOutreachPreview\(r, statusKey\)\}/);
     assert.match(js, /Picked up from \$\{_rqEsc\(p\.label\)\}/);
     assert.match(readFileSync('src/utils/chat-meeting-action.ts', 'utf8'), /picked up from \$\{pickedUpLabel\(d\)\}/);
 });
@@ -319,6 +352,18 @@ await test('SQL: unique key per workspace, platform and meeting', () => {
     const sqlText = readFileSync('db/z-meeting-imports.sql', 'utf8');
     assert.match(sqlText, /UNIQUE INDEX IF NOT EXISTS meeting_imports_org_platform_external_uq ON meeting_imports \(organisation_id, platform, external_id\)/);
     assert.match(sqlText, /CREATE TABLE IF NOT EXISTS meeting_pickup_state/);
+});
+
+await test('an Inbox edit can neither drop nor invent where a meeting came from', async () => {
+    const { keepServerOwnedMeetingKeys } = await import('../src/utils/meeting-handoff-once');
+    const stored = { meetingTitle: 'x', pickedUpFrom: { platform: 'zoom', label: 'Zoom' } };
+    assert.deepEqual(keepServerOwnedMeetingKeys({ meetingTitle: 'y' }, stored).pickedUpFrom, stored.pickedUpFrom);
+    assert.equal('pickedUpFrom' in keepServerOwnedMeetingKeys({ pickedUpFrom: { label: 'Forged' } }, { meetingTitle: 'x' }), false);
+});
+
+await test('scheduler auth is shared, not imported from another feature', () => {
+    assert.match(readFileSync('netlify/functions/meeting-pickup.ts', 'utf8'), /from '\.\.\/\.\.\/src\/utils\/scheduled-run-auth'/);
+    assert.match(readFileSync('src/utils/meeting-pickup-db.ts', 'utf8'), /Promise\.all\(due\.map/);
 });
 
 console.log(`meeting-pickup: ${passed} passed`);

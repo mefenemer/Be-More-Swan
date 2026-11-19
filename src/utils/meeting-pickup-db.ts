@@ -3,7 +3,7 @@
 
 import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, masterAssistants, meetingImports, meetingPickupState } from '../../db/schema';
+import { aiAssistants, assistantRecords, masterAssistants, meetingImports, meetingPickupState } from '../../db/schema';
 import { resolveBaseUrl } from './base-url';
 import { persistHubRecordsWithTitles } from './hub-records';
 import { meetingHubRecord } from './meeting-minutes';
@@ -122,7 +122,13 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = MEETING_S
                 sessionId: `meeting-pickup:${assistant.id}`, requestPath: false,
             });
         },
-        async file(organisationId, assistantId, card) {
+        async file(organisationId, assistantId, card, importId) {
+            const [already] = await db.select({ id: assistantRecords.id }).from(assistantRecords).where(and(
+                eq(assistantRecords.organisationId, organisationId),
+                eq(assistantRecords.recordType, 'meeting'),
+                sql`${assistantRecords.data}->'pickedUpFrom'->>'importId' = ${String(importId)}`,
+            )).limit(1);
+            if (already) return already.id;
             // Its own meeting: the record writer never overwrites a meeting, it adds the time to a repeated title.
             const [saved] = await persistHubRecordsWithTitles(db, organisationId, assistantId, [meetingHubRecord(card)]);
             return saved?.id ?? null;
@@ -173,8 +179,8 @@ export async function runMeetingPickup(db: Db, sources: readonly MeetingSource[]
         // The tables may not exist yet (z-meeting-imports.sql not applied): nothing to do, not an outage.
         console.error('[meeting-pickup] could not run', err instanceof Error ? err.message : err);
     }
-    let dispatched = 0;
-    for (const id of due) if (await triggerMeetingImport(id)) dispatched++;
+    // In parallel: each hand-off waits up to 5 s, and 25 in turn could pass the function's time limit.
+    const dispatched = (await Promise.all(due.map((id) => triggerMeetingImport(id)))).filter(Boolean).length;
     const out = { ...found, due: due.length, dispatched };
     console.log('[meeting-pickup]', out);
     return out;

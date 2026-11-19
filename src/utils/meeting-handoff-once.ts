@@ -103,5 +103,8 @@ export function keepServerOwnedMeetingKeys(incoming: Record<string, unknown>, st
     for (const k of SERVER_OWNED_MEETING_KEYS) {
         if (!(k in out) && k in base) out[k] = base[k];
     }
+    // Where a picked-up meeting came from (meeting-pickup.ts) is set once by the server: an edit can neither drop nor invent it.
+    if ('pickedUpFrom' in base) out.pickedUpFrom = base.pickedUpFrom;
+    else delete out.pickedUpFrom;
     return out;
 }
