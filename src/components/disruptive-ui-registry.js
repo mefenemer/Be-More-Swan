@@ -1974,6 +1974,48 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('footage_review_proposal', renderFootageReviewProposalCard);
 
+  // { type: 'screen_recording_proposal', purpose: 'presenter' | 'footage' }
+  //
+  // "Record my screen" from the chat (docs/video-producer-screen-walkthrough-plan.md Phase 3). Only the browser
+  // can record the screen, and only after the owner picks what to share, so the card opens the recorder on the
+  // Videos tab (AssistantVideos.recordScreen): 'presenter' = a screen an AI presenter talks over, no microphone;
+  // 'footage' = narrated in their own voice for "Use my own footage". Phones and tablets get the reason instead.
+  // On a page without the Videos tab, the recorder opens the next time that tab does.
+  function renderScreenRecordingProposalCard(ui, esc) {
+    const purpose = ui.purpose === 'presenter' ? 'presenter' : 'footage';
+    const can = !window.ScreenRecorder || window.ScreenRecorder.supported();
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Record your screen</p>
+      <p class="text-sm text-gray-900 mt-2">${purpose === 'presenter' ? 'A screen recording for your AI presenter to walk viewers through. No microphone: the presenter does the talking.' : 'A screen recording you talk through in your own voice, for “Use my own footage”.'}</p>
+      <p class="text-xs text-gray-600 mt-2">Your browser asks which window, tab or screen to share. Only share the window you need, and close emails, customer details and passwords first. Up to 10 minutes; you watch it back before it’s saved to My Content. Recording is free.</p>
+      ${can ? '' : `<p class="text-xs font-semibold text-amber-700 mt-2">${esc(window.ScreenRecorder.unsupportedReason())}</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-srp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50"${can ? '' : ' disabled'}>● Record my screen</button>
+        <button type="button" data-srp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-srp-status></p>`;
+    const status = el.querySelector('[data-srp-status]');
+    const say = (t) => { status.textContent = t; status.className = 'mt-2 text-xs font-semibold text-indigo-700'; };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-srp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-srp-go]')) return;
+      const tab = document.querySelector('.main-tab-btn[data-maintab="videos"]:not(.hidden)');
+      if (tab && window.AssistantVideos && typeof window.AssistantVideos.recordScreen === 'function' && window.ScreenRecorder) {
+        tab.click();
+        window.AssistantVideos.recordScreen(purpose);
+        say('The recorder is open on the Videos tab.');
+      } else {
+        try { sessionStorage.setItem('bms-screen-record', purpose); } catch { /* private window */ }
+        say('Open your Video Producer’s Videos tab: the recorder opens there.');
+      }
+    });
+    return el;
+  }
+
+  register('screen_recording_proposal', renderScreenRecordingProposalCard);
+
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
   register('video_script_proposal', renderVideoScriptProposalCard);

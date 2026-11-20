@@ -243,6 +243,7 @@ export const GENERATED_CHAT_MANIFEST = {
             "cards": [
                 "ai_video_label_setting",
                 "footage_review_proposal",
+                "screen_recording_proposal",
                 "video_brief_proposal",
                 "video_caption_remove_proposal",
                 "video_chapter_proposal",
@@ -447,6 +448,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "reviews_add",
         "rule_proposal",
         "schedule_proposal",
+        "screen_recording_proposal",
         "search_terms",
         "setup_field_proposal",
         "share_for_review_proposal",

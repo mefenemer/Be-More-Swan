@@ -523,3 +523,40 @@ recordings they're in every scene: in a bubble, which is still a presenter clip.
 - **Voiceover charge.** A voiceover is 1 task however long. A 10-minute one costs us ~8× a short one at ElevenLabs
   (~$1.35 vs ~$0.18).
 - **Hand-over test.** Testing the run hand-over on staging needs `VIDEO_BUILD_RUN_BUDGET_MS` set there.
+
+---
+
+## 13. Phase 3 as built (2026-11-20): "Record my screen"
+
+Since the AI presenter (§11.7), the most useful half of Phase 3 is a **screen on its own**: the presenter talks
+over it, synced by the script's word timings, so no camera is needed. This slice builds that, plus a screen
+narrated in the owner's own voice. It follows D-W2 (10 minutes), D-W5 (desktop only) and D-W6 (screen sound off).
+
+- `src/components/screen-recorder.js` (`window.ScreenRecorder`): `getDisplayMedia` + `MediaRecorder`, MP4 where
+  the browser makes it, WebM otherwise, 2.5 Mbit/s (~190 MB for 10 minutes), stops at 10 minutes or 480 MB, or when
+  the browser's own "Stop sharing" is pressed. Ticks: "Record my voice too" (microphone) and "Keep the screen's
+  sound" (off, D-W6; with both, the two are mixed into one track). A "What's in this recording?" name, which is
+  what the planner sees. Privacy box: share only the window you need, close emails, customer details and passwords,
+  turn on Do Not Disturb; watched back before it's saved, saved only to the owner's My Content.
+- **Phones and tablets** (including iPadOS, which reports a Mac) and browsers without `getDisplayMedia` get the
+  reason instead of the button: use the device's own screen recorder and add the file.
+- **Videos tab:** "● Record my screen" under the AI presenter's *Screen recordings* (no microphone): uploaded
+  (`FootageReader.upload`, with the timed length when a WebM reports none), read once (`FootageReader.prepare`,
+  free) so it has a measured length, then ticked in the list. And in *Use my own footage* (microphone ticked),
+  where it joins the footage like "Record a video". The footage form's stale "up to 5 minutes" now says 10.
+- **Chat:** `screen_recording_proposal` `{ purpose: 'presenter' | 'footage' }` opens the recorder on the Videos tab
+  (`AssistantVideos.recordScreen`); from the standalone chat it opens the next time that tab does. Prompt block
+  "RECORDING THEIR SCREEN". Manifest regenerated.
+
+**Not built (Phase 3's other half):** "Record my screen too" in `video-recorder.js` (camera + screen as two linked
+files, `render_params.recordedWith`, synced covers). Owner question, below.
+
+**Owner decisions open:**
+- **D-R1: build "Record my screen too" (own face + screen, synced)?** Recommendation: **not now.** The AI
+  presenter covers the face, a narrated screen recording covers "my own voice", and a Loom-style file with the
+  bubble baked in already works. Build it when a customer asks to appear on camera over their screen.
+- **D-R2: footage review flags visible email addresses** (§10 risk). Recommendation: **yes, as a small follow-up**
+  to the footage review prompt; a presenter's screen recording is not reviewed, so the recorder's privacy box is
+  the guard there.
+- **Help article:** a "Record your screen" section (help SQL, both databases after release). Recommendation: write
+  it with the next help batch.

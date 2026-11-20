@@ -244,6 +244,7 @@ export const CARD_LABELS: Record<string, string> = {
     reviews_add: 'Add customer reviews',
     rule_proposal: 'Add, reword, switch off or delete a rule',
     schedule_proposal: 'Change the posting schedule',
+    screen_recording_proposal: 'Record their screen for a walkthrough (opens the recorder)',
     setup_field_proposal: 'Change a set-up answer',
     share_for_review_proposal: 'Send a post to someone to review',
     site_audit_check: 'Run a website check',

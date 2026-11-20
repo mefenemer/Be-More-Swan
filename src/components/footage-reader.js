@@ -16,7 +16,8 @@
  *     the library's thumbnails load the SAME signed URL without CORS (the URL is kept stable so the
  *     browser caches it), and a CORS request then gets that cached copy with no CORS header — the
  *     video "couldn't be opened" on staging, 2026-11-09, although R2's CORS rules were right.
- *   window.FootageReader.upload(file) → Promise<{ id, name }>   a new video into the library (My Content)
+ *   window.FootageReader.upload(file, { durationS? }) → Promise<{ id, name }>   a new video into the library (My Content);
+ *     durationS: the length a recorder timed, used when the file reports none (a WebM straight from MediaRecorder)
  *
  * Nothing here spends. Reading a library video downloads it once into this tab.
  */
@@ -180,7 +181,7 @@
   }
 
   /** A new video into the library — the same path as My Content (content-upload-url → PUT → content-assets). */
-  async function upload(file) {
+  async function upload(file, opts) {
     if (!file || !/^video\//.test(file.type)) throw new Error('That isn’t a video. Choose an MP4, MOV or WebM.');
     if (file.size > MAX_BYTES) throw new Error('That video is larger than 500 MB. Trim it first, or pick the part you want.');
     const r = await fetch('/.netlify/functions/content-upload-url', {
@@ -201,6 +202,8 @@
       durationS = Number.isFinite(v.duration) ? v.duration : null; width = v.videoWidth || null; height = v.videoHeight || null;
       URL.revokeObjectURL(url);
     } catch { /* the server copes without */ }
+    const timed = Number(opts && opts.durationS);
+    if (!(durationS > 0) && timed > 0 && timed <= MAX_S + 1) durationS = timed;
     const c = await fetch('/.netlify/functions/content-assets', {
       credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: file.name, assetType: 'video', mimeType: file.type, fileSize: file.size, storageKey: j.storageKey, storageUrl: j.storageUrl, durationS, width, height }),
