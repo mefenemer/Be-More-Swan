@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { voices, languages } = JSON.parse(readFileSync(join(root, 'src/public/voice-catalogue.json'), 'utf8'));
-// A language with a `model` (Welsh, Norwegian: eleven_v3) is spoken by it, told the language — as src/lib/tts.ts speechModel.
+// A language with a `model` (Welsh, Norwegian: eleven_v3) is spoken by it (it reads the language from the text) — as src/lib/tts.ts speechModel.
 const modelFor = (lang) => languages.find((l) => l.code === lang)?.model || null;
 const out = join(root, 'audio/voices');
 mkdirSync(out, { recursive: true });
@@ -48,7 +48,7 @@ async function eleven(text, voiceId, lang) {
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_64`, {
         method: 'POST',
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-        body: JSON.stringify({ text, model_id: model || 'eleven_multilingual_v2', ...(model ? { language_code: lang } : {}), voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
+        body: JSON.stringify({ text, model_id: model || 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
     });
     if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return Buffer.from(await res.arrayBuffer());

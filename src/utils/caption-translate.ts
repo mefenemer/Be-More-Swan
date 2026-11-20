@@ -47,8 +47,10 @@ export async function translateCaptions(db: Db, row: ProjectRow, code: unknown):
     // The captions as spoken are already in this language (a Welsh video's Welsh captions are free to download).
     const spoken = spokenLanguage(row.brief);
     if (code === spoken) return { ok: false, status: 400, error: `This video is already spoken in ${CAPTION_LANGUAGES[code]}.` };
+    // A stored translation into the spoken language (before 2026-11-20 every video counted as English) doesn't count.
     const have = translationsOf(row.timeline);
-    if (!have[code] && Object.keys(have).length >= MAX_TRANSLATIONS) return { ok: false, status: 409, error: `A video can have up to ${MAX_TRANSLATIONS} translations. Remove one first.` };
+    const kept = Object.keys(have).filter((c) => c !== spoken);
+    if (!have[code] && kept.length >= MAX_TRANSLATIONS) return { ok: false, status: 409, error: `A video can have up to ${MAX_TRANSLATIONS} translations. Remove one first.` };
     const asSpoken = await videoCaptionLines(db, row.organisationId, row.timeline);
     if (!asSpoken.length) return { ok: false, status: 409, error: 'This video has no spoken words to translate.' };
     const cost = (await getTaskCosts()).weights.caption_translation;

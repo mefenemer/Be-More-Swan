@@ -105,10 +105,13 @@ export function languageLabel(code: unknown): string | null {
 }
 
 /**
- * The ElevenLabs model that speaks a voice, and the language code to send with it. Every language uses
- * ELEVENLABS_MODEL (eleven_multilingual_v2, which reads the script's own language and takes no language_code)
- * unless the catalogue gives the language a `model`: eleven_multilingual_v2 refuses Welsh ('cy') and has no
- * Norwegian, and eleven_v3 speaks both when told the language (checked 2026-11-20, plan A4). Pure.
+ * The ElevenLabs model that speaks a voice, and its language. Every language uses ELEVENLABS_MODEL
+ * (eleven_multilingual_v2) unless the catalogue gives the language a `model`: multilingual v2 refuses Welsh ('cy')
+ * and has no Norwegian, and eleven_v3 speaks both (checked 2026-11-20, plan A4). No language_code is SENT: eleven_v3
+ * reads the language from the script (Welsh text came out Welsh, English text on Hannah came out English, both heard
+ * back by Scribe), so a Welsh-accented voice still reads an English post in English, as every voice reads the script in
+ * the language it is written in. `languageCode` is the voice's language, for callers that know the script is in it
+ * (a Video Producer build) and tell the transcriber. Pure.
  */
 export function speechModel(voice: VoiceId): { model: string; languageCode: string | null } {
     const lang = VOICE_LANGUAGES.find((l) => l.code === voiceLanguage(voice));
@@ -121,8 +124,23 @@ export function speechModel(voice: VoiceId): { model: string; languageCode: stri
  * full-length short voiceover (VOICEOVER_MAX_CHARS) is three parts spoken side by side, about 12 s.
  */
 export const SLOW_MODEL_PART_CHARS = 500;
-/** How long to wait for one eleven_v3 part of at most SLOW_MODEL_PART_CHARS. */
-const SLOW_MODEL_PART_TIMEOUT_MS = 17_000;
+
+/**
+ * An eleven_v3 script in parts. A short voiceover (≤ VOICEOVER_MAX_CHARS) is held to SPEECH_PARTS_AT_ONCE parts, so
+ * it is one batch inside the request: sentence cuts can fall as early as half way, so the part size grows (to 800 at
+ * most) until it fits (review of A4). A long one (built in the background) keeps 500-character parts. Pure.
+ */
+export function slowModelParts(text: string): string[] {
+    let max = SLOW_MODEL_PART_CHARS;
+    let parts = splitForSpeech(text, max);
+    while (parts.length > SPEECH_PARTS_AT_ONCE && text.length <= VOICEOVER_MAX_CHARS && max < 800) parts = splitForSpeech(text, max += 50);
+    return parts;
+}
+
+/** How long to wait for one eleven_v3 part: 17 s for 500 characters (10.9 s measured for 484), 25 ms a character more. Pure. */
+export function slowPartTimeoutMs(chars: number): number {
+    return 17_000 + Math.max(0, chars - SLOW_MODEL_PART_CHARS) * 25;
+}
 
 export function isVoiceId(v: unknown): v is VoiceId {
     return typeof v === 'string' && VOICES.some((x) => x.id === v);
@@ -240,7 +258,7 @@ function classifyElevenLabs(status: number, body: string): TtsError {
 /** Speak `text` with an ElevenLabs voice. Returns mp3 bytes. */
 export async function synthesizeElevenLabs(
     text: string, voiceId: string, fetchImpl: typeof fetch = fetch, timeoutMs: number = 12_000,
-    model: string = ELEVENLABS_MODEL, languageCode: string | null = null,
+    model: string = ELEVENLABS_MODEL,
 ): Promise<Buffer> {
     const key = process.env.ELEVENLABS_API_KEY;
     if (!key) throw new TtsError('ElevenLabs is not configured.', 'not_configured');
@@ -248,8 +266,8 @@ export async function synthesizeElevenLabs(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'xi-api-key': key },
         // Settings the owner heard in the trials: a little expressive, true to the speaker.
-        // language_code only where the catalogue names a model for the language: multilingual v2 refuses the field.
-        body: JSON.stringify({ text, model_id: model, ...(languageCode ? { language_code: languageCode } : {}), voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
+        // No language_code: the model reads the script's language (speechModel); multilingual v2 refuses the field anyway.
+        body: JSON.stringify({ text, model_id: model, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
         // Leaves room for the transcription inside the request (there is no fallback voice to wait for). A long
         // video's part (built in the background, Phase 4c) gets longer: speechTimeoutMs.
         signal: AbortSignal.timeout(timeoutMs),
@@ -265,16 +283,16 @@ export async function synthesizeElevenLabs(
  */
 export async function speakVoiceover(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<{ mp3: Buffer; provider: TtsProvider; model: string }> {
     const eleven = elevenLabsVoice(voice);
-    const { model, languageCode } = speechModel(voice);
+    const { model } = speechModel(voice);
     // eleven_v3 (Welsh, Norwegian) is slow, so even a short script goes in small parts spoken side by side.
     const slow = !!eleven && model !== ELEVENLABS_MODEL;
     const speak = (part: string) => eleven
-        ? synthesizeElevenLabs(part, eleven, fetchImpl, slow ? SLOW_MODEL_PART_TIMEOUT_MS : speechTimeoutMs(part.length), model, languageCode)
+        ? synthesizeElevenLabs(part, eleven, fetchImpl, slow ? slowPartTimeoutMs(part.length) : speechTimeoutMs(part.length), model)
         : synthesizeSpeech(part, voice, fetchImpl, speechTimeoutMs(part.length, 15_000));
     // A long video's script (Phase 4c) is spoken in parts, a few at a time, and joined. A short one is one call,
     // exactly as before: only a long build (in the background) ever passes SPEECH_PART_CHARS. eleven_v3 scripts
     // over SLOW_MODEL_PART_CHARS are the exception: up to three parts side by side even for a short voiceover.
-    const parts = splitForSpeech(text, slow ? SLOW_MODEL_PART_CHARS : SPEECH_PART_CHARS);
+    const parts = slow ? slowModelParts(text) : splitForSpeech(text, SPEECH_PART_CHARS);
     let mp3: Buffer;
     if (parts.length <= 1) mp3 = await speak(text);
     else {
@@ -328,8 +346,8 @@ export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: 
 export interface Transcript { words: SpokenWord[]; durationS: number | null; provider: TtsProvider }
 
 /** Word timings + duration for an mp3. A failure here is NOT fatal to the voiceover — callers keep the audio. */
-export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch, language?: string | null): Promise<Transcript> {
-    return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg', timeoutMs: transcribeTimeoutMs(mp3.byteLength), ...(language ? { language } : {}) }, fetchImpl);
+export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch, language?: string | null, timeoutMs?: number): Promise<Transcript> {
+    return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg', timeoutMs: timeoutMs ?? transcribeTimeoutMs(mp3.byteLength), ...(language ? { language } : {}) }, fetchImpl);
 }
 
 /**

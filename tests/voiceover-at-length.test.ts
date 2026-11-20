@@ -72,7 +72,7 @@ const part = (fill: number, frames = 3) => Buffer.concat([id3(), infoFrame(), ..
         assert.strictEqual(transcribeTimeoutMs(300_000), 8_000);
         const tenMinutes = transcribeTimeoutMs(9.6 * 1024 * 1024);
         assert.ok(tenMinutes >= 90_000 && tenMinutes <= 100_000, String(tenMinutes));
-        assert.match(read('src/lib/tts.ts'), /timeoutMs: transcribeTimeoutMs\(mp3\.byteLength\)/);
+        assert.match(read('src/lib/tts.ts'), /timeoutMs: timeoutMs \?\? transcribeTimeoutMs\(mp3\.byteLength\)/);
     });
 
     console.log('joining MP3 parts');

@@ -511,7 +511,7 @@ export default withLambda(async (event) => {
             let differs = false;
             if (remove) { delete scene.voiceAssetId; delete scene.voiceS; }
             else {
-                const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scene.voiceover, maxS: MAX_LINE_S, language: brief.language });
+                const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scene.voiceover, maxS: MAX_LINE_S, language: spokenLanguage(brief) });
                 if ('error' in r) return json(r.status, { error: r.error });
                 scene.voiceAssetId = r.assetId; scene.voiceS = r.durationS; differs = r.differs;
             }
@@ -523,7 +523,7 @@ export default withLambda(async (event) => {
         // words (as the AI voice is), and every line recording is dropped.
         let voiceoverAssetId: number | null = null, differs = false;
         if (!remove) {
-            const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scriptOf(sb), maxS: MAX_WHOLE_S, language: brief.language });
+            const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scriptOf(sb), maxS: MAX_WHOLE_S, language: spokenLanguage(brief) });
             if ('error' in r) return json(r.status, { error: r.error });
             voiceoverAssetId = r.assetId; differs = r.differs;
         }

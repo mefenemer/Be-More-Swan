@@ -45,7 +45,7 @@ const catalogue = JSON.parse(readFileSync(CATALOGUE, 'utf8'));
 const dir = mkdtempSync(join(tmpdir(), 'voice-pace-'));
 const words = (t) => t.split(/\s+/).filter(Boolean).length;
 
-// A language with a `model` (Welsh, Norwegian: eleven_v3) is spoken by it, told the language — as src/lib/tts.ts speechModel.
+// A language with a `model` (Welsh, Norwegian: eleven_v3) is spoken by it (it reads the language from the text) — as src/lib/tts.ts speechModel.
 const modelFor = (lang) => (catalogue.languages || []).find((l) => l.code === lang)?.model || null;
 
 async function speak(v, text) {
@@ -53,7 +53,7 @@ async function speak(v, text) {
     if (v.elevenlabs) {
         const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${v.elevenlabs}?output_format=mp3_44100_128`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'xi-api-key': process.env.ELEVENLABS_API_KEY },
-            body: JSON.stringify({ text, model_id: model || process.env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2', ...(model ? { language_code: v.lang } : {}), voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
+            body: JSON.stringify({ text, model_id: model || process.env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
         });
         if (!res.ok) throw new Error(`ElevenLabs ${res.status}`);
         return Buffer.from(await res.arrayBuffer());
