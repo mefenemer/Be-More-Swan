@@ -7,6 +7,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { MEETING_SPECIAL_CATEGORY_CLAUSE } from './meeting-minutes';
 import type { PickupPlatform } from './meeting-pickup';
+import { BOT_TILE_NOT_RECORDING_JPEG_B64, BOT_TILE_RECORDING_JPEG_B64 } from './meeting-bot-tile-data';
 
 export const MEETING_BOT_FLAG = 'meeting_bot';
 /** Plan B7: Zoom joins only once our Zoom app passes Zoom's review (OBF). No row needed: absent = off. */
@@ -280,6 +281,12 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
         bot_name: botName(i.businessName),
         ...(i.scheduled ? { join_at: i.joinAt.toISOString() } : {}),
         chat: { on_bot_join: { send_to: 'everyone', message: joinMessage(i.businessName), pin: true } },
+        // Its video tile: a still Be More Swan picture saying it is taking notes, so everyone can see what it is
+        // (scripts/gen-meeting-bot-tile.js; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
+        automatic_video_output: {
+            in_call_recording: { kind: 'jpeg', b64_data: BOT_TILE_RECORDING_JPEG_B64 },
+            in_call_not_recording: { kind: 'jpeg', b64_data: BOT_TILE_NOT_RECORDING_JPEG_B64 },
+        },
         recording_config: {
             transcript: {
                 provider: { recallai_streaming: { mode: 'prioritize_accuracy', language_code: 'auto' } },

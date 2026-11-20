@@ -199,6 +199,27 @@ await test('the Recall request: platform speaker names, Recall\'s transcript, th
     assert.deepEqual(now.metadata, { bms_bot_id: '7', bms_org_id: '58' });
 });
 
+await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {
+    const req = recallBotRequest({ meetingUrl: 'https://meet.google.com/xtt-xerh-qte', businessName: 'Marmalade', joinAt: at(0), scheduled: false, lengthLimitMinutes: 60, botRowId: 1, organisationId: 1 }) as Record<string, any>;
+    for (const state of ['in_call_recording', 'in_call_not_recording']) {
+        const out = req.automatic_video_output[state];
+        assert.equal(out.kind, 'jpeg', state);
+        const jpg = Buffer.from(out.b64_data, 'base64');
+        assert.equal(jpg.toString('base64'), out.b64_data, `${state}: standard base64, no data: prefix`);
+        assert.deepEqual([...jpg.subarray(0, 3)], [0xff, 0xd8, 0xff], `${state}: a JPEG`);
+        assert.ok(jpg.length < 1_300_000, `${state}: under 1.3 MB`);
+        // 1280×720 (16:9): read the SOF0/SOF2 frame header.
+        let i = 2, size: number[] | null = null;
+        while (i < jpg.length) {
+            const marker = jpg[i + 1], len = jpg.readUInt16BE(i + 2);
+            if (marker === 0xc0 || marker === 0xc2) { size = [jpg.readUInt16BE(i + 7), jpg.readUInt16BE(i + 5)]; break; }
+            i += 2 + len;
+        }
+        assert.deepEqual(size, [1280, 720], `${state}: 1280×720`);
+    }
+    assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
+});
+
 await test('Recall\'s transcript: one line per block with the participant\'s name; empty blocks dropped, no name = unlabelled', () => {
     const lines = recallTranscriptLines([
         { participant: { name: 'Alex Smith' }, words: [{ text: 'Morning' }, { text: 'all' }] },
