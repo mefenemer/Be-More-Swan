@@ -45,8 +45,8 @@
 //
 // Usage:
 //   npx tsx scripts/rescore-lead-prospect-type.ts --list          # inventory only, no model calls
-//   npx tsx scripts/rescore-lead-prospect-type.ts --campaign=2 --url-var=PROD_DATABASE_URL
-//   npx tsx scripts/rescore-lead-prospect-type.ts --apply --plan=prospect-gate-plan.json --url-var=PROD_DATABASE_URL
+//   npx tsx scripts/rescore-lead-prospect-type.ts --campaign=2 --url-var=DATABASE_URL_PROD
+//   npx tsx scripts/rescore-lead-prospect-type.ts --apply --plan=prospect-gate-plan.json --url-var=DATABASE_URL_PROD
 //
 // Start with --list. Without --campaign the run sweeps EVERY campaign in the database, and the
 // campaign id is not something to guess at when the next step writes to production.
