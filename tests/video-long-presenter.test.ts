@@ -58,7 +58,7 @@ check('a script too long to speak is refused with how much to cut; short videos 
     assert.strictEqual(LONG_SCRIPT_CHARS, 15_000, 'the fastest voices need ~13,000 characters for 10 minutes');
     const vp = read('src/utils/video-producer.ts');
     const refuse = vp.indexOf('const tooLong = scriptTooLong(storyboard, brief);');
-    assert.ok(refuse > 0 && refuse < vp.indexOf('const script = cleanScript(scriptOf(storyboard)'), 'refused before the voiceover is made');
+    assert.ok(refuse > 0 && refuse < vp.indexOf('const script = voiceoverScript(storyboard, brief);'), 'refused before the voiceover is made');
     assert.match(vp, /\(Couldn't find pictures\|The person who started\|The script is\)/, 'the owner\'s to fix, not a platform incident');
 });
 
