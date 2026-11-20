@@ -100,7 +100,7 @@ check('the admin page sends only after the number waiting is typed', () => {
     const html = read('admin.html');
     assert.ok(html.includes('id="view-broadcast"'));
     assert.match(html, /\{ view: 'broadcast', +icon: '📣', label: 'Broadcast', +perm: 'manage_comms_templates', +group: 'Messages' \}/);
-    assert.match(html, /send\.disabled = input\.value\.trim\(\) !== String\(n\) \|\| n === 0;/);
+    assert.match(html, /send\.disabled = input\.value\.trim\(\) !== String\(n\) \|\| n === 0 \|\| !!b\.switchedOff;/);
     assert.match(html, /runBroadcast\(e\.currentTarget, 'send', \{ key: b\.key, expected: waitingNow\(\), audience: pick\.value \}\)/);
     assert.match(html, /pick\.addEventListener\('change', \(\) => \{ input\.value = ''; sync\(\); \}\);/, 'changing the audience clears the typed number');
 });
@@ -135,6 +135,11 @@ check('audience (owner, 2026-11-20): owners or everyone, picked per send, never 
     const worker = read('netlify/functions/admin-broadcast-background.ts');
     assert.match(worker, /if \(!audience\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
     assert.match(worker, /recipients = await pendingRecipients\(db, def\.key, audience\);/);
+    assert.match(util, /export async function pendingRecipients\(db: Db, key: string, audience: BroadcastAudience\): Promise/, 'no default: every caller says who');
+    // Review of #788: two sends of one notice at once must not reach anyone twice.
+    assert.ok(worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') > 0
+        && worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') < worker.indexOf('const ok = await createNotification('), 'checked again just before each send');
+    assert.match(read('admin.html'), /b\.switchedOff \?/, 'a switched-off notice says so on the card');
 });
 
 check('the Broadcast page previews the copy that will go out, saved Admin edits included', () => {

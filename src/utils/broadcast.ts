@@ -85,7 +85,7 @@ export function emailsGoToCustomers(headers: Record<string, string | undefined> 
 export interface Recipient { id: number; email: string; firstName: string | null }
 
 /** Everyone who should get this notice and hasn't yet — or, for 'owners', only workspace owners. */
-export async function pendingRecipients(db: Db, key: string, audience: BroadcastAudience = 'everyone'): Promise<Recipient[]> {
+export async function pendingRecipients(db: Db, key: string, audience: BroadcastAudience): Promise<Recipient[]> {
     const rows = await db.execute<{ id: number; email: string; first_name: string | null }>(sql`
         SELECT DISTINCT u.id, u.email, u.first_name
           FROM users u
@@ -98,6 +98,15 @@ export async function pendingRecipients(db: Db, key: string, audience: Broadcast
          ORDER BY u.id`);
     return (rows as unknown as Array<{ id: number; email: string; first_name: string | null }>)
         .map((r) => ({ id: Number(r.id), email: r.email, firstName: r.first_name }));
+}
+
+/**
+ * Has this person got the notice already? Read again just before each send: two sends of one notice can run at once
+ * (owners, then everyone, before the first finishes), and the list each run read at its start would repeat people.
+ */
+export async function alreadyHas(db: Db, userId: number, key: string): Promise<boolean> {
+    const rows = await db.execute<{ n: number }>(sql`SELECT 1 AS n FROM notifications WHERE user_id = ${userId} AND type = ${key} LIMIT 1`);
+    return (rows as unknown as unknown[]).length > 0;
 }
 
 /** How many already have it. */

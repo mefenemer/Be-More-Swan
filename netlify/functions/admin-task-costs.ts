@@ -107,11 +107,11 @@ export default withLambda(async (event) => {
             const open = await openChange(db);
             const changes = await listChanges(db);
             const decorated = await Promise.all(changes.map(async (c) => {
-                if (c.status === 'draft') return { ...c, waiting: (await pendingRecipients(db, noticeKey(c.id))).length, ...(await preview(c)) };
+                if (c.status === 'draft') return { ...c, waiting: (await pendingRecipients(db, noticeKey(c.id), 'everyone')).length, ...(await preview(c)) };
                 if (c.status !== 'announced') return c;
                 return {
                     ...c,
-                    waiting: (await pendingRecipients(db, noticeKey(c.id))).length,
+                    waiting: (await pendingRecipients(db, noticeKey(c.id), 'everyone')).length,
                     sent: await alreadySentCount(db, noticeKey(c.id)),
                     inForce: c.effectiveDate <= now.toISOString().slice(0, 10),
                     acceptance: await acceptanceStats(db, c),
@@ -203,7 +203,7 @@ export default withLambda(async (event) => {
 
         if (resource === 'announce') {
             if (change.status !== 'draft') return json(409, { error: 'This change has already been announced.' });
-            const waiting = (await pendingRecipients(db, noticeKey(id))).length;
+            const waiting = (await pendingRecipients(db, noticeKey(id), 'everyone')).length;
             if (body.expected !== waiting) return json(409, { error: `The number of customers has changed to ${waiting}. Check it again before announcing.`, waiting });
             // Checked again here: days have passed, or a cost moved, since the draft was saved.
             const costs = await getTaskCosts();
@@ -235,7 +235,7 @@ export default withLambda(async (event) => {
 
         if (resource === 'resend') {
             if (change.status !== 'announced') return json(409, { error: 'Only an announced change can be sent again.' });
-            const waiting = (await pendingRecipients(db, noticeKey(id))).length;
+            const waiting = (await pendingRecipients(db, noticeKey(id), 'everyone')).length;
             if (body.expected !== waiting) return json(409, { error: `The number waiting has changed to ${waiting}. Check it again before sending.`, waiting });
             if (waiting === 0) return json(400, { error: 'Everyone already has this notice.' });
             const failed = await startSend(id, 'announced');

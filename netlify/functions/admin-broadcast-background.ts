@@ -14,7 +14,7 @@ import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
-import { broadcastDef, pendingRecipients, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
+import { alreadyHas, broadcastDef, pendingRecipients, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
 import { cancelledNoticeKey, cancelledRecipients, noticeContext, noticeKey, readChange } from '../../src/utils/task-cost-changes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -55,7 +55,7 @@ export default withLambda(async (event: HandlerEvent) => {
         sentMark = cancelled ? cancelledNoticeKey(change.id) : noticeKey(change.id);
         context = noticeContext(change, resolveBaseUrl(event.headers) || 'https://bemoreswan.com');
         metadata = { taskCostChangeId: change.id };
-        recipients = cancelled ? await cancelledRecipients(db, change.id) : await pendingRecipients(db, sentMark);
+        recipients = cancelled ? await cancelledRecipients(db, change.id) : await pendingRecipients(db, sentMark, 'everyone');
     } else {
         const def = broadcastDef(body.key);
         if (!def) return { statusCode: 400, body: 'key required.' };
@@ -71,6 +71,7 @@ export default withLambda(async (event: HandlerEvent) => {
     for (let i = 0; i < recipients.length; i++) {
         if (Date.now() - startedAt > STOP_STARTING_AFTER_MS) { left = recipients.length - i; break; }
         const r = recipients[i];
+        if (await alreadyHas(db, r.id, sentMark)) continue;   // another send of this notice reached them since the list was read
         const ok = await createNotification(db, templateKey, { userId: r.id, typeOverride: sentMark === templateKey ? undefined : sentMark, context, metadata: { ...metadata, broadcast: sentMark, emailed: live } });
         if (!ok) continue;   // no "sent" mark → no email, and the next run tries this person again
         inApp++;

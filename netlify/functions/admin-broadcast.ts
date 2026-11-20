@@ -17,7 +17,7 @@
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users } from '../../db/schema';
+import { users, notificationTemplates } from '../../db/schema';
 import { requirePermission, hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { createNotification, renderNotification } from '../../src/utils/notify';
@@ -29,6 +29,15 @@ import { BROADCASTS, AUDIENCE_LABELS, BROADCAST_AUDIENCES, broadcastDef, pending
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
+
+/** Is this notice's in-app template switched off in Admin → Notification Templates? False if there is no saved row. */
+async function inAppSwitchedOff(key: string): Promise<boolean> {
+    try {
+        const [row] = await getDb().select({ isActive: notificationTemplates.isActive }).from(notificationTemplates)
+            .where(eq(notificationTemplates.templateKey, key)).limit(1);
+        return row ? row.isActive === false : false;
+    } catch { return false; }
+}
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -78,6 +87,8 @@ export default withLambda(async (event) => {
                 waiting,
                 audiences: BROADCAST_AUDIENCES.map((a) => ({ key: a, label: AUDIENCE_LABELS[a] })),
                 alreadySent: await alreadySentCount(db, b.key),
+                // Switched off in Notification Templates: a send writes nothing and emails nobody, so the page says so.
+                switchedOff: await inAppSwitchedOff(b.key),
             });
         }
         return json(200, { broadcasts: out, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>), you: admin.email });
