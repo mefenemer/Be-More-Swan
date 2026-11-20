@@ -402,7 +402,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     try {
       note('Saving your recording to My Content…');
       const a = await window.FootageReader.upload(file, { durationS: meta && meta.durationS });
-      await window.FootageReader.prepare(a.id, file, { onProgress: (t) => note(t.replace(/your video/g, 'your recording')) });
+      await window.FootageReader.prepare(a.id, file, { durationS: meta && meta.durationS, onProgress: (t) => note(t.replace(/your video/g, 'your recording')) });
       state.pendingScreens.add(a.id);
       const f = form();
       const chosen = !!(f && f.elements.presenterId && f.elements.presenterId.value);
@@ -419,7 +419,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
    * purpose 'footage' = a recording in their own voice for "Use my own footage" (microphone ticked).
    */
   function recordScreen(purpose) {
-    if (!window.ScreenRecorder) return;
+    if (!window.ScreenRecorder) { window.showToast?.('The screen recorder didn’t load. Reload the page and try again.', { icon: '⚠️', duration: 6000 }); return; }
+    if (purpose === 'presenter' && !state.aiPresenter) {
+      // A card from when presenters were on: say what opens instead of silently switching (review of #792).
+      window.showToast?.('AI presenters aren’t on for your workspace, so this records for “Use my own footage”, with your voice.', { icon: 'ℹ️', duration: 7000 });
+    }
     if (purpose === 'presenter' && state.aiPresenter) {
       if (!state.form) { state.form = true; state.footage = null; render(); window.VoicePicker?.load().then(paintFormVoice).catch(() => {}); }
       host()?.querySelector('[data-vid-form] [data-vid-screens-note]')?.closest('div')?.scrollIntoView({ block: 'nearest' });
@@ -427,7 +431,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       return;
     }
     if (!state.footage) openFootageForm();
-    window.ScreenRecorder.open({ mic: true, onDone: (file, meta) => { if (file) addFootageFiles([file], meta); } });
+    // Never record ten minutes that can't be added (review of #792).
+    if (state.footage.picked.size >= MAX_FOOTAGE) { footageMsg(`Up to ${MAX_FOOTAGE} videos at a time: untick one first, then record.`); return; }
+    window.ScreenRecorder.open({ mic: true, onDone: (file, meta) => {
+      if (!file) return;
+      if (!state.footage) openFootageForm();   // the form was closed while recording
+      addFootageFiles([file], meta);
+    } });
   }
 
   function formHtml() {
@@ -603,12 +613,17 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </form>`;
   }
 
+  /** A message under the footage form. */
+  function footageMsg(text) {
+    const msg = host()?.querySelector('[data-vid-footage-form] [data-vid-form-msg]');
+    if (msg) { msg.textContent = text; msg.classList.remove('hidden'); } else window.showToast?.(text, { icon: '⚠️', duration: 6000 });
+  }
   async function addFootageFiles(files, meta) {
     const f = state.footage;
     if (!f) return;
     const msg = host()?.querySelector('[data-vid-footage-form] [data-vid-form-msg]');
     for (const file of files) {
-      if (f.picked.size >= MAX_FOOTAGE) break;
+      if (f.picked.size >= MAX_FOOTAGE) { footageMsg(`Up to ${MAX_FOOTAGE} videos at a time: “${file.name}” wasn’t added. Untick one and add it again.`); break; }
       f.progress = `Uploading ${file.name}…`; paintProgress();
       try {
         const a = await window.FootageReader.upload(file, meta);

@@ -39,6 +39,10 @@
       ? 'Recording your screen works on a computer, in Chrome, Edge, Firefox or Safari. On a phone or tablet, use its own screen recorder, then add the video.'
       : 'This browser can’t record your screen. Use Chrome, Edge, Firefox or Safari on a computer, or record with another app and add the video.';
   }
+  /** Only Chrome and Edge hand over a shared tab's or screen's sound; Firefox and Safari share the picture only. */
+  function canShareSound() {
+    return /Chrome\/|Edg\//.test(navigator.userAgent || '') && !/Firefox\//.test(navigator.userAgent || '');
+  }
   function pickMimeType(withSound) {
     for (const t of withSound ? WITH_SOUND : NO_SOUND) {
       if (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(t)) return t;
@@ -81,7 +85,7 @@
         </div>
         <div data-choices style="display:grid;gap:4px;margin-top:10px;font-size:13px;color:#374151;">
           <label style="display:flex;align-items:flex-start;gap:6px;"><input type="checkbox" data-mic${o.mic ? ' checked' : ''} style="margin-top:3px;"> <span>Record my voice too <span style="color:#6b7280;font-size:12px;">— from your microphone, to talk viewers through it yourself</span></span></label>
-          <label style="display:flex;align-items:flex-start;gap:6px;"><input type="checkbox" data-sound style="margin-top:3px;"> <span>Keep the screen’s sound <span style="color:#6b7280;font-size:12px;">— only for a demo with sound; it also records notification sounds</span></span></label>
+          <label data-sound-row style="display:${canShareSound() ? 'flex' : 'none'};align-items:flex-start;gap:6px;"><input type="checkbox" data-sound style="margin-top:3px;"> <span>Keep the screen’s sound <span style="color:#6b7280;font-size:12px;">— only for a demo with sound; it also records notification sounds</span></span></label>
           <label style="display:block;margin-top:4px;"><span style="display:block;font-size:12px;font-weight:700;color:#4b5563;margin-bottom:2px;">What’s in this recording?</span>
             <input data-name maxlength="80" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;" placeholder="e.g. Booking a class in our app"></label>
           <span style="font-size:11px;color:#6b7280;">The name helps your Video Producer choose which part to show when. Up to 10 minutes.</span>
@@ -132,6 +136,7 @@
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return voice;   // a voice beats notification sounds
       audioCtx = new Ctx();
+      audioCtx.resume().catch(() => {});   // made after awaits: never left suspended (review of #792)
       const out = audioCtx.createMediaStreamDestination();
       audioCtx.createMediaStreamSource(new MediaStream([screenSound])).connect(out);
       audioCtx.createMediaStreamSource(new MediaStream([voice])).connect(out);
@@ -173,7 +178,25 @@
         return;
       }
       if (closed) { stopTracks(); return; }
+      try {
+        begin(keepSound);
+      } catch {
+        // e.g. "Stop sharing" pressed while the microphone prompt was open: the share has already ended.
+        if (timer) clearInterval(timer);
+        recorder = null;
+        stopTracks();
+        show(live, false); show(empty, true); show(stopBtn, false); show(startBtn, true);
+        q('[data-choices]').querySelectorAll('input').forEach((i) => { i.disabled = false; });
+        statusEl.textContent = 'Ready';
+        say('The recording couldn’t start (was the sharing stopped?). Press “Choose what to share” to try again.', true);
+        startBtn.disabled = false;
+      }
+    }
+
+    /** Record what was shared. Throws when it can't start; start() tidies up. */
+    function begin(keepSound) {
       const video = display.getVideoTracks()[0];
+      if (!video || video.readyState === 'ended') throw new Error('share ended');
       if (!keepSound) display.getAudioTracks().forEach((t) => { t.stop(); display.removeTrack(t); });
       const sound = soundTrack();
       withVoice = !!mic;
@@ -187,7 +210,11 @@
         chunks.push(e.data); bytes += e.data.size;
         if (bytes >= MAX_BYTES) { stop(); statusEl.textContent = 'Stopped: the recording reached the size limit'; }
       };
+      recorder.onerror = () => { stop(); };
       recorder.onstop = () => {
+        // The recorder can stop by itself (every track ended) before stop() runs: tidy the timer here too.
+        if (timer) { clearInterval(timer); timer = null; }
+        if (statusEl.textContent === 'Recording') statusEl.textContent = 'Recorded — watch it back';
         if (!durationS) durationS = (Date.now() - startedAt) / 1000;
         blob = new Blob(chunks, { type: recorder.mimeType || mime || 'video/webm' });
         stopTracks();
@@ -211,6 +238,7 @@
       statusEl.textContent = 'Recording';
       say('Recording. Press “Stop recording” here, or “Stop sharing” in your browser, when you’re done.');
       timer = setInterval(() => {
+        if (!recorder || recorder.state !== 'recording') return;
         const s = (Date.now() - startedAt) / 1000;
         timeEl.textContent = fmtTime(s);
         if (s >= MAX_SECONDS) { stop(); statusEl.textContent = `Stopped at ${fmtTime(MAX_SECONDS)}, the longest a recording can be`; }

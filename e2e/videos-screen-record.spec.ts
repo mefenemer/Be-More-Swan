@@ -147,3 +147,25 @@ test('on a tablet the reason shows instead of the button', async ({ page, api, p
     await expect(page.locator('[data-vid-footage-form]')).toContainText('On a phone or tablet, use its own screen recorder');
     expect(pageErrors).toEqual([]);
 });
+
+test('a share that has already ended leaves the recorder ready to try again (review of #792)', async ({ page, api, pageErrors }) => {
+    await page.addInitScript(() => {
+        (navigator.mediaDevices as MediaDevices & { getDisplayMedia: unknown }).getDisplayMedia = async () => {
+            const s = document.createElement('canvas').captureStream(30);
+            s.getTracks().forEach((t) => t.stop());   // "Stop sharing" pressed straight away
+            return s;
+        };
+    });
+    stubApi(api);
+    await page.route('**/e2e-videos.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+    await page.goto('/e2e-videos.html');
+    await page.locator('[data-vid-act="footage"]').first().click();
+    await page.locator('[data-vid-act="record-screen"]').click();
+    const dlg = page.locator('[data-screen-recorder]');
+    await dlg.locator('[data-mic]').uncheck();
+    await dlg.locator('[data-start]').click();
+    await expect(dlg.locator('[data-hint]')).toContainText('couldn’t start');
+    await expect(dlg.locator('[data-start]')).toBeEnabled();
+    await expect(dlg.locator('[data-status]')).toHaveText('Ready');
+    expect(pageErrors).toEqual([]);
+});

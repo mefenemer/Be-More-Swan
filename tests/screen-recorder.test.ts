@@ -147,4 +147,25 @@ check('the chat can start it: card registered, prompt names it, manifest lists i
     assert.ok(GENERATED_CHAT_MANIFEST.uiCards.includes('screen_recording_proposal'));
 });
 
+check('review of #792: a failed start tidies up; a recorder that stops itself stops the clock', () => {
+    const start = between(SRC, 'async function start()', 'function begin(');
+    assert.match(start, /try \{\n\s+begin\(keepSound\);\n\s+\} catch \{[\s\S]*stopTracks\(\);[\s\S]*startBtn\.disabled = false;/);
+    const begin = between(SRC, 'function begin(', 'startBtn.addEventListener');
+    assert.match(begin, /video\.readyState === 'ended'\) throw/);
+    assert.match(between(begin, 'recorder.onstop', 'recorder.start('), /clearInterval\(timer\)/);
+    assert.match(begin, /recorder\.onerror = /);
+    assert.match(SRC, /audioCtx\.resume\(\)/);
+    // The screen's sound is only offered where the browser hands it over.
+    assert.match(SRC, /data-sound-row style="display:\$\{canShareSound\(\) \? 'flex' : 'none'\}/);
+});
+
+check('review of #792: never record what can’t be added; the reader takes the timed length too', () => {
+    const rec = between(VIDEOS, 'function recordScreen(purpose)', '\n  }\n');
+    assert.ok(rec.indexOf('picked.size >= MAX_FOOTAGE') < rec.indexOf('mic: true'), 'the limit is checked before recording');
+    assert.match(rec, /AI presenters aren’t on for your workspace/);
+    assert.match(between(VIDEOS, 'async function addFootageFiles', 'function paintProgress'), /wasn’t added/);
+    assert.match(READER, /grabFrames\(v, onProgress, durationS\)/);
+    assert.match(between(VIDEOS, 'async function saveScreenRecording', 'function recordScreen('), /prepare\(a\.id, file, \{ durationS: meta && meta\.durationS/);
+});
+
 console.log(`\n${passed} passed`);

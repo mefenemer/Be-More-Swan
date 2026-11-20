@@ -10,7 +10,8 @@
  *     the video is silent
  * then hands them to netlify/functions/footage.ts (the WAV goes straight to storage by a signed PUT).
  *
- *   window.FootageReader.prepare(assetId, source, { onProgress }) → Promise<void>
+ *   window.FootageReader.prepare(assetId, source, { onProgress, durationS? }) → Promise<void>
+ *     durationS: a recorder's timed length, used only when the file reports none
  *     source: a File (just uploaded — no download needed) or the video's URL (a library video). A URL
  *     is downloaded ONCE, with the cache skipped, and read from memory. Not straight into a <video>:
  *     the library's thumbnails load the SAME signed URL without CORS (the URL is kept stable so the
@@ -60,8 +61,8 @@
     return v;
   }
 
-  async function grabFrames(v, onProgress) {
-    const times = frameTimes(v.duration);
+  async function grabFrames(v, onProgress, durationS) {
+    const times = frameTimes(durationS || v.duration);
     const scale = Math.min(1, FRAME_PX / Math.max(v.videoWidth || FRAME_PX, v.videoHeight || FRAME_PX));
     const c = document.createElement('canvas');
     c.width = Math.max(2, Math.round((v.videoWidth || FRAME_PX) * scale));
@@ -158,10 +159,12 @@
     try {
       onProgress?.('Opening your video…');
       const v = await openVideo(src);
-      const durationS = v.duration;
+      // A WebM straight from MediaRecorder may still report no length: use the recorder's timed one (opts.durationS).
+      const timed = Number(opts && opts.durationS);
+      const durationS = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : (timed > 0 ? timed : v.duration);
       if (!(durationS > 0.5)) throw new Error('That video is too short to use.');
       if (durationS > MAX_S + 1) throw new Error('That video is longer than 10 minutes. Trim it first, or pick the part you want.');
-      const frames = await grabFrames(v, onProgress);
+      const frames = await grabFrames(v, onProgress, durationS);
       const width = v.videoWidth || null, height = v.videoHeight || null;
       v.removeAttribute('src'); v.load();
       onProgress?.('Listening to your video… 80%');

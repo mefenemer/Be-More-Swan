@@ -2006,9 +2006,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         tab.click();
         window.AssistantVideos.recordScreen(purpose);
         say('The recorder is open on the Videos tab.');
-      } else {
+      } else if (window.ScreenRecorder || !window.AssistantVideos) {
         try { sessionStorage.setItem('bms-screen-record', purpose); } catch { /* private window */ }
-        say('Open your Video Producer’s Videos tab: the recorder opens there.');
+        say('Open your Video Producer’s Videos tab on a computer: the recorder opens there.');
+      } else {
+        say('Open your Video Producer’s Videos tab and press “Record my screen” there.');
       }
     });
     return el;
