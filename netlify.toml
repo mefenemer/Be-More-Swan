@@ -1263,6 +1263,12 @@ node_bundler = "esbuild"
 [functions.make-carousel]
   timeout = 26
 
+# The Messages tab (social-messages.ts): Send waits on a Page token (≤5s) and Meta's Send API (≤8s)
+# inside one transaction, and a draft gives the model 20s. Cut off at the default 10s, a reply Meta had
+# already delivered would go unrecorded and the Send button would still be there.
+[functions.social-messages]
+  timeout = 26
+
 # Epic 1, US1: synchronous AI image generation submits to Fal and polls until the images
 # are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
 # instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.

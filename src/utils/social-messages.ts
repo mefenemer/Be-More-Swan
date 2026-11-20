@@ -50,7 +50,7 @@ export type ConversationStatus = typeof CONVERSATION_STATUSES[number];
 
 /** Longest reply each platform takes. Messenger: 2,000 characters; Instagram: 1,000. */
 export const MAX_REPLY_CHARS: Record<MessagingPlatform, number> = { facebook: 2000, instagram: 1000 };
-/** Conversations listed on the tab (newest message first). */
+/** Conversations listed on the tab per status (newest message first). The chips show full counts. */
 export const LIST_CONVERSATIONS = 100;
 /** Messages shown per conversation on the tab (the most recent). */
 export const THREAD_MESSAGES = 20;
@@ -255,9 +255,10 @@ async function messagesFor(db: Db, conversationIds: number[], perConversation: n
 export async function listConversations(db: Db, organisationId: number, assistantId: number, opts: { lookUpNames?: boolean } = {}) {
     const scope = and(eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId));
     const [rows, counts, connection] = await Promise.all([
-        db.select().from(socialConversations).where(scope)
+        // Per status, so a long Replied history can never push a waiting conversation off the tab.
+        Promise.all(CONVERSATION_STATUSES.map((st) => db.select().from(socialConversations).where(and(scope, eq(socialConversations.status, st)))
             .orderBy(desc(sql`coalesce(${socialConversations.lastInboundAt}, ${socialConversations.lastOutboundAt}, ${socialConversations.createdAt})`))
-            .limit(LIST_CONVERSATIONS),
+            .limit(LIST_CONVERSATIONS))).then((lists) => lists.flat()),
         db.select({ status: socialConversations.status, n: sql<number>`count(*)::int` }).from(socialConversations).where(scope).groupBy(socialConversations.status),
         messagingConnectionState(db, organisationId),
     ]);
@@ -407,7 +408,8 @@ export async function callSendApi(
  *
  * ⚠️ The 24-hour window is checked against the database clock right before the call. A transaction-
  * scoped advisory lock per conversation stops the tab and the chat card (or a double click) sending
- * at the same moment; the same text again within a minute is refused as a double send.
+ * at the same moment; the same text as the latest reply, with nothing new from them since, is refused
+ * as a repeat (isRepeatSend) — whenever it was sent.
  */
 export async function sendReply(
     db: Db, organisationId: number, assistantId: number, id: number, text: string | null, userId: number | null,
