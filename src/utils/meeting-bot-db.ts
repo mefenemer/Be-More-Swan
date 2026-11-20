@@ -169,9 +169,12 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, i.organisationId)).limit(1);
     let recallBotId: string;
     try {
+        // Loaded here, not at the top: recall-webhook imports this file and never needs the pictures (review of #794).
+        const tile = await import('./meeting-bot-tile-data');
         recallBotId = await createRecallBot(region, recallBotRequest({
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
+            videoTile: { recordingJpegB64: tile.BOT_TILE_RECORDING_JPEG_B64, notRecordingJpegB64: tile.BOT_TILE_NOT_RECORDING_JPEG_B64 },
         }));
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';

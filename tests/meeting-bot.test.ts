@@ -15,6 +15,7 @@ import {
 } from '../src/utils/meeting-pickup';
 import { MEETING_SPECIAL_CATEGORY_CLAUSE, buildMeetingMinutesPrompt, FORM_CHANNEL_BLOCK } from '../src/utils/meeting-minutes';
 import { BOT_CHANNEL_BLOCK } from '../src/utils/meeting-bot';
+import { BOT_TILE_NOT_RECORDING_JPEG_B64, BOT_TILE_RECORDING_JPEG_B64 } from '../src/utils/meeting-bot-tile-data';
 import { specialCategoryClauseFor, withSpecialCategoryClause } from '../src/utils/special-category-clause';
 import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 
@@ -200,7 +201,9 @@ await test('the Recall request: platform speaker names, Recall\'s transcript, th
 });
 
 await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {
-    const req = recallBotRequest({ meetingUrl: 'https://meet.google.com/xtt-xerh-qte', businessName: 'Marmalade', joinAt: at(0), scheduled: false, lengthLimitMinutes: 60, botRowId: 1, organisationId: 1 }) as Record<string, any>;
+    const base = { meetingUrl: 'https://meet.google.com/xtt-xerh-qte', businessName: 'Marmalade', joinAt: at(0), scheduled: false, lengthLimitMinutes: 60, botRowId: 1, organisationId: 1 };
+    assert.equal((recallBotRequest(base) as Record<string, any>).automatic_video_output, undefined, 'no tile passed, no field');
+    const req = recallBotRequest({ ...base, videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64, notRecordingJpegB64: BOT_TILE_NOT_RECORDING_JPEG_B64 } }) as Record<string, any>;
     for (const state of ['in_call_recording', 'in_call_not_recording']) {
         const out = req.automatic_video_output[state];
         assert.equal(out.kind, 'jpeg', state);
@@ -218,6 +221,13 @@ await test('the bot\'s video tile: a JPEG for recording and one for not recordin
         assert.deepEqual(size, [1280, 720], `${state}: 1280×720`);
     }
     assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
+});
+
+await test('the tile pictures load only where a bot is sent: meeting-bot.ts never imports them; sendMeetingBot imports them lazily', () => {
+    assert.ok(!read('src/utils/meeting-bot.ts').includes("from './meeting-bot-tile-data'"), 'not in meeting-bot.ts (recall-webhook loads it)');
+    const db = read('src/utils/meeting-bot-db.ts');
+    assert.ok(!db.includes("from './meeting-bot-tile-data'"), 'no static import in meeting-bot-db.ts');
+    assert.ok(db.includes("await import('./meeting-bot-tile-data')"), 'dynamic import where the bot is sent');
 });
 
 await test('Recall\'s transcript: one line per block with the participant\'s name; empty blocks dropped, no name = unlabelled', () => {

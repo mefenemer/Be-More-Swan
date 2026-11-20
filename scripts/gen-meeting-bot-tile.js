@@ -19,6 +19,8 @@ const ROOT = path.join(__dirname, '..');
 const LOGO = path.join(ROOT, 'scripts/assets/BeMoreSwan_SwanAI-master.png');
 GlobalFonts.registerFromPath(path.join(ROOT, 'site-fonts/inter.woff2'), 'Inter');
 
+// Recall's limit for the JPEG itself (docs: "The maximum size is 1.3MB"); ours are ~50 KB.
+const MAX_JPEG_BYTES = 1_300_000;
 const W = 2560, H = 1440;
 const BG = '#16111f';       // deep plum, close to black, so the pink swan stands out like a webcam tile
 const PINK = '#d82173';     // the swan in the logo
@@ -31,6 +33,13 @@ const STATES = {
     recording: { line: 'Taking notes & recording', dot: RED },
     'not-recording': { line: 'In the call · not recording', dot: GREY },
 };
+
+// Google Meet crops tiles (Recall: keep to the safe zone). Everything must fit a centred SQUARE (H wide), with a margin,
+// so nothing is cut off on a square tile. Throws rather than draw a picture that would be cropped.
+const SAFE_WIDTH = H - 40;
+function fitsSafe(what, width) {
+    if (width > SAFE_WIDTH) throw new Error(`"${what}" is ${Math.round(width)} px wide; the square safe zone is ${SAFE_WIDTH} px`);
+}
 
 function centredRow(ctx, parts, y) {
     // parts: [{ draw(x) , width }] laid out side by side, centred.
@@ -47,7 +56,7 @@ async function draw(state) {
     ctx.fillRect(0, 0, W, H);
 
     // A soft pink glow behind the logo — one wide radial, kept faint (Recall: minimal gradients).
-    const glow = ctx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.4, W * 0.36);
+    const glow = ctx.createRadialGradient(W / 2, H * 0.38, 0, W / 2, H * 0.38, W * 0.32);
     glow.addColorStop(0, 'rgba(216,33,115,0.22)');
     glow.addColorStop(1, 'rgba(216,33,115,0)');
     ctx.fillStyle = glow;
@@ -55,27 +64,29 @@ async function draw(state) {
 
     // Logo, centred.
     const logo = await loadImage(LOGO);
-    const lh = 340, lw = Math.round((logo.width / logo.height) * lh);
-    ctx.drawImage(logo, (W - lw) / 2, 300, lw, lh);
+    const lh = 260, lw = Math.round((logo.width / logo.height) * lh);
+    ctx.drawImage(logo, (W - lw) / 2, 290, lw, lh);
+    fitsSafe('logo', lw);
 
-    // Wordmark: "Be More Swan" in white, "Note Taker" in pink, one line.
+    // Name on two lines, so it fits when Google Meet crops the tile to a square: "Be More Swan" white, "Note Taker" pink.
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '800 132px Inter';
-    const a = 'Be More Swan ', b = 'Note Taker';
-    const aw = ctx.measureText(a).width, bw = ctx.measureText(b).width;
-    centredRow(ctx, [
-        { width: aw, draw: (x, y) => { ctx.fillStyle = WHITE; ctx.fillText(a, x, y); } },
-        { width: bw, draw: (x, y) => { ctx.fillStyle = PINK; ctx.fillText(b, x, y); } },
-    ], 860);
+    ctx.font = '800 140px Inter';
+    for (const [text, colour, y] of [['Be More Swan', WHITE, 730], ['Note Taker', PINK, 890]]) {
+        const w = ctx.measureText(text).width;
+        fitsSafe(text, w);
+        ctx.fillStyle = colour;
+        ctx.fillText(text, (W - w) / 2, y);
+    }
 
     // Status line with a dot, like a "REC" light.
-    ctx.font = '700 104px Inter';
+    ctx.font = '700 100px Inter';
     const tw = ctx.measureText(s.line).width;
-    const r = 30, gap = 40;
+    const r = 28, gap = 36;
+    fitsSafe(s.line, r * 2 + gap + tw);
     centredRow(ctx, [
-        { width: r * 2 + gap, draw: (x, y) => { ctx.fillStyle = s.dot; ctx.beginPath(); ctx.arc(x + r, y - 37, r, 0, Math.PI * 2); ctx.fill(); } },
+        { width: r * 2 + gap, draw: (x, y) => { ctx.fillStyle = s.dot; ctx.beginPath(); ctx.arc(x + r, y - 36, r, 0, Math.PI * 2); ctx.fill(); } },
         { width: tw, draw: (x, y) => { ctx.fillStyle = MUTED; ctx.fillText(s.line, x, y); } },
-    ], 1060);
+    ], 1080);
 
     // Scale down once to 1280×720 with high-quality smoothing.
     const out = createCanvas(1280, 720);
@@ -92,7 +103,7 @@ async function draw(state) {
     const b64 = {};
     for (const state of Object.keys(STATES)) {
         const jpg = await draw(state);
-        if (jpg.length > 1_000_000) throw new Error(`${state}.jpg is ${jpg.length} bytes; Recall's limit is 1.3 MB`);
+        if (jpg.length > MAX_JPEG_BYTES) throw new Error(`${state}.jpg is ${jpg.length} bytes; Recall's limit is ${MAX_JPEG_BYTES} bytes (1.3 MB)`);
         fs.writeFileSync(path.join(dir, `${state}.jpg`), jpg);
         b64[state] = jpg.toString('base64');
         console.log(`${state}.jpg ${(jpg.length / 1024).toFixed(0)} KB`);
