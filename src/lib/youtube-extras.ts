@@ -103,10 +103,12 @@ export function readCaptionLines(raw: unknown): CaptionLine[] {
 // ── Translation languages ─────────────────────────────────────────────────────────────────────────
 
 /** The languages captions can be translated into: BCP-47 code (what YouTube's caption track takes) → name. */
+// English is a target too: a video spoken in Welsh (or any voice language) gets English captions (plan A4, 2026-11-20).
+// Every voice language (voice-catalogue.json) is here, so a video's spoken language always has a name (test pins it).
 export const CAPTION_LANGUAGES: Record<string, string> = {
-    cy: 'Welsh', ga: 'Irish', fr: 'French', es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese',
+    en: 'English', cy: 'Welsh', ga: 'Irish', fr: 'French', es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese',
     nl: 'Dutch', pl: 'Polish', ro: 'Romanian', sv: 'Swedish', da: 'Danish', no: 'Norwegian', fi: 'Finnish',
-    el: 'Greek', tr: 'Turkish', ar: 'Arabic', ur: 'Urdu', hi: 'Hindi', pa: 'Punjabi', bn: 'Bengali',
+    el: 'Greek', cs: 'Czech', tr: 'Turkish', ar: 'Arabic', ur: 'Urdu', hi: 'Hindi', pa: 'Punjabi', bn: 'Bengali',
     'zh-Hans': 'Chinese (Simplified)', ja: 'Japanese', ko: 'Korean', uk: 'Ukrainian',
 };
 export const MAX_TRANSLATIONS = 10;

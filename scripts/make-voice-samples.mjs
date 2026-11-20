@@ -13,7 +13,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { voices } = JSON.parse(readFileSync(join(root, 'src/public/voice-catalogue.json'), 'utf8'));
+const { voices, languages } = JSON.parse(readFileSync(join(root, 'src/public/voice-catalogue.json'), 'utf8'));
+// A language with a `model` (Welsh, Norwegian: eleven_v3) is spoken by it, told the language — as src/lib/tts.ts speechModel.
+const modelFor = (lang) => languages.find((l) => l.code === lang)?.model || null;
 const out = join(root, 'audio/voices');
 mkdirSync(out, { recursive: true });
 
@@ -29,15 +31,24 @@ const LINE = {
     ar: (n) => `مرحبًا، أنا ${n}. هكذا يمكن أن تبدو مقاطع الفيديو الخاصة بك: واضحة وطبيعية وجاهزة للمشاركة.`,
     hi: (n) => `नमस्ते, मैं ${n} हूँ। आपके वीडियो ऐसे सुनाई दे सकते हैं: साफ़, स्वाभाविक और शेयर करने के लिए तैयार।`,
     ja: (n) => `こんにちは、${n}です。あなたの動画はこんなふうに聞こえます。はっきりと自然で、すぐにシェアできます。`,
+    cy: (n) => `Helo, ${n} ydw i. Dyma sut gallai eich fideos swnio: yn glir, yn naturiol ac yn barod i'w rhannu.`,
+    sv: (n) => `Hej, jag heter ${n}. Så här kan dina videor låta: tydliga, naturliga och redo att delas.`,
+    da: (n) => `Hej, jeg hedder ${n}. Sådan kan dine videoer lyde: klare, naturlige og parate til at blive delt.`,
+    no: (n) => `Hei, jeg heter ${n}. Slik kan videoene dine høres ut: klare, naturlige og klare til å deles.`,
+    fi: (n) => `Hei, olen ${n}. Tältä videosi voisivat kuulostaa: selkeiltä, luonnollisilta ja valmiilta jaettavaksi.`,
+    el: (n) => `Γεια σας, με λένε ${n}. Έτσι θα μπορούσαν να ακούγονται τα βίντεό σας: καθαρά, φυσικά και έτοιμα για κοινοποίηση.`,
+    cs: (n) => `Dobrý den, jmenuji se ${n}. Takhle by mohla znít vaše videa: jasně, přirozeně a připravená ke sdílení.`,
+    ro: (n) => `Bună, sunt ${n}. Așa ar putea suna videoclipurile tale: clare, naturale și gata de distribuit.`,
 };
 
 const force = new Set((process.argv.find((a) => a.startsWith('--force='))?.slice(8) || '').split(',').filter(Boolean));
 
-async function eleven(text, voiceId) {
+async function eleven(text, voiceId, lang) {
+    const model = modelFor(lang);
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_64`, {
         method: 'POST',
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-        body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
+        body: JSON.stringify({ text, model_id: model || 'eleven_multilingual_v2', ...(model ? { language_code: lang } : {}), voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
     });
     if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return Buffer.from(await res.arrayBuffer());
@@ -60,7 +71,7 @@ for (const v of voices) {
     if (existsSync(file) && !force.has(v.id)) continue;
     const text = (LINE[v.lang] || LINE.en)(v.name);
     try {
-        const mp3 = v.elevenlabs ? await eleven(text, v.elevenlabs) : await openai(text, v.speaker, v.accent);
+        const mp3 = v.elevenlabs ? await eleven(text, v.elevenlabs, v.lang) : await openai(text, v.speaker, v.accent);
         writeFileSync(file, mp3);
         made++; if (v.elevenlabs) chars += text.length;
         console.log(`✓ ${v.id} (${Math.round(mp3.length / 1024)} KB)`);

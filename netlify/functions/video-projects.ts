@@ -61,7 +61,7 @@ import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { AI_PRESENTER_FLAG, briefForWorkspace, screenRefusal } from '../../src/lib/presenters';
-import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
+import { spokenLanguage, translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
 import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
@@ -163,11 +163,11 @@ export default withLambda(async (event) => {
                 .map((w) => ({ word: w.word, start: w.start, end: w.end, cut: struck.some((c) => Math.abs(c.start - w.start) < 0.03 && Math.abs(c.end - w.end) < 0.03) }));
             return json(200, { words, inS: scene.inS, outS: scene.outS });
         }
-        // A caption file: ?captions=en (as spoken) or a translation's code, &format=srt|vtt.
+        // A caption file: ?captions=<the language spoken> (as spoken; 'en' for most videos) or a translation's code, &format=srt|vtt.
         if (Number.isInteger(id) && id > 0 && qs.captions) {
             const row = await load(id);
             if (!row || row.status !== 'ready') return json(404, { error: 'Video not found.' });
-            const lines = qs.captions === 'en' ? await videoCaptionLines(db, orgId, row.timeline) : translationsOf(row.timeline)[qs.captions] ?? [];
+            const lines = qs.captions === spokenLanguage(row.brief) ? await videoCaptionLines(db, orgId, row.timeline) : translationsOf(row.timeline)[qs.captions] ?? [];
             if (!lines.length) return json(404, { error: 'No captions in that language yet.' });
             const vtt = qs.format === 'vtt';
             const name = `${(row.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'video'}-${qs.captions}.${vtt ? 'vtt' : 'srt'}`;

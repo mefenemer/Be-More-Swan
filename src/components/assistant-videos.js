@@ -1602,15 +1602,17 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   function captionsHtml(v) {
     if (!v.hasSpokenCaptions) return '';
     const langs = state.captionLanguages || {};
-    const done = (v.captionTranslations || []).filter((c) => langs[c]);
-    const left = Object.keys(langs).filter((c) => !done.includes(c));
+    // The language it's spoken in (a Welsh voiceover → Welsh): its captions as spoken, never offered as a translation.
+    const spoken = v.spokenLanguage || 'en';
+    const done = (v.captionTranslations || []).filter((c) => langs[c] && c !== spoken);
+    const left = Object.keys(langs).filter((c) => !done.includes(c) && c !== spoken);
     const file = (code, fmt) => `${API}?id=${encodeURIComponent(v.id)}&captions=${encodeURIComponent(code)}&format=${fmt}`;
     const links = (code) => `<a href="${file(code, 'srt')}" class="font-bold text-indigo-700 hover:underline">SRT</a> · <a href="${file(code, 'vtt')}" class="font-bold text-indigo-700 hover:underline">VTT</a>`;
     const cost = window.taskCost ? window.taskCost('caption_translation', '1 task') : '1 task';
     return `<div class="border border-gray-200 rounded-lg p-2" data-vid-captions="${v.id}">
         <p class="text-xs font-bold text-gray-800">Caption files</p>
         <ul class="mt-1 space-y-0.5 text-xs text-gray-800">
-          <li class="flex items-center gap-2"><span>English (as spoken)</span><span class="ml-auto shrink-0">${links('en')}</span></li>
+          <li class="flex items-center gap-2"><span>${esc(langs[spoken] || 'English')} (as spoken)</span><span class="ml-auto shrink-0">${links(spoken)}</span></li>
           ${done.map((c) => `<li class="flex items-center gap-2"><span>${esc(langs[c])}</span><span class="ml-auto shrink-0">${links(c)}</span>
             <button type="button" data-vid-act="remove-translation" data-id="${v.id}" data-lang="${esc(c)}" aria-label="Remove the ${esc(langs[c])} captions" class="shrink-0 text-gray-400 hover:text-red-700">×</button></li>`).join('')}
         </ul>

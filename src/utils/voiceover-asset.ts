@@ -13,7 +13,7 @@ import { mediaGenerationJobs, contentAssets } from '../../db/schema';
 import { persistBufferToR2 } from '../lib/media-persist';
 import { logAiUsage } from './ai-usage';
 import { VOICEOVER_CREDIT_COST } from './ai-credits';
-import { speakVoiceover, transcribeWords, voiceoverCostUsd, type SpokenWord, type TtsProvider, type VoiceId } from '../lib/tts';
+import { speakVoiceover, speechModel, transcribeWords, voiceoverCostUsd, type SpokenWord, type TtsProvider, type VoiceId } from '../lib/tts';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -33,7 +33,9 @@ export async function makeVoiceoverAsset(db: Db, args: {
     let durationS: number | null = null;
     let transcribedBy: TtsProvider | null = null;
     try {
-        ({ words, durationS, provider: transcribedBy } = await transcribeWords(mp3));
+        // A language spoken with its own model (Welsh) is named to the transcriber too: left to guess, Scribe was only
+        // 53% sure a Welsh voiceover was Welsh (2026-11-20), and a wrong guess times every word wrong.
+        ({ words, durationS, provider: transcribedBy } = await transcribeWords(mp3, fetch, speechModel(args.voice).languageCode));
     } catch (err) {
         console.warn('[voiceover-asset] transcription failed — saving without word timings:', err instanceof Error ? err.message : err);
     }
