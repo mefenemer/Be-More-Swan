@@ -7220,6 +7220,8 @@ export const socialConversations = pgTable("social_conversations", {
   // db/z-social-messages-2.sql: the "4 hours left" reminder went out for the window ending at this
   // time. A new message moves window_closes_at, so a later window gets its own reminder.
   remindedForWindow: timestamp("reminded_for_window"),
+  // When we last asked Meta for the person's name — a refused lookup is not repeated for a day.
+  nameLookedUpAt: timestamp("name_looked_up_at"),
   decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
   decidedAt: timestamp("decided_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

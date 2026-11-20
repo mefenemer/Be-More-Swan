@@ -62,8 +62,6 @@ const NAME_LOOKUPS_PER_LIST = 10;
 export const REMINDER_BEFORE_MS = 4 * 60 * 60 * 1000;
 /** Message text is blanked after this many days (owner decision D6); counts stay. */
 export const RETENTION_DAYS = 90;
-/** The same text sent twice in a conversation within this long is a double click, not a choice. */
-const DUPLICATE_SEND_MS = 60_000;
 
 export const PLATFORM_LABEL: Record<MessagingPlatform, string> = { facebook: 'Facebook', instagram: 'Instagram' };
 
@@ -209,8 +207,15 @@ export async function messagingConnectionState(db: Db, organisationId: number) {
 
 /** Fill in names Meta will give us, at most NAME_LOOKUPS_PER_LIST per call. Best effort. */
 async function fillNames(db: Db, rows: ConvRow[]): Promise<void> {
-    const missing = rows.filter((r) => !r.participantName).slice(0, NAME_LOOKUPS_PER_LIST);
+    // A lookup Meta refused is not tried again for a day (name_looked_up_at) — otherwise every tab
+    // load would repeat up to NAME_LOOKUPS_PER_LIST Graph calls for people who keep their name private.
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const missing = rows
+        .filter((r) => !r.participantName && (!r.nameLookedUpAt || new Date(toIso(r.nameLookedUpAt) ?? 0).getTime() < dayAgo))
+        .slice(0, NAME_LOOKUPS_PER_LIST);
     if (!missing.length) return;
+    await db.update(socialConversations).set({ nameLookedUpAt: sql`now()` })
+        .where(inArray(socialConversations.id, missing.map((r) => r.id))).catch(() => {});
     const creds = new Map<number, Promise<{ pageId: string; pageToken: string } | null>>();
     await Promise.all(missing.map(async (r) => {
         if (!creds.has(r.connectionId)) creds.set(r.connectionId, pageCredentialsForConnection(db, r.connectionId));
@@ -246,7 +251,7 @@ async function messagesFor(db: Db, conversationIds: number[], perConversation: n
     return out;
 }
 
-export async function listConversations(db: Db, organisationId: number, assistantId: number) {
+export async function listConversations(db: Db, organisationId: number, assistantId: number, opts: { lookUpNames?: boolean } = {}) {
     const scope = and(eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId));
     const [rows, counts, connection] = await Promise.all([
         db.select().from(socialConversations).where(scope)
@@ -255,7 +260,8 @@ export async function listConversations(db: Db, organisationId: number, assistan
         db.select({ status: socialConversations.status, n: sql<number>`count(*)::int` }).from(socialConversations).where(scope).groupBy(socialConversations.status),
         messagingConnectionState(db, organisationId),
     ]);
-    await fillNames(db, rows);
+    // The tab looks names up; the chat block (every turn) never waits on Meta.
+    if (opts.lookUpNames !== false) await fillNames(db, rows);
     const msgs = await messagesFor(db, rows.map((r) => r.id), THREAD_MESSAGES);
     const c = { new: 0, replied: 0, dismissed: 0 };
     for (const r of counts) if (r.status in c) c[r.status as keyof typeof c] = Number(r.n);
@@ -425,11 +431,14 @@ export async function sendReply(
         if (!row) return { ok: false as const, status: 404, error: 'That conversation isn’t on this assistant’s Messages tab.' };
         if (!row.open) return { ok: false as const, status: 409, error: REFUSAL_COPY.window_closed, code: 'window_closed' };
 
-        const [dupe] = await tx.select({ id: socialMessages.id }).from(socialMessages).where(and(
-            eq(socialMessages.conversationId, id), eq(socialMessages.direction, 'out'), eq(socialMessages.body, reply),
-            sql`${socialMessages.sentAt} > now() - make_interval(secs => ${DUPLICATE_SEND_MS / 1000})`,
-        )).limit(1);
-        if (dupe) return { ok: false as const, status: 409, error: 'That reply was just sent.', code: 'duplicate' };
+        // The same text as the latest reply, with nothing new from them since, is a repeat — a double
+        // click, or an old chat card pressed after the tab already answered — never a choice.
+        const [latestOut] = await tx.select({ body: socialMessages.body, sentAt: socialMessages.sentAt }).from(socialMessages)
+            .where(and(eq(socialMessages.conversationId, id), eq(socialMessages.direction, 'out')))
+            .orderBy(desc(socialMessages.sentAt), desc(socialMessages.id)).limit(1);
+        if (isRepeatSend(reply, latestOut ?? null, row.c.lastInboundAt)) {
+            return { ok: false as const, status: 409, error: 'You’ve already sent this reply, and they haven’t written since.', code: 'duplicate' };
+        }
 
         const creds = await pageCredentialsForConnection(tx, row.c.connectionId, fetchImpl);
         if (!creds) return { ok: false as const, status: 409, error: REFUSAL_COPY.not_connected, code: 'not_connected' };
@@ -441,18 +450,42 @@ export async function sendReply(
             await tx.update(socialConversations).set({ draftReply: reply, updatedAt: sql`now()` }).where(eq(socialConversations.id, id));
             return { ok: false as const, status: sent.reason === 'meta_error' ? 502 : 409, error: REFUSAL_COPY[sent.reason], code: sent.reason };
         }
-        // The echo webhook delivers this message again with the same id — the unique mid makes it a no-op.
-        await tx.insert(socialMessages).values({
-            organisationId, conversationId: id, direction: 'out',
-            mid: sent.messageId ?? `sent:${id}:${Date.now()}`, body: reply, sentAt: sql`now()` as unknown as Date, sentBy: userId,
-        }).onConflictDoNothing({ target: socialMessages.mid });
-        const [updated] = await tx.update(socialConversations)
-            .set({ status: 'replied', lastOutboundAt: sql`now()`, draftReply: null, decidedBy: userId, decidedAt: sql`now()`, updatedAt: sql`now()` })
-            .where(eq(socialConversations.id, id))
-            .returning();
-        const msgs = await messagesFor(tx, [id], THREAD_MESSAGES);
-        return { ok: true as const, conversation: conversationView(updated, msgs.get(id) ?? []) };
+        // ⚠️ From here the message HAS gone. Bookkeeping runs in a savepoint: if it fails, the outer
+        // transaction still commits and the rows are written again after it — the user is never told
+        // to try again (which would send it twice).
+        const mid = sent.messageId ?? `sent:${id}:${Date.now()}`;
+        try {
+            await (txAny as { transaction: (f: (t: unknown) => Promise<void>) => Promise<void> }).transaction(async (sp) => recordSent(sp as Db, { organisationId, id, mid, reply, userId }));
+        } catch (err) {
+            console.error(`[social-messages] conversation ${id}: sent, but recording it failed — retrying after commit`, err instanceof Error ? err.message : err);
+            return { ok: true as const, recordLater: { mid } };
+        }
+        return { ok: true as const, recordLater: null };
+    }).then(async (r) => {
+        if (!r.ok) return r;
+        if (r.recordLater) await recordSent(db, { organisationId, id, mid: r.recordLater.mid, reply, userId }).catch((err) => console.error(`[social-messages] conversation ${id}: recording a sent reply failed twice`, err instanceof Error ? err.message : err));
+        const fresh = await loadConversation(db, organisationId, assistantId, id);
+        return { ok: true as const, conversation: fresh ? await viewOf(db, fresh) : conversationView(first, []) };
     });
+}
+
+/** Same text as the latest reply, and nothing from them since. Pure. */
+export function isRepeatSend(reply: string, latestOut: { body: string | null; sentAt: Date | string | null } | null, lastInboundAt: Date | string | null): boolean {
+    if (!latestOut || latestOut.body == null || latestOut.body.trim() !== reply.trim()) return false;
+    const outAt = new Date(toIso(latestOut.sentAt as Date | string | null) ?? 0).getTime();
+    const inAt = lastInboundAt ? new Date(toIso(lastInboundAt as Date | string) ?? 0).getTime() : 0;
+    return inAt <= outAt;
+}
+
+/** File a reply Meta accepted. Idempotent on mid (the echo webhook delivers it again). */
+async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string; reply: string; userId: number | null }): Promise<void> {
+    await db.insert(socialMessages).values({
+        organisationId: a.organisationId, conversationId: a.id, direction: 'out',
+        mid: a.mid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
+    }).onConflictDoNothing({ target: socialMessages.mid });
+    await db.update(socialConversations)
+        .set({ status: 'replied', lastOutboundAt: sql`now()`, draftReply: null, decidedBy: a.userId, decidedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(eq(socialConversations.id, a.id));
 }
 
 // ── Notifications + the tick ─────────────────────────────────────────────────────────────────
@@ -461,8 +494,9 @@ export async function sendReply(
 export async function notifyConversationOpened(db: Db, r: { conversationId: number; organisationId: number; assistantId: number | null; platform: MessagingPlatform }): Promise<void> {
     try {
         if (!r.assistantId) return;
-        const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name }).from(aiAssistants).where(eq(aiAssistants.id, r.assistantId)).limit(1);
-        if (!owner?.userId) return;
+        const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, lifecycle: aiAssistants.lifecycleStatus }).from(aiAssistants).where(eq(aiAssistants.id, r.assistantId)).limit(1);
+        // An archived assistant's conversations are kept but nobody is pinged (as the tick skips them).
+        if (!owner?.userId || owner.lifecycle === 'archived') return;
         await createNotification(db, 'social_message_received', {
             userId: owner.userId, assistantId: r.assistantId, category: 'suggested_action',
             context: { assistant: { name: owner.name }, platform: { name: PLATFORM_LABEL[r.platform] } },
@@ -542,7 +576,7 @@ export function timeLeftLabel(windowClosesAt: string | null, now = Date.now()): 
  */
 export async function buildMessagesChatBlock(db: Db, organisationId: number, assistantId: number): Promise<string | null> {
     try {
-        const { conversations, counts, connection } = await listConversations(db, organisationId, assistantId);
+        const { conversations, counts, connection } = await listConversations(db, organisationId, assistantId, { lookUpNames: false });
         if (!connection.enabled && !conversations.length) return null;
         const waiting = conversations.filter((c) => c.status === 'new').slice(0, CHAT_SNAPSHOT_CONVERSATIONS);
         const lines = waiting.map((c) => {

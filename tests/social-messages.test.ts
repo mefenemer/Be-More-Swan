@@ -23,7 +23,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
-    MAX_REPLY_CHARS, REFUSAL_COPY, callSendApi, classifySendError, conversationView, timeLeftLabel, tidyReply, windowOpen,
+    MAX_REPLY_CHARS, REFUSAL_COPY, callSendApi, isRepeatSend, classifySendError, conversationView, timeLeftLabel, tidyReply, windowOpen,
 } from '../src/utils/social-messages';
 import { messageActionFromUiElement } from '../src/utils/chat-message-action';
 import { parseMessagingWebhook, sentAtFrom } from '../src/utils/meta-messaging';
@@ -72,7 +72,7 @@ async function main() {
         const v = conversationView({
             id: 1, organisationId: 1, aiAssistantId: 2, connectionId: 3, platform: 'instagram', accountExternalId: 'a', participantId: 'p',
             participantName: null, lastInboundAt: new Date('2026-11-20T09:00:00Z'), lastOutboundAt: null, windowClosesAt: new Date('2026-11-21T09:00:00Z'),
-            status: 'new', draftReply: null, remindedForWindow: null, decidedBy: null, decidedAt: null, createdAt: new Date(), updatedAt: new Date(),
+            status: 'new', draftReply: null, remindedForWindow: null, nameLookedUpAt: null, decidedBy: null, decidedAt: null, createdAt: new Date(), updatedAt: new Date(),
         }, [
             { id: 2, organisationId: 1, conversationId: 1, direction: 'out', mid: 'b', body: 'second', attachmentType: null, sentAt: new Date('2026-11-20T09:05:00Z'), sentBy: 7, createdAt: new Date() },
             { id: 1, organisationId: 1, conversationId: 1, direction: 'in', mid: 'a', body: 'first', attachmentType: null, sentAt: new Date('2026-11-20T09:00:00Z'), sentBy: null, createdAt: new Date() },
@@ -129,6 +129,33 @@ async function main() {
             else assert.equal(n, 0, `${f} must never send`);
         }
         assert.ok(!lib.slice(lib.indexOf('export async function runMessagesTick')).includes('callSendApi'), 'the tick never sends');
+    });
+    await check('the same text as the latest reply, with nothing new from them, is a repeat — not after they write again', () => {
+        const out = { body: 'See you Sunday!', sentAt: '2026-11-20T10:00:00Z' };
+        assert.equal(isRepeatSend('See you Sunday!', out, '2026-11-20T09:00:00Z'), true, 'double click / old chat card');
+        assert.equal(isRepeatSend(' See you Sunday! ', out, null), true);
+        assert.equal(isRepeatSend('See you Sunday!', out, '2026-11-20T10:05:00Z'), false, 'they wrote again: the same answer may be right');
+        assert.equal(isRepeatSend('Something else', out, '2026-11-20T09:00:00Z'), false);
+        assert.equal(isRepeatSend('See you Sunday!', null, '2026-11-20T09:00:00Z'), false);
+        const fn = lib.slice(lib.indexOf('export async function sendReply'));
+        assert.ok(fn.indexOf('isRepeatSend(reply') < fn.indexOf('await callSendApi('));
+    });
+    await check('once Meta accepted a reply the user is never told to try again', () => {
+        const fn = lib.slice(lib.indexOf('export async function sendReply'), lib.indexOf('export function isRepeatSend'));
+        const after = fn.slice(fn.indexOf('From here the message HAS gone'));
+        assert.ok(!after.includes('ok: false'), 'no failure is returned after a successful send');
+        assert.ok(after.includes('return { ok: true as const, recordLater: { mid } };'));
+        assert.ok(after.includes('if (r.recordLater) await recordSent(db,'));
+    });
+    await check("an archived assistant's conversations ping nobody", () => {
+        const fn = lib.slice(lib.indexOf('export async function notifyConversationOpened'));
+        assert.ok(fn.includes("owner.lifecycle === 'archived') return;"));
+    });
+    await check('the chat block never waits on Meta for names, and a refused name lookup waits a day', () => {
+        assert.ok(lib.includes('listConversations(db, organisationId, assistantId, { lookUpNames: false })'));
+        assert.ok(lib.includes('if (opts.lookUpNames !== false) await fillNames(db, rows);'));
+        const fill = lib.slice(lib.indexOf('async function fillNames'));
+        assert.ok(fill.indexOf('nameLookedUpAt: sql`now()`') < fill.indexOf('fetchParticipantName('), 'marked before asking');
     });
     await check('the tab endpoint refuses writes while impersonating', () => {
         assert.ok(read('netlify/functions/social-messages.ts').includes("requireTenant(event, db, { mutates: action !== 'list' })"));
