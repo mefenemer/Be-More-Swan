@@ -1,0 +1,120 @@
+Skip to navigation
+Skip to main content
+Opens in new tab
+|
+Recall.ai's Trust Center
+Subscribe to updates
+Request access
+Recall.ai
+
+Welcome to Recall.ai's Security Portal. Our commitment to data privacy and security is embedded in every part of our business. Use this portal to learn about our security posture and request access to our security documentation. For any security related questions that haven't been addressed on this page, please email us at hello@recall.ai.
+
+hello@recall.ai
+Privacy Policy
+Opens in new tab
+Overview
+Resources
+Controls
+Subprocessors
+FAQ
+Updates
+Subprocessors
+Amazon Web Services • Infrastructure Hosting
+US, EU, JP
+Datadog • Logging & Monitoring
+US, EU
+Svix • Webhook Management
+US, EU
+Google Analytics • Website analytics
+US
+PostHog • Website analytics
+US
+Airbyte • Data Integration
+US
+Google Workspace • Operations
+US
+Metabase • Data Analytics
+US
+Pylon • Support Ticketing System
+US
+Slack • Collaboration
+US
+1-10 of 18 results
+Show
+10
+results per page
+Previous
+Next
+All subprocessors
+Amazon Web Services
+Infrastructure Hosting
+US, EU, JP
+aws.amazon.com
+Datadog
+Logging & Monitoring
+US, EU
+datadoghq.com
+Svix
+Webhook Management
+US, EU
+https://www.svix.com/
+Google Analytics
+Website analytics
+US
+https://analytics.google.com/analytics/web/provision/#/provision
+PostHog
+Website analytics
+US
+https://posthog.com/
+Airbyte
+Data Integration
+US
+Airbyte.com
+Google Workspace
+Operations
+US
+admin.google.com
+Metabase
+Data Analytics
+US
+metabase.com
+Pylon
+Support Ticketing System
+US
+https://usepylon.com/
+Slack
+Collaboration
+US
+slack.com
+Snowflake
+Data Storage
+US
+snowflake.com
+Stripe
+Payment Processor
+US
+stripe.com
+Vanta
+Security Portal
+US
+vanta.com
+Zapier
+Internal Operations
+US
+https://zapier.com/
+Inkeep
+Customer support
+US
+inkeep.com
+Salesforce.com
+Sales
+US
+AssemblyAI (Optional Subprocessor)
+Data storage and processing
+US, EU
+https://www.assemblyai.com/
+OpenAI (Optional Subprocessor)
+Data storage and processing
+US
+https://openai.com/
+Opens in new tab
