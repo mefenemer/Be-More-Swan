@@ -112,9 +112,10 @@ await check('long sentences never push a short Welsh voiceover into a second bat
     assert.strictEqual(parts.join(' '), text);
     const cy = await spoken(text, 'cy_hannah');
     assert.ok(cy.bodies.length <= 3);
-    // Each part's wait stays under 20 s, so speech + saving fits the 26 s request.
+    // Each part's wait stays at 22 s or less, so speech + saving fits the 26 s request.
     assert.strictEqual(slowPartTimeoutMs(500), 17_000);
-    assert.strictEqual(slowPartTimeoutMs(800), 20_000);
+    assert.strictEqual(slowPartTimeoutMs(800), 22_000);
+    assert.ok(read('netlify.toml').includes('[functions.read-aloud]\n  timeout = 26'), 'read aloud gets the 26 s too');
     // A long video's script (background) keeps 500-character parts.
     assert.ok(slowModelParts(text.repeat(3)).every((p) => p.length <= SLOW_MODEL_PART_CHARS));
 });

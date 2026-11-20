@@ -1273,6 +1273,11 @@ node_bundler = "esbuild"
 [functions.generate-voiceover]
   timeout = 26
 
+# Read aloud (Voice builder): a Welsh or Norwegian voice speaks through eleven_v3, ~22–26 ms a character, so a
+# 700-character sample takes 9–13 s — past the 10 s default (review of #793).
+[functions.read-aloud]
+  timeout = 26
+
 # Video Producer: "My own voice" transcribes the owner's recording inside the request (own-voice.ts,
 # ≤18 s for one recording of a whole 60 s script). Everything else here answers in well under 10 s.
 [functions.video-projects]
