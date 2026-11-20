@@ -279,6 +279,13 @@ window.NotifKit = (function () {
             } };
         }
         // What a website brought in opens on its own tab of the Website Assistant (owner, 2026-10-16).
+        // A Facebook / Instagram message waits on the Social Media assistant's Messages tab.
+        if ((notif.type === 'social_message_received' || notif.type === 'social_message_window_closing') && meta.assistantId) {
+            return { label: 'Open messages', run: () => {
+                window._assistantDetailInitialTab = 'messages';
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         const SITE_TABS = {
             site_enquiry_received: ['Open enquiries', 'siteenquiries'], site_order_received: ['Open orders', 'siteorders'],
             site_payments_ready: ['Open orders', 'siteorders'],

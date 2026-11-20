@@ -1745,6 +1745,39 @@
       }
     }
 
+    // Message cards → social-messages.ts, the same actions as the Messages tab's buttons. Dispatches
+    // `messages:changed` so the tab behind the chat reloads. Only send sends — privately, as the business.
+    async function onMessageAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const aid = d.assistantId || assistantId;
+      const call = (body) => fetch('/.netlify/functions/social-messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ assistantId: aid, ...body }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      });
+      try {
+        if (d.action === 'draft') {
+          const r = await call({ action: 'draft', id: d.conversationId, instruction: d.instruction || undefined });
+          respond({ ok: true, conversation: r.conversation });
+        } else if (d.action === 'send') {
+          const r = await call({ action: 'send', id: d.conversationId, text: d.text || undefined });
+          respond({ ok: true, conversation: r.conversation, message: 'Sent.' });
+        } else if (d.action === 'dismiss') {
+          const r = await call({ action: 'set_status', id: d.conversationId, status: 'dismissed' });
+          respond({ ok: true, conversation: r.conversation, message: 'Dismissed.' });
+        } else {
+          throw new Error('Unknown action.');
+        }
+        document.dispatchEvent(new CustomEvent('messages:changed', { detail: { assistantId: aid } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     // Watch list cards → lead-watch.ts, the same actions as the Watch list tab's buttons. Dispatches
     // `watchlist:changed` so the tab behind the chat reloads. Nothing is sent to anyone.
     async function onWatchAction(e) {
@@ -2737,6 +2770,7 @@
     container.addEventListener('lead:action', onLeadAction);
     container.addEventListener('discussion:action', onDiscussionAction);
     container.addEventListener('comment:action', onCommentAction);
+    container.addEventListener('message:action', onMessageAction);
     container.addEventListener('watch:action', onWatchAction);
     container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('rule:change', onRuleChange);
@@ -2868,6 +2902,7 @@
         container.removeEventListener('lead:action', onLeadAction);
         container.removeEventListener('discussion:action', onDiscussionAction);
         container.removeEventListener('comment:action', onCommentAction);
+        container.removeEventListener('message:action', onMessageAction);
         container.removeEventListener('watch:action', onWatchAction);
         container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('rule:change', onRuleChange);

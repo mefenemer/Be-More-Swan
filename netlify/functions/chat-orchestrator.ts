@@ -102,6 +102,8 @@ import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
 import { buildCommentsChatBlock } from '../../src/utils/page-comments';
 import { commentActionFromUiElement, resolveCommentActionProposal } from '../../src/utils/chat-comment-action';
+import { buildMessagesChatBlock } from '../../src/utils/social-messages';
+import { messageActionFromUiElement, resolveMessageActionProposal } from '../../src/utils/chat-message-action';
 import { buildWatchActionsChatBlock, resolveWatchActionProposal, watchActionFromUiElement } from '../../src/utils/chat-watch-action';
 import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
@@ -279,6 +281,9 @@ interface RouteContext {
     /** The Social Media assistant's Comments tab — its LinkedIn Page comments and the card that acts on
      *  them. src/utils/page-comments.ts buildCommentsChatBlock. Null on failure / before the SQL. */
     commentsBlock?: string | null;
+    /** The Social Media assistant's Messages tab — its Facebook / Instagram conversations and the card
+     *  that acts on them. src/utils/social-messages.ts buildMessagesChatBlock. Null on failure / before the SQL. */
+    messagesBlock?: string | null;
     /** This Lead Generator's Watch list (buying triggers Phase 2): what it watches, the news, and the card
      *  that changes it. Same routes as leadsSnapshot. src/utils/chat-watch-action.ts. */
     watchListBlock?: string | null;
@@ -340,6 +345,9 @@ interface AssistantRoute {
     /** When true the handler reads this assistant's LinkedIn Page comments for this turn
      *  (rc.commentsBlock) and the comment_action_proposal card is resolved. */
     usesPageComments?: boolean;
+    /** When true the handler reads this assistant's Facebook / Instagram conversations for this turn
+     *  (rc.messagesBlock) and the message_action_proposal card is resolved. */
+    usesSocialMessages?: boolean;
     /** When true the handler reads this assistant's campaigns for this turn and passes them into
      *  buildRolePrompt via rc.campaignsSnapshot. */
     usesCampaignSnapshot?: boolean;
@@ -3084,6 +3092,7 @@ OR, for A PART THEY SELECTED, uiElement is instead:
         contentSnapshot: 'posts',
         // Its Comments tab (LinkedIn Company Page comments) — src/utils/page-comments.ts.
         usesPageComments: true,
+        usesSocialMessages: true,
         // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
         // the failure mode is the worst one available: the envelope truncates mid-string, the
         // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
@@ -3137,6 +3146,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
                 socialSurfaces(rc.taskCosts),
                 rc.contentSnapshot ?? 'YOUR POSTS — your list of posts could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing post, say you cannot see it right now and point them to the "Posts" tab.',
                 rc.commentsBlock ?? '',
+                rc.messagesBlock ?? '',
                 // Before the JSON contract, deliberately. The block ends with up to four excerpts
                 // that are themselves finished social posts, so it is the last thing that should be
                 // allowed to suggest a reply SHAPE — the envelope instruction has to come after it.
@@ -3173,6 +3183,9 @@ ${voiceOptionsBlock()}
 
 OR, to act on a comment on the Comments tab (see YOUR COMMENTS TAB), uiElement is instead:
 { "type": "comment_action_proposal", "action": "draft" | "post_reply" | "dismiss", "commentId": <the number after # in YOUR COMMENTS TAB>, "instruction": "<draft only: what to change>" | null }
+
+OR, to act on a Facebook / Instagram conversation on the Messages tab (see YOUR MESSAGES TAB), uiElement is instead:
+{ "type": "message_action_proposal", "action": "draft" | "send" | "dismiss", "conversationId": <the number after # in YOUR MESSAGES TAB>, "instruction": "<draft only: what to change>" | null }
 
 OR, to offer redrafting the upcoming drafts after a change to what you post about (see UPCOMING DRAFTS AFTER A CHANGE), uiElement is instead:
 { "type": "redraft_upcoming_proposal", "summary": "<one sentence: which change, and that the upcoming drafts don't use it yet>" }
@@ -3545,6 +3558,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const commentsBlock = route.usesPageComments
         ? await buildCommentsChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Messages tab (src/utils/social-messages.ts) — per turn, so a reply sent on the tab a moment ago
+    // is not offered again. Null on failure, including before db/z-social-messages.sql is applied.
+    const messagesBlock = route.usesSocialMessages
+        ? await buildMessagesChatBlock(db, orgId, session.aiAssistantId)
+        : null;
     // Its Watch list (src/utils/chat-watch-action.ts) — per turn, null before db/z-lead-watch.sql is applied.
     const watchListBlock = route.usesLeadSnapshot
         ? await buildWatchActionsChatBlock(db, orgId, session.aiAssistantId)
@@ -3662,6 +3680,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         followUpPlanBlock,
         discussionsBlock,
         commentsBlock,
+        messagesBlock,
         watchListBlock,
         campaignsSnapshot,
         taskCosts: await getTaskCosts(),
@@ -4535,6 +4554,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (commentReq) {
             uiElement = await resolveCommentActionProposal(db, orgId, session.aiAssistantId, commentReq);
             if (!uiElement) content = 'I couldn’t find that comment on this assistant’s Comments tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Comments" tab.';
+        }
+        // And its Messages tab (src/utils/chat-message-action.ts), rebuilt from the social_conversations row;
+        // the click calls social-messages.ts, the same endpoint as the tab's buttons.
+        const messageReq = route === ROUTES.social_media_manager ? messageActionFromUiElement(uiElement) : null;
+        if (messageReq) {
+            uiElement = await resolveMessageActionProposal(db, orgId, session.aiAssistantId, messageReq);
+            if (!uiElement) content = 'I couldn’t find that conversation on this assistant’s Messages tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Messages" tab.';
         }
         // And its Watch list (src/utils/chat-watch-action.ts); the click calls lead-watch.ts, the tab's endpoint.
         const watchReq = route === ROUTES.lead_qualifier ? watchActionFromUiElement(uiElement) : null;

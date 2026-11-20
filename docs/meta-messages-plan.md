@@ -89,6 +89,9 @@ unsubscribe on disconnect (`integrations.ts`), tests `tests/meta-messaging.test.
    the same verify token.
 4. Reconnect Facebook / Instagram so the Page is subscribed (`metadata.messaging.subscribed`).
 
+**Follow-ups noted in review of #790 (not blocking):** the chat block reads up to 300 conversations
+to show 10 — give it one query for the 10 newest waiting ones, the counts, and their messages only.
+
 ### Phase 2 — Messages tab + send
 
 5. **Tab** on the Social Media Assistant, next to Comments, built with `tab-head.js` like the others:

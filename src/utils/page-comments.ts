@@ -402,7 +402,7 @@ export async function saveDraft(db: Db, organisationId: number, assistantId: num
 }
 
 /** The brand's tone as the assistant was set up with it (onboarding answers), for the drafting prompt. */
-async function loadVoice(db: Db, assistantId: number): Promise<string | null> {
+export async function loadVoice(db: Db, assistantId: number): Promise<string | null> {
     const [a] = await db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants).where(eq(aiAssistants.id, assistantId)).limit(1);
     const ctx = (a?.ctx ?? {}) as Record<string, unknown>;
     const tone = typeof ctx.tone_of_voice === 'string' ? ctx.tone_of_voice.trim() : '';
