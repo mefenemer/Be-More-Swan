@@ -613,7 +613,8 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
     {
         // The DPA clause 5 notice for adding ElevenLabs as a sub-processor (docs/elevenlabs-sub-processor-notice.md).
         // Sent once by Growth → Broadcast; the in-app twin shares the key. Transactional: a legal notice, not marketing.
-        // No fixed objection date in the copy: the 14 days run from whenever it is sent.
+        // No fixed objection date in the copy: the 14 days run from whenever it is sent. No apology (owner, 2026-11-20):
+        // the Video Producer had not officially launched, so ElevenLabs had not been opened to customers.
         triggerKey: 'subprocessor_elevenlabs_notice',
         name: 'Notice: new sub-processor ElevenLabs',
         category: 'Compliance',
@@ -624,7 +625,6 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('We have added <strong>ElevenLabs</strong> (ElevenLabs Inc., United States) to the list of providers that process data for us, on our <a href="https://bemoreswan.com/trust.html#sub-processors">Trust page</a>.') +
             p('<strong>What it does.</strong> ElevenLabs speaks the AI voiceovers for your videos and the "Read aloud" samples in your assistant\'s Voice settings, from the script or text you give it. It also transcribes the audio you upload &mdash; your own videos and voice recordings &mdash; so captions and edits line up with the words. That audio can include the voices of the people in your recordings.') +
             p('<strong>How your data is protected.</strong> ElevenLabs acts as our processor under its Data Processing Addendum, and transfers to the US are covered by Standard Contractual Clauses with the UK Addendum.') +
-            p('<strong>We should have told you sooner.</strong> ElevenLabs has made voiceovers for us since 2 November 2026 and transcriptions since 12 November. Our Data Processing Agreement promises 14 days\' notice before a new sub-processor, and we did not give it. We are sorry.') +
             p('<strong>If you object.</strong> If you have a data protection reason to object, email <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a> within 14 days of this email. We will work with you on an alternative, and if we cannot find one you can end the affected service with no early-termination charge (clause 5 of our <a href="https://bemoreswan.com/dpa.html">Data Processing Agreement</a>). Until then, you can avoid ElevenLabs by not using AI voiceovers or Read aloud, and not uploading audio to the Video Producer.') +
             p('Nothing else changes, and there is nothing you need to do.') +
             p('Any questions, just reply to this email.') + signoff,

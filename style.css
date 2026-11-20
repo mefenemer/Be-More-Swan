@@ -949,6 +949,12 @@
   .min-h-\[46px\] {
     min-height: 46px;
   }
+  .min-h-\[44px\] {
+    min-height: 44px;
+  }
+  .min-w-\[44px\] {
+    min-width: 44px;
+  }
   .min-h-\[200px\] {
     min-height: 200px;
   }
@@ -4683,6 +4689,11 @@
   .sm\:rounded-2xl {
     @media (width >= 40rem) {
       border-radius: var(--radius-2xl);
+    }
+  }
+  .sm\:min-h-0 {
+    @media (width >= 40rem) {
+      min-height: calc(var(--spacing) * 0);
     }
   }
   .sm\:p-4 {

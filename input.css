@@ -7,6 +7,10 @@
 
 /* 2. Initialize core Tailwind compilation engine framework */
 @import "tailwindcss";
+/* The touch-size utilities (44px tap targets on phones, back to normal from sm:) are used on 100+ buttons
+   but were missing from the committed style.css, so phone buttons were not 44px anywhere. Listed here so a
+   rebuild always generates them; style.css carries them hand-added until the next full rebuild. */
+@source inline("min-h-[44px] sm:min-h-0 min-w-[44px]");
 
 @layer theme {
     @theme default {
