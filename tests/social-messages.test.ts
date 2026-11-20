@@ -120,6 +120,8 @@ async function main() {
         assert.ok(lockAt !== -1 && windowAt !== -1 && refuseAt !== -1 && callAt !== -1);
         assert.ok(lockAt < windowAt && windowAt < refuseAt && refuseAt < callAt);
         assert.ok(fn.indexOf('if (!messagingEnabled())') < callAt, 'refuses when messages are switched off');
+        const slowAt = fn.indexOf('if (Date.now() - startedAt > SEND_DEADLINE_MS)');
+        assert.ok(slowAt !== -1 && slowAt < callAt, 'a slow start stops BEFORE Meta, where a retry is safe');
     });
     await check('only sendReply calls the Send API, and only the tab endpoint calls sendReply', () => {
         assert.equal((lib.match(/await callSendApi\(/g) || []).length, 1);
@@ -150,6 +152,10 @@ async function main() {
         assert.ok(after.includes('return { ok: true as const, recordLater: { mid } as { mid: string | null } };'));
         assert.ok(fn.includes('if (!accepted) throw err;'), 'a failed commit after Meta accepted is recorded, not reported');
         assert.ok(after.includes('if (r.recordLater) await recordSent(db,'));
+    });
+    await check('a draft is charged only once there is a written message to answer', () => {
+        const fn = lib.slice(lib.indexOf('export async function draftReply'), lib.indexOf('export async function callSendApi'));
+        assert.ok(fn.indexOf("code: 'no_text'") < fn.indexOf("meterInteraction(db, organisationId, 'helpers')"));
     });
     await check("an archived assistant's conversations ping nobody", () => {
         const fn = lib.slice(lib.indexOf('export async function notifyConversationOpened'));

@@ -60,6 +60,9 @@ const DRAFT_CONTEXT_MESSAGES = 12;
 const NAME_LOOKUPS_PER_LIST = 10;
 /** "4 hours left" reminder (owner decision D5). */
 export const REMINDER_BEFORE_MS = 4 * 60 * 60 * 1000;
+/** Send calls Meta only if it got this far within this long — leaving room under the 26s function
+ *  timeout for Meta (≤8s) and the bookkeeping. */
+export const SEND_DEADLINE_MS = 12_000;
 /** Message text is blanked after this many days (owner decision D6); counts stay. */
 export const RETENTION_DAYS = 90;
 
@@ -322,12 +325,6 @@ export async function draftReply(
     const row = await loadConversation(db, organisationId, assistantId, id);
     if (!row) return { ok: false, status: 404, error: 'That conversation isn’t on this assistant’s Messages tab.' };
     if (await isGlobalAiDisabled()) return { ok: false, status: 503, error: 'AI services are temporarily unavailable. Please try again later.' };
-    const credit = await meterInteraction(db, organisationId, 'helpers');
-    if (!credit.allowed) {
-        if (credit.failed) return { ok: false, status: 503, error: credit.limitMessage ?? 'Please try again.' };
-        if (credit.fairUse) return { ok: false, status: 429, error: credit.limitMessage ?? 'Please try again later.', code: 'FAIR_USE_LIMIT' };
-        return { ok: false, status: 403, error: credit.limitMessage ?? 'You need a plan for this.', code: 'UPGRADE_REQUIRED' };
-    }
     const platform: MessagingPlatform = row.platform === 'instagram' ? 'instagram' : 'facebook';
     const [sender, knowledgeBlock, rulesBlock, voice, roleKey, history] = await Promise.all([
         loadSenderIdentity(db, organisationId, assistantId),
@@ -340,6 +337,13 @@ export async function draftReply(
     const thread = conversationView(row, history.get(row.id) ?? []).messages;
     if (!thread.some((m) => m.direction === 'in' && (m.body || '').trim())) {
         return { ok: false, status: 422, error: 'There’s no written message to answer yet (only a picture or a sticker). Write your own reply, or open it in the Facebook / Instagram app.', code: 'no_text' };
+    }
+    // Charged only once there is something to answer.
+    const credit = await meterInteraction(db, organisationId, 'helpers');
+    if (!credit.allowed) {
+        if (credit.failed) return { ok: false, status: 503, error: credit.limitMessage ?? 'Please try again.' };
+        if (credit.fairUse) return { ok: false, status: 429, error: credit.limitMessage ?? 'Please try again later.', code: 'FAIR_USE_LIMIT' };
+        return { ok: false, status: 403, error: credit.limitMessage ?? 'You need a plan for this.', code: 'UPGRADE_REQUIRED' };
     }
     const modelChoice = await loadRoleModel(db, roleKey ?? 'social_media_manager');
     const payload = {
@@ -419,6 +423,8 @@ export async function sendReply(
     const credsFor = deps.credsFor ?? ((d: Db, cid: number) => pageCredentialsForConnection(d, cid, fetchImpl));
     // Set the moment Meta accepts — from then on nothing may report a failure (that invites a second send).
     let accepted: { mid: string | null } | null = null;
+    // Meta is called only while there is time left to record what it says (the function stops at 26s).
+    const startedAt = Date.now();
     const first = await loadConversation(db, organisationId, assistantId, id);
     if (!first) return { ok: false, status: 404, error: 'That conversation isn’t on this assistant’s Messages tab.' };
     const platform: MessagingPlatform = first.platform === 'instagram' ? 'instagram' : 'facebook';
@@ -453,6 +459,11 @@ export async function sendReply(
         const creds = await credsFor(tx, row.c.connectionId);
         if (!creds) return { ok: false as const, status: 409, error: REFUSAL_COPY.not_connected, code: 'not_connected' };
 
+        // Too slow so far (a cold database, a slow token): stop BEFORE Meta — nothing has gone, so trying
+        // again is safe. Past this point a timeout could cut us off after Meta delivered.
+        if (Date.now() - startedAt > SEND_DEADLINE_MS) {
+            return { ok: false as const, status: 503, error: 'That took too long to get ready, so nothing was sent. Please try again.', code: 'too_slow' };
+        }
         const sent = await callSendApi(creds, row.c.participantId, reply, fetchImpl);
         if (!sent.ok) {
             console.warn(`[social-messages] send refused for conversation ${id}: ${sent.reason} — ${sent.detail}`);
