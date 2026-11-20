@@ -123,6 +123,11 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // Someone sent a message from the Website Assistant's contact form (site-forms.ts). They are
     // waiting for a reply — a do-something item, like a prospect writing back.
     site_enquiry_received: 'suggested_action',
+    // Someone messaged the business's Facebook Page or Instagram account (social-messages.ts). A
+    // person is waiting, and Meta closes the reply after 24 hours — work that decays by the hour.
+    social_message_received: 'suggested_action',
+    // The same conversation, 4 hours before Meta closes the reply. Same reasons.
+    social_message_window_closing: 'suggested_action',
     // A booking from the website (bookings.ts). A REQUEST waits for the owner's Confirm — the call
     // site passes 'state_change' instead when the business confirms bookings instantly.
     site_booking_received: 'suggested_action',

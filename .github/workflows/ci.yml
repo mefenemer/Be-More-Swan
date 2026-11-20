@@ -291,6 +291,10 @@ jobs:
       # reorders deliveries; a retry must change nothing and the 24h reply window must only move forward.
       - name: Meta messages filing
         run: npx tsx tests/meta-messaging-db.test.ts
+      # The Messages tab's tick (src/utils/social-messages.ts runMessagesTick): one "4 hours left"
+      # reminder per reply window, never twice, and the 90-day text purge.
+      - name: Meta messages reminders and purge
+        run: npx tsx tests/social-messages-db.test.ts
       # The single task allowance's money SQL (src/utils/work-metering.ts): weighted charges, bonus
       # tasks spent only past the allowance, in-flight media reserved. A bare parameter in one of these
       # statements took production capacity checks down on 2026-10-17 — only Postgres can catch that.

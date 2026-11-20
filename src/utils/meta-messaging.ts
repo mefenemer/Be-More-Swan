@@ -15,7 +15,7 @@
 // Facebook Login dialog and the Page subscription on connect. Off until Meta approves them: asking
 // a customer for a permission the app isn't approved for is exactly what App Review is about.
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { socialConversations, socialMessages, systemConnections } from '../../db/schema';
@@ -103,7 +103,7 @@ export function parseMessagingWebhook(body: unknown): ParsedMessage[] {
             const recipientId = str(ev?.recipient?.id);
             if (!senderId || !recipientId || senderId === recipientId) continue;
             const ts = typeof ev?.timestamp === 'number' ? ev.timestamp : Number(ev?.timestamp);
-            const sentAt = Number.isFinite(ts) && ts > 0 ? new Date(ts) : new Date();
+            const sentAt = sentAtFrom(ts);
 
             if (ev.message && typeof ev.message === 'object') {
                 const msg = ev.message;
@@ -131,7 +131,8 @@ export function parseMessagingWebhook(body: unknown): ParsedMessage[] {
                 if (recipientId !== accountId) continue;
                 // Postbacks have a mid on Instagram, not always on Messenger: derive a stable one so
                 // a retried delivery still dedupes.
-                const mid = str(ev.postback.mid) ?? `postback:${accountId}:${senderId}:${sentAt.getTime()}`;
+                // Hashed from the event itself, so it is the same on every retry even with no timestamp.
+                const mid = str(ev.postback.mid) ?? `postback:${createHash('sha256').update(JSON.stringify([accountId, senderId, ev.timestamp ?? null, ev.postback])).digest('hex').slice(0, 32)}`;
                 out.push({
                     platform, accountId, participantId: senderId, direction: 'in', mid,
                     text: str(ev.postback.title) ?? str(ev.postback.payload),
@@ -143,6 +144,15 @@ export function parseMessagingWebhook(body: unknown): ParsedMessage[] {
     return out;
 }
 
+/**
+ * Meta's millisecond timestamp → a Date we can store. Anything missing, non-numeric, before 2015 or
+ * more than a day ahead becomes "now": an out-of-range value would make an Invalid Date, whose
+ * toISOString() throws, and the webhook would answer 500 for that delivery forever.
+ */
+export function sentAtFrom(ts: number, now = Date.now()): Date {
+    return Number.isFinite(ts) && ts > 1_420_070_400_000 && ts < now + REPLY_WINDOW_MS ? new Date(ts) : new Date(now);
+}
+
 /** When Meta stops letting the account reply, given the person's last message. */
 export function windowClosesAt(lastInboundAt: Date): Date {
     return new Date(lastInboundAt.getTime() + REPLY_WINDOW_MS);
@@ -151,7 +161,9 @@ export function windowClosesAt(lastInboundAt: Date): Date {
 // ── Storing ──────────────────────────────────────────────────────────────────────────────────
 
 export type StoreResult =
-    | { stored: true; conversationId: number }
+    /** `opened`: the conversation now waits on the business when it didn't a moment ago — a new
+     *  conversation, or a new message after a reply / dismiss. The webhook notifies only then. */
+    | { stored: true; conversationId: number; opened: boolean; organisationId: number; assistantId: number | null; platform: MessagingPlatform }
     | { stored: false; reason: 'duplicate' | 'unknown_account' | 'ambiguous_account' | 'deleted_applied' | 'deleted_unknown' };
 
 /**
@@ -222,7 +234,8 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
                 updatedAt: sql`${socialConversations.updatedAt}`,
             },
         })
-        .returning({ id: socialConversations.id });
+        // xmax = 0 only on a freshly inserted row: tells a new conversation from a found one.
+        .returning({ id: socialConversations.id, created: sql<boolean>`(xmax = 0)`, statusBefore: socialConversations.status });
 
     // 2. The message. Already have it → nothing else to do.
     const inserted = await db.insert(socialMessages)
@@ -250,6 +263,9 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
             status: sql`CASE WHEN ${socialConversations.lastOutboundAt} IS NULL OR ${socialConversations.lastOutboundAt} < ${at} THEN 'new' ELSE ${socialConversations.status} END`,
             updatedAt: new Date(),
         }).where(eq(socialConversations.id, conv.id));
+        const [after] = await db.select({ status: socialConversations.status }).from(socialConversations).where(eq(socialConversations.id, conv.id)).limit(1);
+        const opened = after?.status === 'new' && (conv.created === true || conv.statusBefore !== 'new');
+        return { stored: true, conversationId: conv.id, opened, organisationId: conn.organisationId, assistantId: conn.assistantId, platform: m.platform };
     } else {
         await db.update(socialConversations).set({
             lastOutboundAt: sql`GREATEST(COALESCE(${socialConversations.lastOutboundAt}, ${at}), ${at})`,
@@ -257,7 +273,7 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
             updatedAt: new Date(),
         }).where(eq(socialConversations.id, conv.id));
     }
-    return { stored: true, conversationId: conv.id };
+    return { stored: true, conversationId: conv.id, opened: false, organisationId: conn.organisationId, assistantId: conn.assistantId, platform: m.platform };
 }
 
 /**
@@ -290,7 +306,7 @@ export async function markPageSubscribedOnOtherRows(db: Db, pageId: string, exce
 
 export type SubscribeResult = { ok: true } | { ok: false; error: string };
 
-async function pageTokenFor(userToken: string, pageId: string, fetchImpl: typeof fetch): Promise<string | null> {
+export async function pageTokenFor(userToken: string, pageId: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
     const res = await fetchImpl(
         `https://graph.facebook.com/${FB_GRAPH_VERSION}/${encodeURIComponent(pageId)}?fields=access_token&access_token=${encodeURIComponent(userToken)}`,
         { signal: AbortSignal.timeout(5000) },

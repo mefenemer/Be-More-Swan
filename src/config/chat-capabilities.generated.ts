@@ -204,7 +204,8 @@ export const GENERATED_CHAT_MANIFEST = {
         "social_media_manager": {
             "flags": [
                 "usesInspo",
-                "usesPageComments"
+                "usesPageComments",
+                "usesSocialMessages"
             ],
             "contentSnapshot": "posts",
             "offersOwnCards": true,
@@ -212,6 +213,7 @@ export const GENERATED_CHAT_MANIFEST = {
             "cards": [
                 "ai_video_label_setting",
                 "comment_action_proposal",
+                "message_action_proposal",
                 "post_action_proposal",
                 "redraft_upcoming_proposal",
                 "share_for_review_proposal",
@@ -300,6 +302,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesInspo",
         "usesLeadSnapshot",
         "usesPageComments",
+        "usesSocialMessages",
         "usesCampaignSnapshot",
         "usesBriefsSnapshot",
         "usesVideosSnapshot",
@@ -432,6 +435,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "mentor_review_all",
         "mentor_support_request",
         "mentor_take_me_there",
+        "message_action_proposal",
         "newsletter_campaign_draft",
         "newsletter_issue_draft",
         "offer_profile",

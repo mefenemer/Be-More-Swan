@@ -82,6 +82,7 @@ async function main() {
         await check('a first message creates the conversation, files the message, opens a 24h window', async () => {
             const res = await storeMessagingEvent(db, msg({}));
             assert.equal(res.stored, true);
+            assert.equal((res as { opened: boolean }).opened, true, 'a new conversation opens (one notification)');
             const [c] = await conv();
             assert.equal(c.organisation_id, 1);
             assert.equal(c.ai_assistant_id, 7, "filed under the connection's assistant");
@@ -89,6 +90,13 @@ async function main() {
             assert.equal(c.li, '2026-11-19 10:00:00');
             assert.equal(c.wc, '2026-11-20 10:00:00');
             assert.deepEqual((await msgs()).map(m => [m.direction, m.mid, m.body]), [['in', 'm1', 'hello']]);
+        });
+
+        await check('a second message while it is still waiting does not open it again (no second notification)', async () => {
+            const res = await storeMessagingEvent(db, msg({ mid: 'm1b', text: 'are you there?', sentAt: at(1) }));
+            assert.equal((res as { opened: boolean }).opened, false);
+            await sql.unsafe(`DELETE FROM social_messages WHERE mid = 'm1b'`);
+            await sql.unsafe(`UPDATE social_conversations SET last_inbound_at = '2026-11-19 10:00:00', window_closes_at = '2026-11-20 10:00:00'`);
         });
 
         await check('the same delivery again changes nothing', async () => {
@@ -107,7 +115,8 @@ async function main() {
         });
 
         await check("a new message from the person → 'new' again and the window restarts from it", async () => {
-            await storeMessagingEvent(db, msg({ mid: 'm3', text: 'and Monday?', sentAt: at(60) }));
+            const res = await storeMessagingEvent(db, msg({ mid: 'm3', text: 'and Monday?', sentAt: at(60) }));
+            assert.equal((res as { opened: boolean }).opened, true, 'a message after a reply opens it again');
             const [c] = await conv();
             assert.equal(c.status, 'new');
             assert.equal(c.wc, '2026-11-20 11:00:00');

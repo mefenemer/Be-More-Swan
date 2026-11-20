@@ -7217,12 +7217,18 @@ export const socialConversations = pgTable("social_conversations", {
   // 'new' | 'replied' | 'dismissed'
   status: text("status").notNull().default("new"),
   draftReply: text("draft_reply"),
+  // db/z-social-messages-2.sql: the "4 hours left" reminder went out for the window ending at this
+  // time. A new message moves window_closes_at, so a later window gets its own reminder.
+  remindedForWindow: timestamp("reminded_for_window"),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("social_conversations_connection_participant_uq").on(t.connectionId, t.participantId),
   index("social_conversations_assistant_status_idx").on(t.aiAssistantId, t.status, t.lastInboundAt),
   index("social_conversations_org_idx").on(t.organisationId),
+  index("social_conversations_window_idx").on(t.status, t.windowClosesAt),
   check("social_conversations_platform_check", sql`${t.platform} IN ('facebook','instagram')`),
   check("social_conversations_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
 ]);
