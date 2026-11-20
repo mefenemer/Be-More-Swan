@@ -14,7 +14,7 @@ import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
-import { broadcastDef, pendingRecipients, emailsGoToCustomers } from '../../src/utils/broadcast';
+import { broadcastDef, pendingRecipients, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
 import { cancelledNoticeKey, cancelledRecipients, noticeContext, noticeKey, readChange } from '../../src/utils/task-cost-changes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -31,7 +31,7 @@ export default withLambda(async (event: HandlerEvent) => {
     const auth = event.headers['authorization'] || event.headers['Authorization'] || '';
     if (auth.replace(/^Bearer\s+/i, '').trim() !== secret) return { statusCode: 401, body: 'Unauthorized.' };
 
-    let body: { key?: string; adminId?: number; taskCostChangeId?: number; notice?: string } = {};
+    let body: { key?: string; adminId?: number; audience?: string; taskCostChangeId?: number; notice?: string } = {};
     try { body = JSON.parse(event.body || '{}'); } catch { /* validated below */ }
     const adminId = Number(body.adminId);
     if (!Number.isInteger(adminId)) return { statusCode: 400, body: 'adminId required.' };
@@ -59,9 +59,12 @@ export default withLambda(async (event: HandlerEvent) => {
     } else {
         const def = broadcastDef(body.key);
         if (!def) return { statusCode: 400, body: 'key required.' };
+        // The audience the admin confirmed the count for; never widened to everyone by a missing field.
+        const audience = readAudience(body.audience);
+        if (!audience) return { statusCode: 400, body: 'audience required.' };
         templateKey = def.key;
         sentMark = def.key;
-        recipients = await pendingRecipients(db, def.key);
+        recipients = await pendingRecipients(db, def.key, audience);
     }
     let inApp = 0, emailed = 0, emailFailed = 0, left = 0;
 

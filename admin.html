@@ -2441,7 +2441,7 @@
       <section id="view-broadcast" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="mb-6">
           <h2 class="text-lg font-extrabold text-gray-900">Broadcast</h2>
-          <p class="text-sm text-gray-500 mt-0.5">Send a notice to every customer: an in-app notification and an email, once each. Only notices written and reviewed in code can be sent (src/utils/broadcast.ts). Anyone who already has a notice is skipped, so sending again only reaches people who missed it.</p>
+          <p class="text-sm text-gray-500 mt-0.5">Send a notice to customers, to workspace owners only or to everyone in each workspace: an in-app notification and an email, once each. The notices are set up in code (src/utils/broadcast.ts); edit their wording in Manage Emails and Notification Templates, and this page shows your saved edits. Anyone who already has a notice is skipped, so sending again only reaches people who missed it.</p>
         </div>
         <div id="bc-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
         <div id="bc-mode" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
@@ -4569,7 +4569,7 @@ async function loadBroadcasts() {
   const mode = document.getElementById('bc-mode');
   mode.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (d.emailsGoToCustomers ? 'bg-amber-50 text-amber-800' : 'bg-sky-50 text-sky-800');
   mode.textContent = d.emailsGoToCustomers
-    ? 'This is the live site: sending emails every customer listed below.'
+    ? 'This is the live site: sending emails everyone in the audience you pick below.'
     : `This is not the live site: in-app notices are written to this database, but no customer is emailed. "Send a test to me" emails ${d.you} only.`;
   mode.classList.remove('hidden'); mode.style.display = 'block';
 
@@ -4581,7 +4581,7 @@ async function loadBroadcasts() {
           <p class="text-xs text-gray-500 mt-0.5">${bcEsc(b.purpose)}</p>
         </div>
         <div class="text-right text-sm shrink-0">
-          <p><strong>${b.waiting}</strong> waiting</p>
+          <p><strong class="bc-waiting">${b.waiting[b.audience]}</strong> waiting</p>
           <p class="text-xs text-gray-500">${b.alreadySent} already have it</p>
         </div>
       </div>
@@ -4597,8 +4597,13 @@ async function loadBroadcasts() {
       </div>
       <div class="flex flex-wrap items-center gap-2 mt-4">
         <button type="button" class="bc-test btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send a test to me</button>
-        <input type="text" inputmode="numeric" class="bc-confirm w-28 border border-gray-300 rounded-lg px-2 py-2 text-sm" placeholder="Type ${b.waiting}" aria-label="Type the number waiting to confirm" ${b.waiting ? '' : 'disabled'}>
-        <button type="button" class="bc-send btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Send to ${b.waiting} ${b.waiting === 1 ? 'person' : 'people'}</button>
+        <label class="text-sm text-gray-600 flex items-center gap-1.5">Send to
+          <select class="bc-audience border border-gray-300 rounded-lg px-2 py-2 text-sm" aria-label="Who this notice goes to">
+            ${(b.audiences || []).map((a) => `<option value="${bcEsc(a.key)}" ${a.key === b.audience ? 'selected' : ''}>${bcEsc(a.label)} (${b.waiting[a.key]})</option>`).join('')}
+          </select>
+        </label>
+        <input type="text" inputmode="numeric" class="bc-confirm w-28 border border-gray-300 rounded-lg px-2 py-2 text-sm" aria-label="Type the number waiting to confirm">
+        <button type="button" class="bc-send btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled></button>
       </div>
     </div>`).join('') || '<p class="text-sm text-gray-400">No notices are set up for broadcast.</p>';
 
@@ -4611,9 +4616,22 @@ async function loadBroadcasts() {
     if (frame && b.email) frame.srcdoc = b.email.html;
     const input = card.querySelector('.bc-confirm');
     const send = card.querySelector('.bc-send');
-    input.addEventListener('input', () => { send.disabled = input.value.trim() !== String(b.waiting) || b.waiting === 0; });
+    const pick = card.querySelector('.bc-audience');
+    // The count to type, the button and the send all follow the audience picked; changing it clears the typed number.
+    const waitingNow = () => b.waiting[pick.value] ?? 0;
+    const sync = () => {
+      const n = waitingNow();
+      card.querySelector('.bc-waiting').textContent = n;
+      input.placeholder = `Type ${n}`;
+      input.disabled = n === 0;
+      send.textContent = `Send to ${n} ${pick.value === 'owners' ? (n === 1 ? 'owner' : 'owners') : (n === 1 ? 'person' : 'people')}`;
+      send.disabled = input.value.trim() !== String(n) || n === 0;
+    };
+    pick.addEventListener('change', () => { input.value = ''; sync(); });
+    input.addEventListener('input', sync);
+    sync();
     card.querySelector('.bc-test').addEventListener('click', (e) => runBroadcast(e.currentTarget, 'test', { key: b.key }));
-    send.addEventListener('click', (e) => runBroadcast(e.currentTarget, 'send', { key: b.key, expected: b.waiting }));
+    send.addEventListener('click', (e) => runBroadcast(e.currentTarget, 'send', { key: b.key, expected: waitingNow(), audience: pick.value }));
   });
 }
 
@@ -4625,8 +4643,8 @@ async function runBroadcast(btn, resource, payload) {
     if (!res.ok) { showBcStatus('error', d.error || `That didn't work (HTTP ${res.status}).`); if (res.status === 409) loadBroadcasts(); return; }
     if (resource === 'test') showBcStatus('success', `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`);
     else showBcStatus('success', d.emailsGoToCustomers
-      ? `Sending to ${d.waiting} people. It runs in the background; refresh this page to watch the count fall.`
-      : `Writing in-app notices for ${d.waiting} people on this database. No customer emails are sent from here.`);
+      ? `Sending to ${d.waiting} ${d.audience === 'owners' ? 'workspace owners' : 'people'}. It runs in the background; refresh this page to watch the count fall.`
+      : `Writing in-app notices for ${d.waiting} ${d.audience === 'owners' ? 'workspace owners' : 'people'} on this database. No customer emails are sent from here.`);
     setTimeout(loadBroadcasts, 4000);
   } catch (err) {
     showBcStatus('error', err.message || 'That didn\'t work.');

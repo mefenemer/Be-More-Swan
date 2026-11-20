@@ -13,7 +13,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BROADCASTS, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES } from '../src/utils/broadcast';
+import { BROADCASTS, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES, readAudience, BROADCAST_AUDIENCES } from '../src/utils/broadcast';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 import { TEMPLATE_DEFAULTS } from '../src/utils/email-templates-catalog';
 
@@ -100,8 +100,9 @@ check('the admin page sends only after the number waiting is typed', () => {
     const html = read('admin.html');
     assert.ok(html.includes('id="view-broadcast"'));
     assert.match(html, /\{ view: 'broadcast', +icon: '📣', label: 'Broadcast', +perm: 'manage_comms_templates', +group: 'Messages' \}/);
-    assert.match(html, /send\.disabled = input\.value\.trim\(\) !== String\(b\.waiting\) \|\| b\.waiting === 0;/);
-    assert.match(html, /runBroadcast\(e\.currentTarget, 'send', \{ key: b\.key, expected: b\.waiting \}\)/);
+    assert.match(html, /send\.disabled = input\.value\.trim\(\) !== String\(n\) \|\| n === 0;/);
+    assert.match(html, /runBroadcast\(e\.currentTarget, 'send', \{ key: b\.key, expected: waitingNow\(\), audience: pick\.value \}\)/);
+    assert.match(html, /pick\.addEventListener\('change', \(\) => \{ input\.value = ''; sync\(\); \}\);/, 'changing the audience clears the typed number');
 });
 
 check('ElevenLabs notice: both lists name it, the copy keeps the 14-day objection route and claims no training promise', () => {
@@ -116,6 +117,29 @@ check('ElevenLabs notice: both lists name it, the copy keeps the 14-day objectio
     assert.doesNotMatch(email.bodyHtml, /within 14 days of (?:\d|[A-Z][a-z]+ \d)/, 'no fixed objection date: the 14 days run from the send');
     assert.match(read('trust.html'), /<td[^>]*>ElevenLabs<\/td>/);
     assert.match(read('privacy.html'), /<td[^>]*>ElevenLabs<\/td>/);
+});
+
+check('audience (owner, 2026-11-20): owners or everyone, picked per send, never widened by a missing field', () => {
+    assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone']);
+    assert.strictEqual(readAudience('owners'), 'owners');
+    assert.strictEqual(readAudience('everyone'), 'everyone');
+    for (const bad of [undefined, null, '', 'admins', 'Owners']) assert.strictEqual(readAudience(bad), null);
+    assert.strictEqual(broadcastDef('subprocessor_elevenlabs_notice')?.audience, 'owners', 'the DPA notice goes to owners');
+    assert.strictEqual(broadcastDef('ai_video_per_second_notice')?.audience, 'everyone');
+    const util = read('src/utils/broadcast.ts');
+    assert.match(util, /\$\{audience === 'owners' \? sql`AND uo\.role = 'owner'` : sql``\}/);
+    const fn = read('netlify/functions/admin-broadcast.ts');
+    assert.ok(fn.indexOf("const audience = readAudience(body.audience);") < fn.indexOf('const waiting = (await pendingRecipients(db, def.key, audience)).length;'), 'the count is checked for the audience picked');
+    assert.match(fn, /if \(!audience\) return json\(400,/);
+    assert.match(fn, /body: JSON\.stringify\(\{ key: def\.key, adminId, audience \}\)/);
+    const worker = read('netlify/functions/admin-broadcast-background.ts');
+    assert.match(worker, /if \(!audience\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
+    assert.match(worker, /recipients = await pendingRecipients\(db, def\.key, audience\);/);
+});
+
+check('the Broadcast page previews the copy that will go out, saved Admin edits included', () => {
+    const fn = read('netlify/functions/admin-broadcast.ts');
+    assert.match(fn, /const tpl = await renderNotification\(b\.key,/);
 });
 
 console.log(`\n${passed} checks passed`);
