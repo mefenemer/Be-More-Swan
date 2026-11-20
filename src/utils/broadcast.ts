@@ -7,7 +7,9 @@
 // Rules that matter, each pinned by tests/broadcast.test.ts:
 //   · Only notices listed in BROADCASTS can go out — an in-app template and an email template
 //     with the same key, both written and reviewed in code. There is no free-text broadcast.
-//   · Recipients: active users who belong to a workspace on a plan that is still running.
+//   · Recipients: active users who belong to a workspace on a plan that is still running — everyone in it, or
+//     only its owners (user_organisations.role 'owner'). Each notice has a default audience; the admin picks
+//     on the Broadcast page (owner, 2026-11-20: the ElevenLabs sub-processor notice goes to owners only).
 //   · Once each: a user who already has the notice's notification is skipped, so a second press,
 //     a retried worker or a resend after a crash never sends twice.
 //   · Real emails go out only from the production deploy. Anywhere else (staging, branch deploys,
@@ -19,12 +21,24 @@ import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
 
+/** Who a broadcast reaches: every member of a live workspace, or only its owners. */
+export const BROADCAST_AUDIENCES = ['owners', 'everyone'] as const;
+export type BroadcastAudience = typeof BROADCAST_AUDIENCES[number];
+export const AUDIENCE_LABELS: Record<BroadcastAudience, string> = { owners: 'Workspace owners', everyone: 'Everyone in each workspace' };
+
+/** An audience from a request; anything else is null (refused, never guessed). Pure. */
+export function readAudience(v: unknown): BroadcastAudience | null {
+    return (BROADCAST_AUDIENCES as readonly unknown[]).includes(v) ? v as BroadcastAudience : null;
+}
+
 export interface BroadcastDef {
     /** Same key in NOTIFICATION_DEFAULTS (in-app) and TEMPLATE_DEFAULTS (email). */
     key: string;
     label: string;
     /** Why it exists — shown on the admin page so nobody sends it by accident. */
     purpose: string;
+    /** Who the admin page offers first. They can still pick the other. */
+    audience: BroadcastAudience;
 }
 
 export const BROADCASTS: readonly BroadcastDef[] = [
@@ -32,11 +46,14 @@ export const BROADCASTS: readonly BroadcastDef[] = [
         key: 'ai_video_per_second_notice',
         label: 'AI video will count by length (from 3 December 2026)',
         purpose: '30 days\' notice required by terms 5.2 before AI video is priced by the second. Send by 2 November 2026 for a 3 December start.',
+        audience: 'everyone',
     },
     {
         key: 'subprocessor_elevenlabs_notice',
         label: 'New sub-processor: ElevenLabs (voiceovers and transcription)',
         purpose: 'The 14 days\' notice in DPA clause 5 for adding ElevenLabs to the sub-processor list (Trust page, 19 November 2026). Owners may object to privacy@bemoreswan.com within 14 days of the email.',
+        // The DPA's notice goes to the workspace owner (clause 5); the owner chose owners only (2026-11-20).
+        audience: 'owners',
     },
 ];
 
@@ -67,8 +84,8 @@ export function emailsGoToCustomers(headers: Record<string, string | undefined> 
 
 export interface Recipient { id: number; email: string; firstName: string | null }
 
-/** Everyone who should get this notice and hasn't yet. */
-export async function pendingRecipients(db: Db, key: string): Promise<Recipient[]> {
+/** Everyone who should get this notice and hasn't yet — or, for 'owners', only workspace owners. */
+export async function pendingRecipients(db: Db, key: string, audience: BroadcastAudience): Promise<Recipient[]> {
     const rows = await db.execute<{ id: number; email: string; first_name: string | null }>(sql`
         SELECT DISTINCT u.id, u.email, u.first_name
           FROM users u
@@ -76,10 +93,20 @@ export async function pendingRecipients(db: Db, key: string): Promise<Recipient[
           JOIN plans p ON p.organisation_id = uo.organisation_id
          WHERE u.status = 'active'
            AND p.status IN (${sql.join(LIVE_PLAN_STATUSES.map((s) => sql`${s}`), sql`, `)})
+           ${audience === 'owners' ? sql`AND uo.role = 'owner'` : sql``}
            AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = u.id AND n.type = ${key})
          ORDER BY u.id`);
     return (rows as unknown as Array<{ id: number; email: string; first_name: string | null }>)
         .map((r) => ({ id: Number(r.id), email: r.email, firstName: r.first_name }));
+}
+
+/**
+ * Has this person got the notice already? Read again just before each send: two sends of one notice can run at once
+ * (owners, then everyone, before the first finishes), and the list each run read at its start would repeat people.
+ */
+export async function alreadyHas(db: Db, userId: number, key: string): Promise<boolean> {
+    const rows = await db.execute<{ n: number }>(sql`SELECT 1 AS n FROM notifications WHERE user_id = ${userId} AND type = ${key} LIMIT 1`);
+    return (rows as unknown as unknown[]).length > 0;
 }
 
 /** How many already have it. */

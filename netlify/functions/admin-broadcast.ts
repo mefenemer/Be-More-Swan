@@ -17,18 +17,27 @@
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users } from '../../db/schema';
+import { users, notificationTemplates } from '../../db/schema';
 import { requirePermission, hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { createNotification } from '../../src/utils/notify';
+import { createNotification, renderNotification } from '../../src/utils/notify';
 import { renderTemplate, sendTemplatedEmail } from '../../src/utils/email';
 import { NOTIFICATION_DEFAULTS } from '../../src/utils/notification-templates-catalog';
 import { resolveEnvironment } from '../../src/utils/env-context';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { BROADCASTS, broadcastDef, pendingRecipients, alreadySentCount, emailsGoToCustomers } from '../../src/utils/broadcast';
+import { BROADCASTS, AUDIENCE_LABELS, BROADCAST_AUDIENCES, broadcastDef, pendingRecipients, alreadySentCount, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
+
+/** Is this notice's in-app template switched off in Admin → Notification Templates? False if there is no saved row. */
+async function inAppSwitchedOff(key: string): Promise<boolean> {
+    try {
+        const [row] = await getDb().select({ isActive: notificationTemplates.isActive }).from(notificationTemplates)
+            .where(eq(notificationTemplates.templateKey, key)).limit(1);
+        return row ? row.isActive === false : false;
+    } catch { return false; }
+}
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -65,21 +74,28 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET' && resource === 'list') {
         const out = [];
         for (const b of BROADCASTS) {
-            const tpl = NOTIFICATION_DEFAULTS.find((t) => t.templateKey === b.key);
+            // The copy that will really go out: a saved Admin edit (Notification Templates / Manage Emails) beats the code.
+            const tpl = await renderNotification(b.key, { user: { first_name: admin.firstName || 'there' } })
+                ?? NOTIFICATION_DEFAULTS.find((t) => t.templateKey === b.key) ?? null;
             const email = await renderTemplate(b.key, { user: { first_name: admin.firstName || 'there' } });
+            const waiting: Record<string, number> = {};
+            for (const a of BROADCAST_AUDIENCES) waiting[a] = (await pendingRecipients(db, b.key, a)).length;
             out.push({
                 ...b,
                 inApp: tpl ? { title: tpl.title, message: tpl.message } : null,
                 email: email ? { subject: email.subject, html: email.html } : null,
-                waiting: (await pendingRecipients(db, b.key)).length,
+                waiting,
+                audiences: BROADCAST_AUDIENCES.map((a) => ({ key: a, label: AUDIENCE_LABELS[a] })),
                 alreadySent: await alreadySentCount(db, b.key),
+                // Switched off in Notification Templates: a send writes nothing and emails nobody, so the page says so.
+                switchedOff: await inAppSwitchedOff(b.key),
             });
         }
         return json(200, { broadcasts: out, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>), you: admin.email });
     }
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
-    let body: { key?: string; expected?: number };
+    let body: { key?: string; expected?: number; audience?: string };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON body.' }); }
     const def = broadcastDef(body.key);
     if (!def) return json(400, { error: 'That notice is not one that can be broadcast.' });
@@ -99,27 +115,29 @@ export default withLambda(async (event) => {
     }
 
     if (resource === 'send') {
-        const waiting = (await pendingRecipients(db, def.key)).length;
+        const audience = readAudience(body.audience);
+        if (!audience) return json(400, { error: 'Choose who it goes to: workspace owners or everyone.' });
+        const waiting = (await pendingRecipients(db, def.key, audience)).length;
         if (!Number.isInteger(body.expected) || body.expected !== waiting) {
             return json(409, { error: `The number waiting has changed to ${waiting}. Check it again before sending.`, waiting });
         }
-        if (waiting === 0) return json(400, { error: 'Everyone already has this notice.' });
+        if (waiting === 0) return json(400, { error: audience === 'owners' ? 'Every workspace owner already has this notice.' : 'Everyone already has this notice.' });
         const secret = process.env.CRON_TRIGGER_SECRET;
         const base = resolveBaseUrl(event.headers);
         if (!secret || !base) return json(503, { error: !secret ? 'CRON_TRIGGER_SECRET is not set on this site.' : 'Could not work out this site\'s address.' });
-        await audit('broadcast_started', { waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
+        await audit('broadcast_started', { waiting, audience, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
         try {
             const res = await fetch(`${base}/.netlify/functions/admin-broadcast-background`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
-                body: JSON.stringify({ key: def.key, adminId }),
+                body: JSON.stringify({ key: def.key, adminId, audience }),
                 signal: AbortSignal.timeout(8_000),
             });
             if (!(res.status === 202 || res.ok)) return json(502, { error: `The sender refused to start (HTTP ${res.status}).` });
         } catch (err) {
             return json(502, { error: `The sender could not be reached: ${err instanceof Error ? err.message : String(err)}` });
         }
-        return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
+        return json(202, { started: true, waiting, audience, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
     }
 
     return json(400, { error: 'Unknown resource.' });
