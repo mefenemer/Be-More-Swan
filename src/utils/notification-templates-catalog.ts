@@ -1235,7 +1235,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Compliance',
         type: 'subprocessor_elevenlabs_notice',
         title: 'We have added ElevenLabs to our list of sub-processors',
-        message: 'ElevenLabs (US) speaks the AI voiceovers for your videos and the Read aloud samples, and transcribes the audio you upload so captions line up. It has done this since early November, and we should have told you 14 days before. It acts as our processor under its Data Processing Addendum, with Standard Contractual Clauses and the UK Addendum. If you have a data protection reason to object, email privacy@bemoreswan.com within 14 days. The full list is on our Trust page.',
+        message: 'ElevenLabs (US) speaks the AI voiceovers for your videos and the Read aloud samples, and transcribes the audio you upload so captions line up. It acts as our processor under its Data Processing Addendum, with Standard Contractual Clauses and the UK Addendum. If you have a data protection reason to object, email privacy@bemoreswan.com within 14 days. The full list is on our Trust page.',
         variables: [],
     },
     {

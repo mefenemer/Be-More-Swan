@@ -3,20 +3,20 @@
 Written 2026-11-19. The owner asked for ElevenLabs to be added to the sub-processor lists, with the
 email to workspace owners drafted for review.
 
-## Why it is owed
+## Why it is sent
 
 The DPA (clause 5, `get-dpa-content.ts`) promises workspace owners **14 days' notice** before a new
-sub-processor of Customer Personal Data, by email and by updating the Trust page list. ElevenLabs has
-handled customer data without being listed:
+sub-processor of Customer Personal Data, by email and by updating the Trust page list.
 
-| Since | What ElevenLabs receives | Commit |
+**No apology (owner, 2026-11-20).** The Video Producer has not officially launched, so ElevenLabs was
+never opened to customers. The notice announces the addition plainly. It has no dates of earlier use
+and no "we should have told you". The code history is kept below for the record only:
+
+| Since | What ElevenLabs receives in code | Commit |
 |---|---|---|
 | 2 Nov 2026 | Voiceover scripts and "Read aloud" writing samples (text-to-speech) | ddd2ffda, 485dfc31 |
-| 12 Nov 2026 | Audio for word timings: our voiceovers, the customer's uploaded footage, own-voice recordings (Scribe) | b91cc6c4 |
+| 12 Nov 2026 | Audio for word timings: our voiceovers, uploaded footage, own-voice recordings (Scribe) | b91cc6c4 |
 | 12 Nov 2026 | The product tour narration (our own copy, no customer data) | 264b1251 |
-
-Uploaded footage and voice recordings contain people's voices, so this is personal data. The
-notice is late, and the email says so plainly.
 
 ## What changes in this PR
 
@@ -25,7 +25,7 @@ notice is late, and the email says so plainly.
   (the London man) and whisper as the backup when Scribe fails. The dates move to 19 November 2026.
 - **privacy.html:** the same rows, kept identical, and the date.
 - **faq.html:** "Which AI models power my assistant?" names ElevenLabs.
-- **Broadcast `subprocessor_elevenlabs_notice`:** an email and in-app notice, listed in Admin →
+- **Broadcast `subprocessor_elevenlabs_notice`:** an email and in-app notice (apology removed 2026-11-20), listed in Admin →
   Growth → Broadcast. Nothing sends it until the owner presses Send.
 
 ## What the owner decides

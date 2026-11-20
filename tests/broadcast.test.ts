@@ -111,6 +111,7 @@ check('ElevenLabs notice: both lists name it, the copy keeps the 14-day objectio
         assert.ok(tpl.message.includes(s), `in-app: ${s}`);
         assert.ok(email.bodyHtml.includes(s), `email: ${s}`);
     }
+    assert.doesNotMatch(email.bodyHtml + tpl.message, /sorry|should have told|apolog/i, 'no apology (owner, 2026-11-20): ElevenLabs was never opened to customers before launch');
     assert.doesNotMatch(email.bodyHtml + tpl.message, /\btrain/i, 'ElevenLabs\' DPA makes no training promise, so neither do we');
     assert.doesNotMatch(email.bodyHtml, /within 14 days of (?:\d|[A-Z][a-z]+ \d)/, 'no fixed objection date: the 14 days run from the send');
     assert.match(read('trust.html'), /<td[^>]*>ElevenLabs<\/td>/);
