@@ -14,7 +14,7 @@
 
 import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
-import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, ELEVENLABS_MODEL, SLOW_MODEL_PART_CHARS, VOICEOVER_MAX_CHARS, speechModel, speakVoiceover, splitForSpeech, slowModelParts, voicePace } from '../src/lib/tts';
+import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, ELEVENLABS_MODEL, SLOW_MODEL_PART_CHARS, VOICEOVER_MAX_CHARS, speechModel, speakVoiceover, splitForSpeech, slowModelParts, slowPartTimeoutMs, voicePace } from '../src/lib/tts';
 import { CAPTION_LANGUAGES } from '../src/lib/youtube-extras';
 import { spokenLanguage } from '../src/utils/youtube-video';
 import { translationPrompt, translateCaptions } from '../src/utils/caption-translate';
@@ -112,6 +112,9 @@ await check('long sentences never push a short Welsh voiceover into a second bat
     assert.strictEqual(parts.join(' '), text);
     const cy = await spoken(text, 'cy_hannah');
     assert.ok(cy.bodies.length <= 3);
+    // Each part's wait stays under 20 s, so speech + saving fits the 26 s request.
+    assert.strictEqual(slowPartTimeoutMs(500), 17_000);
+    assert.strictEqual(slowPartTimeoutMs(800), 20_000);
     // A long video's script (background) keeps 500-character parts.
     assert.ok(slowModelParts(text.repeat(3)).every((p) => p.length <= SLOW_MODEL_PART_CHARS));
 });

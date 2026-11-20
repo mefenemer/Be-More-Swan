@@ -137,9 +137,12 @@ export function slowModelParts(text: string): string[] {
     return parts;
 }
 
-/** How long to wait for one eleven_v3 part: 17 s for 500 characters (10.9 s measured for 484), 25 ms a character more. Pure. */
+/**
+ * How long to wait for one eleven_v3 part: 17 s for 500 characters (10.9 s measured for 484), 25 ms a character more,
+ * never over 20 s, so a short voiceover's speech leaves room to save inside the 26 s request (review of A4). Pure.
+ */
 export function slowPartTimeoutMs(chars: number): number {
-    return 17_000 + Math.max(0, chars - SLOW_MODEL_PART_CHARS) * 25;
+    return Math.min(20_000, 17_000 + Math.max(0, chars - SLOW_MODEL_PART_CHARS) * 25);
 }
 
 export function isVoiceId(v: unknown): v is VoiceId {
