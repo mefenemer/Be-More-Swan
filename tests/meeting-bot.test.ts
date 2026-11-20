@@ -1,6 +1,7 @@
 // The Note Taker joins a call itself (docs/note-taker-bot-plan.md §4, step 2): the pure rules, Recall's signature,
 // the hand-over to the meeting pick-up engine, and the order of the safety checks. Run: npx tsx tests/meeting-bot.test.ts
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
@@ -223,11 +224,12 @@ await test('the bot\'s video tile: a JPEG for recording and one for not recordin
     assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
 });
 
-await test('the tile pictures load only where a bot is sent: meeting-bot.ts never imports them; sendMeetingBot imports them lazily', () => {
-    assert.ok(!read('src/utils/meeting-bot.ts').includes("from './meeting-bot-tile-data'"), 'not in meeting-bot.ts (recall-webhook loads it)');
-    const db = read('src/utils/meeting-bot-db.ts');
-    assert.ok(!db.includes("from './meeting-bot-tile-data'"), 'no static import in meeting-bot-db.ts');
-    assert.ok(db.includes("await import('./meeting-bot-tile-data')"), 'dynamic import where the bot is sent');
+await test('the tile pictures are bundled only where a bot is sent: no src/ or function file but meeting-bots.ts imports them', () => {
+    // esbuild bundles even a dynamic import, so ANY import (static or dynamic) adds ~125 KB to that function.
+    const hits = execSync("grep -rlE \"meeting-bot-tile-data['\\\"]\" src netlify || true", { encoding: 'utf8' }).split('\n').filter(Boolean).sort();
+    assert.deepEqual(hits, ['netlify/functions/meeting-bots.ts'], 'only the send function imports the pictures');
+    assert.ok(read('netlify/functions/meeting-bots.ts').includes('videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64'), 'and passes them to sendMeetingBot');
+    assert.ok(read('src/utils/meeting-bot-db.ts').includes('videoTile: i.videoTile'), 'sendMeetingBot hands them to the Recall request');
 });
 
 await test('Recall\'s transcript: one line per block with the participant\'s name; empty blocks dropped, no name = unlabelled', () => {

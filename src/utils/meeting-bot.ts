@@ -260,7 +260,7 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
 
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
-/** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, loaded only where a bot is sent). */
+/** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, imported only by netlify/functions/meeting-bots.ts). */
 export interface BotVideoTile { recordingJpegB64: string; notRecordingJpegB64: string }
 
 export interface BotRequestInput {
@@ -271,7 +271,8 @@ export interface BotRequestInput {
     lengthLimitMinutes: number;
     botRowId: number;
     organisationId: number;
-    /** Its picture in the call. Passed in rather than imported, so the webhook doesn't load ~130 KB it never uses. */
+    /** Its picture in the call. Passed in (from netlify/functions/meeting-bots.ts) rather than imported, so the other
+     *  functions that import this file don't bundle ~125 KB of pictures they never use. */
     videoTile?: BotVideoTile;
 }
 
