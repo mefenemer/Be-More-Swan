@@ -84,7 +84,7 @@ export function windowOpen(windowClosesAt: Date | string | null | undefined, now
     return !!iso && new Date(iso).getTime() > now;
 }
 
-export type SendRefusal = 'window_closed' | 'not_connected' | 'scope_missing' | 'instagram_access_off' | 'person_unavailable' | 'meta_error';
+export type SendRefusal = 'window_closed' | 'not_connected' | 'scope_missing' | 'instagram_access_off' | 'person_unavailable' | 'meta_error' | 'unconfirmed';
 
 /**
  * Meta's error body → why the reply didn't go. Pure, so tests can feed it Meta's documented shapes.
@@ -109,6 +109,7 @@ export const REFUSAL_COPY: Record<SendRefusal, string> = {
     instagram_access_off: 'Instagram is blocking apps from your messages. In the Instagram app: Settings → Messages and story replies → Connected tools → turn on “Allow access to messages”.',
     person_unavailable: 'Meta says this person can’t be messaged right now (they may have blocked the account or closed theirs).',
     meta_error: 'Meta didn’t accept the reply just now — please try again.',
+    unconfirmed: 'Meta didn’t answer in time, so the reply may or may not have gone. Check the conversation in the Facebook / Instagram app before sending it again.',
 };
 
 // ── Credentials ──────────────────────────────────────────────────────────────────────────────
@@ -391,9 +392,12 @@ export async function callSendApi(
         });
         const data: any = await res.json().catch(() => ({}));
         if (res.ok && (data?.message_id || data?.recipient_id)) return { ok: true, messageId: data.message_id ? String(data.message_id) : null };
+        // A 5xx is Meta failing on its side after it may have accepted the message.
+        if (res.status >= 500) return { ok: false, status: res.status, reason: 'unconfirmed', detail: String(data?.error?.message ?? `HTTP ${res.status}`).slice(0, 300) };
         return { ok: false, status: res.status, reason: classifySendError(res.status, data), detail: String(data?.error?.message ?? `HTTP ${res.status}`).slice(0, 300) };
     } catch (err) {
-        return { ok: false, status: 0, reason: 'meta_error', detail: String((err as Error)?.message ?? err).slice(0, 300) };
+        // Timed out or the connection dropped: Meta may already have delivered it. Never say "try again".
+        return { ok: false, status: 0, reason: 'unconfirmed', detail: String((err as Error)?.message ?? err).slice(0, 300) };
     }
 }
 
@@ -407,8 +411,12 @@ export async function callSendApi(
  */
 export async function sendReply(
     db: Db, organisationId: number, assistantId: number, id: number, text: string | null, userId: number | null,
-    fetchImpl: typeof fetch = fetch,
+    deps: { fetchImpl?: typeof fetch; credsFor?: (db: Db, connectionId: number) => Promise<{ pageId: string; pageToken: string } | null> } = {},
 ): Promise<{ ok: true; conversation: ConversationView } | { ok: false; status: number; error: string; code?: string }> {
+    const fetchImpl = deps.fetchImpl ?? fetch;
+    const credsFor = deps.credsFor ?? ((d: Db, cid: number) => pageCredentialsForConnection(d, cid, fetchImpl));
+    // Set the moment Meta accepts — from then on nothing may report a failure (that invites a second send).
+    let accepted: { mid: string | null } | null = null;
     const first = await loadConversation(db, organisationId, assistantId, id);
     if (!first) return { ok: false, status: 404, error: 'That conversation isn’t on this assistant’s Messages tab.' };
     const platform: MessagingPlatform = first.platform === 'instagram' ? 'instagram' : 'facebook';
@@ -440,7 +448,7 @@ export async function sendReply(
             return { ok: false as const, status: 409, error: 'You’ve already sent this reply, and they haven’t written since.', code: 'duplicate' };
         }
 
-        const creds = await pageCredentialsForConnection(tx, row.c.connectionId, fetchImpl);
+        const creds = await credsFor(tx, row.c.connectionId);
         if (!creds) return { ok: false as const, status: 409, error: REFUSAL_COPY.not_connected, code: 'not_connected' };
 
         const sent = await callSendApi(creds, row.c.participantId, reply, fetchImpl);
@@ -448,24 +456,30 @@ export async function sendReply(
             console.warn(`[social-messages] send refused for conversation ${id}: ${sent.reason} — ${sent.detail}`);
             // Keep what they typed as the draft so nothing is lost.
             await tx.update(socialConversations).set({ draftReply: reply, updatedAt: sql`now()` }).where(eq(socialConversations.id, id));
-            return { ok: false as const, status: sent.reason === 'meta_error' ? 502 : 409, error: REFUSAL_COPY[sent.reason], code: sent.reason };
+            return { ok: false as const, status: sent.reason === 'meta_error' || sent.reason === 'unconfirmed' ? 502 : 409, error: REFUSAL_COPY[sent.reason], code: sent.reason };
         }
+        accepted = { mid: sent.messageId };
         // ⚠️ From here the message HAS gone. Bookkeeping runs in a savepoint: if it fails, the outer
         // transaction still commits and the rows are written again after it — the user is never told
         // to try again (which would send it twice).
-        const mid = sent.messageId ?? `sent:${id}:${Date.now()}`;
+        const mid = sent.messageId;
         try {
             await (txAny as { transaction: (f: (t: unknown) => Promise<void>) => Promise<void> }).transaction(async (sp) => recordSent(sp as Db, { organisationId, id, mid, reply, userId }));
         } catch (err) {
             console.error(`[social-messages] conversation ${id}: sent, but recording it failed — retrying after commit`, err instanceof Error ? err.message : err);
-            return { ok: true as const, recordLater: { mid } };
+            return { ok: true as const, recordLater: { mid } as { mid: string | null } };
         }
         return { ok: true as const, recordLater: null };
+    }).catch((err) => {
+        // The commit itself failed. Before Meta accepted: an ordinary error. After: it went — record it below.
+        if (!accepted) throw err;
+        console.error(`[social-messages] conversation ${id}: sent, but the commit failed — recording after`, err instanceof Error ? err.message : err);
+        return { ok: true as const, recordLater: { mid: accepted.mid } };
     }).then(async (r) => {
         if (!r.ok) return r;
         if (r.recordLater) await recordSent(db, { organisationId, id, mid: r.recordLater.mid, reply, userId }).catch((err) => console.error(`[social-messages] conversation ${id}: recording a sent reply failed twice`, err instanceof Error ? err.message : err));
-        const fresh = await loadConversation(db, organisationId, assistantId, id);
-        return { ok: true as const, conversation: fresh ? await viewOf(db, fresh) : conversationView(first, []) };
+        const fresh = await loadConversation(db, organisationId, assistantId, id).catch(() => null);
+        return { ok: true as const, conversation: fresh ? await viewOf(db, fresh).catch(() => conversationView(fresh, [])) : conversationView(first, []) };
     });
 }
 
@@ -477,12 +491,18 @@ export function isRepeatSend(reply: string, latestOut: { body: string | null; se
     return inAt <= outAt;
 }
 
-/** File a reply Meta accepted. Idempotent on mid (the echo webhook delivers it again). */
-async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string; reply: string; userId: number | null }): Promise<void> {
-    await db.insert(socialMessages).values({
-        organisationId: a.organisationId, conversationId: a.id, direction: 'out',
-        mid: a.mid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
-    }).onConflictDoNothing({ target: socialMessages.mid });
+/**
+ * File a reply Meta accepted. Idempotent on mid: the echo webhook delivers the same message, and
+ * whichever lands first, the row ends up marked as sent from here. With no message id from Meta
+ * nothing is filed under a made-up one — the echo files it, so it never shows twice.
+ */
+async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string | null; reply: string; userId: number | null }): Promise<void> {
+    if (a.mid) {
+        await db.insert(socialMessages).values({
+            organisationId: a.organisationId, conversationId: a.id, direction: 'out',
+            mid: a.mid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
+        }).onConflictDoUpdate({ target: socialMessages.mid, set: { sentBy: sql`COALESCE(${socialMessages.sentBy}, excluded.sent_by)` } });
+    }
     await db.update(socialConversations)
         .set({ status: 'replied', lastOutboundAt: sql`now()`, draftReply: null, decidedBy: a.userId, decidedAt: sql`now()`, updatedAt: sql`now()` })
         .where(eq(socialConversations.id, a.id));

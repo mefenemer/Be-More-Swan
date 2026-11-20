@@ -295,6 +295,10 @@ jobs:
       # reminder per reply window, never twice, and the 90-day text purge.
       - name: Meta messages reminders and purge
         run: npx tsx tests/social-messages-db.test.ts
+      # Send itself (sendReply) with a fake Meta: the 24h window by the database clock, the per-conversation
+      # lock, the repeat guard, and never "try again" once Meta has accepted (that would send it twice).
+      - name: Meta messages Send
+        run: npx tsx tests/social-messages-send-db.test.ts
       # The single task allowance's money SQL (src/utils/work-metering.ts): weighted charges, bonus
       # tasks spent only past the allowance, in-flight media reserved. A bare parameter in one of these
       # statements took production capacity checks down on 2026-10-17 — only Postgres can catch that.

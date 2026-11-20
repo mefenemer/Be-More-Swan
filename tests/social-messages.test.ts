@@ -103,7 +103,10 @@ async function main() {
         assert.equal((r as { reason: string }).reason, 'window_closed');
         const boom = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
         const r2 = await callSendApi({ pageId: '1', pageToken: 't' }, 'p', 'x', boom);
-        assert.equal((r2 as { reason: string }).reason, 'meta_error');
+        assert.equal((r2 as { reason: string }).reason, 'unconfirmed', 'a dropped connection may have delivered it — never "try again"');
+        const down = (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
+        assert.equal(((await callSendApi({ pageId: '1', pageToken: 't' }, 'p', 'x', down)) as { reason: string }).reason, 'unconfirmed');
+        assert.ok(!/try again/i.test(REFUSAL_COPY.unconfirmed));
     });
 
     // ── Send rules (source) ──────────────────────────────────────────────────────────────────
@@ -144,7 +147,8 @@ async function main() {
         const fn = lib.slice(lib.indexOf('export async function sendReply'), lib.indexOf('export function isRepeatSend'));
         const after = fn.slice(fn.indexOf('From here the message HAS gone'));
         assert.ok(!after.includes('ok: false'), 'no failure is returned after a successful send');
-        assert.ok(after.includes('return { ok: true as const, recordLater: { mid } };'));
+        assert.ok(after.includes('return { ok: true as const, recordLater: { mid } as { mid: string | null } };'));
+        assert.ok(fn.includes('if (!accepted) throw err;'), 'a failed commit after Meta accepted is recorded, not reported');
         assert.ok(after.includes('if (r.recordLater) await recordSent(db,'));
     });
     await check("an archived assistant's conversations ping nobody", () => {
