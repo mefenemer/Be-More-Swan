@@ -1,9 +1,14 @@
 {
-  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper and the London man by ear (Beth was removed 2026-11-13: her ElevenLabs voice came out far quieter and lower quality, about -40 LUFS against Pepper's -22; saved Beth settings now speak as Pepper). `speaker` is the OpenAI voice, used only by a voice with no `elevenlabs` id (no fallback since 2026-11-12). `legacy` voices (the original OpenAI six) stay valid for saved settings but are not offered; since 2026-11-12 each is spoken by an ElevenLabs voice of the same gender (coral, sage, alloy → Pepper; shimmer → Pepper; verse → Archer; onyx → Adam), because OpenAI retires gpt-4o-mini-tts on 6 Jan 2027. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs. \"wps\": measured words a second (scripts/measure-voice-pace.mjs), used for a long video's word target.",
+  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper and the London man by ear (Beth was removed 2026-11-13: her ElevenLabs voice came out far quieter and lower quality, about -40 LUFS against Pepper's -22; saved Beth settings now speak as Pepper). `speaker` is the OpenAI voice, used only by a voice with no `elevenlabs` id (no fallback since 2026-11-12). `legacy` voices (the original OpenAI six) stay valid for saved settings but are not offered; since 2026-11-12 each is spoken by an ElevenLabs voice of the same gender (coral, sage, alloy → Pepper; shimmer → Pepper; verse → Archer; onyx → Adam), because OpenAI retires gpt-4o-mini-tts on 6 Jan 2027. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs. \"wps\": measured words a second (scripts/measure-voice-pace.mjs), used for a long video's word target. A language with a `model` is spoken by that ElevenLabs model with its language_code (Welsh and Norwegian: eleven_multilingual_v2 does not speak them; eleven_v3 does, checked 2026-11-20); every other language uses ELEVENLABS_MODEL. Welsh, Swedish, Danish, Norwegian, Finnish, Greek, Czech and Romanian voices added 2026-11-20 (plan A4): the most-used free library voice per language and gender (Welsh: no Welsh-language voices in the library, so two Welsh-accented voices whose Welsh Scribe heard back word for word).",
   "languages": [
     {
       "code": "en",
       "label": "English"
+    },
+    {
+      "code": "cy",
+      "label": "Welsh",
+      "model": "eleven_v3"
     },
     {
       "code": "fr",
@@ -32,6 +37,35 @@
     {
       "code": "pl",
       "label": "Polish"
+    },
+    {
+      "code": "sv",
+      "label": "Swedish"
+    },
+    {
+      "code": "da",
+      "label": "Danish"
+    },
+    {
+      "code": "no",
+      "label": "Norwegian",
+      "model": "eleven_v3"
+    },
+    {
+      "code": "fi",
+      "label": "Finnish"
+    },
+    {
+      "code": "el",
+      "label": "Greek"
+    },
+    {
+      "code": "cs",
+      "label": "Czech"
+    },
+    {
+      "code": "ro",
+      "label": "Romanian"
     },
     {
       "code": "ar",
@@ -236,6 +270,28 @@
       "wps": 3.18
     },
     {
+      "id": "cy_hannah",
+      "name": "Hannah",
+      "label": "Welsh, soft and friendly (woman)",
+      "gender": "female",
+      "lang": "cy",
+      "region": "Welsh",
+      "elevenlabs": "73fZMjboCm1aBVyxTbBp",
+      "speaker": "coral",
+      "wps": 2.05
+    },
+    {
+      "id": "cy_chris",
+      "name": "Chris",
+      "label": "Welsh, calm and grounded (man)",
+      "gender": "male",
+      "lang": "cy",
+      "region": "Welsh",
+      "elevenlabs": "aKQdyEogZx5VoND0oujS",
+      "speaker": "ash",
+      "wps": 2.28
+    },
+    {
       "id": "fr_adina",
       "name": "Adina",
       "label": "French, young and joyful (woman)",
@@ -388,6 +444,160 @@
       "elevenlabs": "H5xTcsAIeS5RAykjz57a",
       "speaker": "ash",
       "wps": 1.92
+    },
+    {
+      "id": "sv_sanna",
+      "name": "Sanna",
+      "label": "Swedish, direct and natural (woman)",
+      "gender": "female",
+      "lang": "sv",
+      "region": "Swedish",
+      "elevenlabs": "4xkUqaR9MYOJHoaC1Nak",
+      "speaker": "coral",
+      "wps": 2.42
+    },
+    {
+      "id": "sv_adam",
+      "name": "Adam",
+      "label": "Swedish, resonant and smooth (man)",
+      "gender": "male",
+      "lang": "sv",
+      "region": "Swedish",
+      "elevenlabs": "x0u3EW21dbrORJzOq1m9",
+      "speaker": "ash",
+      "wps": 2.5
+    },
+    {
+      "id": "da_camilla",
+      "name": "Camilla",
+      "label": "Danish, clear and calm (woman)",
+      "gender": "female",
+      "lang": "da",
+      "region": "Danish",
+      "elevenlabs": "4RklGmuxoAskAbGXplXN",
+      "speaker": "coral",
+      "wps": 2.54
+    },
+    {
+      "id": "da_mathias",
+      "name": "Mathias",
+      "label": "Danish, warm and engaging (man)",
+      "gender": "male",
+      "lang": "da",
+      "region": "Danish",
+      "elevenlabs": "ygiXC2Oa1BiHksD3WkJZ",
+      "speaker": "ash",
+      "wps": 2.63
+    },
+    {
+      "id": "no_mia",
+      "name": "Mia",
+      "label": "Norwegian, clear and friendly (woman)",
+      "gender": "female",
+      "lang": "no",
+      "region": "Norwegian",
+      "elevenlabs": "uNsWM1StCcpydKYOjKyu",
+      "speaker": "coral",
+      "wps": 2.76
+    },
+    {
+      "id": "no_olaf",
+      "name": "Olaf",
+      "label": "Norwegian, clear and natural (man)",
+      "gender": "male",
+      "lang": "no",
+      "region": "Norwegian",
+      "elevenlabs": "xF681s0UeE04gsf0mVsJ",
+      "speaker": "ash",
+      "wps": 2.64
+    },
+    {
+      "id": "fi_aurora",
+      "name": "Aurora",
+      "label": "Finnish, cheerful and bright (woman)",
+      "gender": "female",
+      "lang": "fi",
+      "region": "Finnish",
+      "elevenlabs": "YSabzCJMvEHDduIDMdwV",
+      "speaker": "coral",
+      "wps": 1.9
+    },
+    {
+      "id": "fi_christoffer",
+      "name": "Christoffer",
+      "label": "Finnish, hopeful and steady (man)",
+      "gender": "male",
+      "lang": "fi",
+      "region": "Finnish",
+      "elevenlabs": "3OArekHEkHv5XvmZirVD",
+      "speaker": "ash",
+      "wps": 1.75
+    },
+    {
+      "id": "el_eleni",
+      "name": "Eleni",
+      "label": "Greek, soft and calm (woman)",
+      "gender": "female",
+      "lang": "el",
+      "region": "Greek",
+      "elevenlabs": "aTP4J5SJLQl74WTSRXKW",
+      "speaker": "coral",
+      "wps": 2.66
+    },
+    {
+      "id": "el_theos",
+      "name": "Theos",
+      "label": "Greek, warm broadcast narrator (man)",
+      "gender": "male",
+      "lang": "el",
+      "region": "Greek",
+      "elevenlabs": "n0vzWypeCK1NlWPVwhOc",
+      "speaker": "ash",
+      "wps": 2.34
+    },
+    {
+      "id": "cs_anet",
+      "name": "Anet",
+      "label": "Czech, young and lively (woman)",
+      "gender": "female",
+      "lang": "cs",
+      "region": "Czech",
+      "elevenlabs": "MpbYQvoTmXjHkaxtLiSh",
+      "speaker": "coral",
+      "wps": 2.2
+    },
+    {
+      "id": "cs_jan",
+      "name": "Jan",
+      "label": "Czech, kind and clear (man)",
+      "gender": "male",
+      "lang": "cs",
+      "region": "Czech",
+      "elevenlabs": "KIDKfqJyZ6ASuyzsKfh5",
+      "speaker": "ash",
+      "wps": 2.11
+    },
+    {
+      "id": "ro_antonia",
+      "name": "Antonia",
+      "label": "Romanian, mellow and warm (woman)",
+      "gender": "female",
+      "lang": "ro",
+      "region": "Romanian",
+      "elevenlabs": "3z9q8Y7plHbvhDZehEII",
+      "speaker": "coral",
+      "wps": 2.36
+    },
+    {
+      "id": "ro_jora",
+      "name": "Jora",
+      "label": "Romanian, calm and reassuring (man)",
+      "gender": "male",
+      "lang": "ro",
+      "region": "Romanian",
+      "elevenlabs": "OlBp4oyr3FBAGEAtJOnU",
+      "speaker": "ash",
+      "wps": 2.08
     },
     {
       "id": "ar_salma",

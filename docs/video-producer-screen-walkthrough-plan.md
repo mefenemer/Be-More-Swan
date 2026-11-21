@@ -313,6 +313,16 @@ The fal models have **no stock people**: we make our own roster.
   the video in that language (same presenter, same screens, translated script, new voice and new presenter
   clips). The screen covers and timings are reused. Scene lengths change with the new audio, so covers are
   laid out again from the new word timings.
+- **Built 2026-11-20 (A4, voices part):** the voice list has **19 languages**: Welsh (straight after English), Swedish, Danish,
+  Norwegian, Finnish, Greek, Czech and Romanian added, a woman and a man each, pace measured (`wps` 1.75–2.76). Welsh and
+  Norwegian languages carry `model: "eleven_v3"` (`speechModel` in `src/lib/tts.ts`). No `language_code` is sent: v3
+  reads the language from the script, so a Welsh-accented voice still reads an English post in English. v3 is slow
+  (1,190 Welsh characters took 31 s, past the 26 s voiceover request), so a short script goes in at most three parts
+  side by side (~12 s), and the word timings get only what is left of the request. A Video Producer build and own-voice
+  recordings tell Scribe the script's language (`spokenLanguage`; it was only 53% sure Welsh was Welsh). The ElevenLabs library has **no Welsh-language voices**: Hannah and Chris are Welsh-accented voices whose
+  Welsh Scribe heard back word for word. Caption files now follow the **language spoken** (`spokenLanguage`): a Welsh
+  video's captions are Welsh, and English is a translation. Real staging check: project 55 (Marmalade, Hannah, 9:16).
+  Not added: Irish (one paid library voice, Scribe "moderate" accuracy), Scottish Gaelic (no ElevenLabs model speaks it).
 - **Lip-sync quality varies by language** (strongest in English and Chinese). The bake-off tests English,
   French and Polish. Arabic and Hindi get tested before we promise them.
 
@@ -367,7 +377,7 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 | **A1** ✅ | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker component (not yet on a page) | M |
 | **A2** | Picker on the brief form + chat presenter card; `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
 | **A3** | Screen walkthrough with AI presenter: covers from word timings (needs §3 Phases 1–2) | M |
-| **A4** | "Make it in another language" versions; add voices to the catalogue for new languages | M |
+| **A4** | "Make it in another language" versions; add voices to the catalogue for new languages — **voices part built 2026-11-20** (see §11.4 "Built"); the versions button not yet | M |
 | **A5** | Copy: help, FAQ, pricing (tasks per presenter-second), Terms notice if charged, assistant page sample | S |
 | Later | The owner's own presenter from a photo, with recorded consent (D-A6) | L |
 

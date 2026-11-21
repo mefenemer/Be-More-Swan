@@ -13,7 +13,7 @@ import { mediaGenerationJobs, contentAssets } from '../../db/schema';
 import { persistBufferToR2 } from '../lib/media-persist';
 import { logAiUsage } from './ai-usage';
 import { VOICEOVER_CREDIT_COST } from './ai-credits';
-import { speakVoiceover, transcribeWords, voiceoverCostUsd, type SpokenWord, type TtsProvider, type VoiceId } from '../lib/tts';
+import { speakVoiceover, transcribeTimeoutMs, transcribeWords, voiceoverCostUsd, type SpokenWord, type TtsProvider, type VoiceId } from '../lib/tts';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -27,13 +27,23 @@ export interface VoiceoverAsset {
 
 export async function makeVoiceoverAsset(db: Db, args: {
     orgId: number; userId: number; script: string; voice: VoiceId; name: string; assistantId?: number | null;
+    /** The script's language when the caller knows it (a Video Producer build: spokenLanguage), told to the transcriber.
+     *  Left to guess, Scribe was only 53% sure a Welsh voiceover was Welsh (2026-11-20). Unknown (a post's voiceover,
+     *  typed by the owner in any language) → it detects the language. */
+    language?: string | null;
+    /** Epoch ms by which the request must be done (generate-voiceover: Netlify's 26 s). The word timings get what is
+     *  left, less time to save; with too little left they are skipped (captions absent, the audio kept). */
+    deadlineAt?: number;
 }): Promise<VoiceoverAsset> {
     const { mp3, provider, model } = await speakVoiceover(args.script, args.voice);
     let words: SpokenWord[] = [];
     let durationS: number | null = null;
     let transcribedBy: TtsProvider | null = null;
+    const left = args.deadlineAt ? args.deadlineAt - Date.now() - 2_500 : null;
     try {
-        ({ words, durationS, provider: transcribedBy } = await transcribeWords(mp3));
+        if (left != null && left < 2_000) throw new Error('no time left in the request for word timings');
+        ({ words, durationS, provider: transcribedBy } = await transcribeWords(mp3, fetch, args.language ?? null,
+            left != null ? Math.min(transcribeTimeoutMs(mp3.byteLength), left) : undefined));
     } catch (err) {
         console.warn('[voiceover-asset] transcription failed — saving without word timings:', err instanceof Error ? err.message : err);
     }

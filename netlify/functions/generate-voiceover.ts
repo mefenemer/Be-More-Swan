@@ -55,6 +55,8 @@ export function voiceoverName(given: unknown, script: string): string {
 }
 
 export default withLambda(async (event) => {
+    // The function's 26 s (netlify.toml): the voiceover's word timings get what is left (voiceover-asset.ts deadlineAt).
+    const deadlineAt = Date.now() + 24_500;
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -126,7 +128,7 @@ export default withLambda(async (event) => {
     const name = voiceoverName(body.name, script);
     let made;
     try {
-        made = await makeVoiceoverAsset(db, { orgId, userId, script, voice, name });
+        made = await makeVoiceoverAsset(db, { orgId, userId, script, voice, name, deadlineAt });
     } catch (err) {
         const e = err instanceof TtsError ? err : null;
         await refund(err instanceof Error ? err.message : 'voiceover failed', e?.kind === 'policy' ? 'flagged' : 'failed');
