@@ -91,6 +91,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
+    // Screen recordings made here (screen-recorder.js) for an AI presenter: ticked when the New video form's
+    // screen list next draws (docs/video-producer-screen-walkthrough-plan.md Phase 3).
+    pendingScreens: new Set(),
     // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
     // Music picker is showing that list before a track is chosen.
     tracks: null, mineOpen: new Set(),
@@ -304,10 +307,22 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <div data-vid-screens class="hidden space-y-1.5 border-t border-gray-100 pt-2">
           <span class="block text-[11px] font-bold text-gray-600">Screen recordings (optional)</span>
           <p class="text-[11px] text-gray-500">Your presenter walks viewers through them from a round bubble in the corner, so they're in every scene.</p>
+          ${screenRecordButtonHtml('record-screen-presenter')}
           <div data-vid-screens-list class="space-y-1 text-xs text-gray-500">Loading your videos…</div>
           <label class="flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="screenConsent" class="mt-0.5"> <span>I have permission to use the people and music in these videos</span></label>
         </div>
+        <p data-vid-screens-note class="hidden text-[11px] font-semibold text-indigo-700" role="status"></p>
       </div>`;
+  }
+
+  /**
+   * "Record my screen" (Phase 3, screen-recorder.js): a button on a computer, the reason on a phone or tablet (D-W5:
+   * phone browsers can't share the screen; they can still add a recording made with the phone's own recorder).
+   */
+  function screenRecordButtonHtml(act) {
+    if (!window.ScreenRecorder) return '';
+    if (!window.ScreenRecorder.supported()) return `<p class="text-[11px] text-gray-500">${esc(window.ScreenRecorder.unsupportedReason())}</p>`;
+    return `<button type="button" data-vid-act="${act}" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">● Record my screen</button>`;
   }
   // Long videos (Phase 4b): 2, 5 and 10 minutes, only from own footage in its own sound (allowsLongLength in
   // src/lib/storyboard.ts; the server makes any other long brief 60 s).
@@ -351,17 +366,78 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const screens = form.querySelector('[data-vid-screens]');
     if (!screens) return;
     screens.classList.toggle('hidden', !on);
-    const list = screens.querySelector('[data-vid-screens-list]');
-    if (on && list && !list.dataset.loaded) {
-      list.dataset.loaded = '1';
-      fetch(`${FOOTAGE_API}?list=1`, { credentials: 'same-origin' }).then((r) => r.json()).then((j) => {
-        // Only measured recordings: a screen needs its length to be laid out (review of #725).
-        const vids = ((j && j.videos) || []).filter((x) => Number(x.durationS) > 0);
-        list.innerHTML = vids.length
-          ? vids.map((x) => `<label class="flex items-center gap-1.5"><input type="checkbox" name="screenIds" value="${esc(x.id)}"> <span class="truncate">${esc(x.name || `Video ${x.id}`)}</span>${x.durationS ? ` <span class="text-gray-400">${esc(mmss(x.durationS))}</span>` : ''}</label>`).join('')
-          : 'No videos of your own yet. Upload a screen recording to My Content, or use “Use my own footage”.';
-      }).catch(() => { list.textContent = 'Your videos couldn’t be loaded.'; delete list.dataset.loaded; });
+    if (on) loadScreens(form);
+  }
+
+  /** The New video form's screen list: the workspace's measured own videos; ticks kept, new recordings ticked. */
+  function loadScreens(form, again) {
+    const list = form && form.querySelector('[data-vid-screens-list]');
+    if (!list || (list.dataset.loaded && !again)) return;
+    list.dataset.loaded = '1';
+    const ticked = new Set([...list.querySelectorAll('input[name="screenIds"]:checked')].map((i) => Number(i.value)));
+    fetch(`${FOOTAGE_API}?list=1`, { credentials: 'same-origin' }).then((r) => r.json()).then((j) => {
+      // Only measured recordings: a screen needs its length to be laid out (review of #725).
+      const vids = ((j && j.videos) || []).filter((x) => Number(x.durationS) > 0);
+      const on = (id) => ticked.has(Number(id)) || state.pendingScreens.has(Number(id));
+      list.innerHTML = vids.length
+        ? vids.map((x) => `<label class="flex items-center gap-1.5"><input type="checkbox" name="screenIds" value="${esc(x.id)}"${on(x.id) ? ' checked' : ''}> <span class="truncate">${esc(x.name || `Video ${x.id}`)}</span>${x.durationS ? ` <span class="text-gray-400">${esc(mmss(x.durationS))}</span>` : ''}</label>`).join('')
+        : 'No videos of your own yet. Record your screen above, upload a screen recording to My Content, or use “Use my own footage”.';
+      vids.forEach((x) => state.pendingScreens.delete(Number(x.id)));
+      paintNewLongLengths(form);
+    }).catch(() => { list.textContent = 'Your videos couldn’t be loaded.'; delete list.dataset.loaded; });
+  }
+
+  /**
+   * A screen recording for the AI presenter: into My Content (FootageReader.upload), read once so it has a measured
+   * length (FootageReader.prepare: free, nothing spent), then ticked in the New video form's screen list.
+   */
+  async function saveScreenRecording(file, meta) {
+    const form = () => host()?.querySelector('[data-vid-form]');
+    const note = (text, bad) => {
+      const el = form()?.querySelector('[data-vid-screens-note]');
+      if (!el) { if (text) window.showToast?.(text, { icon: bad ? '⚠️' : '✓', duration: 6000 }); return; }
+      el.textContent = text; el.classList.toggle('hidden', !text);
+      el.classList.toggle('text-red-600', !!bad); el.classList.toggle('text-indigo-700', !bad);
+    };
+    try {
+      note('Saving your recording to My Content…');
+      const a = await window.FootageReader.upload(file, { durationS: meta && meta.durationS });
+      await window.FootageReader.prepare(a.id, file, { durationS: meta && meta.durationS, onProgress: (t) => note(t.replace(/your video/g, 'your recording')) });
+      state.pendingScreens.add(a.id);
+      const f = form();
+      const chosen = !!(f && f.elements.presenterId && f.elements.presenterId.value);
+      note(chosen ? `Saved “${a.name}” to My Content and ticked below.` : `Saved “${a.name}” to My Content. Choose a presenter and it’s ticked under Screen recordings.`);
+      if (f && chosen) loadScreens(f, true);
+    } catch (err) {
+      note(`Your recording couldn’t be saved: ${err.message}`, true);
     }
+  }
+
+  /**
+   * "Record my screen" from anywhere (this tab's buttons and the chat's screen_recording_proposal card):
+   * purpose 'presenter' = a screen an AI presenter talks over (New video form, no microphone);
+   * purpose 'footage' = a recording in their own voice for "Use my own footage" (microphone ticked).
+   */
+  function recordScreen(purpose) {
+    if (!window.ScreenRecorder) { window.showToast?.('The screen recorder didn’t load. Reload the page and try again.', { icon: '⚠️', duration: 6000 }); return; }
+    if (purpose === 'presenter' && !state.aiPresenter) {
+      // A card from when presenters were on: say what opens instead of silently switching (review of #792).
+      window.showToast?.('AI presenters aren’t on for your workspace, so this records for “Use my own footage”, with your voice.', { icon: 'ℹ️', duration: 7000 });
+    }
+    if (purpose === 'presenter' && state.aiPresenter) {
+      if (!state.form) { state.form = true; state.footage = null; render(); window.VoicePicker?.load().then(paintFormVoice).catch(() => {}); }
+      host()?.querySelector('[data-vid-form] [data-vid-screens-note]')?.closest('div')?.scrollIntoView({ block: 'nearest' });
+      window.ScreenRecorder.open({ mic: false, onDone: (file, meta) => { if (file) saveScreenRecording(file, meta); } });
+      return;
+    }
+    if (!state.footage) openFootageForm();
+    // Never record ten minutes that can't be added (review of #792).
+    if (state.footage.picked.size >= MAX_FOOTAGE) { footageMsg(`Up to ${MAX_FOOTAGE} videos at a time: untick one first, then record.`); return; }
+    window.ScreenRecorder.open({ mic: true, onDone: (file, meta) => {
+      if (!file) return;
+      if (!state.footage) openFootageForm();   // the form was closed while recording
+      addFootageFiles([file], meta);
+    } });
   }
 
   function formHtml() {
@@ -484,12 +560,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return `
       <form data-vid-footage-form class="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">Make a video from your own footage</p>
-        <p class="text-xs text-gray-600">${who()} watches your videos, tells you what it sees, and suggests edits for the video you want. You tick the ones you like, then check the storyboard before anything is made. Videos up to 5 minutes and 500 MB, up to ${MAX_FOOTAGE} at a time.</p>
+        <p class="text-xs text-gray-600">${who()} watches your videos, tells you what it sees, and suggests edits for the video you want. You tick the ones you like, then check the storyboard before anything is made. Videos up to 10 minutes and 500 MB, up to ${MAX_FOOTAGE} at a time.</p>
         <div class="flex flex-wrap items-center gap-2">
           <label class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Add a video
             <input type="file" accept="video/mp4,video/quicktime,video/webm" multiple hidden data-vid-footage-file></label>
           ${/* Film it here (video-recorder.js), into the library like any upload (owner, 2026-11-10). */ ''}
           <button type="button" data-vid-act="record-video" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">● Record a video</button>
+          ${/* Record the screen, narrated in their own voice (screen-recorder.js, Phase 3). */ screenRecordButtonHtml('record-screen')}
           <span class="text-xs text-gray-500">or tick videos already in your library:</span>
         </div>
         <div data-vid-footage-list>${footageListHtml()}</div>
@@ -536,15 +613,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </form>`;
   }
 
-  async function addFootageFiles(files) {
+  /** A message under the footage form. */
+  function footageMsg(text) {
+    const msg = host()?.querySelector('[data-vid-footage-form] [data-vid-form-msg]');
+    if (msg) { msg.textContent = text; msg.classList.remove('hidden'); } else window.showToast?.(text, { icon: '⚠️', duration: 6000 });
+  }
+  async function addFootageFiles(files, meta) {
     const f = state.footage;
     if (!f) return;
     const msg = host()?.querySelector('[data-vid-footage-form] [data-vid-form-msg]');
     for (const file of files) {
-      if (f.picked.size >= MAX_FOOTAGE) break;
+      if (f.picked.size >= MAX_FOOTAGE) { footageMsg(`Up to ${MAX_FOOTAGE} videos at a time: “${file.name}” wasn’t added. Untick one and add it again.`); break; }
       f.progress = `Uploading ${file.name}…`; paintProgress();
       try {
-        const a = await window.FootageReader.upload(file);
+        const a = await window.FootageReader.upload(file, meta);
         f.files.set(a.id, file);       // read from the file itself — no download needed
         f.picked.add(a.id);
         (f.videos = f.videos || []).unshift({ id: a.id, name: a.name, durationS: null, url: URL.createObjectURL(file), needsReading: true, analysed: false });
@@ -1827,6 +1909,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         window.VideoRecorder.open({ shape, onDone: (file) => { if (file) addFootageFiles([file]); } });
         break;
       }
+      case 'record-screen': recordScreen('footage'); break;
+      case 'record-screen-presenter': recordScreen('presenter'); break;
       case 'voice-mode': {
         const own = b.dataset.mode === 'own';
         act(id, { action: 'set_options', id, voiceMode: own ? 'own' : 'ai' }, own ? 'Your own voice. Approve the script, then record each line.' : 'An AI voice reads it — made when you press “Make the video”, which shows what it uses.');
@@ -2211,12 +2295,23 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (!state.rendered) { state.rendered = true; }
       openFootageForm(prefill);
     },
+    /** "Record my screen" from the chat's screen_recording_proposal card: 'presenter' | 'footage' (recordScreen). */
+    async recordScreen(purpose) {
+      if (!state.rendered) { state.rendered = true; render(); }
+      // Whether the workspace has the AI presenter comes with the first load.
+      for (let i = 0; i < 80 && !state.loaded; i++) await new Promise((r) => setTimeout(r, 100));
+      recordScreen(purpose === 'presenter' ? 'presenter' : 'footage');
+    },
     /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
     rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       // A footage card approved in the standalone chat left its prefill for this tab.
       let prefill = null;
       try { prefill = JSON.parse(sessionStorage.getItem('bms-footage-prefill') || 'null'); sessionStorage.removeItem('bms-footage-prefill'); } catch { prefill = null; }
+      // A screen-recording card pressed in the standalone chat: open the recorder here (the share picker still waits for their click).
+      let screenFor = null;
+      try { screenFor = sessionStorage.getItem('bms-screen-record'); sessionStorage.removeItem('bms-screen-record'); } catch { screenFor = null; }
+      if (screenFor) { setTimeout(() => window.AssistantVideos.recordScreen(screenFor), 0); }
       if (state.rendered) { if (prefill) openFootageForm(prefill); return; }
       state.rendered = true;
       if (prefill) openFootageForm(prefill); else render();

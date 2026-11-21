@@ -10,13 +10,15 @@
  *     the video is silent
  * then hands them to netlify/functions/footage.ts (the WAV goes straight to storage by a signed PUT).
  *
- *   window.FootageReader.prepare(assetId, source, { onProgress }) → Promise<void>
+ *   window.FootageReader.prepare(assetId, source, { onProgress, durationS? }) → Promise<void>
+ *     durationS: a recorder's timed length, used only when the file reports none
  *     source: a File (just uploaded — no download needed) or the video's URL (a library video). A URL
  *     is downloaded ONCE, with the cache skipped, and read from memory. Not straight into a <video>:
  *     the library's thumbnails load the SAME signed URL without CORS (the URL is kept stable so the
  *     browser caches it), and a CORS request then gets that cached copy with no CORS header — the
  *     video "couldn't be opened" on staging, 2026-11-09, although R2's CORS rules were right.
- *   window.FootageReader.upload(file) → Promise<{ id, name }>   a new video into the library (My Content)
+ *   window.FootageReader.upload(file, { durationS? }) → Promise<{ id, name }>   a new video into the library (My Content);
+ *     durationS: the length a recorder timed, used when the file reports none (a WebM straight from MediaRecorder)
  *
  * Nothing here spends. Reading a library video downloads it once into this tab.
  */
@@ -59,8 +61,8 @@
     return v;
   }
 
-  async function grabFrames(v, onProgress) {
-    const times = frameTimes(v.duration);
+  async function grabFrames(v, onProgress, durationS) {
+    const times = frameTimes(durationS || v.duration);
     const scale = Math.min(1, FRAME_PX / Math.max(v.videoWidth || FRAME_PX, v.videoHeight || FRAME_PX));
     const c = document.createElement('canvas');
     c.width = Math.max(2, Math.round((v.videoWidth || FRAME_PX) * scale));
@@ -157,10 +159,12 @@
     try {
       onProgress?.('Opening your video…');
       const v = await openVideo(src);
-      const durationS = v.duration;
+      // A WebM straight from MediaRecorder may still report no length: use the recorder's timed one (opts.durationS).
+      const timed = Number(opts && opts.durationS);
+      const durationS = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : (timed > 0 ? timed : v.duration);
       if (!(durationS > 0.5)) throw new Error('That video is too short to use.');
       if (durationS > MAX_S + 1) throw new Error('That video is longer than 10 minutes. Trim it first, or pick the part you want.');
-      const frames = await grabFrames(v, onProgress);
+      const frames = await grabFrames(v, onProgress, durationS);
       const width = v.videoWidth || null, height = v.videoHeight || null;
       v.removeAttribute('src'); v.load();
       onProgress?.('Listening to your video… 80%');
@@ -180,7 +184,7 @@
   }
 
   /** A new video into the library — the same path as My Content (content-upload-url → PUT → content-assets). */
-  async function upload(file) {
+  async function upload(file, opts) {
     if (!file || !/^video\//.test(file.type)) throw new Error('That isn’t a video. Choose an MP4, MOV or WebM.');
     if (file.size > MAX_BYTES) throw new Error('That video is larger than 500 MB. Trim it first, or pick the part you want.');
     const r = await fetch('/.netlify/functions/content-upload-url', {
@@ -201,6 +205,8 @@
       durationS = Number.isFinite(v.duration) ? v.duration : null; width = v.videoWidth || null; height = v.videoHeight || null;
       URL.revokeObjectURL(url);
     } catch { /* the server copes without */ }
+    const timed = Number(opts && opts.durationS);
+    if (!(durationS > 0) && timed > 0 && timed <= MAX_S + 1) durationS = timed;
     const c = await fetch('/.netlify/functions/content-assets', {
       credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: file.name, assetType: 'video', mimeType: file.type, fileSize: file.size, storageKey: j.storageKey, storageUrl: j.storageUrl, durationS, width, height }),
