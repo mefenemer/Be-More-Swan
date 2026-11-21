@@ -218,6 +218,11 @@ async function main() {
             assert.deepEqual(res, { stored: false, reason: 'duplicate' });
             const rows = await sql.unsafe(`SELECT mid, sent_by FROM social_messages WHERE conversation_id = $1 AND direction = 'out'`, [cv.id]) as any[];
             assert.deepEqual(rows.map((r) => [r.mid, Number(r.sent_by)]), [['m_real', 42]]);
+            // An old placeholder (over 10 minutes) is never claimed by a later echo with the same words.
+            await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at, sent_by)
+                VALUES (7, $1, 'out', 'pending:x:2', 'Same words', now() - interval '20 minutes', 42)`, [cv.id]);
+            const res3 = await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', direction: 'out', mid: 'm_same', text: 'Same words', sentAt: at(7) }));
+            assert.equal(res3.stored, true);
             // A reply typed in Meta's own app (no placeholder) is filed normally.
             const res2 = await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', direction: 'out', mid: 'm_app', text: 'From the app', sentAt: at(6) }));
             assert.equal(res2.stored, true);

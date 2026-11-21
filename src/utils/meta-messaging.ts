@@ -248,6 +248,7 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
             UPDATE social_messages SET mid = ${m.mid}
             WHERE id = (SELECT id FROM social_messages
                         WHERE conversation_id = ${conv.id} AND direction = 'out' AND mid LIKE 'pending:%' AND body = ${m.text}
+                          AND sent_at > now() - interval '10 minutes'
                         ORDER BY id LIMIT 1)
             RETURNING id`) as unknown as unknown[];
         if ((Array.isArray(reconciled) ? reconciled : (reconciled as { rows?: unknown[] }).rows ?? []).length) return { stored: false, reason: 'duplicate' };

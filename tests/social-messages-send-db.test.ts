@@ -155,6 +155,23 @@ async function main() {
             assert.equal(calls, 0);
         });
 
+        await check('with no message id and the echo already filed, the echo row is claimed — the reply shows once', async () => {
+            const id = await conv('5 hours');
+            await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at) VALUES (${ORG}, $1, 'out', 'm_early_echo', 'Early bird', now())`, [id]);
+            // The early echo would trip the repeat guard, so it is filed with a different text first and renamed after the guard ran.
+            await sql.unsafe(`UPDATE social_messages SET body = 'Early bird (before)' WHERE mid = 'm_early_echo'`);
+            const r = await sendReply(db, ORG, ASSISTANT, id, 'Early bird', USER, {
+                credsFor: async () => ({ pageId: 'PAGE', pageToken: 'TOKEN' }),
+                fetchImpl: (async () => {
+                    // Meta delivers the echo while the send is still being recorded.
+                    await other.unsafe(`UPDATE ${schema}.social_messages SET body = 'Early bird' WHERE mid = 'm_early_echo'`);
+                    return new Response(JSON.stringify({ recipient_id: 'p' }), { status: 200 });
+                }) as unknown as typeof fetch,
+            });
+            assert.equal(r.ok, true);
+            assert.deepEqual((await outs(id)).map((m) => [m.mid, Number(m.sent_by)]), [['m_early_echo', USER]]);
+        });
+
         await check('a timeout says the reply may have gone — never "try again" — and keeps the draft', async () => {
             const id = await conv('5 hours');
             const r = await sendReply(db, ORG, ASSISTANT, id, 'Maybe sent', USER, {
