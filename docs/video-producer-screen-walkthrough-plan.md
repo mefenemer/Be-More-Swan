@@ -561,12 +561,14 @@ narrated in the owner's own voice. It follows D-W2 (10 minutes), D-W5 (desktop o
 **Not built (Phase 3's other half):** "Record my screen too" in `video-recorder.js` (camera + screen as two linked
 files, `render_params.recordedWith`, synced covers). Owner question, below.
 
-**Owner decisions open:**
+**Owner decisions:**
 - **D-R1: build "Record my screen too" (own face + screen, synced)?** Recommendation: **not now.** The AI
   presenter covers the face, a narrated screen recording covers "my own voice", and a Loom-style file with the
   bubble baked in already works. Build it when a customer asks to appear on camera over their screen.
-- **D-R2: footage review flags visible email addresses** (§10 risk). Recommendation: **yes, as a small follow-up**
-  to the footage review prompt; a presenter's screen recording is not reviewed, so the recorder's privacy box is
-  the guard there.
-- **Help article:** a "Record your screen" section (help SQL, both databases after release). Recommendation: write
-  it with the next help batch.
+- **D-R2: footage review flags visible email addresses** (§10 risk). ✅ **Decided 2026-11-21 (owner): yes.** Built:
+  the shot list marks "private details on screen: <kind>" (email, phone, password, card or bank number, a customer's
+  details; never copying them), and the review's first suggestion is to cut that stretch (it can't blur). A
+  presenter's screen recording is not reviewed, so the recorder's privacy box is the guard there.
+- **Help article.** ✅ **Decided 2026-11-21 (owner): yes.** `db/help-articles-2026-12z…z-video-record-screen.sql` adds
+  "Record your screen" and corrects two stale Phase 0 lines (5 → 10 minutes, the "can't yet … 60 seconds" line).
+  Apply to both databases after the release that carries #792.
