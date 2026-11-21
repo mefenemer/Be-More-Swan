@@ -207,7 +207,7 @@ async function main() {
         const hook = read('netlify/functions/meta-webhook.ts');
         assert.ok(hook.includes('if (res.stored && res.opened) await notifyConversationOpened(db, res);'));
         const mm = read('src/utils/meta-messaging.ts');
-        assert.ok(mm.includes("const opened = after?.status === 'new' && (conv.created === true || conv.statusBefore !== 'new');"));
+        assert.ok(mm.includes("const opened = after?.status === 'new' && (conv.created === true || conv.statusBefore !== 'new' || windowHadClosed);"));
     });
     await check('both notification types are wired wherever a notification type must be', () => {
         for (const t of ['social_message_received', 'social_message_window_closing']) {

@@ -196,6 +196,37 @@ async function main() {
             assert.equal((await meta(Number(a.id))).messaging, undefined, 'not the row being disconnected');
             assert.equal((await meta(Number(c.id))).messaging, undefined, 'not a row on another Page');
         });
+        await check('a message to a conversation left waiting after its window closed notifies again', async () => {
+            const c = await conn(6, 'facebook', 'pg-6');
+            await storeMessagingEvent(db, msg({ accountId: 'pg-6', participantId: 'late', mid: 'w1', sentAt: at(0) }));
+            // Left in Waiting, and Meta's 24 hours passed: a message two days later is a new chance to reply.
+            const res = await storeMessagingEvent(db, msg({ accountId: 'pg-6', participantId: 'late', mid: 'w2', text: 'still there?', sentAt: at(48 * 60) }));
+            assert.equal((res as { opened: boolean }).opened, true);
+            // Inside the window, a second message while waiting still doesn't.
+            const res2 = await storeMessagingEvent(db, msg({ accountId: 'pg-6', participantId: 'late', mid: 'w3', text: 'hello?', sentAt: at(48 * 60 + 5) }));
+            assert.equal((res2 as { opened: boolean }).opened, false);
+            assert.ok(c > 0);
+        });
+
+        await check("the echo of a tab reply filed under a placeholder takes Meta's id instead of filing it twice", async () => {
+            await conn(7, 'facebook', 'pg-7');
+            await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', mid: 'in7', sentAt: at(0) }));
+            const [cv] = await sql.unsafe(`SELECT id FROM social_conversations WHERE account_external_id = 'pg-7'`) as any[];
+            await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at, sent_by)
+                VALUES (7, $1, 'out', 'pending:x:1', 'On our way!', now(), 42)`, [cv.id]);
+            const res = await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', direction: 'out', mid: 'm_real', text: 'On our way!', sentAt: at(5) }));
+            assert.deepEqual(res, { stored: false, reason: 'duplicate' });
+            const rows = await sql.unsafe(`SELECT mid, sent_by FROM social_messages WHERE conversation_id = $1 AND direction = 'out'`, [cv.id]) as any[];
+            assert.deepEqual(rows.map((r) => [r.mid, Number(r.sent_by)]), [['m_real', 42]]);
+            // An old placeholder (over 10 minutes) is never claimed by a later echo with the same words.
+            await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at, sent_by)
+                VALUES (7, $1, 'out', 'pending:x:2', 'Same words', now() - interval '20 minutes', 42)`, [cv.id]);
+            const res3 = await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', direction: 'out', mid: 'm_same', text: 'Same words', sentAt: at(7) }));
+            assert.equal(res3.stored, true);
+            // A reply typed in Meta's own app (no placeholder) is filed normally.
+            const res2 = await storeMessagingEvent(db, msg({ accountId: 'pg-7', participantId: 'p7', direction: 'out', mid: 'm_app', text: 'From the app', sentAt: at(6) }));
+            assert.equal(res2.stored, true);
+        });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});
         await sql.end();
