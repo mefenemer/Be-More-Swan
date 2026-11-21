@@ -333,12 +333,27 @@ function lineAtSentence(raw: unknown, max: number, i: number, changes: string[])
 /**
  * Words a second to write a brief's voiceover at. A LONG voiced video uses its voice's measured pace (catalogue `wps`,
  * less 5% for the gaps between scenes): staging project 51 wrote 302 words at the assumed 2.5 and Priya's voice
- * (3.83) spoke them in 84 s for a "2-minute" video. Short videos, and voices not measured, keep WORDS_PER_SECOND. Pure.
+ * (3.83) spoke them in 84 s for a "2-minute" video. A SHORT voiced video keeps WORDS_PER_SECOND unless its voice is
+ * slower (2026-11-21, A4): a 15-second Welsh video written at 2.5 played 18.2 s in Hannah's voice (2.05). A faster voice
+ * finishing a short video early is fine, so short videos never go above 2.5. Voices not measured keep WORDS_PER_SECOND. Pure.
  */
 export function wordsPerSecondFor(brief: Pick<VideoBrief, 'lengthS' | 'voiceover' | 'voice'>): number {
-    if (!isLongLength(brief.lengthS) || !brief.voiceover) return WORDS_PER_SECOND;
+    if (!brief.voiceover) return WORDS_PER_SECOND;
     const pace = voicePace(brief.voice ?? null);
-    return pace ? Math.round(pace * 0.95 * 100) / 100 : WORDS_PER_SECOND;
+    if (!pace) return WORDS_PER_SECOND;
+    const own = Math.round(pace * 0.95 * 100) / 100;
+    return isLongLength(brief.lengthS) ? own : Math.min(WORDS_PER_SECOND, own);
+}
+
+/**
+ * The word budget line for a short voiced video whose voice speaks slower than the system prompt's WORDS_PER_SECOND,
+ * or null (every other short video keeps exactly the prompt it had). Pure.
+ */
+export function slowVoiceBudgetLine(brief: Pick<VideoBrief, 'lengthS' | 'voiceover' | 'voice'>): string | null {
+    if (isLongLength(brief.lengthS) || !brief.voiceover) return null;
+    const wps = wordsPerSecondFor(brief);
+    if (wps >= WORDS_PER_SECOND) return null;
+    return `VOICEOVER LENGTH: this voice speaks slowly (about ${wps} words a second), so keep the whole voiceover to about ${Math.round(brief.lengthS * wps)} words in all, fewer than the usual pace allows.`;
 }
 
 /** A scene's voiceover line, at most: 240 characters (about 16 s), or 1200 in a long video (Phase 4c: a chapter of 30 s or more). Pure. */
@@ -822,6 +837,8 @@ export function storyboardUserPrompt(args: {
             : isLongLength(brief.lengthS)
                 ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most), ${Math.min(MAX_LONG_SCENES, Math.max(MIN_SCENES, Math.ceil(brief.lengthS * wordsPerSecondFor(brief) / 180)))}–${MAX_LONG_SCENES} scenes, scene lengths adding up to about ${brief.lengthS} seconds. A long video is told in CHAPTERS: each scene is one topic or step of the walkthrough and becomes a chapter. Write each scene's voiceover for its length (this voice speaks about ${wordsPerSecondFor(brief)} words a second — a 30-second chapter is about ${Math.round(30 * wordsPerSecondFor(brief))} words), never more than 1200 characters a scene, in short spoken sentences — the whole voiceover about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words in all, because the voice sets the video's length, with the screen recording showing what is being said. Open with what the viewer will learn, end with the call to action.`
                 : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
+        // A slow voice (Welsh, Finnish, Polish…) speaks fewer words in the same seconds (wordsPerSecondFor).
+        !brief.footageAssetIds?.length ? slowVoiceBudgetLine(brief) ?? '' : '',
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',

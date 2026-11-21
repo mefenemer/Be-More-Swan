@@ -19,6 +19,7 @@ import { CAPTION_LANGUAGES } from '../src/lib/youtube-extras';
 import { spokenLanguage } from '../src/utils/youtube-video';
 import { translationPrompt, translateCaptions } from '../src/utils/caption-translate';
 import { PRESENTERS, presenterLanguages, presenterVoice } from '../src/lib/presenters';
+import { WORDS_PER_SECOND, wordsPerSecondFor, slowVoiceBudgetLine, storyboardUserPrompt } from '../src/lib/storyboard';
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 let passed = 0;
@@ -182,6 +183,24 @@ await check('captions are translated FROM the language spoken; the spoken one is
     assert.ok(read('src/utils/video-producer.ts').includes('spokenLanguage: spokenLanguage(row.brief),'));
     const yt = read('src/utils/youtube-video.ts');
     assert.ok(yt.includes("lang === 'en' ? 'en-GB' : lang") && yt.includes('if (code !== lang)'));
+});
+
+await check('a short video in a slow voice is written at that voice\'s pace; faster voices keep 2.5 and their prompt', () => {
+    // Staging project 55: 15 s at 2.5 words a second played 18.2 s in Hannah's voice (2.05).
+    const welsh = { lengthS: 15, voiceover: true, voice: 'cy_hannah' } as any;
+    assert.strictEqual(wordsPerSecondFor(welsh), 1.95);
+    assert.match(slowVoiceBudgetLine(welsh)!, /about 29 words in all/);
+    assert.strictEqual(wordsPerSecondFor({ lengthS: 30, voiceover: true, voice: 'fi_christoffer' } as any), 1.66);
+    for (const fast of ['british_woman', 'en_us_mark', 'fr_nicolas', 'da_mathias', 'ja_kyoko']) {
+        const b = { lengthS: 30, voiceover: true, voice: fast } as any;
+        assert.strictEqual(wordsPerSecondFor(b), WORDS_PER_SECOND, fast);
+        assert.strictEqual(slowVoiceBudgetLine(b), null, fast);
+    }
+    assert.strictEqual(slowVoiceBudgetLine({ lengthS: 15, voiceover: false, voice: 'cy_hannah' } as any), null, 'no voiceover, no line');
+    assert.strictEqual(slowVoiceBudgetLine({ lengthS: 120, voiceover: true, voice: 'cy_hannah' } as any), null, 'long videos have their own pace rules');
+    const prompt = (brief: any) => storyboardUserPrompt({ brief: { message: 'New Welsh cakes', shape: '9:16', captions: true, ...brief }, businessName: 'Marmalade', businessFacts: '', library: [], today: '2026-11-21', feedback: null, language: 'Welsh' } as any);
+    assert.ok(prompt(welsh).includes('VOICEOVER LENGTH: this voice speaks slowly (about 1.95 words a second), so keep the whole voiceover to about 29 words'));
+    assert.ok(!prompt({ lengthS: 15, voiceover: true, voice: 'british_woman' }).includes('VOICEOVER LENGTH'));
 });
 
 console.log(`\nvoice languages: ${passed} passed`);
