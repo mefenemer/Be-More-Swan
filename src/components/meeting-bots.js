@@ -34,6 +34,8 @@
     no_transcript: 'No minutes: there was no transcript for this call.',
     blocked: 'No minutes: the transcript couldn’t be used.',
     assistant_gone: 'No minutes: the assistant was archived.',
+    task_limit: 'No minutes: your monthly task allowance was used up.',
+    waiting_for_tasks: 'Minutes waiting: your monthly task allowance is used up. They’ll be written when it resets on the 1st, or add tasks now.',
   };
   const STATUS_HINT = {
     not_admitted: 'Nobody let it in.',
@@ -68,6 +70,7 @@
     if (bot.status === 'done') {
       // The minutes, not the call, are what the user is waiting for.
       if (bot.writeUp === 'writing') reason = 'Writing the minutes…';
+      else if (bot.writeUp === 'waiting_for_tasks') reason = WRITE_UP_WORDS.waiting_for_tasks;
       else if (bot.writeUp === 'no_meeting' || bot.writeUp === 'not_written') reason = WRITE_UP_WORDS[bot.writeUpReason] || 'The minutes couldn’t be written.';
       else reason = '';
     }
@@ -92,11 +95,11 @@
    * from the last day whatever happened to their minutes (written, still being written, or not written and why). A
    * finished call with no minutes used to vanish silently.
    */
+  const recent = (b, now = Date.now()) => now - new Date(b.leftAt || b.joinAt).getTime() < 24 * 3600 * 1000;
   function visibleBots(bots, now = Date.now()) {
-    const recent = (b) => now - new Date(b.leftAt || b.joinAt).getTime() < 24 * 3600 * 1000;
     return (bots || []).filter((b) => OPEN.includes(b.status)
-      || (['not_admitted', 'failed', 'removed'].includes(b.status) && recent(b))
-      || (b.status === 'done' && recent(b)));
+      || (['not_admitted', 'failed', 'removed'].includes(b.status) && recent(b, now))
+      || (b.status === 'done' && recent(b, now)));
   }
 
   function stripHtml(bots, now = Date.now()) {
@@ -132,7 +135,7 @@
   function schedule() {
     clearTimeout(st.timer);
     // Keep refreshing while a call is open OR its minutes are still being written, so "Writing…" turns into the result.
-    const anyOpen = (st.data?.bots || []).some((b) => OPEN.includes(b.status) || (b.status === 'done' && b.writeUp === 'writing'));
+    const anyOpen = (st.data?.bots || []).some((b) => OPEN.includes(b.status) || (b.status === 'done' && b.writeUp === 'writing' && recent(b)));
     if (anyOpen) st.timer = setTimeout(refresh, REFRESH_MS);
   }
 

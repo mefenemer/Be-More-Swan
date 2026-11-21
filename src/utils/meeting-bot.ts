@@ -260,8 +260,9 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
 
 // ── What happened to the minutes (the strip must never go silent; staging test 2026-11-21) ──────
 
-/** written = in the Inbox; writing = still being written; no_meeting = too little said; not_written = gave up. */
-export type BotWriteUp = 'none' | 'writing' | 'written' | 'no_meeting' | 'not_written';
+/** written = in the Inbox; writing = still being written; waiting_for_tasks = held until tasks free up (meeting-pickup
+ * retries a task_limit import for up to 7 days); no_meeting = too little said; not_written = gave up. */
+export type BotWriteUp = 'none' | 'writing' | 'waiting_for_tasks' | 'written' | 'no_meeting' | 'not_written';
 
 /**
  * The minutes' state for a finished bot, from its meeting_imports row. A bot that was in the call and is 'done' but has no
@@ -269,10 +270,11 @@ export type BotWriteUp = 'none' | 'writing' | 'written' | 'no_meeting' | 'not_wr
  */
 export function botWriteUp(
     bot: { status: string; joinedAt: unknown },
-    imp: { status: string | null; skipReason: string | null; recordId: number | null } | null,
+    imp: { status: string | null; skipReason: string | null; recordId: number | null; lastError?: string | null } | null,
 ): { writeUp: BotWriteUp; writeUpReason: string | null } {
     if (imp?.recordId) return { writeUp: 'written', writeUpReason: null };
     if (bot.status !== 'done' || !bot.joinedAt) return { writeUp: 'none', writeUpReason: null };
+    if (imp?.status === 'found' && imp.lastError === 'task_limit') return { writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' };
     if (!imp || !imp.status || imp.status === 'found' || imp.status === 'writing') return { writeUp: 'writing', writeUpReason: null };
     if (imp.status === 'skipped' && imp.skipReason === 'no_meeting') return { writeUp: 'no_meeting', writeUpReason: 'no_meeting' };
     return { writeUp: 'not_written', writeUpReason: imp.skipReason ?? imp.status };

@@ -82,7 +82,9 @@ await test('staging test 2026-11-21: a finished call never vanishes — the stri
     ], NOW) as { id: number }[];
     assert.deepEqual(rows.map((r) => r.id), [10, 11]);
     const src = read('src/components/meeting-bots.js');
-    assert.ok(src.includes("(b.status === 'done' && b.writeUp === 'writing')"), 'keeps refreshing until the minutes land');
+    assert.ok(src.includes("(b.status === 'done' && b.writeUp === 'writing' && recent(b))"), 'keeps refreshing until the minutes land, only for rows still shown');
+    assert.match(MB._rowHtml(done({ writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }), NOW) as string, /Minutes waiting: your monthly task allowance is used up/);
+    assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'task_limit' }), NOW) as string, /No minutes: your monthly task allowance was used up\./);
 });
 
 await test('the server works out the minutes\' state from the import (botWriteUp) and the list sends it', () => {
@@ -94,8 +96,12 @@ await test('the server works out the minutes\' state from the import (botWriteUp
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'failed', skipReason: null, recordId: null }), { writeUp: 'not_written', writeUpReason: 'failed' });
     assert.equal(botWriteUp({ status: 'not_admitted', joinedAt: null }, null).writeUp, 'none', 'never in the call: no minutes expected');
     assert.equal(botWriteUp({ status: 'in_call', joinedAt: 1 }, null).writeUp, 'none');
+    assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'found', skipReason: null, recordId: null, lastError: 'task_limit' }), { writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }, 'held for tasks (meeting-pickup retries for 7 days)');
+    assert.equal(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'found', skipReason: null, recordId: null, lastError: 'timeout' }).writeUp, 'writing');
     const db = read('src/utils/meeting-bot-db.ts');
-    assert.ok(db.includes('importStatus: meetingImports.status, skipReason: meetingImports.skipReason'));
+    assert.ok(db.includes('importStatus: meetingImports.status, skipReason: meetingImports.skipReason, lastError: meetingImports.lastError'));
+    const remove = db.slice(db.indexOf('export async function removeMeetingBot'), db.indexOf('export async function removeMeetingBot') + 1500);
+    assert.ok(remove.includes('.from(meetingImports).where(eq(meetingImports.id, row.importId))'), 'remove of a finished bot answers with the real minutes state');
 });
 
 await test('the dialog\'s cost line quotes the live weight (B3), and says nothing is charged at 0', () => {
