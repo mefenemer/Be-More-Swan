@@ -35,7 +35,7 @@
     blocked: 'No minutes: the transcript couldn’t be used.',
     assistant_gone: 'No minutes: the assistant was archived.',
     task_limit: 'No minutes: your monthly task allowance was used up.',
-    waiting_for_tasks: 'Minutes waiting: your monthly task allowance is used up. They’ll be written when it resets on the 1st, or add tasks now.',
+    waiting_for_tasks: 'Minutes waiting: your monthly task allowance is used up. Add tasks, or wait for the reset on the 1st: the call is kept for 7 days.',
   };
   const STATUS_HINT = {
     not_admitted: 'Nobody let it in.',
