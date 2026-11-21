@@ -83,7 +83,12 @@ export interface SendBotInput {
     /** The bot's picture in the call. The meeting-bots function passes it, so only that function's bundle carries the
      *  ~125 KB of picture data (esbuild bundles even a dynamic import; review of #794). */
     videoTile?: BotVideoTile;
+    /** Draws this workspace's own picture (meeting-bot-tile.ts drawBotTiles); `videoTile` is the fallback if it fails. */
+    tileFor?: (names: { assistantName: string | null; businessName: string | null }) => Promise<BotVideoTile>;
 }
+
+/** Drawing the picture must never stop a bot: past this, the fallback picture goes instead. */
+export const TILE_DRAW_TIMEOUT_MS = 4000;
 
 export type SendBotResult =
     | { ok: true; bot: MeetingBotView; alreadySent: boolean }
@@ -118,7 +123,7 @@ const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room',
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
     if (!(await isFeatureEnabled(i.organisationId, MEETING_BOT_FLAG))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
 
-    const [assistant] = await db.select({ id: aiAssistants.id, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
+    const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
         .where(and(eq(aiAssistants.id, i.assistantId), eq(aiAssistants.organisationId, i.organisationId))).limit(1);
     if (!assistant || assistant.roleKey !== 'meeting_note_taker') return fail(404, 'no_assistant', 'Meeting assistant not found in this workspace.');
@@ -175,12 +180,26 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     }
 
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, i.organisationId)).limit(1);
+    let videoTile = i.videoTile;
+    if (i.tileFor) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            videoTile = await Promise.race([
+                i.tileFor({ assistantName: assistant.name ?? null, businessName: org?.name ?? null }),
+                new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), TILE_DRAW_TIMEOUT_MS); }),
+            ]);
+        } catch (err) {
+            console.error('[meeting-bot] own picture not drawn, sending the fallback', { botId: row.id, error: err instanceof Error ? err.message : 'unknown' });
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
     let recallBotId: string;
     try {
         recallBotId = await createRecallBot(region, recallBotRequest({
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
-            videoTile: i.videoTile,
+            videoTile,
         }));
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';

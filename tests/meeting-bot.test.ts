@@ -229,7 +229,7 @@ await test('the tile pictures are bundled only where a bot is sent: no src/ or f
     const hits = execSync("grep -rlE \"meeting-bot-tile-data['\\\"]\" src netlify || true", { encoding: 'utf8' }).split('\n').filter(Boolean).sort();
     assert.deepEqual(hits, ['netlify/functions/meeting-bots.ts'], 'only the send function imports the pictures');
     assert.ok(read('netlify/functions/meeting-bots.ts').includes('videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64'), 'and passes them to sendMeetingBot');
-    assert.ok(read('src/utils/meeting-bot-db.ts').includes('videoTile: i.videoTile'), 'sendMeetingBot hands them to the Recall request');
+    assert.ok(read('src/utils/meeting-bot-db.ts').includes('let videoTile = i.videoTile;'), 'sendMeetingBot keeps them as the fallback (own picture: meeting-bot-tile.test.ts)');
 });
 
 await test('Recall\'s transcript: one line per block with the participant\'s name; empty blocks dropped, no name = unlabelled', () => {
