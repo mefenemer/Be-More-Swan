@@ -140,12 +140,19 @@ async function main() {
             assert.deepEqual((await outs(id)).map((m) => [m.mid, Number(m.sent_by)]), [['m_echo', USER]]);
         });
 
-        await check('with no message id from Meta, nothing is filed under a made-up id (the echo files it)', async () => {
+        await check('with no message id from Meta, the reply is filed under a placeholder at once — and the repeat guard sees it', async () => {
             const id = await conv('5 hours');
             const r = await sendReply(db, ORG, ASSISTANT, id, 'Noted', USER, meta(okWith({ recipient_id: 'p' })));
             assert.equal(r.ok, true);
-            assert.equal((await outs(id)).length, 0);
+            const rows = await outs(id);
+            assert.equal(rows.length, 1);
+            assert.ok(String(rows[0].mid).startsWith('pending:'));
+            assert.equal(Number(rows[0].sent_by), USER);
             assert.equal((await row(id)).status, 'replied');
+            calls = 0;
+            const again = await sendReply(db, ORG, ASSISTANT, id, 'Noted', USER, meta(okWith({ recipient_id: 'p' })));
+            assert.equal((again as { code?: string }).code, 'duplicate', 'no second send before the echo arrives');
+            assert.equal(calls, 0);
         });
 
         await check('a timeout says the reply may have gone — never "try again" — and keeps the draft', async () => {

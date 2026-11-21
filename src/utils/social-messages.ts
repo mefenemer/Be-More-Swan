@@ -506,16 +506,15 @@ export function isRepeatSend(reply: string, latestOut: { body: string | null; se
 
 /**
  * File a reply Meta accepted. Idempotent on mid: the echo webhook delivers the same message, and
- * whichever lands first, the row ends up marked as sent from here. With no message id from Meta
- * nothing is filed under a made-up one — the echo files it, so it never shows twice.
+ * whichever lands first, the row ends up marked as sent from here. With no message id from Meta it
+ * is filed under a `pending:` placeholder at once — so the repeat guard sees it — and the echo gives
+ * that row Meta's real id instead of filing it again (meta-messaging.ts storeInTx, step 1b).
  */
 async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string | null; reply: string; userId: number | null }): Promise<void> {
-    if (a.mid) {
-        await db.insert(socialMessages).values({
-            organisationId: a.organisationId, conversationId: a.id, direction: 'out',
-            mid: a.mid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
-        }).onConflictDoUpdate({ target: socialMessages.mid, set: { sentBy: sql`COALESCE(${socialMessages.sentBy}, excluded.sent_by)` } });
-    }
+    await db.insert(socialMessages).values({
+        organisationId: a.organisationId, conversationId: a.id, direction: 'out',
+        mid: a.mid ?? `pending:${a.id}:${Date.now()}`, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
+    }).onConflictDoUpdate({ target: socialMessages.mid, set: { sentBy: sql`COALESCE(${socialMessages.sentBy}, excluded.sent_by)` } });
     await db.update(socialConversations)
         .set({ status: 'replied', lastOutboundAt: sql`now()`, draftReply: null, decidedBy: a.userId, decidedAt: sql`now()`, updatedAt: sql`now()` })
         .where(eq(socialConversations.id, a.id));
