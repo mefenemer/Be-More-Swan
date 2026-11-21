@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, socialConversations, socialMessages, systemConnections } from '../../db/schema';
+import { aiAssistants, notifications, socialConversations, socialMessages, systemConnections } from '../../db/schema';
 import { getSecret } from './vault';
 import { FB_GRAPH_VERSION } from './social-publish';
 import { messagingEnabled, pageTokenFor, type MessagingPlatform } from './meta-messaging';
@@ -309,7 +309,15 @@ export async function deleteConversation(db: Db, organisationId: number, assista
     const gone = await db.delete(socialConversations)
         .where(and(eq(socialConversations.id, id), eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId)))
         .returning({ id: socialConversations.id });
-    return gone.length > 0;
+    if (!gone.length) return false;
+    // Its notification cards carry the person's name and point at it: they go too (the assistant id
+    // is this workspace's, checked above, so no other workspace's cards can match).
+    await db.delete(notifications).where(and(
+        inArray(notifications.type, ['social_message_received', 'social_message_window_closing']),
+        sql`${notifications.metadata}->>'conversationId' = ${String(id)}`,
+        sql`${notifications.metadata}->>'assistantId' = ${String(assistantId)}`,
+    )).catch((err) => console.error('[social-messages] could not clear notifications for a deleted conversation', err instanceof Error ? err.message : err));
+    return true;
 }
 
 export async function saveDraft(db: Db, organisationId: number, assistantId: number, id: number, text: string): Promise<ConversationView | null> {

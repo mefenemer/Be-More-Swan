@@ -112,7 +112,13 @@ async function main() {
             await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at) VALUES (1, $1, 'in', 'erase-1', 'please delete', now())`, [target]);
             assert.equal(await deleteConversation(db, 2, Number(a.id), target), false, 'another workspace cannot');
             assert.equal(await deleteConversation(db, 1, Number(a.id) + 999, target), false, 'another assistant cannot');
+            await sql.unsafe(`INSERT INTO notifications (user_id, type, title, metadata) VALUES
+                (42, 'social_message_window_closing', '4 hours left to answer Erase Me', $1::jsonb),
+                (42, 'social_message_window_closing', 'another conversation', $2::jsonb)`,
+                [JSON.stringify({ assistantId: Number(a.id), conversationId: target }), JSON.stringify({ assistantId: Number(a.id), conversationId: target + 1000 })]);
             assert.equal(await deleteConversation(db, 1, Number(a.id), target), true);
+            const cards = await sql.unsafe(`SELECT title FROM notifications WHERE type = 'social_message_window_closing' AND title IN ('4 hours left to answer Erase Me', 'another conversation')`) as any[];
+            assert.deepEqual(cards.map((c) => c.title), ['another conversation'], "only that conversation's cards go");
             const left = await sql.unsafe(`SELECT count(*)::int n FROM social_messages WHERE conversation_id = $1`, [target]) as any[];
             assert.equal(left[0].n, 0, 'its messages went with it');
         });

@@ -45,6 +45,7 @@ async function main() {
         const lib = read('src/utils/social-messages.ts');
         const d = lib.slice(lib.indexOf('export async function deleteConversation'));
         assert.ok(d.includes('eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId)'));
+        assert.ok(d.includes("sql`${notifications.metadata}->>'conversationId' = ${String(id)}`"), "its notification cards (with the person's name) go too");
         // Messages go with the conversation, by the database.
         assert.ok(read('db/z-social-messages.sql').includes('conversation_id   INTEGER NOT NULL REFERENCES social_conversations(id) ON DELETE CASCADE'));
     });
@@ -53,6 +54,11 @@ async function main() {
         assert.ok(comp.includes('data-msg-delete="${c.id}"'));
         assert.ok(comp.includes("this conversation with ${esc(c.personLabel)} and every message in it"));
         assert.ok(comp.includes("confirmLabel: 'Delete', tone: 'destructive'"));
+        assert.ok(!comp.includes('window.confirmModal?.('), 'no optional call: a missing dialog must never mean "yes"');
+        assert.ok(comp.includes("return window.confirm("), 'falls back to the browser confirm');
+        assert.equal((comp.match(/if \(!ok\) return;/g) || []).length, 2, 'Send and Delete both stop on anything but a yes');
+        assert.ok(comp.includes('${state.canDelete ? `'), 'only owners and admins see Delete');
+        assert.ok(read('netlify/functions/social-messages.ts').includes("canDelete: ctx.role === 'owner' || ctx.role === 'admin'"));
     });
     await check("Meta's deletion request erases the messages before the connection, and the status page says so", () => {
         const cb = read('netlify/functions/meta-callbacks.ts');

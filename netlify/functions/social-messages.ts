@@ -52,7 +52,7 @@ export default withLambda(async (event) => {
     }
 
     try {
-        if (action === 'list') return json(200, await listConversations(db, orgId, assistantId));
+        if (action === 'list') return json(200, { ...(await listConversations(db, orgId, assistantId)), canDelete: ctx.role === 'owner' || ctx.role === 'admin' });
         if (action === 'draft') {
             const r = await draftReply(db, orgId, assistantId, id, typeof body.instruction === 'string' && body.instruction.trim() ? body.instruction : null);
             return r.ok ? json(200, { conversation: r.conversation }) : json(r.status, { error: r.error, code: r.code });
