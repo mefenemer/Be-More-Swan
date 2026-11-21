@@ -837,8 +837,9 @@ export function storyboardUserPrompt(args: {
             : isLongLength(brief.lengthS)
                 ? `VIDEO: a ${lengthLabel(brief.lengthS)} ${clip(brief.purpose, 60) || 'walkthrough'} video (${brief.lengthS} seconds at most), ${Math.min(MAX_LONG_SCENES, Math.max(MIN_SCENES, Math.ceil(brief.lengthS * wordsPerSecondFor(brief) / 180)))}–${MAX_LONG_SCENES} scenes, scene lengths adding up to about ${brief.lengthS} seconds. A long video is told in CHAPTERS: each scene is one topic or step of the walkthrough and becomes a chapter. Write each scene's voiceover for its length (this voice speaks about ${wordsPerSecondFor(brief)} words a second — a 30-second chapter is about ${Math.round(30 * wordsPerSecondFor(brief))} words), never more than 1200 characters a scene, in short spoken sentences — the whole voiceover about ${Math.round(brief.lengthS * wordsPerSecondFor(brief))} words in all, because the voice sets the video's length, with the screen recording showing what is being said. Open with what the viewer will learn, end with the call to action.`
                 : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
-        // A slow voice (Welsh, Finnish, Polish…) speaks fewer words in the same seconds (wordsPerSecondFor).
-        !brief.footageAssetIds?.length ? slowVoiceBudgetLine(brief) ?? '' : '',
+        // A slow voice (Welsh, Finnish, Polish…) speaks fewer words in the same seconds (wordsPerSecondFor) — with stock
+        // pictures or over the owner's own footage alike; a video in the footage's own sound has no voiceover to budget.
+        !keepsOwnSound(brief) ? slowVoiceBudgetLine(brief) ?? '' : '',
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.countdown && !brief.footageAssetIds?.length ? COUNTDOWN_VIDEO_BRIEF : '',
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',

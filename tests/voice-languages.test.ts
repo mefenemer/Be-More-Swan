@@ -201,6 +201,8 @@ await check('a short video in a slow voice is written at that voice\'s pace; fas
     const prompt = (brief: any) => storyboardUserPrompt({ brief: { message: 'New Welsh cakes', shape: '9:16', captions: true, ...brief }, businessName: 'Marmalade', businessFacts: '', library: [], today: '2026-11-21', feedback: null, language: 'Welsh' } as any);
     assert.ok(prompt(welsh).includes('VOICEOVER LENGTH: this voice speaks slowly (about 1.95 words a second), so keep the whole voiceover to about 29 words'));
     assert.ok(!prompt({ lengthS: 15, voiceover: true, voice: 'british_woman' }).includes('VOICEOVER LENGTH'));
+    // Over the owner's own footage with a voiceover too (review of 184a60b3): the over-length check measures it at this pace.
+    assert.ok(prompt({ ...welsh, footageAssetIds: [383] }).includes('VOICEOVER LENGTH'));
 });
 
 console.log(`\nvoice languages: ${passed} passed`);
