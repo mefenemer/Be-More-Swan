@@ -34,7 +34,7 @@ async function main() {
     });
     await check('the admin access-request export carries the replies a user sent, and survives a missing table', () => {
         const sar = read('netlify/functions/admin-sar-export.ts');
-        assert.ok(sar.includes('db.select().from(socialMessages).where(eq(socialMessages.sentBy, targetUserId)).catch(() => [])'));
+        assert.ok(sar.includes("if (code === '42P01') return [];") && sar.includes('throw err;'), 'only a missing table reads as none');
         assert.ok(sar.includes('facebookInstagramRepliesSent: sentMessages,'));
     });
     await check('deleting a conversation is owners/admins only and scoped to the workspace and assistant', () => {
@@ -68,6 +68,7 @@ async function main() {
         const revokeReturn = erase.indexOf("if (mode === 'revoke')");
         assert.ok(msgsAt !== -1 && connAt !== -1 && revokeReturn < msgsAt && msgsAt < connAt, 'erase only, children first');
         assert.ok(cb.includes('and the messages people had sent your Page or account through it.'));
+        assert.ok(erase.includes("inArray(sql`${notifications.metadata}->>'conversationId'`, convs.map((c) => String(c.id)))"), "their notification cards (with names) go too");
         // The FK must keep cascading — the explicit delete is belt and braces, not the only line.
         assert.ok(read('db/z-social-messages.sql').includes('connection_id        INTEGER NOT NULL REFERENCES system_connections(id) ON DELETE CASCADE'));
     });

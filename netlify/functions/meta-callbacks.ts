@@ -52,7 +52,7 @@
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { workspaceIntegrations, systemConnections, postInsights, webhookEvents, socialConversations } from '../../db/schema';
+import { workspaceIntegrations, systemConnections, postInsights, webhookEvents, socialConversations, notifications } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { deleteIntegration } from '../../src/utils/workspace-integrations';
@@ -215,10 +215,20 @@ async function revokeMetaConnections(fbUserId: string, mode: 'revoke' | 'erase')
     // Facebook / Instagram messages received through these connections (Messages tab). The FK already
     // cascades from the connection, but it is spelt out here so nobody weakens it to SET NULL unseen.
     // Messages go with their conversation (ON DELETE CASCADE). Absent table before the SQL: nothing to erase.
-    await db.delete(socialConversations).where(inArray(socialConversations.connectionId, ids)).catch((err) => {
+    // Their notification cards carry the person's name and point at the conversation: they go too.
+    try {
+        const convs = await db.delete(socialConversations).where(inArray(socialConversations.connectionId, ids))
+            .returning({ id: socialConversations.id });
+        if (convs.length) {
+            await db.delete(notifications).where(and(
+                inArray(notifications.type, ['social_message_received', 'social_message_window_closing']),
+                inArray(sql`${notifications.metadata}->>'conversationId'`, convs.map((c) => String(c.id))),
+            ));
+        }
+    } catch (err) {
         const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
         if (code !== '42P01') throw err;
-    });
+    }
     await db.delete(systemConnections).where(inArray(systemConnections.id, ids));
 
     return rows.length;

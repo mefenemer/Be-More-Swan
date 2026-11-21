@@ -103,7 +103,13 @@ export default withLambda(async (event) => {
     const tosRecords  = await db.select().from(tosAcceptances).where(eq(tosAcceptances.userId, targetUserId));
     // Replies they sent from the Messages tab (Facebook / Instagram). Before db/z-social-messages.sql
     // is applied the table is absent — the request must still be answerable, so that reads as none.
-    const sentMessages = await db.select().from(socialMessages).where(eq(socialMessages.sentBy, targetUserId)).catch(() => []);
+    // Only a MISSING table reads as none — any other failure must fail the request, never hand the
+    // admin an answer that silently leaves this section out.
+    const sentMessages = await db.select().from(socialMessages).where(eq(socialMessages.sentBy, targetUserId)).catch((err) => {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code === '42P01') return [];
+        throw err;
+    });
     // Resolve the target user's org memberships from the junction (not the deprecated users.organisationId).
     const targetOrgs = await db
         .select({ organisationId: userOrganisations.organisationId })
