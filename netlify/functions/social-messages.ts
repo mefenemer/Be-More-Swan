@@ -9,6 +9,8 @@
 //   POST { action: 'send',       assistantId, id, text? }          → { conversation }   — sends AS the Page /
 //        Instagram account, only inside Meta's 24-hour window (checked server-side, right before the call)
 //   POST { action: 'set_status', assistantId, id, status }         → { conversation }   (new | dismissed)
+//   POST { action: 'delete',     assistantId, id }                 → { deleted: true }  — owners / admins:
+//        removes our copy of the conversation and its messages (an erasure request); Meta keeps theirs
 
 import { and, eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -16,7 +18,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isMissingTable } from '../../src/utils/meta-messaging';
-import { draftReply, listConversations, saveDraft, sendReply, setConversationStatus } from '../../src/utils/social-messages';
+import { deleteConversation, draftReply, listConversations, saveDraft, sendReply, setConversationStatus } from '../../src/utils/social-messages';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -45,12 +47,12 @@ export default withLambda(async (event) => {
     if (!assistant) return json(404, { error: 'Assistant not found.' });
 
     const id = Number(body.id);
-    if (['draft', 'save_draft', 'send', 'set_status'].includes(action) && (!Number.isInteger(id) || id <= 0)) {
+    if (['draft', 'save_draft', 'send', 'set_status', 'delete'].includes(action) && (!Number.isInteger(id) || id <= 0)) {
         return json(400, { error: 'id required.' });
     }
 
     try {
-        if (action === 'list') return json(200, await listConversations(db, orgId, assistantId));
+        if (action === 'list') return json(200, { ...(await listConversations(db, orgId, assistantId)), canDelete: ctx.role === 'owner' || ctx.role === 'admin' });
         if (action === 'draft') {
             const r = await draftReply(db, orgId, assistantId, id, typeof body.instruction === 'string' && body.instruction.trim() ? body.instruction : null);
             return r.ok ? json(200, { conversation: r.conversation }) : json(r.status, { error: r.error, code: r.code });
@@ -62,6 +64,13 @@ export default withLambda(async (event) => {
         if (action === 'send') {
             const r = await sendReply(db, orgId, assistantId, id, typeof body.text === 'string' ? body.text : null, userId ?? null);
             return r.ok ? json(200, { conversation: r.conversation }) : json(r.status, { error: r.error, code: r.code });
+        }
+        if (action === 'delete') {
+            // Erasing data is a workspace decision: owners and admins, the people who accept the DPA.
+            if (ctx.role !== 'owner' && ctx.role !== 'admin') return json(403, { error: 'Only the workspace owner or an admin can delete a conversation.' });
+            return (await deleteConversation(db, orgId, assistantId, id))
+                ? json(200, { deleted: true })
+                : json(404, { error: 'That conversation isn’t on this assistant’s Messages tab.' });
         }
         if (action === 'set_status') {
             const status = body.status === 'new' || body.status === 'dismissed' ? body.status : null;

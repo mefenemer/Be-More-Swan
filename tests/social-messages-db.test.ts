@@ -20,7 +20,7 @@ import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { closeDbPools } from '../db/client';
-import { runMessagesTick } from '../src/utils/social-messages';
+import { deleteConversation, runMessagesTick } from '../src/utils/social-messages';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -50,6 +50,8 @@ async function main() {
         for (const t of ['ai_assistants', 'notifications']) await sql.unsafe(`CREATE TABLE ${schema}.${t} (LIKE public.${t} INCLUDING DEFAULTS)`);
         await sql.unsafe(`CREATE TABLE ${schema}.social_conversations (LIKE public.social_conversations INCLUDING ALL)`);
         await sql.unsafe(`CREATE TABLE ${schema}.social_messages (LIKE public.social_messages INCLUDING ALL)`);
+        // LIKE copies no foreign keys: restore the real cascade (db/z-social-messages.sql) the delete relies on.
+        await sql.unsafe(`ALTER TABLE ${schema}.social_messages ADD FOREIGN KEY (conversation_id) REFERENCES ${schema}.social_conversations(id) ON DELETE CASCADE`);
         await sql.unsafe(`SET search_path TO ${schema}`);
         const db = drizzle({ client: sql }) as never;
 
@@ -104,6 +106,21 @@ async function main() {
             assert.deepEqual(rows.map((x) => [x.mid, x.body]), [['new-1', 'new words'], ['old-1', null]]);
             const [c] = await sql.unsafe(`SELECT draft_reply FROM social_conversations WHERE id = $1`, [old]) as any[];
             assert.equal(c.draft_reply, null, 'an old draft goes too');
+        });
+        await check('deleting a conversation removes its messages, and only for its own workspace and assistant', async () => {
+            const target = await conv({ assistant: Number(a.id), participant: 'erase-me', closesIn: '5 hours' });
+            await sql.unsafe(`INSERT INTO social_messages (organisation_id, conversation_id, direction, mid, body, sent_at) VALUES (1, $1, 'in', 'erase-1', 'please delete', now())`, [target]);
+            assert.equal(await deleteConversation(db, 2, Number(a.id), target), false, 'another workspace cannot');
+            assert.equal(await deleteConversation(db, 1, Number(a.id) + 999, target), false, 'another assistant cannot');
+            await sql.unsafe(`INSERT INTO notifications (user_id, type, title, metadata) VALUES
+                (42, 'social_message_window_closing', '4 hours left to answer Erase Me', $1::jsonb),
+                (42, 'social_message_window_closing', 'another conversation', $2::jsonb)`,
+                [JSON.stringify({ assistantId: Number(a.id), conversationId: target }), JSON.stringify({ assistantId: Number(a.id), conversationId: target + 1000 })]);
+            assert.equal(await deleteConversation(db, 1, Number(a.id), target), true);
+            const cards = await sql.unsafe(`SELECT title FROM notifications WHERE type = 'social_message_window_closing' AND title IN ('4 hours left to answer Erase Me', 'another conversation')`) as any[];
+            assert.deepEqual(cards.map((c) => c.title), ['another conversation'], "only that conversation's cards go");
+            const left = await sql.unsafe(`SELECT count(*)::int n FROM social_messages WHERE conversation_id = $1`, [target]) as any[];
+            assert.equal(left[0].n, 0, 'its messages went with it');
         });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});

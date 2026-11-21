@@ -68,6 +68,11 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     leads: s.leads,
     leadThreads: s.leadThreads,
     leadMessages: s.leadMessages,
+    // The Social Media assistant's inboxes: Facebook / Instagram messages (Messages tab, kept 90 days
+    // in full, then without their text) and comments on its LinkedIn Company Page posts (Comments tab).
+    facebookInstagramConversations: s.socialConversations,
+    facebookInstagramMessages: s.socialMessages,
+    linkedInPageComments: s.pageComments,
     discoveryCampaigns: s.discoveryCampaigns,
     discoveredLeads: s.discoveredLeads,
     outreachSequences: s.outreachSequences,
