@@ -22,8 +22,9 @@ export interface TileNames { assistantName: string | null | undefined; businessN
 
 export const TILE_W = 2560;
 export const TILE_H = 1440;
-/** Google Meet crops to a centred square (H wide); keep a margin inside it. */
-export const TILE_SAFE_WIDTH = TILE_H - 120;
+/** Google Meet crops tiles, and on a phone a tile can be PORTRAIT: everything fits a centred 3:4 crop with a margin
+ *  (a real Meet test on 2026-11-21 cut off a one-line status sized for a square; e6499d91). */
+export const TILE_SAFE_WIDTH = Math.round(TILE_H * 0.75) - 60;
 export const MAX_JPEG_BYTES = 1_300_000;
 
 const BG = '#16111f';
@@ -34,9 +35,10 @@ const RED = '#ff3b4e';
 const GREY = '#8a8399';
 const FONT = 'Inter';
 
-const STATUS: Record<TileState, { line: string; dot: string }> = {
-    recording: { line: 'Taking notes & recording', dot: RED },
-    'not-recording': { line: 'In the call · not recording', dot: GREY },
+// Two lines, so a narrow portrait tile doesn't cut it off (e6499d91).
+const STATUS: Record<TileState, { lines: [string, string]; dot: string }> = {
+    recording: { lines: ['Taking notes', '& recording'], dot: RED },
+    'not-recording': { lines: ['In the call', 'not recording'], dot: GREY },
 };
 
 /** True when the tile's font has this character (TILE_FONT_CODEPOINTS, measured by the generator script). Pure. */
@@ -68,17 +70,17 @@ export function drawableName(s: string | null | undefined, max: number): string 
 }
 
 /** The words on the tile, top to bottom. Pure. With no business name the tile is Be More Swan's own. */
-export function tileWords(names: TileNames, state: TileState): { greeting: string | null; shortGreeting: string | null; business: string; noteTaker: string; status: string; poweredBy: string | null } {
+export function tileWords(names: TileNames, state: TileState): { greeting: string | null; shortGreeting: string | null; business: string; noteTaker: string; status: [string, string]; poweredBy: string | null } {
     const business = drawableName(names.businessName, 80);
     const assistant = drawableName(names.assistantName, 40);
-    if (!business) return { greeting: null, shortGreeting: null, business: 'Be More Swan', noteTaker: 'Note Taker', status: STATUS[state].line, poweredBy: null };
+    if (!business) return { greeting: null, shortGreeting: null, business: 'Be More Swan', noteTaker: 'Note Taker', status: STATUS[state].lines, poweredBy: null };
     return {
         greeting: assistant ? `Hi, I'm ${assistant} from ${business}` : `Hi, I'm the Note Taker from ${business}`,
         // When the whole greeting won't fit: the company is written large just below, so it can go.
         shortGreeting: assistant ? `Hi, I'm ${assistant}` : null,
         business,
         noteTaker: 'Note Taker',
-        status: STATUS[state].line,
+        status: STATUS[state].lines,
         poweredBy: 'Powered by Be More Swan',
     };
 }
@@ -111,24 +113,23 @@ export function fitLines(text: string, sizes: number[], width: number, maxLines:
         if (lines) return { size, lines, cut: false };
     }
     // Still too long at the smallest size: fill the lines word by word, then cut the last one with "…".
+    // Whole words only where possible ("The Northumberland Coastal…", never "The / Northumberland C…"); a single word
+    // wider than the line is cut by characters.
     const size = sizes[sizes.length - 1];
+    const fits = (s: string) => measure(s, size) <= width;
+    const chop = (s: string) => { let c = s; while (c.length > 1 && !fits(`${c}…`)) c = c.slice(0, -1); return `${c.trimEnd()}…`; };
     const lines: string[] = [];
-    let rest = text;
-    while (lines.length < maxLines && rest) {
-        let take = rest.length;
-        while (take > 1 && measure(rest.slice(0, take), size) > width) take--;
-        if (lines.length === maxLines - 1 && take < rest.length) {
-            let cut = rest.slice(0, take);
-            while (cut.length > 1 && measure(`${cut.trimEnd()}…`, size) > width) cut = cut.slice(0, -1);
-            lines.push(`${cut.trimEnd()}…`);
-            rest = '';
-            break;
-        }
-        // Prefer to break at a space.
-        const space = take < rest.length ? rest.lastIndexOf(' ', take) : -1;
-        const end = space > 0 ? space : take;
-        lines.push(rest.slice(0, end).trim());
-        rest = rest.slice(end).trim();
+    let i = 0;
+    while (lines.length < maxLines - 1 && i < words.length) {
+        if (!fits(words[i])) break; // an over-long word goes on the last line, cut
+        let line = words[i++];
+        while (i < words.length && fits(`${line} ${words[i]}`)) line += ` ${words[i++]}`;
+        lines.push(line);
+    }
+    if (i < words.length) {
+        let last = '';
+        while (i < words.length && fits(`${last ? `${last} ` : ''}${words[i]}…`)) last = `${last ? `${last} ` : ''}${words[i++]}`;
+        lines.push(last ? (i < words.length ? `${last}…` : last) : chop(words[i]));
     }
     return { size, lines, cut: true };
 }
@@ -166,6 +167,8 @@ export async function drawTile(names: TileNames, state: TileState, lib?: CanvasL
     const words = tileWords(names, state);
     const dotRoom = 56 + 36; // the status dot and its gap
     const swanH = 96, swanGap = 28;
+    const swanImg = words.poweredBy ? await c.loadImage(Buffer.from(TILE_SWAN_PNG_B64, 'base64')) : null;
+    const swanRoom = swanImg ? swanH * (swanImg.width / swanImg.height) + swanGap : 0;
 
     const blocks: Block[] = [];
     if (words.greeting) {
@@ -176,10 +179,9 @@ export async function drawTile(names: TileNames, state: TileState, lib?: CanvasL
     const b = fitLines(words.business, [200, 180, 160, 140, 120, 104], TILE_SAFE_WIDTH, 2, measureAt(800));
     blocks.push({ ...b, weight: 800, colour: WHITE, gapBefore: words.greeting ? 40 : 0 });
     blocks.push({ size: 120, weight: 800, colour: PINK, lines: [words.noteTaker], gapBefore: 70 });
-    const s = fitLines(words.status, [100], TILE_SAFE_WIDTH - dotRoom, 1, measureAt(700));
-    blocks.push({ ...s, weight: 700, colour: MUTED, gapBefore: 20, dot: STATUS[state].dot });
+    blocks.push({ size: 100, weight: 700, colour: MUTED, lines: [...words.status], gapBefore: 20, dot: STATUS[state].dot });
     if (words.poweredBy) {
-        const p = fitLines(words.poweredBy, [76], TILE_SAFE_WIDTH - swanH - swanGap, 1, measureAt(600));
+        const p = fitLines(words.poweredBy, [72, 64, 56], TILE_SAFE_WIDTH - swanRoom, 1, measureAt(600));
         blocks.push({ ...p, weight: 600, colour: MUTED, gapBefore: 90, swan: true });
     }
 
@@ -187,19 +189,21 @@ export async function drawTile(names: TileNames, state: TileState, lib?: CanvasL
     const total = blocks.reduce((sum, blk) => sum + blk.gapBefore + blk.lines.length * lineH(blk), 0);
     let y = Math.round((TILE_H - total) / 2);
 
-    const swan = words.poweredBy ? await c.loadImage(Buffer.from(TILE_SWAN_PNG_B64, 'base64')) : null;
+    const swan = swanImg;
     ctx.textBaseline = 'middle';
     for (const blk of blocks) {
         y += blk.gapBefore;
         ctx.font = font(blk.size, blk.weight);
-        for (const line of blk.lines) {
+        for (const [n, line] of blk.lines.entries()) {
             if (!canDraw(line)) throw new Error('tile text has a character the font cannot draw');
             const mid = y + lineH(blk) / 2;
             const tw = ctx.measureText(line).width;
-            const lead = blk.dot ? dotRoom : blk.swan && swan ? swanH * (swan.width / swan.height) + swanGap : 0;
+            const dotHere = Boolean(blk.dot) && n === 0; // the "REC" light before the first status line only
+            const lead = dotHere ? dotRoom : blk.swan && swan ? swanRoom : 0;
+            if (lead + tw > TILE_SAFE_WIDTH + 1) throw new Error('tile text wider than the safe zone');
             const x = (TILE_W - (lead + tw)) / 2;
-            if (blk.dot) {
-                ctx.fillStyle = blk.dot;
+            if (dotHere) {
+                ctx.fillStyle = blk.dot!;
                 ctx.beginPath();
                 ctx.arc(x + 28, mid, 28, 0, Math.PI * 2);
                 ctx.fill();

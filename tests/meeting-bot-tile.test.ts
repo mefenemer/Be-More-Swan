@@ -32,9 +32,9 @@ await test('the words: greeting with assistant and company, the company, Note Ta
     assert.equal(w.shortGreeting, "Hi, I'm Orbit Scribe");
     assert.equal(w.business, 'Marmalade Productions');
     assert.equal(w.noteTaker, 'Note Taker');
-    assert.equal(w.status, 'Taking notes & recording');
+    assert.deepEqual(w.status, ['Taking notes', '& recording'], 'two lines, so a portrait Meet tile doesn\'t cut it (e6499d91)');
     assert.equal(w.poweredBy, 'Powered by Be More Swan');
-    assert.equal(tileWords({ assistantName: 'X', businessName: 'Y' }, 'not-recording').status, 'In the call · not recording');
+    assert.deepEqual(tileWords({ assistantName: 'X', businessName: 'Y' }, 'not-recording').status, ['In the call', 'not recording']);
 });
 
 await test('the words: no assistant name, spaces tidied; no company = Be More Swan\'s own tile', () => {
@@ -65,6 +65,17 @@ await test('fitLines: too long even at the smallest size → cut with "…", nev
     assert.equal(r.lines.length, 2);
     assert.ok(r.lines[1].endsWith('…'));
     assert.ok(r.lines.every((l) => mono(l, r.size) <= 200), JSON.stringify(r.lines));
+});
+
+await test('fitLines: cut at whole words — "The Northumberland Coastal…", never a word split across the cut', () => {
+    const r = fitLines('The Northumberland Coastal Wedding Photography Company', [10], 200, 2, mono);
+    assert.deepEqual(r.lines, ['The Northumberland', 'Coastal Wedding…']);
+});
+
+await test('the safe zone is a centred PORTRAIT 3:4 crop (a phone Meet tile), and every line is checked against it', () => {
+    const src = read('src/utils/meeting-bot-tile.ts');
+    assert.ok(src.includes('TILE_SAFE_WIDTH = Math.round(TILE_H * 0.75) - 60'));
+    assert.ok(src.includes("if (lead + tw > TILE_SAFE_WIDTH + 1) throw new Error("));
 });
 
 await test('fitLines: one unbreakable word wider than the line is cut too', () => {
@@ -143,7 +154,7 @@ await test('tileWords: never a word the font can\'t draw, whatever the names', (
     ]) {
         for (const state of ['recording', 'not-recording'] as const) {
             const t = tileWords(names, state);
-            for (const line of [t.greeting, t.shortGreeting, t.business, t.noteTaker, t.status, t.poweredBy]) {
+            for (const line of [t.greeting, t.shortGreeting, t.business, t.noteTaker, ...t.status, t.poweredBy]) {
                 if (line) assert.ok(canDraw(line), `${JSON.stringify(names)} → ${line}`);
             }
         }
