@@ -132,6 +132,17 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             expect(posts).toHaveLength(0);
         });
 
+        test('a finished call with no minutes says why instead of vanishing', async ({ page, api }) => {
+            api.set('meeting-bots', async (route) => (route.request().method() === 'GET'
+                ? { available: true, dpaAccepted: true, tasksPer5Min: 1, bots: [{ ...BOTS[0], id: 9, status: 'done', statusWords: 'Done', statusReason: 'call_ended_by_host', leftAt: new Date(Date.now() - 5 * 60_000).toISOString(), writeUp: 'no_meeting', writeUpReason: 'no_meeting' }] }
+                : {}));
+            await open(page);
+            const row = page.locator('[data-mb-bot="9"]');
+            await expect(row).toContainText('No minutes: too little was said in the call to write them.');
+            await expect(row.getByRole('button')).toHaveCount(0);
+            await noSideScroll(page);
+        });
+
         test('nothing shows while the flag is off', async ({ page, api }) => {
             stub(api, { available: false });
             await open(page);

@@ -28,6 +28,13 @@
     assistant_or_workspace_removed: 'The assistant was archived.',
     not_sent: 'It couldn’t reach the meeting service.',
   };
+  /** A finished call whose minutes didn't reach the Inbox says why (staging test 2026-11-21: it used to vanish). */
+  const WRITE_UP_WORDS = {
+    no_meeting: 'No minutes: too little was said in the call to write them.',
+    no_transcript: 'No minutes: there was no transcript for this call.',
+    blocked: 'No minutes: the transcript couldn’t be used.',
+    assistant_gone: 'No minutes: the assistant was archived.',
+  };
   const STATUS_HINT = {
     not_admitted: 'Nobody let it in.',
     failed: 'The meeting service blocked the Note Taker, or the link didn’t work.',
@@ -57,11 +64,17 @@
    */
   function rowHtml(bot, now = Date.now()) {
     const live = LIVE.includes(bot.status);
-    const reason = (bot.statusReason && REASON_WORDS[bot.statusReason]) || STATUS_HINT[bot.status] || '';
+    let reason = (bot.statusReason && REASON_WORDS[bot.statusReason]) || STATUS_HINT[bot.status] || '';
+    if (bot.status === 'done') {
+      // The minutes, not the call, are what the user is waiting for.
+      if (bot.writeUp === 'writing') reason = 'Writing the minutes…';
+      else if (bot.writeUp === 'no_meeting' || bot.writeUp === 'not_written') reason = WRITE_UP_WORDS[bot.writeUpReason] || 'The minutes couldn’t be written.';
+      else reason = '';
+    }
     let action = '';
     if (bot.status === 'scheduled') action = `<button type="button" data-mb-remove="${bot.id}" style="min-height:44px" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap">Cancel</button>`;
     else if (live) action = `<button type="button" data-mb-remove="${bot.id}" style="min-height:44px" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap">Remove from call</button>`;
-    else if (bot.status === 'done' && bot.recordId) action = '<span class="text-xs font-bold text-gray-700 whitespace-nowrap">Minutes in your Inbox</span>';
+    else if (bot.status === 'done' && (bot.recordId || bot.writeUp === 'written')) action = '<span class="text-xs font-bold text-gray-700 whitespace-nowrap">Minutes in your Inbox</span>';
     const dot = live ? '<span class="inline-block w-2 h-2 rounded-full bg-emerald-600 mr-1.5 align-middle" aria-hidden="true"></span>' : '';
     return `<li class="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 border-t border-gray-100 first:border-t-0" data-mb-bot="${bot.id}">
       <span class="inline-block rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-bold text-gray-700">${esc(bot.platformLabel)}</span>
@@ -74,11 +87,16 @@
     </li>`;
   }
 
-  /** The bots worth showing: open ones, plus anything that ended badly in the last day (so the "why" is seen). */
+  /**
+   * The bots worth showing: open ones, anything that ended badly in the last day (so the "why" is seen), and finished calls
+   * from the last day whatever happened to their minutes (written, still being written, or not written and why). A
+   * finished call with no minutes used to vanish silently.
+   */
   function visibleBots(bots, now = Date.now()) {
+    const recent = (b) => now - new Date(b.leftAt || b.joinAt).getTime() < 24 * 3600 * 1000;
     return (bots || []).filter((b) => OPEN.includes(b.status)
-      || (['not_admitted', 'failed', 'removed'].includes(b.status) && now - new Date(b.joinAt).getTime() < 24 * 3600 * 1000)
-      || (b.status === 'done' && b.recordId && now - new Date(b.leftAt || b.joinAt).getTime() < 3 * 3600 * 1000));
+      || (['not_admitted', 'failed', 'removed'].includes(b.status) && recent(b))
+      || (b.status === 'done' && recent(b)));
   }
 
   function stripHtml(bots, now = Date.now()) {
@@ -113,7 +131,8 @@
 
   function schedule() {
     clearTimeout(st.timer);
-    const anyOpen = (st.data?.bots || []).some((b) => OPEN.includes(b.status));
+    // Keep refreshing while a call is open OR its minutes are still being written, so "Writing…" turns into the result.
+    const anyOpen = (st.data?.bots || []).some((b) => OPEN.includes(b.status) || (b.status === 'done' && b.writeUp === 'writing'));
     if (anyOpen) st.timer = setTimeout(refresh, REFRESH_MS);
   }
 

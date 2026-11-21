@@ -15,8 +15,8 @@ import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
-    cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
-    type BotStatePatch, type BotStatus, type BotVideoTile, type RecallRegion,
+    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
+    type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
@@ -50,12 +50,17 @@ export interface MeetingBotView {
     minutesInCall: number | null;
     /** The meeting record in the Inbox, once the minutes are written. */
     recordId: number | null;
+    /** What happened to the minutes of a finished call, so the strip never goes silent (botWriteUp). */
+    writeUp: BotWriteUp;
+    /** Why they weren't written: 'no_meeting', 'no_transcript', 'failed', … (null otherwise). */
+    writeUpReason: string | null;
 }
 
-export function botView(r: BotRow, recordId: number | null = null): MeetingBotView {
+export function botView(r: BotRow, recordId: number | null = null, imp: { status: string | null; skipReason: string | null } | null = null): MeetingBotView {
     const status = r.status as BotStatus;
     const platform = r.platform as PickupPlatform;
     return {
+        ...botWriteUp(r, imp ? { ...imp, recordId } : (recordId ? { status: 'written', skipReason: null, recordId } : null)),
         id: r.id, assistantId: r.aiAssistantId, platform, platformLabel: PICKUP_PLATFORM_LABELS[platform] ?? platform,
         title: r.title, meetingUrl: r.meetingUrl, joinAt: r.joinAt.toISOString(), status,
         statusWords: BOT_STATUS_WORDS[status] ?? status, statusReason: r.statusReason,
@@ -209,13 +214,13 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
 
 /** Booked, live and the last 30 days' bots for one Note Taker, newest first. */
 export async function listMeetingBots(db: Db, organisationId: number, assistantId: number, now: Date = new Date()): Promise<MeetingBotView[]> {
-    const rows = await db.select({ bot: meetingBots, recordId: meetingImports.recordId }).from(meetingBots)
+    const rows = await db.select({ bot: meetingBots, recordId: meetingImports.recordId, importStatus: meetingImports.status, skipReason: meetingImports.skipReason }).from(meetingBots)
         .leftJoin(meetingImports, eq(meetingBots.importId, meetingImports.id))
         .where(and(
             eq(meetingBots.organisationId, organisationId), eq(meetingBots.aiAssistantId, assistantId),
             or(inArray(meetingBots.status, [...OPEN_BOT_STATUSES]), gt(meetingBots.joinAt, new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000))),
         )).orderBy(desc(meetingBots.joinAt)).limit(50);
-    return rows.map((r) => botView(r.bot, r.recordId ?? null));
+    return rows.map((r) => botView(r.bot, r.recordId ?? null, r.bot.importId ? { status: r.importStatus ?? null, skipReason: r.skipReason ?? null } : null));
 }
 
 export type RemoveBotResult = { ok: true; bot: MeetingBotView } | { ok: false; status: number; error: string };

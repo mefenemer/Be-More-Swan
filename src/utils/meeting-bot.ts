@@ -258,6 +258,26 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
     return moved ? { ...last, minutesInCall: minutes } : null;
 }
 
+// ── What happened to the minutes (the strip must never go silent; staging test 2026-11-21) ──────
+
+/** written = in the Inbox; writing = still being written; no_meeting = too little said; not_written = gave up. */
+export type BotWriteUp = 'none' | 'writing' | 'written' | 'no_meeting' | 'not_written';
+
+/**
+ * The minutes' state for a finished bot, from its meeting_imports row. A bot that was in the call and is 'done' but has no
+ * import yet is about to get one ('writing'). Pure.
+ */
+export function botWriteUp(
+    bot: { status: string; joinedAt: unknown },
+    imp: { status: string | null; skipReason: string | null; recordId: number | null } | null,
+): { writeUp: BotWriteUp; writeUpReason: string | null } {
+    if (imp?.recordId) return { writeUp: 'written', writeUpReason: null };
+    if (bot.status !== 'done' || !bot.joinedAt) return { writeUp: 'none', writeUpReason: null };
+    if (!imp || !imp.status || imp.status === 'found' || imp.status === 'writing') return { writeUp: 'writing', writeUpReason: null };
+    if (imp.status === 'skipped' && imp.skipReason === 'no_meeting') return { writeUp: 'no_meeting', writeUpReason: 'no_meeting' };
+    return { writeUp: 'not_written', writeUpReason: imp.skipReason ?? imp.status };
+}
+
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
 /** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, imported only by netlify/functions/meeting-bots.ts). */
