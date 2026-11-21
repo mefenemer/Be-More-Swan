@@ -12,7 +12,7 @@
 // font + swan come from meeting-bot-tile-assets.ts. Only netlify/functions/meeting-bots.ts imports this file.
 
 import type { BotVideoTile } from './meeting-bot';
-import { TILE_FONT_WOFF2_B64, TILE_SWAN_PNG_B64 } from './meeting-bot-tile-assets';
+import { TILE_FONT_CODEPOINTS, TILE_FONT_WOFF2_B64, TILE_SWAN_PNG_B64 } from './meeting-bot-tile-assets';
 
 type CanvasLib = typeof import('@napi-rs/canvas');
 type Ctx = import('@napi-rs/canvas').SKRSContext2D;
@@ -39,12 +39,38 @@ const STATUS: Record<TileState, { line: string; dot: string }> = {
     'not-recording': { line: 'In the call · not recording', dot: GREY },
 };
 
-const clean = (s: string | null | undefined, max: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+/** True when the tile's font has this character (TILE_FONT_CODEPOINTS, measured by the generator script). Pure. */
+export function fontHas(cp: number): boolean {
+    let lo = 0, hi = TILE_FONT_CODEPOINTS.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const [a, b] = TILE_FONT_CODEPOINTS[mid];
+        if (cp < a) hi = mid - 1; else if (cp > b) lo = mid + 1; else return true;
+    }
+    return false;
+}
+
+/** Every character can be drawn (no box in the customer's call; review of #800). Pure. */
+export function canDraw(text: string): boolean {
+    for (const ch of text) if (!fontHas(ch.codePointAt(0)!)) return false;
+    return true;
+}
+
+/**
+ * A name as the tile can show it: emoji and their joiners removed, spaces tidied. A name with any letter the font
+ * can't draw (Ł, Cyrillic, Greek, CJK…) counts as no name, so the tile uses its general words rather than a box. Pure.
+ */
+export function drawableName(s: string | null | undefined, max: number): string {
+    const name = String(s ?? '').normalize('NFC')
+        .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0e\ufe0f\u20e3]/gu, '')
+        .replace(/\s+/g, ' ').trim().slice(0, max).trim();
+    return canDraw(name) ? name : '';
+}
 
 /** The words on the tile, top to bottom. Pure. With no business name the tile is Be More Swan's own. */
 export function tileWords(names: TileNames, state: TileState): { greeting: string | null; shortGreeting: string | null; business: string; noteTaker: string; status: string; poweredBy: string | null } {
-    const business = clean(names.businessName, 80);
-    const assistant = clean(names.assistantName, 40);
+    const business = drawableName(names.businessName, 80);
+    const assistant = drawableName(names.assistantName, 40);
     if (!business) return { greeting: null, shortGreeting: null, business: 'Be More Swan', noteTaker: 'Note Taker', status: STATUS[state].line, poweredBy: null };
     return {
         greeting: assistant ? `Hi, I'm ${assistant} from ${business}` : `Hi, I'm the Note Taker from ${business}`,
@@ -112,7 +138,9 @@ async function canvasLib(): Promise<CanvasLib> {
     const lib = await import('@napi-rs/canvas') as unknown as CanvasLib & { default?: CanvasLib };
     const c = (lib.GlobalFonts ? lib : lib.default) as CanvasLib;
     if (!fontsReady) {
-        c.GlobalFonts.register(Buffer.from(TILE_FONT_WOFF2_B64, 'base64'), FONT);
+        // register() answers null rather than throwing; without the font every picture would be wrong, so throw and let
+        // sendMeetingBot send the fallback picture (review of #800).
+        if (!c.GlobalFonts.register(Buffer.from(TILE_FONT_WOFF2_B64, 'base64'), FONT)) throw new Error('tile font not registered');
         fontsReady = true;
     }
     return c;
@@ -165,6 +193,7 @@ export async function drawTile(names: TileNames, state: TileState, lib?: CanvasL
         y += blk.gapBefore;
         ctx.font = font(blk.size, blk.weight);
         for (const line of blk.lines) {
+            if (!canDraw(line)) throw new Error('tile text has a character the font cannot draw');
             const mid = y + lineH(blk) / 2;
             const tw = ctx.measureText(line).width;
             const lead = blk.dot ? dotRoom : blk.swan && swan ? swanH * (swan.width / swan.height) + swanGap : 0;

@@ -4,7 +4,9 @@
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { MAX_JPEG_BYTES, drawBotTiles, drawTile, fitLines, tileWords, type Measure } from '../src/utils/meeting-bot-tile';
+import { MAX_JPEG_BYTES, canDraw, drawBotTiles, drawTile, drawableName, fitLines, fontHas, tileWords, type Measure } from '../src/utils/meeting-bot-tile';
+import { TILE_FONT_WOFF2_B64 } from '../src/utils/meeting-bot-tile-assets';
+import { GlobalFonts, createCanvas } from '@napi-rs/canvas';
 
 let failed = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -101,6 +103,57 @@ await test('drawBotTiles: both pictures as plain base64 (no data: prefix), as Re
         assert.ok(/^[A-Za-z0-9+/]+=*$/.test(b64));
         assert.deepEqual(jpegSize(Buffer.from(b64, 'base64')), [1280, 720]);
     }
+});
+
+// ── Characters the font can't draw (review of #800: "Łukasz" was drawn as "▯ukasz" in the call) ──────────────────
+
+await test('the font list is right: drawn and compared with the font\'s own "missing" box', () => {
+    assert.ok(GlobalFonts.register(Buffer.from(TILE_FONT_WOFF2_B64, 'base64'), 'TileTest'));
+    const c = createCanvas(80, 80), ctx = c.getContext('2d');
+    const snap = (ch: string) => { ctx.clearRect(0, 0, 80, 80); ctx.font = '48px TileTest'; ctx.fillStyle = '#000'; ctx.fillText(ch, 10, 60); return Buffer.from(ctx.getImageData(0, 0, 80, 80).data).toString('base64'); };
+    const missing = snap('\uE000');
+    for (const ch of ['a', 'Z', 'é', 'ß', 'ñ', 'ø', '&', '’', '—', '…', '€', '·']) {
+        assert.equal(fontHas(ch.codePointAt(0)!), true, `${ch} listed`);
+        assert.notEqual(snap(ch), missing, `${ch} really drawn`);
+    }
+    for (const ch of ['Ł', 'ł', 'Ž', 'ğ', 'Ж', 'Ω', '東', '🍊']) {
+        assert.equal(fontHas(ch.codePointAt(0)!), false, `${ch} not listed`);
+        if (ch.codePointAt(0)! < 0x3000) assert.equal(snap(ch), missing, `${ch} really missing`);
+    }
+});
+
+await test('drawableName: emoji removed; a name with a letter the font lacks counts as no name', () => {
+    assert.equal(drawableName('Café 🍊 & Søn', 80), 'Café & Søn');
+    assert.equal(drawableName('👩🏽‍💻 Ada', 80), 'Ada');
+    assert.equal(drawableName('Łukasz', 80), '');
+    assert.equal(drawableName('Москва Design', 80), '');
+    assert.equal(drawableName('東京デザイン', 80), '');
+    assert.equal(drawableName('🦢', 80), '');
+});
+
+await test('tileWords: never a word the font can\'t draw, whatever the names', () => {
+    const w = tileWords({ assistantName: 'Łucja', businessName: 'Marmalade' }, 'recording');
+    assert.equal(w.greeting, "Hi, I'm the Note Taker from Marmalade");
+    const ru = tileWords({ assistantName: 'Orbit', businessName: 'Москва Design' }, 'recording');
+    assert.equal(ru.business, 'Be More Swan', 'company can\'t be drawn → Be More Swan\'s own tile');
+    assert.equal(ru.greeting, null);
+    for (const names of [
+        { assistantName: 'Żółć', businessName: 'Řeka Ğüş' }, { assistantName: '東京', businessName: 'Ελλάδα' },
+        { assistantName: 'Zoë 🦢', businessName: 'Café Ñandú 🍊 & Søn' }, { assistantName: '', businessName: '\u0000\u0007' },
+    ]) {
+        for (const state of ['recording', 'not-recording'] as const) {
+            const t = tileWords(names, state);
+            for (const line of [t.greeting, t.shortGreeting, t.business, t.noteTaker, t.status, t.poweredBy]) {
+                if (line) assert.ok(canDraw(line), `${JSON.stringify(names)} → ${line}`);
+            }
+        }
+    }
+});
+
+await test('drawTile refuses to draw a character the font lacks, and a font that didn\'t register (→ fallback)', () => {
+    const src = read('src/utils/meeting-bot-tile.ts');
+    assert.ok(src.includes("if (!canDraw(line)) throw new Error("), 'checked line by line before drawing');
+    assert.ok(src.includes("throw new Error('tile font not registered')"), 'register() returning null is a failure');
 });
 
 await test('bundles: the drawing code and its font/swan reach ONLY the send function; canvas is never a static import', () => {
