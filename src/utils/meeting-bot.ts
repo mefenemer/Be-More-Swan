@@ -260,7 +260,7 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
 
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
-/** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, imported only by netlify/functions/meeting-bots.ts). */
+/** The bot's video tile, base64 JPEGs: drawn per workspace (meeting-bot-tile.ts) or the fallback (meeting-bot-tile-data.ts). */
 export interface BotVideoTile { recordingJpegB64: string; notRecordingJpegB64: string }
 
 export interface BotRequestInput {
@@ -286,8 +286,8 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
         bot_name: botName(i.businessName),
         ...(i.scheduled ? { join_at: i.joinAt.toISOString() } : {}),
         chat: { on_bot_join: { send_to: 'everyone', message: joinMessage(i.businessName), pin: true } },
-        // Its video tile: a still Be More Swan picture saying it is taking notes, so everyone can see what it is
-        // (scripts/gen-meeting-bot-tile.js; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
+        // Its video tile: a still picture with the business's name saying it is taking notes, so everyone can see what
+        // it is (meeting-bot-tile.ts; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
         ...(i.videoTile ? {
             automatic_video_output: {
                 in_call_recording: { kind: 'jpeg', b64_data: i.videoTile.recordingJpegB64 },

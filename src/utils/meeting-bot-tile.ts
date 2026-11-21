@@ -1,0 +1,199 @@
+// src/utils/meeting-bot-tile.ts — the Note Taker bot's picture in a call, drawn for each workspace when the bot is sent.
+//
+// Owner, 2026-11-21 (said in the EU test call): the company's name large, "Hi, I'm ⟨assistant⟩ from ⟨company⟩" above it,
+// "Note Taker" and what it is doing below, and "Powered by Be More Swan" at the bottom.
+//
+// Recall's rules (docs.recall.ai/docs/output-video-in-meetings, read 2026-11-20): JPEG, 16:9, 1280×720 at most, under
+// 1.3 MB, bold text ≥ 50 px, solid colours, everything near the middle because Google Meet crops tiles to a square.
+// Drawn at 2560×1440 and scaled down once. Text that would not fit is made smaller, then wrapped, then cut with "…" —
+// never drawn outside the square.
+//
+// @napi-rs/canvas is loaded only when a picture is drawn (it is external in netlify.toml for meeting-bots), and the
+// font + swan come from meeting-bot-tile-assets.ts. Only netlify/functions/meeting-bots.ts imports this file.
+
+import type { BotVideoTile } from './meeting-bot';
+import { TILE_FONT_WOFF2_B64, TILE_SWAN_PNG_B64 } from './meeting-bot-tile-assets';
+
+type CanvasLib = typeof import('@napi-rs/canvas');
+type Ctx = import('@napi-rs/canvas').SKRSContext2D;
+
+export type TileState = 'recording' | 'not-recording';
+export interface TileNames { assistantName: string | null | undefined; businessName: string | null | undefined }
+
+export const TILE_W = 2560;
+export const TILE_H = 1440;
+/** Google Meet crops to a centred square (H wide); keep a margin inside it. */
+export const TILE_SAFE_WIDTH = TILE_H - 120;
+export const MAX_JPEG_BYTES = 1_300_000;
+
+const BG = '#16111f';
+const PINK = '#d82173';
+const WHITE = '#ffffff';
+const MUTED = '#b9b2c7';
+const RED = '#ff3b4e';
+const GREY = '#8a8399';
+const FONT = 'Inter';
+
+const STATUS: Record<TileState, { line: string; dot: string }> = {
+    recording: { line: 'Taking notes & recording', dot: RED },
+    'not-recording': { line: 'In the call · not recording', dot: GREY },
+};
+
+const clean = (s: string | null | undefined, max: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** The words on the tile, top to bottom. Pure. With no business name the tile is Be More Swan's own. */
+export function tileWords(names: TileNames, state: TileState): { greeting: string | null; shortGreeting: string | null; business: string; noteTaker: string; status: string; poweredBy: string | null } {
+    const business = clean(names.businessName, 80);
+    const assistant = clean(names.assistantName, 40);
+    if (!business) return { greeting: null, shortGreeting: null, business: 'Be More Swan', noteTaker: 'Note Taker', status: STATUS[state].line, poweredBy: null };
+    return {
+        greeting: assistant ? `Hi, I'm ${assistant} from ${business}` : `Hi, I'm the Note Taker from ${business}`,
+        // When the whole greeting won't fit: the company is written large just below, so it can go.
+        shortGreeting: assistant ? `Hi, I'm ${assistant}` : null,
+        business,
+        noteTaker: 'Note Taker',
+        status: STATUS[state].line,
+        poweredBy: 'Powered by Be More Swan',
+    };
+}
+
+/** Width of a string at a size, as the canvas measures it. Injected so the wrapping can be tested without a canvas. */
+export type Measure = (text: string, size: number) => number;
+
+/**
+ * Break `text` into at most `maxLines` lines no wider than `width`, at the largest size in `sizes` that fits.
+ * At the smallest size it still wraps, and a last line that is too long is cut with "…". Pure.
+ */
+export function fitLines(text: string, sizes: number[], width: number, maxLines: number, measure: Measure): { size: number; lines: string[]; cut: boolean } {
+    const words = text.split(' ').filter(Boolean);
+    const wrap = (size: number): string[] | null => {
+        const lines: string[] = [];
+        let line = '';
+        for (const w of words) {
+            const next = line ? `${line} ${w}` : w;
+            if (measure(next, size) <= width) { line = next; continue; }
+            if (!line) return null; // one word wider than the line
+            lines.push(line);
+            line = w;
+            if (measure(line, size) > width) return null;
+        }
+        if (line) lines.push(line);
+        return lines.length <= maxLines ? lines : null;
+    };
+    for (const size of sizes) {
+        const lines = wrap(size);
+        if (lines) return { size, lines, cut: false };
+    }
+    // Still too long at the smallest size: fill the lines word by word, then cut the last one with "…".
+    const size = sizes[sizes.length - 1];
+    const lines: string[] = [];
+    let rest = text;
+    while (lines.length < maxLines && rest) {
+        let take = rest.length;
+        while (take > 1 && measure(rest.slice(0, take), size) > width) take--;
+        if (lines.length === maxLines - 1 && take < rest.length) {
+            let cut = rest.slice(0, take);
+            while (cut.length > 1 && measure(`${cut.trimEnd()}…`, size) > width) cut = cut.slice(0, -1);
+            lines.push(`${cut.trimEnd()}…`);
+            rest = '';
+            break;
+        }
+        // Prefer to break at a space.
+        const space = take < rest.length ? rest.lastIndexOf(' ', take) : -1;
+        const end = space > 0 ? space : take;
+        lines.push(rest.slice(0, end).trim());
+        rest = rest.slice(end).trim();
+    }
+    return { size, lines, cut: true };
+}
+
+let fontsReady = false;
+async function canvasLib(): Promise<CanvasLib> {
+    const lib = await import('@napi-rs/canvas') as unknown as CanvasLib & { default?: CanvasLib };
+    const c = (lib.GlobalFonts ? lib : lib.default) as CanvasLib;
+    if (!fontsReady) {
+        c.GlobalFonts.register(Buffer.from(TILE_FONT_WOFF2_B64, 'base64'), FONT);
+        fontsReady = true;
+    }
+    return c;
+}
+
+interface Block { size: number; weight: number; colour: string; lines: string[]; gapBefore: number; dot?: string; swan?: boolean }
+
+/** One tile as a 1280×720 JPEG. */
+export async function drawTile(names: TileNames, state: TileState, lib?: CanvasLib): Promise<Buffer> {
+    const c = lib ?? await canvasLib();
+    const canvas = c.createCanvas(TILE_W, TILE_H);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, TILE_W, TILE_H);
+    const glow = ctx.createRadialGradient(TILE_W / 2, TILE_H * 0.45, 0, TILE_W / 2, TILE_H * 0.45, TILE_W * 0.32);
+    glow.addColorStop(0, 'rgba(216,33,115,0.20)');
+    glow.addColorStop(1, 'rgba(216,33,115,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, TILE_W, TILE_H);
+
+    const font = (size: number, weight: number) => `${weight} ${size}px ${FONT}`;
+    const measureAt = (weight: number): Measure => (text, size) => { ctx.font = font(size, weight); return ctx.measureText(text).width; };
+    const words = tileWords(names, state);
+    const dotRoom = 56 + 36; // the status dot and its gap
+    const swanH = 96, swanGap = 28;
+
+    const blocks: Block[] = [];
+    if (words.greeting) {
+        let g = fitLines(words.greeting, [110, 100], TILE_SAFE_WIDTH, 2, measureAt(600));
+        if (g.cut && words.shortGreeting) g = fitLines(words.shortGreeting, [110, 100], TILE_SAFE_WIDTH, 2, measureAt(600));
+        blocks.push({ ...g, weight: 600, colour: MUTED, gapBefore: 0 });
+    }
+    const b = fitLines(words.business, [200, 180, 160, 140, 120, 104], TILE_SAFE_WIDTH, 2, measureAt(800));
+    blocks.push({ ...b, weight: 800, colour: WHITE, gapBefore: words.greeting ? 40 : 0 });
+    blocks.push({ size: 120, weight: 800, colour: PINK, lines: [words.noteTaker], gapBefore: 70 });
+    const s = fitLines(words.status, [100], TILE_SAFE_WIDTH - dotRoom, 1, measureAt(700));
+    blocks.push({ ...s, weight: 700, colour: MUTED, gapBefore: 20, dot: STATUS[state].dot });
+    if (words.poweredBy) {
+        const p = fitLines(words.poweredBy, [76], TILE_SAFE_WIDTH - swanH - swanGap, 1, measureAt(600));
+        blocks.push({ ...p, weight: 600, colour: MUTED, gapBefore: 90, swan: true });
+    }
+
+    const lineH = (blk: Block) => Math.round(blk.size * (blk.swan ? 1.3 : 1.18));
+    const total = blocks.reduce((sum, blk) => sum + blk.gapBefore + blk.lines.length * lineH(blk), 0);
+    let y = Math.round((TILE_H - total) / 2);
+
+    const swan = words.poweredBy ? await c.loadImage(Buffer.from(TILE_SWAN_PNG_B64, 'base64')) : null;
+    ctx.textBaseline = 'middle';
+    for (const blk of blocks) {
+        y += blk.gapBefore;
+        ctx.font = font(blk.size, blk.weight);
+        for (const line of blk.lines) {
+            const mid = y + lineH(blk) / 2;
+            const tw = ctx.measureText(line).width;
+            const lead = blk.dot ? dotRoom : blk.swan && swan ? swanH * (swan.width / swan.height) + swanGap : 0;
+            const x = (TILE_W - (lead + tw)) / 2;
+            if (blk.dot) {
+                ctx.fillStyle = blk.dot;
+                ctx.beginPath();
+                ctx.arc(x + 28, mid, 28, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (blk.swan && swan) ctx.drawImage(swan, x, mid - swanH / 2, swanH * (swan.width / swan.height), swanH);
+            ctx.fillStyle = blk.colour;
+            ctx.fillText(line, x + lead, mid);
+            y += lineH(blk);
+        }
+    }
+
+    const out = c.createCanvas(1280, 720);
+    const octx = out.getContext('2d') as Ctx;
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = 'high';
+    octx.drawImage(canvas, 0, 0, 1280, 720);
+    const jpg = await out.encode('jpeg', 90);
+    if (jpg.length > MAX_JPEG_BYTES) throw new Error(`tile is ${jpg.length} bytes; Recall's limit is ${MAX_JPEG_BYTES}`);
+    return jpg;
+}
+
+/** Both pictures for one bot, base64 as Recall takes them. */
+export async function drawBotTiles(names: TileNames): Promise<BotVideoTile> {
+    const [rec, notRec] = await Promise.all([drawTile(names, 'recording'), drawTile(names, 'not-recording')]);
+    return { recordingJpegB64: rec.toString('base64'), notRecordingJpegB64: notRec.toString('base64') };
+}
