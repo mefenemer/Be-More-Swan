@@ -2,7 +2,7 @@
 //
 // A Video Producer video on YouTube (src/lib/youtube-extras.ts says what and why):
 //   · afterYouTubeUpload — once publish-youtube-background has the video id: the thumbnail, then the
-//     caption tracks (English + every translation) when the connection granted youtube.force-ssl.
+//     caption tracks (as spoken + every translation) when the connection granted youtube.force-ssl.
 //     Never fails the post: each part is best-effort and its outcome is returned for the log.
 //   · youtubeResultsFor — views, likes and comments for the video's YouTube posts, plus the drop-off
 //     curve when yt-analytics.readonly was granted. Cached on the project's timeline for six hours.
@@ -12,6 +12,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, scheduledPosts, videoProjects } from '../../db/schema';
 import { timelineWords } from '../lib/captions';
+import { DEFAULT_VOICE, isVoiceId, languageLabel, voiceLanguage } from '../lib/tts';
 import { resolveCaptionSources } from '../lib/post-render';
 import type { Storyboard } from '../lib/storyboard';
 import {
@@ -25,7 +26,19 @@ type Db = ReturnType<typeof getDb>;
 type ProjectRow = typeof videoProjects.$inferSelect;
 type Timeline = { audio?: unknown; durationS?: number; captionTranslations?: Record<string, { lines?: unknown; at?: string }>; youtube?: YouTubeCache } & Record<string, unknown>;
 
-/** The spoken words of a finished video as caption file lines (English, as said). [] when it has no captioned voice. */
+/**
+ * The language a video is spoken in, so its captions as spoken are named right and translated from it: the brief's
+ * language, else its voiceover voice's language, else English (own footage with no language set). The same rule the
+ * planner writes the script by (video-producer.ts storyboardUserPrompt `language`). Pure.
+ */
+export function spokenLanguage(brief: unknown): string {
+    const b = (brief && typeof brief === 'object' ? brief : {}) as { language?: unknown; voiceover?: unknown; voice?: unknown };
+    if (typeof b.language === 'string' && languageLabel(b.language)) return b.language;
+    if (b.voiceover) return voiceLanguage(isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE);
+    return 'en';
+}
+
+/** The spoken words of a finished video as caption file lines (in the language spoken, as said). [] when it has no captioned voice. */
 export async function videoCaptionLines(db: Db, orgId: number, timeline: unknown): Promise<CaptionLine[]> {
     const tl = timeline as Timeline | null;
     if (!tl?.audio) return [];
@@ -119,9 +132,10 @@ export async function afterYouTubeUpload(db: Db, args: { orgId: number; videoId:
         if (project) {
             const integ = await getIntegration(db, args.orgId, 'youtube').catch(() => null);
             if (hasScope(integ?.scopes, YT_SCOPE_CAPTIONS)) {
-                const english = await videoCaptionLines(db, args.orgId, project.timeline);
-                const tracks: Array<[string, string, CaptionLine[]]> = english.length ? [['en-GB', 'English', english]] : [];
-                for (const [code, lines] of Object.entries(translationsOf(project.timeline))) tracks.push([code, CAPTION_LANGUAGES[code], lines]);
+                const spoken = await videoCaptionLines(db, args.orgId, project.timeline);
+                const lang = spokenLanguage(project.brief);
+                const tracks: Array<[string, string, CaptionLine[]]> = spoken.length ? [[lang === 'en' ? 'en-GB' : lang, CAPTION_LANGUAGES[lang] ?? languageLabel(lang) ?? lang, spoken]] : [];
+                for (const [code, lines] of Object.entries(translationsOf(project.timeline))) if (code !== lang) tracks.push([code === 'en' ? 'en-GB' : code, CAPTION_LANGUAGES[code], lines]);
                 for (const [code, name, lines] of tracks) {
                     const r = await insertCaptionTrack(args.token, args.videoId, code, name, toSrt(lines)).catch((e) => ({ ok: false, error: String(e?.message || e) }));
                     out.captions.push(r.ok ? code : `${code} refused: ${r.error}`);

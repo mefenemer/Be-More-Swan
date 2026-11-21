@@ -836,6 +836,13 @@
         <span id="comments-tab-label">Comments</span>
         <span id="comments-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Messages — Social Media only (messagesTab). Facebook Page + Instagram private messages, each
+           with a reply the assistant drafts and a person sends inside Meta's 24-hour window. Badge =
+           conversations waiting. assistant-messages.js → social-messages.ts. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-messages" id="maintab-btn-messages" data-maintab="messages" class="main-tab-btn hidden">
+        <span id="messages-tab-label">Messages</span>
+        <span id="messages-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Email flows — Email Marketing Assistant only (emailCampaignsTab). Its automatic email
            series (welcome + form-started) with status and results; each opens in the Email Studio.
            Sits right after Review: emails move draft → review → sent there, campaigns live here.
@@ -1221,6 +1228,10 @@
   <div id="maintab-comments" role="tabpanel" aria-labelledby="maintab-btn-comments" class="main-tab-content hidden">
     <div id="comments-host"></div>
   </div><!-- /maintab-comments -->
+
+  <div id="maintab-messages" role="tabpanel" aria-labelledby="maintab-btn-messages" class="main-tab-content hidden">
+    <div id="messages-host"></div>
+  </div><!-- /maintab-messages -->
 
   <div id="maintab-discussions" role="tabpanel" aria-labelledby="maintab-btn-discussions" class="main-tab-content hidden">
     <div id="discussions-host"></div>

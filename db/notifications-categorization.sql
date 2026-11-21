@@ -99,6 +99,8 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     -- silence the notification was built to end.
     WHEN 'lead_reply_received' THEN 'suggested_action'   -- a prospect replied to outreach
     WHEN 'site_enquiry_received' THEN 'suggested_action' -- someone sent a message from the website's contact form (call site passes category)
+    WHEN 'social_message_received' THEN 'suggested_action' -- someone messaged the Facebook Page / Instagram account (call site passes category)
+    WHEN 'social_message_window_closing' THEN 'suggested_action' -- 4 hours left to answer a Facebook / Instagram message (call site passes category)
     WHEN 'site_booking_received' THEN 'suggested_action' -- a booking from the website; state_change when confirmed instantly (call site passes category)
     WHEN 'site_booking_changed' THEN 'state_change'      -- a customer cancelled or moved their booking (call site passes category)
     WHEN 'site_review_received' THEN 'suggested_action'  -- a customer sent a review that waits for approval (call site passes category)

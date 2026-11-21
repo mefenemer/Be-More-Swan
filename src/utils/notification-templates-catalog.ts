@@ -430,6 +430,34 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // Someone messaged the business's Facebook Page or Instagram account (meta-webhook.ts →
+        // social-messages.ts notifyConversationOpened): one card per conversation that starts waiting.
+        templateKey: 'social_message_received',
+        name: 'New Facebook / Instagram message',
+        category: 'Assistants',
+        type: 'social_message_received',
+        title: 'Someone messaged you on {{platform.name}}',
+        message: 'It is on {{assistant.name}}’s Messages tab, with a reply ready to draft. Meta only lets you answer within 24 hours of their last message.',
+        variables: [
+            ASSISTANT_NAME,
+            v('platform.name', 'Facebook or Instagram', 'Instagram'),
+        ],
+    },
+    {
+        // The "4 hours left" reminder for a conversation still waiting (social-messages.ts runMessagesTick).
+        templateKey: 'social_message_window_closing',
+        name: 'Facebook / Instagram message: 4 hours left to reply',
+        category: 'Assistants',
+        type: 'social_message_window_closing',
+        title: '4 hours left to answer {{person.name}} on {{platform.name}}',
+        message: 'After that Meta closes the conversation and the reply can only be written in the {{platform.name}} app. It is on {{assistant.name}}’s Messages tab.',
+        variables: [
+            ASSISTANT_NAME,
+            v('platform.name', 'Facebook or Instagram', 'Instagram'),
+            v('person.name', 'Who sent the message', 'Sam Patel'),
+        ],
+    },
+    {
         // A visitor sent a message from a site's contact section (site-forms.ts). The owner is also
         // emailed the message itself; this card points at the Website tab's enquiries list.
         templateKey: 'site_enquiry_received',

@@ -37,7 +37,7 @@ function _assistantRenamed(assistantId, name) {
     window.bmsCachedFetch?.invalidate?.();
     window.ChatPane?.renameAll?.(assistantId, name);
     [window.AssistantDataHub, window.AssistantCampaigns, window.AssistantMentorOverview, window.AssistantMentorPlan, window.MentorCommitments,
-        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantComments, window.AssistantWatchList, window.AssistantInspo]
+        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantComments, window.AssistantMessages, window.AssistantWatchList, window.AssistantInspo]
         .forEach((m) => { try { m?.rename?.(name); } catch (e) { console.warn('[assistant-detail] a tab could not take the new name', e); } });
     document.dispatchEvent(new CustomEvent('assistant:renamed', { detail: { assistantId, name } }));
 }
@@ -1155,6 +1155,8 @@ window._activateMainTab = function(name) {
     if (name === 'discussions') window.AssistantDiscussions?.activate();
     // Comments likewise — init() already fetched for the new-comments badge.
     if (name === 'comments') window.AssistantComments?.activate();
+    // Messages likewise — init() already fetched for the waiting-conversations badge.
+    if (name === 'messages') window.AssistantMessages?.activate();
     if (name === 'watchlist') window.AssistantWatchList?.activate();
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
@@ -7809,6 +7811,17 @@ function _applyDashboardRegistry(data) {
     if (commentsTab) {
         setText('comments-tab-label', commentsTab.label || 'Comments');
         window.AssistantComments?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
+    // Messages tab — Social Media only (messagesTab: social_media_manager): Facebook Page + Instagram
+    // messages, each answered with a reply a person sends (docs/meta-messages-plan.md). init() loads
+    // eagerly for the badge, and hides the tab again on a server where messages are switched off
+    // (META_MESSAGING_ENABLED) and nothing has ever arrived.
+    const messagesTab = cfg.messagesTab;
+    toggle('maintab-btn-messages', !!messagesTab);
+    if (messagesTab) {
+        setText('messages-tab-label', messagesTab.label || 'Messages');
+        window.AssistantMessages?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Watch list tab — lead roles only (watchListTab: lead_qualifier): Companies House news on customers,

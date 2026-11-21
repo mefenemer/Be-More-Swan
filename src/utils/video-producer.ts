@@ -71,7 +71,7 @@ import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
 import { chaptersFor } from '../lib/video-chapters';
-import { translationsOf } from './youtube-video';
+import { spokenLanguage, translationsOf } from './youtube-video';
 import { biggestDrop, CAPTION_LANGUAGES } from '../lib/youtube-extras';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
@@ -1091,6 +1091,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                         orgId, userId, assistantId: p.aiAssistantId ?? null, script,
                         voice: isVoiceId(brief.voice) ? brief.voice : DEFAULT_VOICE,
                         name: `Voiceover · ${storyboard.title}`.slice(0, 80),
+                        // The planner wrote the script in this language, so the transcriber is told it.
+                        language: spokenLanguage(brief),
                     });
                     voiceoverAssetId = vo.assetId;
                     words = vo.words;
@@ -1690,9 +1692,10 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         sceneTimes: row.timeline ? sceneTimesOf(row.timeline) : [],
         // Its chapters (runs of scenes with one beat) and, when YouTube would show them, the description lines.
         ...chaptersOf(row, sb, outputDurationS),
-        // Caption files: whether it has spoken captions (English is free to download) and its translations.
+        // Caption files: whether it has spoken captions (free to download, in the language spoken) and its translations.
         hasSpokenCaptions: hasCaptionedVoice(row.timeline),
-        captionTranslations: Object.keys(translationsOf(row.timeline)),
+        spokenLanguage: spokenLanguage(row.brief),
+        captionTranslations: Object.keys(translationsOf(row.timeline)).filter((c) => c !== spokenLanguage(row.brief)),
         youtubeCached: !!(row.timeline as { youtube?: unknown } | null)?.youtube,
         mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
         editCount: row.editCount,
@@ -1880,9 +1883,10 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             ? `\n    chapters (${youtubeChapters ? 'added to the description when it is posted to YouTube' : chaptersWhyNot === 'not_wide' ? 'Videos tab only — YouTube makes a vertical or square video a Short, and Shorts have no chapters' : 'Videos tab only — YouTube needs at least 3 chapters of 10 seconds or more'}): ${chapters.map((c, i) => `${i + 1}. ${mmss(c.startS)} "${c.title}"${c.named ? '' : ' (its own name)'}`).join('; ')}`
             : '';
         // Caption files and how it's doing on YouTube (youtube-video.ts) — the last figures read, never a fresh call here.
-        const tr = r.status === 'ready' ? Object.keys(translationsOf(r.timeline)) : [];
+        // A translation into the language spoken (possible before 2026-11-20, when every video counted as English) is left out.
+        const tr = r.status === 'ready' ? Object.keys(translationsOf(r.timeline)).filter((c) => c !== spokenLanguage(r.brief)) : [];
         const captionLine = r.status === 'ready' && hasCaptionedVoice(r.timeline)
-            ? `\n    caption files: English${tr.length ? `, ${tr.map((c) => `${CAPTION_LANGUAGES[c] ?? c} (${c})`).join(', ')}` : ''}`
+            ? `\n    caption files: ${CAPTION_LANGUAGES[spokenLanguage(r.brief)] ?? 'English'} (as spoken)${tr.length ? `, ${tr.map((c) => `${CAPTION_LANGUAGES[c] ?? c} (${c})`).join(', ')}` : ''}`
             : '';
         const yt = r.status === 'ready' ? (r.timeline as { youtube?: { at: string; posts: Array<{ stats: { views: number } | null }>; retention: Array<{ at: number; watching: number }> | null; averageViewS: number | null } } | null)?.youtube : null;
         const ytViews = yt ? yt.posts.reduce((n, p) => n + (p.stats?.views ?? 0), 0) : 0;

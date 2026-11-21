@@ -22,6 +22,7 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { isMissingTable, parseMessagingWebhook, storeMessagingEvent, verifyMetaSignature } from '../../src/utils/meta-messaging';
+import { notifyConversationOpened } from '../../src/utils/social-messages';
 
 const ok = { statusCode: 200, headers: { 'Content-Type': 'text/plain' }, body: 'EVENT_RECEIVED' };
 
@@ -56,6 +57,8 @@ export default withLambda(async (event) => {
     for (const m of messages) {
         try {
             const res = await storeMessagingEvent(db, m);
+            // A conversation that now waits on the business: one card to its owner (never throws).
+            if (res.stored && res.opened) await notifyConversationOpened(db, res);
             if (!res.stored && (res.reason === 'unknown_account' || res.reason === 'ambiguous_account')) {
                 // Ids only — never the message text.
                 console.warn(`[meta-webhook] ${res.reason}: ${m.platform} ${m.accountId}`);

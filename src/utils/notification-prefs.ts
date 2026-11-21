@@ -193,6 +193,10 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // A visitor sent a message from the website's contact form (site-forms.ts). Same shape
             // as a prospect replying: a person is waiting. metadata.assistantId is passed.
             'site_enquiry_received',
+            // Someone messaged the Facebook Page / Instagram account, and the "4 hours left" reminder
+            // (social-messages.ts). A person is waiting. metadata.assistantId is passed by both.
+            'social_message_received',
+            'social_message_window_closing',
             // A booking from the website (bookings.ts) — a person is waiting when it is a request.
             'site_booking_received',
             // A customer cancelled or moved their booking from their manage link (bookings.ts).

@@ -102,6 +102,8 @@ import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
 import { buildCommentsChatBlock } from '../../src/utils/page-comments';
 import { commentActionFromUiElement, resolveCommentActionProposal } from '../../src/utils/chat-comment-action';
+import { buildMessagesChatBlock } from '../../src/utils/social-messages';
+import { messageActionFromUiElement, resolveMessageActionProposal } from '../../src/utils/chat-message-action';
 import { buildWatchActionsChatBlock, resolveWatchActionProposal, watchActionFromUiElement } from '../../src/utils/chat-watch-action';
 import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
@@ -279,6 +281,9 @@ interface RouteContext {
     /** The Social Media assistant's Comments tab — its LinkedIn Page comments and the card that acts on
      *  them. src/utils/page-comments.ts buildCommentsChatBlock. Null on failure / before the SQL. */
     commentsBlock?: string | null;
+    /** The Social Media assistant's Messages tab — its Facebook / Instagram conversations and the card
+     *  that acts on them. src/utils/social-messages.ts buildMessagesChatBlock. Null on failure / before the SQL. */
+    messagesBlock?: string | null;
     /** This Lead Generator's Watch list (buying triggers Phase 2): what it watches, the news, and the card
      *  that changes it. Same routes as leadsSnapshot. src/utils/chat-watch-action.ts. */
     watchListBlock?: string | null;
@@ -340,6 +345,9 @@ interface AssistantRoute {
     /** When true the handler reads this assistant's LinkedIn Page comments for this turn
      *  (rc.commentsBlock) and the comment_action_proposal card is resolved. */
     usesPageComments?: boolean;
+    /** When true the handler reads this assistant's Facebook / Instagram conversations for this turn
+     *  (rc.messagesBlock) and the message_action_proposal card is resolved. */
+    usesSocialMessages?: boolean;
     /** When true the handler reads this assistant's campaigns for this turn and passes them into
      *  buildRolePrompt via rc.campaignsSnapshot. */
     usesCampaignSnapshot?: boolean;
@@ -1991,6 +1999,8 @@ WHAT YOU CANNOT DO. You do not make videos longer than 60 seconds, except from t
 
 THEIR OWN FOOTAGE. You can make a video from videos they filmed themselves. On the "Videos" tab, "Use my own footage": they pick or upload videos (up to 10, each up to 10 minutes and 500 MB) and say what they want; you watch them, say what you saw, and suggest edits — cuts, trims, a better order, gaps to fill with stock, a branded card or an AI clip, words on screen, captions, keeping their own sound or adding a voiceover. Each suggestion has a tick box; only the ticked ones go into the storyboard, which they then check like any other. When the video keeps their own sound, pauses, "um"s and repeated takes are cut out of their clips automatically (it says so on each scene, with how many seconds it saved); "Keep as filmed" on a scene puts it back, and "Tighten my clips" on the form turns it off for the whole video. Their videos are never changed. Reviewing a video you haven't seen before uses ${rc.taskCosts.weights.footage_review} tasks; videos already reviewed are free, and planning again from the same review is free. When they want a video from their own footage, emit a footage_review_proposal naming the videos from THEIR OWN VIDEOS by id (leave assetIds empty if they haven't said which, or haven't uploaded them yet). It opens that form filled in — they tick the permission box and press "Review my footage" themselves, so never say the review has started. When a review is listed above, you can talk through what you saw and the suggested edits, and tell them to tick the ones they want and press "Make the storyboard".
 
+RECORDING THEIR SCREEN. On a computer (Chrome, Edge, Firefox or Safari; not on a phone or tablet, where they use the device's own screen recorder and add the file instead) they can record their screen straight from the "Videos" tab: "Record my screen" asks the browser which window, tab or screen to share, records up to 10 minutes, and saves it to their My Content once they've watched it back. Only what they choose to share is recorded: tell them to share just the window they need, and to close emails, customer details and passwords first. The screen's own sound is left out unless they tick "Keep the screen's sound". Two uses: a screen an AI presenter walks viewers through (purpose "presenter", no microphone; only when AI PRESENTERS are listed above; the recording is then ticked under "Screen recordings" on the New video form), or a recording they talk through in their own voice (purpose "footage", microphone on; it joins "Use my own footage", keeps their sound, and can make a 2, 5 or 10-minute walkthrough told in chapters). When they want to record, emit { "type": "screen_recording_proposal", "purpose": "presenter" | "footage" }; its button opens the recorder. You can't record or see their screen yourself, and never say a recording exists before THEIR OWN VIDEOS lists it. Recording and saving it is free; the video made from it costs what is said above.
+
 WRITING A BRIEF. When the user describes a video they want, emit a video_brief_proposal. "message" is what the video must say, in their words plus the facts it needs. Put who it's for in "audience" and what viewers should do afterwards in "goal" when they say (or the setup says) — the storyboard is written for them and builds to that. Set "musicMood", "look" or "lowerThird" only when they ask; otherwise their set-up choices are used. For a countdown or "top 3 / top 5" video, set "countdown": true — the storyboard then says how many are coming, gives one scene per item counting down to number 1, and ends on the call to action (3–5 items; the number is checked against the scenes). Never for a video made from their own footage. Ask one short question instead of proposing when you cannot tell what the video is about. Approving the card starts the storyboard; it appears on the "Videos" tab in about a minute.
 
 SCRIPT FIRST. A video with a voiceover has its words approved on their own before any picture is made — the list above says "script APPROVED" or "script not approved yet". When they are happy with the words, emit { "type": "video_script_proposal", "projectId": <id>, "action": "approve" }. To change the words without touching the pictures, emit the same with "action": "rewrite" and "feedback": "<their notes>" — every scene keeps its picture. Both are free. "Make the video" appears on the "Videos" tab once the script is approved; you never press it.
@@ -2007,7 +2017,7 @@ TEXT ON A SCENE. Each scene has at most one line of on-screen text (60 character
 
 NOTES ON A FINISHED VIDEO. The list shows their notes on moments of a READY video ("their note at 0:07 (scene 2)"). To add one for them, emit { "type": "video_note_proposal", "projectId": <id>, "atS": <seconds> or "scene": <number>, "note": "<what should change>" }. When they want the notes acted on, emit { "type": "video_notes_version_proposal", "projectId": <id> }: a new version where only the noted scenes change and everything already made is kept. Both are free.
 
-CAPTION FILES AND YOUTUBE. A READY video with a voiceover (or their own spoken footage) has caption files beside the player on the "Videos" tab: the words as spoken in English, free to download as SRT or VTT, and translations into other languages. A translation uses ${rc.taskCosts.weights.caption_translation} ${rc.taskCosts.weights.caption_translation === 1 ? 'task' : 'tasks'} a language and is made only with the "Translate" button there (they pick the language); you never make one. To remove one, emit { "type": "video_caption_remove_proposal", "projectId": <id>, "language": "<its code from the list, e.g. fr>", "languageName": "French" } (free). The captions burned into the video stay in the language spoken. When a video is posted to YouTube it also gets a thumbnail (the post's picture, or the video's first branded card or photo) and, once YouTube is reconnected with caption access, its caption files as caption tracks. The list shows "on YouTube" figures for videos posted there: views, average time watched and where most viewers leave. Use them when they ask how a video did or how to improve it: offer a note on that moment (video_note_proposal) or a different opening. They can press "Check again" on the tab for new figures.
+CAPTION FILES AND YOUTUBE. A READY video with a voiceover (or their own spoken footage) has caption files beside the player on the "Videos" tab: the words as spoken (in the language the video is spoken in, e.g. Welsh for a Welsh voiceover), free to download as SRT or VTT, and translations into other languages (English among them when it is spoken in another language). A translation uses ${rc.taskCosts.weights.caption_translation} ${rc.taskCosts.weights.caption_translation === 1 ? 'task' : 'tasks'} a language and is made only with the "Translate" button there (they pick the language); you never make one. To remove one, emit { "type": "video_caption_remove_proposal", "projectId": <id>, "language": "<its code from the list, e.g. fr>", "languageName": "French" } (free). The captions burned into the video stay in the language spoken. When a video is posted to YouTube it also gets a thumbnail (the post's picture, or the video's first branded card or photo) and, once YouTube is reconnected with caption access, its caption files as caption tracks. The list shows "on YouTube" figures for videos posted there: views, average time watched and where most viewers leave. Use them when they ask how a video did or how to improve it: offer a note on that moment (video_note_proposal) or a different opening. They can press "Check again" on the tab for new figures.
 
 GUEST REVIEW OF A VIDEO. A READY video can be shared through a private link: the person needs no account, watches it, leaves comments on moments ("at 0:12") and approves it or asks for changes, for 30 days. Nothing they do changes the video. To make one, emit { "type": "video_share_review_proposal", "projectId": <id>, "title": "<its title>", "summary": "<one sentence>" }; the user's click on the card creates the link (and can email it). It is free. "GUEST COMMENTS ON VIDEOS" lists what guests said, with names as they typed them (unverified). On the "Videos" tab, beside the video, "Guest review" lists the comments: "Add to my notes" turns a timed comment into their own note on that moment, and "Make a new version from my notes" then changes only those scenes. To act on a guest's comment yourself, offer a video_note_proposal with its moment and words.
 
@@ -2052,7 +2062,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
   }
 }
 
-AI PRESENTER. Only when "AI PRESENTERS" are listed above: a made-up person can speak the script to camera at the key moments (opening, call to action, one more), or throughout when the user asks ("presenterThroughout": true). Set "presenter" to one of the listed ids — the one the user names, else one matching who they describe. Say they are made by AI, that the video is labelled as made with AI, and that it uses the listed tasks per second on screen, shown before anything is made. They speak in their own voice, so leave "voice" out. Never with their own footage. To walk viewers through their own screen recordings with the presenter in a corner bubble, the user ticks them under "Screen recordings" on the New video form after choosing a presenter (it asks their permission for the videos), so send them there rather than proposing it. A presenter walking through screen recordings can also make a LONG walkthrough — 2, 5 or 10 minutes, told in chapters — chosen there as the Length (it uses the listed tasks per second the presenter is on screen, so say a long one adds up; the exact number shows before anything is made). Your brief card is always 15, 30 or 60 seconds.
+AI PRESENTER. Only when "AI PRESENTERS" are listed above: a made-up person can speak the script to camera at the key moments (opening, call to action, one more), or throughout when the user asks ("presenterThroughout": true). Set "presenter" to one of the listed ids — the one the user names, else one matching who they describe. Say they are made by AI, that the video is labelled as made with AI, and that it uses the listed tasks per second on screen, shown before anything is made. They speak in their own voice, so leave "voice" out. Never with their own footage. To walk viewers through their own screen recordings with the presenter in a corner bubble, the user ticks them under "Screen recordings" on the New video form after choosing a presenter (it asks their permission for the videos), so send them there rather than proposing it. No recording yet? They can make one there with "Record my screen", or you offer a screen_recording_proposal with "purpose": "presenter". A presenter walking through screen recordings can also make a LONG walkthrough — 2, 5 or 10 minutes, told in chapters — chosen there as the Length (it uses the listed tasks per second the presenter is on screen, so say a long one adds up; the exact number shows before anything is made). Your brief card is always 15, 30 or 60 seconds.
 
 ${voiceOptionsBlock()}
 
@@ -2068,6 +2078,12 @@ or, to make a video from their own footage:
 {
   "reply": "your conversational message to the user",
   "uiElement": { "type": "footage_review_proposal", "assetIds": [<video ids from THEIR OWN VIDEOS>], "message": "<the video they want, in their words>", "lengthS": 15 | 30 | 60 | 120 | 300 | 600, "voiceover": true | false, "cta": "<omit unless known>" }   // 120/300/600 (2, 5, 10 minutes) ONLY with "voiceover": false — long videos keep their own sound
+}
+
+or, to record their screen:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "screen_recording_proposal", "purpose": "presenter" | "footage" }
 }`,
             ].filter(Boolean).join('\n\n');
         },
@@ -3084,6 +3100,7 @@ OR, for A PART THEY SELECTED, uiElement is instead:
         contentSnapshot: 'posts',
         // Its Comments tab (LinkedIn Company Page comments) — src/utils/page-comments.ts.
         usesPageComments: true,
+        usesSocialMessages: true,
         // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
         // the failure mode is the worst one available: the envelope truncates mid-string, the
         // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
@@ -3137,6 +3154,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
                 socialSurfaces(rc.taskCosts),
                 rc.contentSnapshot ?? 'YOUR POSTS — your list of posts could not be read this turn. Do not guess at what is drafted, scheduled or published: if the user asks about an existing post, say you cannot see it right now and point them to the "Posts" tab.',
                 rc.commentsBlock ?? '',
+                rc.messagesBlock ?? '',
                 // Before the JSON contract, deliberately. The block ends with up to four excerpts
                 // that are themselves finished social posts, so it is the last thing that should be
                 // allowed to suggest a reply SHAPE — the envelope instruction has to come after it.
@@ -3173,6 +3191,9 @@ ${voiceOptionsBlock()}
 
 OR, to act on a comment on the Comments tab (see YOUR COMMENTS TAB), uiElement is instead:
 { "type": "comment_action_proposal", "action": "draft" | "post_reply" | "dismiss", "commentId": <the number after # in YOUR COMMENTS TAB>, "instruction": "<draft only: what to change>" | null }
+
+OR, to act on a Facebook / Instagram conversation on the Messages tab (see YOUR MESSAGES TAB), uiElement is instead:
+{ "type": "message_action_proposal", "action": "draft" | "send" | "dismiss", "conversationId": <the number after # in YOUR MESSAGES TAB>, "instruction": "<draft only: what to change>" | null }
 
 OR, to offer redrafting the upcoming drafts after a change to what you post about (see UPCOMING DRAFTS AFTER A CHANGE), uiElement is instead:
 { "type": "redraft_upcoming_proposal", "summary": "<one sentence: which change, and that the upcoming drafts don't use it yet>" }
@@ -3545,6 +3566,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const commentsBlock = route.usesPageComments
         ? await buildCommentsChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Messages tab (src/utils/social-messages.ts) — per turn, so a reply sent on the tab a moment ago
+    // is not offered again. Null on failure, including before db/z-social-messages.sql is applied.
+    const messagesBlock = route.usesSocialMessages
+        ? await buildMessagesChatBlock(db, orgId, session.aiAssistantId)
+        : null;
     // Its Watch list (src/utils/chat-watch-action.ts) — per turn, null before db/z-lead-watch.sql is applied.
     const watchListBlock = route.usesLeadSnapshot
         ? await buildWatchActionsChatBlock(db, orgId, session.aiAssistantId)
@@ -3662,6 +3688,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         followUpPlanBlock,
         discussionsBlock,
         commentsBlock,
+        messagesBlock,
         watchListBlock,
         campaignsSnapshot,
         taskCosts: await getTaskCosts(),
@@ -4535,6 +4562,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (commentReq) {
             uiElement = await resolveCommentActionProposal(db, orgId, session.aiAssistantId, commentReq);
             if (!uiElement) content = 'I couldn’t find that comment on this assistant’s Comments tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Comments" tab.';
+        }
+        // And its Messages tab (src/utils/chat-message-action.ts), rebuilt from the social_conversations row;
+        // the click calls social-messages.ts, the same endpoint as the tab's buttons.
+        const messageReq = route === ROUTES.social_media_manager ? messageActionFromUiElement(uiElement) : null;
+        if (messageReq) {
+            uiElement = await resolveMessageActionProposal(db, orgId, session.aiAssistantId, messageReq);
+            if (!uiElement) content = 'I couldn’t find that conversation on this assistant’s Messages tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Messages" tab.';
         }
         // And its Watch list (src/utils/chat-watch-action.ts); the click calls lead-watch.ts, the tab's endpoint.
         const watchReq = route === ROUTES.lead_qualifier ? watchActionFromUiElement(uiElement) : null;

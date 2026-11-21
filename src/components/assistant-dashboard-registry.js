@@ -72,6 +72,8 @@
  *                //   (Briefs, Videos, Campaigns, Mentor) leaves this out.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
+ *   cfg.messagesTab // → optional Messages tab config (assistant-messages.js); social_media_manager only —
+ *                   Facebook Page + Instagram messages (social-messages.ts).
  *   cfg.commentsTab // → optional Comments tab config (assistant-comments.js); social_media_manager only —
  *                //   { label }. LinkedIn Company Page comments with replies a person posts as the Page.
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
@@ -168,6 +170,10 @@
       // published to a LinkedIn Company Page, each with a drafted reply a person posts AS the Page.
       // Sits straight after Posts. ⚠️ The chat-orchestrator prompt names this tab; rename both together.
       commentsTab: { label: 'Comments' },
+      // Messages tab (assistant-messages.js → social-messages.ts) — Facebook Page + Instagram private
+      // messages, each with a drafted reply a person sends inside Meta's 24-hour window. Hidden on a
+      // server where messages are switched off. ⚠️ The chat prompt names this tab; rename both together.
+      messagesTab: { label: 'Messages' },
     },
 
     // Email Marketing Assistant. Its primary action ("Write Email") is special-cased in assistants.js

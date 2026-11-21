@@ -260,6 +260,9 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
 
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
+/** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, imported only by netlify/functions/meeting-bots.ts). */
+export interface BotVideoTile { recordingJpegB64: string; notRecordingJpegB64: string }
+
 export interface BotRequestInput {
     meetingUrl: string;
     businessName: string | null;
@@ -268,6 +271,9 @@ export interface BotRequestInput {
     lengthLimitMinutes: number;
     botRowId: number;
     organisationId: number;
+    /** Its picture in the call. Passed in (from netlify/functions/meeting-bots.ts) rather than imported, so the other
+     *  functions that import this file don't bundle ~125 KB of pictures they never use. */
+    videoTile?: BotVideoTile;
 }
 
 /**
@@ -280,6 +286,14 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
         bot_name: botName(i.businessName),
         ...(i.scheduled ? { join_at: i.joinAt.toISOString() } : {}),
         chat: { on_bot_join: { send_to: 'everyone', message: joinMessage(i.businessName), pin: true } },
+        // Its video tile: a still Be More Swan picture saying it is taking notes, so everyone can see what it is
+        // (scripts/gen-meeting-bot-tile.js; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
+        ...(i.videoTile ? {
+            automatic_video_output: {
+                in_call_recording: { kind: 'jpeg', b64_data: i.videoTile.recordingJpegB64 },
+                in_call_not_recording: { kind: 'jpeg', b64_data: i.videoTile.notRecordingJpegB64 },
+            },
+        } : {}),
         recording_config: {
             transcript: {
                 provider: { recallai_streaming: { mode: 'prioritize_accuracy', language_code: 'auto' } },

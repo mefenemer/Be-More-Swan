@@ -154,9 +154,11 @@ export function quoteIsInTranscript(quote: string, words: SpokenWord[]): boolean
 export function shotListSystemPrompt(): string {
     return `You review raw footage for a small business's short social video. You are shown frames from ONE video, each labelled with its time in seconds, and the words spoken in it with their times.
 
-Split the video into shots: stretches that look and sound alike. For each shot give its start and end in seconds, what you see, what is said (quoted EXACTLY from the transcript, or nothing), any problems (shaky, dark, blurry, out of focus, people talking over each other, dead air, someone mid-sentence at a cut, a thumb over the lens …) and how strong it is for a short video: 0 unusable, 1 filler, 2 good, 3 one of the strongest moments.
+Split the video into shots: stretches that look and sound alike. For each shot give its start and end in seconds, what you see, what is said (quoted EXACTLY from the transcript, or nothing), any problems (shaky, dark, blurry, out of focus, people talking over each other, dead air, someone mid-sentence at a cut, a thumb over the lens, private details readable on screen …) and how strong it is for a short video: 0 unusable, 1 filler, 2 good, 3 one of the strongest moments.
 
 Never name or guess who a person is. Describe people only by what they are doing. Do not invent anything you cannot see or hear.
+
+PRIVATE DETAILS. Screen recordings often show things that shouldn't be in a public video. When you can read an email address, a phone number, a password, a card or bank number, or a customer's name or details in a frame, add the problem "private details on screen: <which kind, e.g. an email address>" to that shot and give it strength 0, so it isn't chosen. Never copy the details themselves into your answer.
 
 Return STRICT JSON only:
 {"summary": "one or two sentences: what this video is", "speech": true|false, "music": true|false, "shots": [{"inS": 0, "outS": 4.2, "what": "...", "speech": "...", "problems": ["..."], "strength": 0|1|2|3}]}`;
@@ -230,6 +232,8 @@ Say briefly what you saw in each video, then suggest the edits that would make t
 Point at a video by its id and at a stretch by inS/outS in seconds ONLY when the edit is about that stretch (a cut, a trim, a moment to move). Use only stretches from the shot lists. Write times as minutes:seconds, e.g. 0:08 or 1:15 — never 8:00 for eight seconds. Never name or guess who a person is. At most ${MAX_SUGGESTIONS} suggestions, the most important first.
 
 Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen, placed top, middle or bottom, plain, on a dark box or on a brand-colour box, appearing with a gentle rise, fade or pop; captions; a name caption (a person's name and role) where someone on screen says who they are; keep their sound or put a voiceover over it. It can NOT add transitions, effects, logos over footage, or crop and reframe a clip — never suggest those. Music, the colour look and the video's shape are the owner's choices in the video's options, made separately: never suggest them. Scenes play one AFTER another: stock or a card can go between sentences, never over someone speaking, so never suggest cutaways while someone talks. Do not suggest what happens anyway: the video is made in the shape the owner chose and the call to action goes at the end.
+
+PRIVATE DETAILS. When a shot's problems say "private details on screen", your FIRST suggestion is a cut (or trim) of exactly that stretch, saying which kind of detail shows ("an email address is readable at 0:42–0:47") and never the details themselves. It can't blur or cover part of the picture, so cutting is the only fix; if the stretch is needed, say so in the reason and suggest they record that part again.
 
 Return STRICT JSON only:
 {"seen": [{"assetId": 1, "summary": "...", "problems": ["..."]}], "suggestions": [{"kind": "cut|trim|reorder|fill|text|sound|frame|other", "text": "...", "reason": "...", "assetId": 1, "inS": 0, "outS": 3}]}`;

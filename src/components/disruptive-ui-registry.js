@@ -1974,6 +1974,50 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('footage_review_proposal', renderFootageReviewProposalCard);
 
+  // { type: 'screen_recording_proposal', purpose: 'presenter' | 'footage' }
+  //
+  // "Record my screen" from the chat (docs/video-producer-screen-walkthrough-plan.md Phase 3). Only the browser
+  // can record the screen, and only after the owner picks what to share, so the card opens the recorder on the
+  // Videos tab (AssistantVideos.recordScreen): 'presenter' = a screen an AI presenter talks over, no microphone;
+  // 'footage' = narrated in their own voice for "Use my own footage". Phones and tablets get the reason instead.
+  // On a page without the Videos tab, the recorder opens the next time that tab does.
+  function renderScreenRecordingProposalCard(ui, esc) {
+    const purpose = ui.purpose === 'presenter' ? 'presenter' : 'footage';
+    const can = !window.ScreenRecorder || window.ScreenRecorder.supported();
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Record your screen</p>
+      <p class="text-sm text-gray-900 mt-2">${purpose === 'presenter' ? 'A screen recording for your AI presenter to walk viewers through. No microphone: the presenter does the talking.' : 'A screen recording you talk through in your own voice, for “Use my own footage”.'}</p>
+      <p class="text-xs text-gray-600 mt-2">Your browser asks which window, tab or screen to share. Only share the window you need, and close emails, customer details and passwords first. Up to 10 minutes; you watch it back before it’s saved to My Content. Recording is free.</p>
+      ${can ? '' : `<p class="text-xs font-semibold text-amber-700 mt-2">${esc(window.ScreenRecorder.unsupportedReason())}</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-srp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50"${can ? '' : ' disabled'}>● Record my screen</button>
+        <button type="button" data-srp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-srp-status></p>`;
+    const status = el.querySelector('[data-srp-status]');
+    const say = (t) => { status.textContent = t; status.className = 'mt-2 text-xs font-semibold text-indigo-700'; };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-srp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-srp-go]')) return;
+      const tab = document.querySelector('.main-tab-btn[data-maintab="videos"]:not(.hidden)');
+      if (tab && window.AssistantVideos && typeof window.AssistantVideos.recordScreen === 'function' && window.ScreenRecorder) {
+        tab.click();
+        window.AssistantVideos.recordScreen(purpose);
+        say('The recorder is open on the Videos tab.');
+      } else if (window.ScreenRecorder || !window.AssistantVideos) {
+        try { sessionStorage.setItem('bms-screen-record', purpose); } catch { /* private window */ }
+        say('Open your Video Producer’s Videos tab on a computer: the recorder opens there.');
+      } else {
+        say('Open your Video Producer’s Videos tab and press “Record my screen” there.');
+      }
+    });
+    return el;
+  }
+
+  register('screen_recording_proposal', renderScreenRecordingProposalCard);
+
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
   register('video_script_proposal', renderVideoScriptProposalCard);
@@ -6694,6 +6738,101 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
 
   register('comment_action_proposal', renderCommentActionProposalCard);
+
+  // ── Built-in: Message Action Proposal Card (Social Media chat) ──────────────
+  // { type: 'message_action_proposal', action: 'draft'|'send'|'dismiss', assistantId, conversationId,
+  //   platform, personLabel, messages[], windowClosesAt, draftReply, instruction, maxReplyChars, blocked, settled? }
+  //
+  // The Messages tab's buttons, from chat (Facebook Page + Instagram messages). Every fact comes from
+  // the social_conversations row (src/utils/chat-message-action.ts). The click dispatches
+  // `message:action`; chat-session.js calls social-messages.ts, the endpoint the tab uses. Only "Send"
+  // sends — privately, to that one person, as the business — and the server checks Meta's 24-hour
+  // window again right before it does.
+  const MESSAGE_ACTION_COPY = {
+    draft: { head: 'Draft a reply', button: 'Draft reply', busy: 'Drafting…' },
+    send: { head: 'Send a reply', button: 'Send', busy: 'Sending…' },
+    dismiss: { head: 'Dismiss this conversation', button: 'Dismiss', busy: 'Dismissing…' },
+  };
+
+  function renderMessageActionProposalCard(ui, esc) {
+    const copy = MESSAGE_ACTION_COPY[ui.action];
+    if (!copy) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const max = Number(ui.maxReplyChars) || 1000;
+    const where = esc(ui.platform || 'Facebook');
+    const replyBox = (text) => `
+        <label class="block text-xs font-bold text-gray-700 mt-3">The reply — you can edit it</label>
+        <textarea data-map-reply rows="3" maxlength="${max}" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">${esc(text || '')}</textarea>
+        <p class="text-xs text-gray-600 mt-1">“Send” sends it to ${esc(ui.personLabel || 'them')} as a private ${where} message from your business.</p>`;
+    const thread = (Array.isArray(ui.messages) ? ui.messages : []).map((m) => `
+        <div class="flex ${m.direction === 'out' ? 'justify-end' : 'justify-start'}">
+          <p class="max-w-[85%] rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap break-words ${m.direction === 'out' ? 'bg-emerald-50 border border-emerald-100' : 'bg-gray-100'}">${m.body ? esc(m.body) : `<span class="italic">${esc(m.attachmentType || 'attachment')}</span>`}</p>
+        </div>`).join('');
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs text-gray-500 mt-2">#${esc(String(ui.conversationId))} · ${where} · ${esc(ui.personLabel || 'Someone')}</p>
+      <div class="mt-2 space-y-1.5">${thread}</div>
+      ${ui.action === 'draft' ? `<p class="text-sm text-gray-800 mt-3">${ui.instruction ? `<span class="font-bold">What to change:</span> ${esc(ui.instruction)}` : 'I’ll write a reply in your brand’s voice. Nothing is sent until you press Send.'}</p>` : ''}
+      ${ui.action === 'send' && !blocked ? replyBox(ui.draftReply) : ''}
+      ${ui.action === 'dismiss' ? '<p class="text-xs text-gray-600 mt-3">It moves to Dismissed on the Messages tab and nothing is sent. You can put it back from there.</p>' : ''}
+      <div data-map-drafted></div>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3" data-map-buttons>
+        ${blocked ? '' : `<button type="button" data-map-go class="${ui.action === 'dismiss' ? 'btn-secondary border' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-map-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-map-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-map-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-map-go], [data-map-cancel], [data-map-send]').forEach((x) => { x.disabled = b; });
+    const dispatch = (action, extra, onOk) => el.dispatchEvent(new CustomEvent('message:action', {
+      bubbles: true,
+      detail: {
+        action, assistantId: Number(ui.assistantId) || null, conversationId: Number(ui.conversationId) || null, ...extra,
+        respond({ ok, message, error, conversation }) {
+          if (ok) { onOk ? onOk(conversation, message) : say(message || 'Done.'); return; }
+          setBusy(false);
+          say(error || 'That didn’t work — please try again.', 'error');
+        },
+      },
+    }));
+    const sendFromBox = () => {
+      const text = (el.querySelector('[data-map-reply]')?.value || '').trim();
+      if (!text) { say('Write a reply first.', 'error'); return; }
+      setBusy(true);
+      say('Sending…');
+      dispatch('send', { text }, (c, message) => {
+        el.querySelectorAll('[data-map-reply]').forEach((x) => { x.readOnly = true; });
+        say(message || `Sent on ${ui.platform || 'Facebook'}.`);
+      });
+    };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-map-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-map-send]')) { sendFromBox(); return; }
+      if (!e.target.closest('[data-map-go]')) return;
+      if (ui.action === 'send') { sendFromBox(); return; }
+      setBusy(true);
+      say(copy.busy);
+      if (ui.action === 'draft') {
+        dispatch('draft', { instruction: ui.instruction || null }, (c) => {
+          // The draft comes back on the card, ready to edit and send — or to leave on the Messages tab.
+          el.querySelector('[data-map-drafted]').innerHTML = `${replyBox(c && c.draftReply)}
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <button type="button" data-map-send class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Send</button>
+            </div>`;
+          el.querySelector('[data-map-buttons]').innerHTML = '';
+          say('Drafted — nothing has been sent. Edit it here or on the Messages tab.');
+        });
+        return;
+      }
+      dispatch(ui.action, {});
+    });
+    return el;
+  }
+
+  register('message_action_proposal', renderMessageActionProposalCard);
 
   // ── Built-in: Watch list Action Proposal Card (Lead Generator chat) ─────────
   // { type: 'watch_action_proposal', action: 'add'|'remove'|'resume'|'set_enabled', assistantId,

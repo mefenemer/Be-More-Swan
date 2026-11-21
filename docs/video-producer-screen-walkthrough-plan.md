@@ -313,6 +313,16 @@ The fal models have **no stock people**: we make our own roster.
   the video in that language (same presenter, same screens, translated script, new voice and new presenter
   clips). The screen covers and timings are reused. Scene lengths change with the new audio, so covers are
   laid out again from the new word timings.
+- **Built 2026-11-20 (A4, voices part):** the voice list has **19 languages**: Welsh (straight after English), Swedish, Danish,
+  Norwegian, Finnish, Greek, Czech and Romanian added, a woman and a man each, pace measured (`wps` 1.75–2.76). Welsh and
+  Norwegian languages carry `model: "eleven_v3"` (`speechModel` in `src/lib/tts.ts`). No `language_code` is sent: v3
+  reads the language from the script, so a Welsh-accented voice still reads an English post in English. v3 is slow
+  (1,190 Welsh characters took 31 s, past the 26 s voiceover request), so a short script goes in at most three parts
+  side by side (~12 s), and the word timings get only what is left of the request. A Video Producer build and own-voice
+  recordings tell Scribe the script's language (`spokenLanguage`; it was only 53% sure Welsh was Welsh). The ElevenLabs library has **no Welsh-language voices**: Hannah and Chris are Welsh-accented voices whose
+  Welsh Scribe heard back word for word. Caption files now follow the **language spoken** (`spokenLanguage`): a Welsh
+  video's captions are Welsh, and English is a translation. Real staging check: project 55 (Marmalade, Hannah, 9:16).
+  Not added: Irish (one paid library voice, Scribe "moderate" accuracy), Scottish Gaelic (no ElevenLabs model speaks it).
 - **Lip-sync quality varies by language** (strongest in English and Chinese). The bake-off tests English,
   French and Polish. Arabic and Hindi get tested before we promise them.
 
@@ -367,7 +377,7 @@ build shows the cost and holds it first, as today. Any new charge in the Terms n
 | **A1** ✅ | Roster: 12 fictional presenters (FLUX), presenter-catalogue.json, sample clips, gallery picker component (not yet on a page) | M |
 | **A2** | Picker on the brief form + chat presenter card; `ai_presenter` scene source: chunked parallel fal calls, retries, task holds and refunds, background handling, "AI presenter" note | M–L |
 | **A3** | Screen walkthrough with AI presenter: covers from word timings (needs §3 Phases 1–2) | M |
-| **A4** | "Make it in another language" versions; add voices to the catalogue for new languages | M |
+| **A4** | "Make it in another language" versions; add voices to the catalogue for new languages — **voices part built 2026-11-20** (see §11.4 "Built"); the versions button not yet | M |
 | **A5** | Copy: help, FAQ, pricing (tasks per presenter-second), Terms notice if charged, assistant page sample | S |
 | Later | The owner's own presenter from a photo, with recorded consent (D-A6) | L |
 
@@ -523,3 +533,42 @@ recordings they're in every scene: in a bubble, which is still a presenter clip.
 - **Voiceover charge.** A voiceover is 1 task however long. A 10-minute one costs us ~8× a short one at ElevenLabs
   (~$1.35 vs ~$0.18).
 - **Hand-over test.** Testing the run hand-over on staging needs `VIDEO_BUILD_RUN_BUDGET_MS` set there.
+
+---
+
+## 13. Phase 3 as built (2026-11-20): "Record my screen"
+
+Since the AI presenter (§11.7), the most useful half of Phase 3 is a **screen on its own**: the presenter talks
+over it, synced by the script's word timings, so no camera is needed. This slice builds that, plus a screen
+narrated in the owner's own voice. It follows D-W2 (10 minutes), D-W5 (desktop only) and D-W6 (screen sound off).
+
+- `src/components/screen-recorder.js` (`window.ScreenRecorder`): `getDisplayMedia` + `MediaRecorder`, MP4 where
+  the browser makes it, WebM otherwise, 2.5 Mbit/s (~190 MB for 10 minutes), stops at 10 minutes or 480 MB, or when
+  the browser's own "Stop sharing" is pressed. Ticks: "Record my voice too" (microphone) and "Keep the screen's
+  sound" (off, D-W6; with both, the two are mixed into one track). A "What's in this recording?" name, which is
+  what the planner sees. Privacy box: share only the window you need, close emails, customer details and passwords,
+  turn on Do Not Disturb; watched back before it's saved, saved only to the owner's My Content.
+- **Phones and tablets** (including iPadOS, which reports a Mac) and browsers without `getDisplayMedia` get the
+  reason instead of the button: use the device's own screen recorder and add the file.
+- **Videos tab:** "● Record my screen" under the AI presenter's *Screen recordings* (no microphone): uploaded
+  (`FootageReader.upload`, with the timed length when a WebM reports none), read once (`FootageReader.prepare`,
+  free) so it has a measured length, then ticked in the list. And in *Use my own footage* (microphone ticked),
+  where it joins the footage like "Record a video". The footage form's stale "up to 5 minutes" now says 10.
+- **Chat:** `screen_recording_proposal` `{ purpose: 'presenter' | 'footage' }` opens the recorder on the Videos tab
+  (`AssistantVideos.recordScreen`); from the standalone chat it opens the next time that tab does. Prompt block
+  "RECORDING THEIR SCREEN". Manifest regenerated.
+
+**Not built (Phase 3's other half):** "Record my screen too" in `video-recorder.js` (camera + screen as two linked
+files, `render_params.recordedWith`, synced covers). Owner question, below.
+
+**Owner decisions:**
+- **D-R1: build "Record my screen too" (own face + screen, synced)?** Recommendation: **not now.** The AI
+  presenter covers the face, a narrated screen recording covers "my own voice", and a Loom-style file with the
+  bubble baked in already works. Build it when a customer asks to appear on camera over their screen.
+- **D-R2: footage review flags visible email addresses** (§10 risk). ✅ **Decided 2026-11-21 (owner): yes.** Built:
+  the shot list marks "private details on screen: <kind>" (email, phone, password, card or bank number, a customer's
+  details; never copying them), and the review's first suggestion is to cut that stretch (it can't blur). A
+  presenter's screen recording is not reviewed, so the recorder's privacy box is the guard there.
+- **Help article.** ✅ **Decided 2026-11-21 (owner): yes.** `db/help-articles-2026-12z…z-video-record-screen.sql` adds
+  "Record your screen" and corrects two stale Phase 0 lines (5 → 10 minutes, the "can't yet … 60 seconds" line).
+  Apply to both databases after the release that carries #792.
