@@ -30,15 +30,16 @@ const RED = '#ff3b4e';
 const GREY = '#8a8399';
 
 const STATES = {
-    recording: { line: 'Taking notes & recording', dot: RED },
-    'not-recording': { line: 'In the call · not recording', dot: GREY },
+    recording: { lines: ['Taking notes', '& recording'], dot: RED },
+    'not-recording': { lines: ['In the call', 'not recording'], dot: GREY },
 };
 
-// Google Meet crops tiles (Recall: keep to the safe zone). Everything must fit a centred SQUARE (H wide), with a margin,
-// so nothing is cut off on a square tile. Throws rather than draw a picture that would be cropped.
-const SAFE_WIDTH = H - 40;
+// Google Meet crops tiles (Recall: keep to the safe zone). On a phone a tile can be PORTRAIT, so everything must fit a
+// centred 3:4 portrait crop (0.75 × H wide) with a margin. A real Meet test on 2026-11-21 cut off "Taking notes &
+// recording" when it was one line sized for a square. Throws rather than draw a picture that would be cropped.
+const SAFE_WIDTH = Math.round(H * 0.75) - 60;
 function fitsSafe(what, width) {
-    if (width > SAFE_WIDTH) throw new Error(`"${what}" is ${Math.round(width)} px wide; the square safe zone is ${SAFE_WIDTH} px`);
+    if (width > SAFE_WIDTH) throw new Error(`"${what}" is ${Math.round(width)} px wide; the portrait safe zone is ${SAFE_WIDTH} px`);
 }
 
 function centredRow(ctx, parts, y) {
@@ -64,29 +65,34 @@ async function draw(state) {
 
     // Logo, centred.
     const logo = await loadImage(LOGO);
-    const lh = 260, lw = Math.round((logo.width / logo.height) * lh);
-    ctx.drawImage(logo, (W - lw) / 2, 290, lw, lh);
+    const lh = 230, lw = Math.round((logo.width / logo.height) * lh);
+    ctx.drawImage(logo, (W - lw) / 2, 250, lw, lh);
     fitsSafe('logo', lw);
 
-    // Name on two lines, so it fits when Google Meet crops the tile to a square: "Be More Swan" white, "Note Taker" pink.
+    // Name on two lines: "Be More Swan" white, "Note Taker" pink.
     ctx.textBaseline = 'alphabetic';
-    ctx.font = '800 140px Inter';
-    for (const [text, colour, y] of [['Be More Swan', WHITE, 730], ['Note Taker', PINK, 890]]) {
+    ctx.font = '800 136px Inter';
+    for (const [text, colour, y] of [['Be More Swan', WHITE, 660], ['Note Taker', PINK, 810]]) {
         const w = ctx.measureText(text).width;
         fitsSafe(text, w);
         ctx.fillStyle = colour;
         ctx.fillText(text, (W - w) / 2, y);
     }
 
-    // Status line with a dot, like a "REC" light.
-    ctx.font = '700 100px Inter';
-    const tw = ctx.measureText(s.line).width;
-    const r = 28, gap = 36;
-    fitsSafe(s.line, r * 2 + gap + tw);
+    // Status on two lines, a dot (like a "REC" light) before the first.
+    ctx.font = '700 104px Inter';
+    const r = 28, gap = 34;
+    const [first, second] = s.lines;
+    const fw = ctx.measureText(first).width;
+    fitsSafe(first, r * 2 + gap + fw);
     centredRow(ctx, [
-        { width: r * 2 + gap, draw: (x, y) => { ctx.fillStyle = s.dot; ctx.beginPath(); ctx.arc(x + r, y - 36, r, 0, Math.PI * 2); ctx.fill(); } },
-        { width: tw, draw: (x, y) => { ctx.fillStyle = MUTED; ctx.fillText(s.line, x, y); } },
-    ], 1080);
+        { width: r * 2 + gap, draw: (x, y) => { ctx.fillStyle = s.dot; ctx.beginPath(); ctx.arc(x + r, y - 37, r, 0, Math.PI * 2); ctx.fill(); } },
+        { width: fw, draw: (x, y) => { ctx.fillStyle = MUTED; ctx.fillText(first, x, y); } },
+    ], 1000);
+    const sw = ctx.measureText(second).width;
+    fitsSafe(second, sw);
+    ctx.fillStyle = MUTED;
+    ctx.fillText(second, (W - sw) / 2, 1130);
 
     // Scale down once to 1280×720 with high-quality smoothing.
     const out = createCanvas(1280, 720);
