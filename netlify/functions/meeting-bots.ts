@@ -12,6 +12,8 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { hasAcceptedBotDpa, listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
 import { MEETING_BOT_FLAG } from '../../src/utils/meeting-bot';
+// Only this function imports the pictures (the one place a bot is sent), so no other bundle carries them.
+import { BOT_TILE_NOT_RECORDING_JPEG_B64, BOT_TILE_RECORDING_JPEG_B64 } from '../../src/utils/meeting-bot-tile-data';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { getTaskCosts } from '../../src/utils/task-costs';
 import { canAccessAssistant } from '../../src/utils/assistant-access';
@@ -64,6 +66,7 @@ export default withLambda(async (event) => {
         organisationId, userId, assistantId,
         meetingUrl: body.meetingUrl, title: body.title, joinAt: body.joinAt, lengthLimitMinutes: body.lengthLimitMinutes,
         source: body.source === 'chat' ? 'chat' : 'link',
+        videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64, notRecordingJpegB64: BOT_TILE_NOT_RECORDING_JPEG_B64 },
     });
     return r.ok ? json(200, { bot: r.bot, alreadySent: r.alreadySent }) : json(r.status, { error: r.error, code: r.code });
 });

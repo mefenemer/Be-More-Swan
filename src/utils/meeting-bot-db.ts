@@ -16,7 +16,7 @@ import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
-    type BotStatePatch, type BotStatus, type RecallRegion,
+    type BotStatePatch, type BotStatus, type BotVideoTile, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
@@ -75,6 +75,9 @@ export interface SendBotInput {
     joinAt?: unknown;
     lengthLimitMinutes?: unknown;
     source: 'link' | 'chat';
+    /** The bot's picture in the call. The meeting-bots function passes it, so only that function's bundle carries the
+     *  ~125 KB of picture data (esbuild bundles even a dynamic import; review of #794). */
+    videoTile?: BotVideoTile;
 }
 
 export type SendBotResult =
@@ -172,6 +175,7 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
         recallBotId = await createRecallBot(region, recallBotRequest({
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
+            videoTile: i.videoTile,
         }));
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';

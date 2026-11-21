@@ -1,6 +1,7 @@
 // The Note Taker joins a call itself (docs/note-taker-bot-plan.md §4, step 2): the pure rules, Recall's signature,
 // the hand-over to the meeting pick-up engine, and the order of the safety checks. Run: npx tsx tests/meeting-bot.test.ts
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
@@ -15,6 +16,7 @@ import {
 } from '../src/utils/meeting-pickup';
 import { MEETING_SPECIAL_CATEGORY_CLAUSE, buildMeetingMinutesPrompt, FORM_CHANNEL_BLOCK } from '../src/utils/meeting-minutes';
 import { BOT_CHANNEL_BLOCK } from '../src/utils/meeting-bot';
+import { BOT_TILE_NOT_RECORDING_JPEG_B64, BOT_TILE_RECORDING_JPEG_B64 } from '../src/utils/meeting-bot-tile-data';
 import { specialCategoryClauseFor, withSpecialCategoryClause } from '../src/utils/special-category-clause';
 import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 
@@ -197,6 +199,37 @@ await test('the Recall request: platform speaker names, Recall\'s transcript, th
     assert.equal(now.automatic_leave.everyone_left_timeout.timeout, ALONE_TIMEOUT_S);
     assert.equal(now.automatic_leave.in_call_recording_timeout, 90 * 60, 'the length limit, in seconds');
     assert.deepEqual(now.metadata, { bms_bot_id: '7', bms_org_id: '58' });
+});
+
+await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {
+    const base = { meetingUrl: 'https://meet.google.com/xtt-xerh-qte', businessName: 'Marmalade', joinAt: at(0), scheduled: false, lengthLimitMinutes: 60, botRowId: 1, organisationId: 1 };
+    assert.equal((recallBotRequest(base) as Record<string, any>).automatic_video_output, undefined, 'no tile passed, no field');
+    const req = recallBotRequest({ ...base, videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64, notRecordingJpegB64: BOT_TILE_NOT_RECORDING_JPEG_B64 } }) as Record<string, any>;
+    for (const state of ['in_call_recording', 'in_call_not_recording']) {
+        const out = req.automatic_video_output[state];
+        assert.equal(out.kind, 'jpeg', state);
+        const jpg = Buffer.from(out.b64_data, 'base64');
+        assert.equal(jpg.toString('base64'), out.b64_data, `${state}: standard base64, no data: prefix`);
+        assert.deepEqual([...jpg.subarray(0, 3)], [0xff, 0xd8, 0xff], `${state}: a JPEG`);
+        assert.ok(jpg.length < 1_300_000, `${state}: under 1.3 MB`);
+        // 1280×720 (16:9): read the SOF0/SOF2 frame header.
+        let i = 2, size: number[] | null = null;
+        while (i < jpg.length) {
+            const marker = jpg[i + 1], len = jpg.readUInt16BE(i + 2);
+            if (marker === 0xc0 || marker === 0xc2) { size = [jpg.readUInt16BE(i + 7), jpg.readUInt16BE(i + 5)]; break; }
+            i += 2 + len;
+        }
+        assert.deepEqual(size, [1280, 720], `${state}: 1280×720`);
+    }
+    assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
+});
+
+await test('the tile pictures are bundled only where a bot is sent: no src/ or function file but meeting-bots.ts imports them', () => {
+    // esbuild bundles even a dynamic import, so ANY import (static or dynamic) adds ~125 KB to that function.
+    const hits = execSync("grep -rlE \"meeting-bot-tile-data['\\\"]\" src netlify || true", { encoding: 'utf8' }).split('\n').filter(Boolean).sort();
+    assert.deepEqual(hits, ['netlify/functions/meeting-bots.ts'], 'only the send function imports the pictures');
+    assert.ok(read('netlify/functions/meeting-bots.ts').includes('videoTile: { recordingJpegB64: BOT_TILE_RECORDING_JPEG_B64'), 'and passes them to sendMeetingBot');
+    assert.ok(read('src/utils/meeting-bot-db.ts').includes('videoTile: i.videoTile'), 'sendMeetingBot hands them to the Recall request');
 });
 
 await test('Recall\'s transcript: one line per block with the participant\'s name; empty blocks dropped, no name = unlabelled', () => {
