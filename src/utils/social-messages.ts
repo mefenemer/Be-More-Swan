@@ -300,6 +300,18 @@ export async function setConversationStatus(
     return row ? viewOf(db, row) : null;
 }
 
+/**
+ * Delete a conversation and every message in it (ON DELETE CASCADE) — for when the person asks the
+ * business to erase what they sent. It stays in Facebook / Instagram; only our copy goes. Owners and
+ * admins only (social-messages.ts endpoint). Returns false when it isn't this assistant's.
+ */
+export async function deleteConversation(db: Db, organisationId: number, assistantId: number, id: number): Promise<boolean> {
+    const gone = await db.delete(socialConversations)
+        .where(and(eq(socialConversations.id, id), eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId)))
+        .returning({ id: socialConversations.id });
+    return gone.length > 0;
+}
+
 export async function saveDraft(db: Db, organisationId: number, assistantId: number, id: number, text: string): Promise<ConversationView | null> {
     const row = await loadConversation(db, organisationId, assistantId, id);
     if (!row) return null;

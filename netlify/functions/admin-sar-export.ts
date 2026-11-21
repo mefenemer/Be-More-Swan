@@ -19,7 +19,7 @@ import { getDb } from '../../db/client';
 import {
     users, userProfiles, plans, payments, invoices,
     aiAssistants, taskRuns, workspaceAssets, contentAssets,
-    supportTickets, auditLogs, dataExportRequests, notifications,
+    supportTickets, auditLogs, dataExportRequests, notifications, socialMessages,
     userNotifications, onboardingDrafts, scheduledPosts,
     gdprErasureLog, tosAcceptances, dpaAcceptances, userOrganisations,
 } from '../../db/schema';
@@ -101,6 +101,9 @@ export default withLambda(async (event) => {
     const notifs      = await db.select().from(notifications).where(eq(notifications.userId, targetUserId));
     const erasures    = await db.select().from(gdprErasureLog).where(eq(gdprErasureLog.requestedBy, adminId));
     const tosRecords  = await db.select().from(tosAcceptances).where(eq(tosAcceptances.userId, targetUserId));
+    // Replies they sent from the Messages tab (Facebook / Instagram). Before db/z-social-messages.sql
+    // is applied the table is absent — the request must still be answerable, so that reads as none.
+    const sentMessages = await db.select().from(socialMessages).where(eq(socialMessages.sentBy, targetUserId)).catch(() => []);
     // Resolve the target user's org memberships from the junction (not the deprecated users.organisationId).
     const targetOrgs = await db
         .select({ organisationId: userOrganisations.organisationId })
@@ -140,6 +143,7 @@ export default withLambda(async (event) => {
         supportTickets:    tickets,
         onboardingDrafts:  drafts,
         notifications:     notifs,
+        facebookInstagramRepliesSent: sentMessages,
         auditLog:          auditEntries,
         gdprErasureLog:    erasures,
         consentLog: {

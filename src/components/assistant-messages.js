@@ -194,6 +194,9 @@
         </div>
         <div class="mt-3 space-y-2">${(c.messages || []).map(bubbleHtml).join('') || '<p class="text-sm text-gray-500">No messages to show.</p>'}</div>
         ${actions}
+        <div class="mt-3 pt-3 border-t border-gray-100 flex justify-end">
+          <button type="button" data-msg-delete="${c.id}" class="text-xs font-bold text-red-700 underline disabled:opacity-50" ${busy ? 'disabled' : ''}>Delete conversation</button>
+        </div>
       </article>`;
   }
 
@@ -293,6 +296,30 @@
     });
   }
 
+  // For when the person asks the business to erase what they sent (a GDPR request): our copy goes,
+  // Meta keeps its own. Owners and admins only — the server refuses anyone else.
+  async function remove(id) {
+    const c = find(id);
+    if (!c) return;
+    const where = PLATFORM[c.platform] || 'Facebook';
+    const ok = await window.confirmModal?.(`This deletes this conversation with ${esc(c.personLabel)} and every message in it from Be More Swan, for good. It stays in ${esc(where)} — delete it there too if they asked.<br><br>Use this when someone asks you to erase what they sent you.`, {
+      title: 'Delete this conversation?', confirmLabel: 'Delete', tone: 'destructive',
+    });
+    if (ok === false) return;
+    await withBusy(id, async () => {
+      await call('delete', { id });
+      const i = state.conversations.findIndex((x) => x.id === id);
+      if (i >= 0) {
+        const st = state.conversations[i].status;
+        state.conversations.splice(i, 1);
+        state.counts[st] = Math.max(0, (state.counts[st] || 0) - 1);
+        setBadge();
+      }
+      delete state.edits[id];
+      toastOk('Conversation deleted.');
+    });
+  }
+
   async function setStatus(id, status) {
     await withBusy(id, async () => {
       const r = await call('set_status', { id, status });
@@ -310,6 +337,7 @@
     if (b.dataset.msgDraft) { draft(Number(b.dataset.msgDraft)); return; }
     if (b.dataset.msgSaveDraft) { saveDraft(Number(b.dataset.msgSaveDraft)); return; }
     if (b.dataset.msgSend) { send(Number(b.dataset.msgSend)); return; }
+    if (b.dataset.msgDelete) { remove(Number(b.dataset.msgDelete)); return; }
     if (b.dataset.msgStatus) { setStatus(Number(b.dataset.msgStatus), b.dataset.status); }
   });
 

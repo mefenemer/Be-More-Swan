@@ -52,7 +52,7 @@
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { workspaceIntegrations, systemConnections, postInsights, webhookEvents } from '../../db/schema';
+import { workspaceIntegrations, systemConnections, postInsights, webhookEvents, socialConversations } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { deleteIntegration } from '../../src/utils/workspace-integrations';
@@ -168,7 +168,8 @@ async function revokeThreadsGrants(threadsUserId: string): Promise<number> {
  *   'erase'  (delete)    — the person made a formal data-deletion request. The row itself goes,
  *       along with the data we obtained THROUGH Meta: the account identifiers it carries
  *       (external_user_id = Page / IG business account id), the cached follower counts and
- *       fbUserId in metadata, the per-post insight counters, and the raw inbound webhook payloads.
+ *       fbUserId in metadata, the per-post insight counters, the raw inbound webhook payloads, and the
+ *       Facebook / Instagram messages received through the connection (social_conversations/messages).
  *
  * Before 2026-08-05 both actions took the 'revoke' path, so a deletion request left every
  * identifier in place while /api/meta/deletion-status told the person nothing was retained.
@@ -211,6 +212,13 @@ async function revokeMetaConnections(fbUserId: string, mode: 'revoke' | 'erase')
     // otherwise orphan Meta-derived data rather than remove it.
     await db.delete(postInsights).where(inArray(postInsights.connectionId, ids));
     await db.delete(webhookEvents).where(inArray(webhookEvents.connectionId, ids));
+    // Facebook / Instagram messages received through these connections (Messages tab). The FK already
+    // cascades from the connection, but it is spelt out here so nobody weakens it to SET NULL unseen.
+    // Messages go with their conversation (ON DELETE CASCADE). Absent table before the SQL: nothing to erase.
+    await db.delete(socialConversations).where(inArray(socialConversations.connectionId, ids)).catch((err) => {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code !== '42P01') throw err;
+    });
     await db.delete(systemConnections).where(inArray(systemConnections.id, ids));
 
     return rows.length;
@@ -265,7 +273,7 @@ export default withLambda(async (event) => {
 <p>Confirmation code: <code>${code.replace(/[^a-f0-9]/gi, '')}</code></p>
 <p>Your ${label} connection to Be More Swan was deleted on ${String(receipt.completedAt ?? '')}. This removed the
 access tokens it held, the account identifiers we obtained from ${label}, the follower and per-post figures we had
-cached, and the event payloads ${label} had sent us.</p>
+cached, the event payloads ${label} had sent us, and the messages people had sent your Page or account through it.</p>
 <p>Two things are not covered by this, because they are not ${label} data: posts already published to your
 ${label} account stay on ${label} and only you can remove them there, and any content drafted inside a Be More Swan
 workspace belongs to that workspace. We also keep an immutable record that this deletion took place, which is what
