@@ -158,7 +158,7 @@ Split the video into shots: stretches that look and sound alike. For each shot g
 
 Never name or guess who a person is. Describe people only by what they are doing. Do not invent anything you cannot see or hear.
 
-PRIVATE DETAILS. Screen recordings often show things that shouldn't be in a public video. When you can read an email address, a phone number, a password, a card or bank number, or a customer's name or details in a frame, add the problem "private details on screen: <which kind, e.g. an email address>" to that shot. Never copy the details themselves into your answer.
+PRIVATE DETAILS. Screen recordings often show things that shouldn't be in a public video. When you can read an email address, a phone number, a password, a card or bank number, or a customer's name or details in a frame, add the problem "private details on screen: <which kind, e.g. an email address>" to that shot and give it strength 0, so it isn't chosen. Never copy the details themselves into your answer.
 
 Return STRICT JSON only:
 {"summary": "one or two sentences: what this video is", "speech": true|false, "music": true|false, "shots": [{"inS": 0, "outS": 4.2, "what": "...", "speech": "...", "problems": ["..."], "strength": 0|1|2|3}]}`;

@@ -20,6 +20,7 @@ check('the shot list marks private details it can read, without copying them', (
     assert.match(p, /an email address, a phone number, a password, a card or bank number, or a customer's name or details/);
     assert.match(p, /"private details on screen: <which kind/);
     assert.match(p, /Never copy the details themselves/);
+    assert.match(p, /give it strength 0, so it isn't chosen/);
 });
 
 check('the review suggests cutting that stretch first, and never quotes the details', () => {
@@ -54,12 +55,15 @@ check('the help SQL is guarded, quoted right, and says what the recorder does', 
     const section = bodies[4];
     for (const words of ['Record my screen', 'Record my voice too', 'Choose what to share', 'Stop sharing', 'up to 10 minutes',
         'Only share what you need', 'Keep the screen\'s sound', 'phone or tablet', 'Recording and saving are free',
-        'points out an email address']) assert.ok(section.includes(words), `section says: ${words}`);
+        'may point out private details', 'It can miss small text', 'Screen recordings for an AI presenter aren\'t reviewed',
+        'Record my voice too** is left unticked']) assert.ok(section.includes(words), `section says: ${words}`);
     // The stale Phase 0 lines are replaced word for word.
     assert.ok(bodies[0] === 'Each recording can be up to 5 minutes and 500 MB, and you can use up to 10.');
     assert.ok(bodies[2] === "It can't yet put a separate camera recording in a bubble over a separate screen recording, or make videos longer than 60 seconds.");
     const phase0 = readFileSync(new URL('help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-video-screen-recordings.sql', dir), 'utf8');
     assert.ok(phase0.includes(bodies[0]) && phase0.includes(bodies[2]), 'the old text matches what Phase 0 published');
+    // The camera-bubble limitation is still true (D-R1 not built), so it stays.
+    assert.ok(bodies[3].startsWith("It can't yet put a separate camera recording in a bubble over a separate screen recording."));
 });
 
 console.log(`\n${passed} passed`);
