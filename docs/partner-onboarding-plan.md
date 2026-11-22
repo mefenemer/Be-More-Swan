@@ -189,7 +189,7 @@ Scheduled function (Monday), notification + email template, opt-out setting, `pa
 | D4 | Her invite page: admin approves before it goes live, or live at once? | Admin approves (our domain, our liability for claims). |
 | D5 | Who supplies the partner kit files (logo, screenshots, 60-second demo)? | Owner; the demo can come from the Walkthroughs studio. |
 | D6 | Weekly nudge: on by default, for how long? | On, first 8 weeks + any week with activity; one-click off. |
-| D7 | Raise the 50-message cap for the first month? | 100 in the first 30 days, then 50. |
+| D7 | Raise the 50-message cap for the first month? | 100 in the first 30 days (counted from their first message), then 50. |
 | D8 | Who reviews `partner-playbook.ts` before it goes live? | Owner reads it; `affiliate-legal-counsel` agent checks `rules` + `channels`. |
 
 ## 7. Not in this plan

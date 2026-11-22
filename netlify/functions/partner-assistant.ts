@@ -185,7 +185,7 @@ export default withLambda(async (event) => {
                 return {
                     // Only a business they OWN is "their business"; as a team member elsewhere they can still hand off.
                     hasWorkspace: true, firstName: u?.firstName ?? null, business: ownsWorkspace ? org ?? null : null,
-                    products: await loadProductsBlock(db, orgId, org?.name).catch(() => null),
+                    products: ownsWorkspace ? await loadProductsBlock(db, orgId, org?.name).catch(() => null) : null,   // never an employer's products as "mine"
                     assistants: team.filter((a) => a.roleKey in HANDOFF_ROLES).map((a) => ({ role: a.roleKey, name: a.name })),
                 };
             }

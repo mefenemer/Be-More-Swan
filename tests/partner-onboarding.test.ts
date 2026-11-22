@@ -158,6 +158,7 @@ check('my_results reads ONLY the partner’s own workspace and user row', () => 
     assert.strictEqual((block.match(/organisation_id = \$\{orgId\}/g) || []).length, 3);
     assert.ok(block.includes('WHERE id = ${userId}'));
     assert.ok(block.includes('if (!orgId || !ownsWorkspace) return { hasWorkspace: false'));
+    assert.ok(src.includes('products: ownsWorkspace ? await loadProductsBlock('), 'no employer products as theirs');
     assert.ok(src.includes("CASE WHEN ${userOrganisations.role} = 'owner' THEN 0 ELSE 1 END"), 'their own workspace first');
     assert.ok(read('netlify/functions/partner-hub.ts').includes("eq(userOrganisations.role, 'owner')"), 'greeting names only a business they own');
 });
