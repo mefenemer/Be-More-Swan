@@ -14,11 +14,15 @@
   <meta property="og:url" content="https://bemoreswan.com/card">
   <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
   <meta name="theme-color" content="#be185d">
+  <!-- style.css @imports this font, which made it wait for style.css first (Lighthouse, 2026-11-22). The preload starts it now, in parallel. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&amp;display=swap">
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
-  <link rel="manifest" href="/favicon/manifest.json">
+  <link rel="manifest" href="/public.webmanifest">
 </head>
 <!-- Deliberately standalone: no site nav or footer component (the theme loader stays — every page carries the admin-set theme). Someone has just scanned
      a QR code on a phone, mid-conversation — the page has to load at once and say who we are, how to
