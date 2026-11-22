@@ -36,7 +36,7 @@
     blocked: 'No minutes: the transcript couldn’t be used.',
     assistant_gone: 'No minutes: the assistant was archived.',
     task_limit: 'No minutes: your monthly task allowance was used up.',
-    waiting_for_tasks: 'Minutes waiting: your monthly task allowance is used up. Add tasks, or wait for the reset on the 1st: the call is kept for 7 days.',
+    waiting_for_tasks: 'Minutes waiting: your monthly task allowance is used up. Upgrade your plan, or wait for the reset on the 1st: the call is kept for 7 days.',
   };
   const STATUS_HINT = {
     not_admitted: 'Nobody let it in.',
@@ -78,6 +78,8 @@
     let action = '';
     if (bot.status === 'scheduled') action = `<button type="button" data-mb-remove="${bot.id}" style="min-height:44px" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap">Cancel</button>`;
     else if (live) action = `<button type="button" data-mb-remove="${bot.id}" style="min-height:44px" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap">Remove from call</button>`;
+    // There is no task top-up to buy (chat-plan-snapshot.ts): more tasks means a bigger plan, on the billing page.
+    else if (bot.status === 'done' && bot.writeUp === 'waiting_for_tasks') action = '<a href="/workspace.html?view=billing" style="min-height:44px" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap inline-flex items-center">See plans</a>';
     else if (bot.status === 'done' && (bot.recordId || bot.writeUp === 'written')) action = '<span class="text-xs font-bold text-gray-700 whitespace-nowrap">Minutes in your Inbox</span>';
     const dot = live ? '<span class="inline-block w-2 h-2 rounded-full bg-emerald-600 mr-1.5 align-middle" aria-hidden="true"></span>' : '';
     return `<li class="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 border-t border-gray-100 first:border-t-0" data-mb-bot="${bot.id}">
