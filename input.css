@@ -247,3 +247,9 @@ summary {
 
 /* Connections sections (integrations.js _connSections): the chevron is drawn by us, so hide Safari's marker. */
 details[data-conn-section] > summary::-webkit-details-marker { display: none; }
+
+/* #nav-placeholder holds the nav's 64px (h-16 in components/nav.html) until the nav is fetched and
+   injected. Empty, it was 0px tall, so the whole page dropped 64px when the nav arrived — Lighthouse
+   measured 0.1 of the home page's 0.133 layout shift on that one jump (2026-11-22). :empty, so a
+   filled placeholder is exactly as tall as what is in it. Hand-copied into style.css; change both. */
+#nav-placeholder:empty { min-height: 4rem; }

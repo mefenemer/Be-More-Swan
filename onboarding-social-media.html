@@ -10,6 +10,10 @@
   <script src="/dialogs.js"></script>
   <script src="/src/public/role-labels.js"></script>
   <script src="/src/components/social-profile-url.js"></script>
+  <!-- style.css @imports this font, which made it wait for style.css first (Lighthouse, 2026-11-22). The preload starts it now, in parallel. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&amp;display=swap">
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <script src="./explainers.js?v=20260630-2" defer></script>
@@ -20,7 +24,8 @@
   <script src="/src/generated/platform-constants.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
-  <link rel="manifest" href="/favicon/manifest.json">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#ffffff">
   <script src="/task-costs.js"></script>
   <!-- The deploy this page was built from. 'dev' here; scripts/stamp-view-version.mjs replaces it with
        the commit on every Netlify build. version-check.js compares it with the live deploy
