@@ -36,6 +36,7 @@ check('several ticked pictures on a multi-picture format show it; the bar is no 
 check('multi-picture means an image/mixed format with max > 1 — never video or one-picture formats', () => {
     const lim = between('function _pceOwnSlideLimits() {', 'window._pceOwnUseAsSlides = async function');
     assert.ok(lim.includes("fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)"));
+    assert.ok(lim.includes('if (post.brandCard) return null;'), 'never on a branded-card post, whose slides would be hidden');
     const consts = readFileSync(new URL('../src/generated/platform-constants.js', import.meta.url), 'utf8');
     assert.match(consts, /"k":"li_document"[^}]*"m":"image"[^}]*"max":20/, 'a Document carousel qualifies');
 });

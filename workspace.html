@@ -13775,6 +13775,9 @@ function _pceOwnSlideLimits() {
     const post = _pcePickerPost();
     const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
     if (!fmt || fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)) return null;
+    // A branded-card post shows no slide strip (_pceRenderSlides skips it), so slides added here would
+    // be invisible and unmovable. Leave it to Replace / the card editor.
+    if (post.brandCard) return null;
     const ids = typeof _pceSlideIds === 'function' ? _pceSlideIds(post) : [];
     const editable = _rqReviewPostId != null && _rqPostCache[_rqReviewPostId] === post;
     return { min: Number(fmt.min) || 0, max: Number(fmt.max), have: ids.length, ids, picturesOnly: fmt.m === 'image', editable };
