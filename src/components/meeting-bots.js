@@ -32,6 +32,7 @@
   const WRITE_UP_WORDS = {
     no_meeting: 'No minutes: too little was said in the call to write them.',
     no_transcript: 'No minutes: there was no transcript for this call.',
+    nobody_spoke: 'No minutes: nobody spoke while the Note Taker was in the call.',
     blocked: 'No minutes: the transcript couldn’t be used.',
     assistant_gone: 'No minutes: the assistant was archived.',
     task_limit: 'No minutes: your monthly task allowance was used up.',

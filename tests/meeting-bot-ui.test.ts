@@ -70,6 +70,7 @@ await test('staging test 2026-11-21: a finished call never vanishes — the stri
     assert.match(MB._rowHtml(done({ writeUp: 'writing' }), NOW) as string, /Writing the minutes…/);
     assert.match(MB._rowHtml(done({ writeUp: 'no_meeting', writeUpReason: 'no_meeting' }), NOW) as string, /No minutes: too little was said in the call to write them\./);
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'no_transcript' }), NOW) as string, /no transcript for this call/);
+    assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'nobody_spoke' }), NOW) as string, /No minutes: nobody spoke while the Note Taker was in the call\./);
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'failed' }), NOW) as string, /The minutes couldn’t be written\./);
     const written = MB._rowHtml(done({ writeUp: 'written', recordId: 7 }), NOW) as string;
     assert.match(written, /Minutes in your Inbox/);
@@ -93,6 +94,7 @@ await test('the server works out the minutes\' state from the import (botWriteUp
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'written', skipReason: null, recordId: 9 }).writeUp, 'written');
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'no_meeting', recordId: null }), { writeUp: 'no_meeting', writeUpReason: 'no_meeting' });
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'no_transcript', recordId: null }), { writeUp: 'not_written', writeUpReason: 'no_transcript' });
+    assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'nobody_spoke', recordId: null }), { writeUp: 'not_written', writeUpReason: 'nobody_spoke' });
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'failed', skipReason: null, recordId: null }), { writeUp: 'not_written', writeUpReason: 'failed' });
     assert.equal(botWriteUp({ status: 'not_admitted', joinedAt: null }, null).writeUp, 'none', 'never in the call: no minutes expected');
     assert.equal(botWriteUp({ status: 'in_call', joinedAt: 1 }, null).writeUp, 'none');
