@@ -29,9 +29,9 @@
   <script src="./explainers.js?v=20261011-my-account" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
-  <!-- The APP manifest — the only one since 2026-11-22, when the public pages moved onto it too and
-       the icon-only favicon/manifest.json (no start_url, no display mode) was deleted.
-       Installing this is what unlocks Web Push on iOS. -->
+  <!-- The APP manifest — the installable one. Public pages link /public.webmanifest instead (same
+       icons and colours, display "browser", so visitors are never offered an install that opens a
+       login screen — owner, 2026-11-22). Installing this is what unlocks Web Push on iOS. -->
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0f172a">
   <!-- Both, deliberately. Chrome deprecated the apple- prefixed one and logs a console warning,

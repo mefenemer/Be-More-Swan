@@ -21,19 +21,21 @@ function check(name: string, fn: () => void) {
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
 }
 
-check('every page with a manifest uses the one app manifest, and sets a theme colour', () => {
+check('public pages use the public manifest, the workspace the app one, and all set a theme colour', () => {
     const withManifest = pages.filter((f) => /rel="manifest"/.test(read(f)));
     assert.ok(withManifest.length >= 40, `expected the public pages, found ${withManifest.length}`);
     for (const f of withManifest) {
         const html = read(f);
-        assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/, `${f} links another manifest`);
+        const want = f === 'workspace.html' ? /rel="manifest" href="\/manifest\.webmanifest"/ : /rel="manifest" href="\/public\.webmanifest"/;
+        assert.match(html, want, `${f} links the wrong manifest`);
         assert.match(html, /<meta name="theme-color" content="#[0-9a-fA-F]{6}">/, `${f} has no theme-color`);
     }
     assert.ok(!existsSync(join(root, 'favicon/manifest.json')), 'the icon-only manifest is back');
 });
 
-check('the app manifest has what a splash screen and a maskable icon need', () => {
-    const m = JSON.parse(read('manifest.webmanifest'));
+for (const file of ['manifest.webmanifest', 'public.webmanifest']) check(`${file} has what a splash screen and a maskable icon need`, () => {
+    const m = JSON.parse(read(file));
+    for (const icon of m.icons) assert.ok(existsSync(join(root, icon.src.replace(/^\//, ''))), `${icon.src} is missing`);
     assert.ok(m.theme_color && m.background_color);
     const has = (purpose: string, size: string) =>
         m.icons.some((i: { purpose?: string; sizes: string }) => (i.purpose || 'any') === purpose && i.sizes === size);
@@ -42,6 +44,14 @@ check('the app manifest has what a splash screen and a maskable icon need', () =
     // android-chrome-512 runs to the edges — a launcher's circle mask cuts the swan's head off.
     assert.ok(!m.icons.some((i: { src: string; purpose?: string }) => i.purpose === 'maskable' && /android-chrome/.test(i.src)),
         'the edge-to-edge android-chrome icon is not safe to mask');
+});
+
+check('the public manifest cannot be installed', () => {
+    // Owner, 2026-11-22: a logged-out visitor must not be offered "Install app" on the marketing
+    // site — the installed icon would open a login screen. Chrome only offers install for
+    // standalone / fullscreen / minimal-ui; "browser" opts out. The app manifest stays installable.
+    assert.equal(JSON.parse(read('public.webmanifest')).display, 'browser');
+    assert.equal(JSON.parse(read('manifest.webmanifest')).display, 'standalone');
 });
 
 check('the empty nav placeholder holds the nav\'s height until the nav arrives', () => {
