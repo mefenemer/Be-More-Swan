@@ -346,7 +346,12 @@ export function readRecallTranscript(status: string | null, body: unknown): { st
     if (status !== 'done' || !Array.isArray(body)) return { state: 'not_ready' };
     // Every block must look like Recall's ({ words: [...] }); a renamed field would otherwise read as "nobody spoke".
     if (!body.every((b) => b && typeof b === 'object' && Array.isArray((b as { words?: unknown }).words))) return { state: 'not_ready' };
-    return { state: 'ready', lines: recallTranscriptLines(body) };
+    const lines = recallTranscriptLines(body);
+    // "Nobody spoke" only when there were no words at all. Words we couldn't read (a renamed `text`, any deeper change)
+    // are not silence: keep waiting.
+    const words = body.reduce((n: number, b) => n + ((b as { words: unknown[] }).words.length), 0);
+    if (!lines.length && words > 0) return { state: 'not_ready' };
+    return { state: 'ready', lines };
 }
 
 /** Recall's transcript download, [{ participant: { name }, words: [{ text }] }], as lines. Pure. */
