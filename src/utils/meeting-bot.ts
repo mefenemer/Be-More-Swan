@@ -120,10 +120,18 @@ export function cleanJoinAt(raw: unknown, now: Date): JoinAtResult {
     return { ok: true, joinAt: t, scheduled: true };
 }
 
-/** Whole minutes from joining to leaving, rounded up. Pure. */
-export function minutesInCall(joinedAt: Date | null, leftAt: Date | null): number {
+/** Recall's leave reason when the bot left because everyone else had gone (after ALONE_TIMEOUT_S on its own). */
+const EVERYONE_LEFT_REASON = /everyone_left/i;
+
+/**
+ * Whole minutes from joining to leaving, rounded up: the minutes that are charged. When the bot left because everyone
+ * else had gone, Recall kept it in the empty call for ALONE_TIMEOUT_S first; that wait is not charged (owner,
+ * 2026-11-22: a 4-minute call must not become 6). Pure.
+ */
+export function minutesInCall(joinedAt: Date | null, leftAt: Date | null, leaveReason?: string | null): number {
     if (!joinedAt || !leftAt) return 0;
-    const ms = leftAt.getTime() - joinedAt.getTime();
+    let ms = leftAt.getTime() - joinedAt.getTime();
+    if (leaveReason && EVERYONE_LEFT_REASON.test(leaveReason)) ms -= ALONE_TIMEOUT_S * 1000;
     return ms > 0 ? Math.ceil(ms / 60_000) : 0;
 }
 
@@ -216,14 +224,17 @@ export function nextBotState(row: BotStateRow, code: string, subCode: string | n
             }
             // Removed by the host after joining: what was heard is still written up (plan §6); the call_ended reason stays.
             const leftAt = left();
-            return { ...base, status: 'done', statusReason: reason ?? base.statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
+            const statusReason = reason ?? base.statusReason;
+            // call_ended carries the leave reason; a 'done' with its own sub-code must not hide it.
+            return { ...base, status: 'done', statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt, `${reason ?? ''} ${base.statusReason ?? ''}`) };
         }
         case 'fatal': {
             if (isFinal && row.status !== 'removed') return null;
             if (row.joinedAt) {
                 // It got some of the call: treat like an early end, so what was heard can still be written up.
                 const leftAt = left();
-                return { ...base, status: 'done', statusReason: reason ?? 'fatal', leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
+                const statusReason = reason ?? 'fatal';
+                return { ...base, status: 'done', statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt, `${reason ?? ''} ${base.statusReason ?? ''}`) };
             }
             const status: BotStatus = WAITING_ROOM_REASON.test(reason ?? '') ? 'not_admitted' : REMOVED_REASON.test(reason ?? '') ? 'removed' : 'failed';
             return { ...base, status, statusReason: reason ?? 'fatal', leftAt: left() };

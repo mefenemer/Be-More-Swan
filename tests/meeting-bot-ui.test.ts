@@ -270,5 +270,42 @@ await test('round 5: archiving or purging cancels a bot still being sent (no Rec
     assert.ok(cancel > 0 && cancel < w.indexOf('const rows = await db.select()'), 'id-less open bots cancelled first');
 });
 
+// ── Where the minutes came from (owner 2026-11-22: run 5's minutes card never said the Note Taker joined) ──────────
+
+function loadRegistry() {
+    const sandbox: Record<string, unknown> = {
+        window: {} as Record<string, unknown>, console, setTimeout, clearTimeout,
+        document: { addEventListener() {}, querySelector() { return null; }, createElement() { return {}; } },
+    };
+    vm.runInNewContext(read('src/components/disruptive-ui-registry.js'), sandbox);
+    return (sandbox.window as { DisruptiveUIRegistry: { meetingSourceLabel: (d: unknown) => string; meetingSourcePillHtml: (d: unknown) => string } }).DisruptiveUIRegistry;
+}
+
+await test('minutes source label: bot → "Joined by the Note Taker", pick-up → "Picked up from", pasted → nothing; escaped', () => {
+    const R = loadRegistry();
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'bot', label: 'Google Meet', importId: 7 } }), 'Joined by the Note Taker · Google Meet');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'bot' } }), 'Joined by the Note Taker');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { label: 'Microsoft Teams' } }), 'Picked up from Microsoft Teams', 'older pick-up records have no via');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'transcript', label: 'Google Meet' } }), 'Picked up from Google Meet');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'transcript' } }), '');
+    assert.equal(R.meetingSourceLabel({ meetingSummary: 'pasted' }), '');
+    assert.equal(R.meetingSourceLabel(null), '');
+    assert.equal(R.meetingSourcePillHtml({}), '');
+    const pill = R.meetingSourcePillHtml({ pickedUpFrom: { via: 'bot', label: '<img src=x>' } });
+    assert.match(pill, /data-meeting-source/);
+    assert.ok(!pill.includes('<img'), 'label escaped');
+});
+
+await test('both minutes views show the label: the stored card (Inbox + chat) and the Meeting Notes tab', () => {
+    const reg = read('src/components/disruptive-ui-registry.js');
+    const card = reg.slice(reg.indexOf('function renderActionItemAssignmentCard'));
+    assert.ok(card.indexOf('meetingSourcePillHtml(ui, esc)') > 0, 'card header draws the pill');
+    assert.ok(card.indexOf('meetingSourcePillHtml(ui, esc)') < card.indexOf('${bodyHtml}'), 'in the header, above the summary');
+    const hub = read('src/components/assistant-data-hub.js');
+    const detail = hub.slice(hub.indexOf('function meetingDetail(record)'));
+    assert.ok(detail.indexOf('DisruptiveUIRegistry.meetingSourcePillHtml(data)') > 0, 'Meeting Notes tab uses the same helper');
+    assert.ok(detail.indexOf('meetingSourcePillHtml(data)') < detail.indexOf('data.meetingSummary ?'), 'above the summary');
+});
+
 console.log(`meeting-bot-ui: ${passed} passed`);
 })().catch((err) => { console.error(err); process.exit(1); });

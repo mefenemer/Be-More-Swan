@@ -489,7 +489,7 @@ export async function chargeBotMeeting(db: Db, organisationId: number, assistant
     const [row] = await db.select().from(meetingBots)
         .where(and(eq(meetingBots.importId, importId), eq(meetingBots.organisationId, organisationId))).limit(1);
     if (!row) return;
-    const minutes = row.minutesInCall ?? minutesInCall(row.joinedAt, row.leftAt);
+    const minutes = row.minutesInCall ?? minutesInCall(row.joinedAt, row.leftAt, row.statusReason);
     const units = chargeUnits(minutes, (await getTaskCosts()).weights.meeting_bot_call);
     if (units > 0) await recordCompletedWork(db, organisationId, 'meeting_bot_call', { units, ref: `meeting_bot:${row.id}`, assistantId });
     await deleteBotMedia(db, row).catch(() => false);

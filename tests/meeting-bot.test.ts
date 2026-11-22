@@ -125,6 +125,27 @@ await test('a normal call: joining → waiting room → in the call → ended �
     assert.equal(r.minutes, 30);
 });
 
+await test('everyone left: the empty-call wait (ALONE_TIMEOUT_S) is not charged (owner 2026-11-22: run 5 was 3 min talk + 2 min alone)', () => {
+    const alone = ALONE_TIMEOUT_S / 60;
+    // Staging run 5 shape: in 05:14:35, people gone ~05:15:42, bot left 05:17:42 with timeout_exceeded_everyone_left.
+    const r = run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 4 + alone], ['done', null, 4.2 + alone]]);
+    assert.equal(r.status, 'done');
+    assert.equal(r.reason, 'timeout_exceeded_everyone_left');
+    assert.equal(r.minutes, 4, 'charged to when the last person left, not when the bot left');
+    assert.equal(chargeUnits(r.minutes ?? 0, 1), 1, 'a 4-minute call stays 1 task, not 2');
+    // A 'done' that brings its own sub-code must not hide the call_ended leave reason.
+    const r2 = run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 4 + alone], ['done', 'something_else', 4.2 + alone]]);
+    assert.equal(r2.minutes, 4);
+    // Fatal after everyone left: same rule.
+    assert.equal(run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 3 + alone], ['fatal', null, 3.1 + alone]]).minutes, 3);
+    // Other endings are charged to when the bot left, as before.
+    assert.equal(minutesInCall(at(0), at(4 + alone), 'call_ended_by_host'), Math.ceil(4 + alone));
+    assert.equal(minutesInCall(at(0), at(4 + alone), null), Math.ceil(4 + alone));
+    // Host let it in then everyone left at once: nothing to charge.
+    assert.equal(minutesInCall(at(0), at(alone), 'timeout_exceeded_everyone_left'), 0);
+    assert.equal(minutesInCall(at(0), at(alone + 0.1), 'timeout_exceeded_everyone_left'), 1, 'any time with people is a started minute');
+});
+
 await test('never let in: waiting room then the timeout is not_admitted, and a later done changes nothing', () => {
     const r = run([['in_waiting_room', null, 0], ['call_ended', 'timeout_exceeded_waiting_room', 10], ['done', null, 11]]);
     assert.equal(r.status, 'not_admitted');
