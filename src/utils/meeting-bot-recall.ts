@@ -5,7 +5,7 @@
 // Proven by hand on 2026-11-19 (plan Phase 0): create → status_changes → recordings[0].media_shortcuts.transcript →
 // presigned download → delete_media, on free Google Meet and Teams.
 
-import { RECALL_HOSTS, recallTranscriptLines, type BotStatusChange, type BotTranscriptLine, type RecallRegion } from './meeting-bot';
+import { RECALL_HOSTS, readRecallTranscript, type BotStatusChange, type BotTranscriptLine, type RecallRegion } from './meeting-bot';
 
 const TIMEOUT_MS = 15_000;
 
@@ -105,7 +105,9 @@ export async function fetchRecallTranscript(region: RecallRegion, botId: string)
         // Presigned: no Authorization header.
         const res = await fetch(bot.transcriptUrl, { signal: controller.signal });
         if (!res.ok) return { state: 'not_ready' };
-        const lines = recallTranscriptLines(await res.json());
+        const read = readRecallTranscript(bot.transcriptStatus, await res.json().catch(() => null));
+        if (read.state !== 'ready') return read;
+        const lines = read.lines;
         const attendees = [...new Set(lines.map((l) => l.speaker).filter((n): n is string => Boolean(n)))];
         return { state: 'ready', lines, attendees };
     } finally {

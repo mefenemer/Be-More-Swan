@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import {
     ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
-    nextBotState, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
+    nextBotState, readRecallTranscript, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
 } from '../src/utils/meeting-bot';
 import { botExternalId, parseBotExternalId } from '../src/utils/meeting-bot-db';
@@ -231,6 +231,17 @@ await test('the bot\'s transcript is FINISHED once Recall has it: empty = nobody
     assert.ok(body.includes("if (t.state === 'none') return { lines: [], finished: 'failed' };"), 'a failed transcript stops at once');
     assert.ok(body.includes("return { lines: t.lines, attendees: t.attendees, finished: 'complete' };"), 'a ready transcript is final');
     assert.ok(body.indexOf("t.state !== 'ready') return null") > body.indexOf("t.state === 'none'"), 'not ready yet still waits');
+});
+
+await test('readRecallTranscript: final only when Recall says done AND the body is a transcript; empty array = nobody spoke', () => {
+    const one = [{ participant: { name: 'Ana' }, words: [{ text: 'Hello' }] }];
+    assert.deepEqual(readRecallTranscript('done', one), { state: 'ready', lines: [{ speaker: 'Ana', text: 'Hello' }] });
+    assert.deepEqual(readRecallTranscript('done', []), { state: 'ready', lines: [] }, 'a real empty transcript: final, nobody spoke');
+    assert.deepEqual(readRecallTranscript('processing', one), { state: 'not_ready' }, 'a URL before it is done: keep waiting');
+    assert.deepEqual(readRecallTranscript(null, []), { state: 'not_ready' });
+    assert.deepEqual(readRecallTranscript('done', { error: 'oops' }), { state: 'not_ready' }, 'an error object is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', null), { state: 'not_ready' }, 'unreadable JSON is not "nobody spoke"');
+    assert.ok(read('src/utils/meeting-bot-recall.ts').includes('readRecallTranscript(bot.transcriptStatus, await res.json().catch(() => null))'), 'the fetch uses it');
 });
 
 await test('the tile pictures are bundled only where a bot is sent: no src/ or function file but meeting-bots.ts imports them', () => {
