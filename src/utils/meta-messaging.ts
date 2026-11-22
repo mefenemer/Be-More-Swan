@@ -235,7 +235,24 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
             },
         })
         // xmax = 0 only on a freshly inserted row: tells a new conversation from a found one.
-        .returning({ id: socialConversations.id, created: sql<boolean>`(xmax = 0)`, statusBefore: socialConversations.status });
+        .returning({
+            id: socialConversations.id, created: sql<boolean>`(xmax = 0)`,
+            statusBefore: socialConversations.status, windowBefore: socialConversations.windowClosesAt,
+        });
+
+    // 1b. The echo of a reply sent from the Messages tab when Meta gave no message id: that reply was
+    // filed under a placeholder (social-messages.ts recordSent). Give it Meta's real id instead of
+    // filing it a second time — so it shows once and keeps "sent from here".
+    if (m.direction === 'out' && m.text) {
+        const reconciled = await db.execute(sql`
+            UPDATE social_messages SET mid = ${m.mid}
+            WHERE id = (SELECT id FROM social_messages
+                        WHERE conversation_id = ${conv.id} AND direction = 'out' AND mid LIKE 'pending:%' AND body = ${m.text}
+                          AND sent_at > now() - interval '10 minutes'
+                        ORDER BY id LIMIT 1)
+            RETURNING id`) as unknown as unknown[];
+        if ((Array.isArray(reconciled) ? reconciled : (reconciled as { rows?: unknown[] }).rows ?? []).length) return { stored: false, reason: 'duplicate' };
+    }
 
     // 2. The message. Already have it → nothing else to do.
     const inserted = await db.insert(socialMessages)
@@ -264,7 +281,11 @@ async function storeInTx(db: Db, m: ParsedMessage): Promise<StoreResult> {
             updatedAt: new Date(),
         }).where(eq(socialConversations.id, conv.id));
         const [after] = await db.select({ status: socialConversations.status }).from(socialConversations).where(eq(socialConversations.id, conv.id)).limit(1);
-        const opened = after?.status === 'new' && (conv.created === true || conv.statusBefore !== 'new');
+        // Also when it was still "waiting" but Meta had closed the reply window before this message: the
+        // business can answer again now, and only a notification tells them so (the 4-hour reminder
+        // would come ~20 hours later).
+        const windowHadClosed = conv.windowBefore != null && new Date(conv.windowBefore).getTime() <= m.sentAt.getTime();
+        const opened = after?.status === 'new' && (conv.created === true || conv.statusBefore !== 'new' || windowHadClosed);
         return { stored: true, conversationId: conv.id, opened, organisationId: conn.organisationId, assistantId: conn.assistantId, platform: m.platform };
     } else {
         await db.update(socialConversations).set({

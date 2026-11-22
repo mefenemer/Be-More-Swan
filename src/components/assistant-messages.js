@@ -26,6 +26,8 @@
     conversations: [],
     counts: { new: 0, replied: 0, dismissed: 0 },
     connection: { enabled: false, connected: false, receiving: false, needsReconnect: false },
+    // Owners and admins may delete a conversation (an erasure request); the server enforces it too.
+    canDelete: false,
     filter: 'new',
     loaded: false,
     notSetUp: false,
@@ -43,6 +45,14 @@
   const toastOk = (m) => window.showToast?.(m, { icon: '✅' });
   const toastErr = (m) => window.showToast?.(m, { icon: '⚠️' });
   const PLATFORM = { facebook: 'Facebook', instagram: 'Instagram' };
+  // Ask before anything that reaches a person or erases data. If dialogs.js didn't load, fall back to
+  // the browser's own confirm (plain text) — never act without asking.
+  async function ask(html, opts) {
+    if (typeof window.confirmModal === 'function') return (await window.confirmModal(html, opts)) === true;
+    const plain = String(html).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    return window.confirm(`${opts && opts.title ? `${opts.title}\n\n` : ''}${plain}`);
+  }
 
   async function call(action, extra) {
     const res = await fetch(API, {
@@ -60,6 +70,7 @@
     state.conversations = Array.isArray(data.conversations) ? data.conversations : [];
     state.counts = data.counts || state.counts;
     state.connection = data.connection || state.connection;
+    state.canDelete = data.canDelete === true;
   }
 
   async function load() {
@@ -194,6 +205,9 @@
         </div>
         <div class="mt-3 space-y-2">${(c.messages || []).map(bubbleHtml).join('') || '<p class="text-sm text-gray-500">No messages to show.</p>'}</div>
         ${actions}
+        ${state.canDelete ? `<div class="mt-3 pt-3 border-t border-gray-100 flex justify-end">
+          <button type="button" data-msg-delete="${c.id}" class="text-xs font-bold text-red-700 underline disabled:opacity-50" ${busy ? 'disabled' : ''}>Delete conversation</button>
+        </div>` : ''}
       </article>`;
   }
 
@@ -281,15 +295,39 @@
     const where = PLATFORM[c.platform] || 'Facebook';
     // ⚠️ confirmModal renders its message as HTML (dialogs.js): the name comes from Meta and is a
     // stranger's choice, so everything interpolated here is escaped.
-    const ok = await window.confirmModal?.(`This sends your reply to ${esc(c.personLabel)} as a private ${esc(where)} message from your business.<br><br>“${esc(text).replace(/\n/g, '<br>')}”`, {
+    const ok = await ask(`This sends your reply to ${esc(c.personLabel)} as a private ${esc(where)} message from your business.<br><br>“${esc(text).replace(/\n/g, '<br>')}”`, {
       title: `Send this on ${where}?`, confirmLabel: 'Send', tone: 'primary',
     });
-    if (ok === false) return;
+    if (!ok) return;
     await withBusy(id, async () => {
       const r = await call('send', { id, text });
       delete state.edits[id];
       replace(r.conversation);
       toastOk(`Sent on ${where}.`);
+    });
+  }
+
+  // For when the person asks the business to erase what they sent (a GDPR request): our copy goes,
+  // Meta keeps its own. Owners and admins only — the server refuses anyone else.
+  async function remove(id) {
+    const c = find(id);
+    if (!c) return;
+    const where = PLATFORM[c.platform] || 'Facebook';
+    const ok = await ask(`This deletes this conversation with ${esc(c.personLabel)} and every message in it from Be More Swan, for good. It stays in ${esc(where)} — delete it there too if they asked.<br><br>Use this when someone asks you to erase what they sent you.`, {
+      title: 'Delete this conversation?', confirmLabel: 'Delete', tone: 'destructive',
+    });
+    if (!ok) return;
+    await withBusy(id, async () => {
+      await call('delete', { id });
+      const i = state.conversations.findIndex((x) => x.id === id);
+      if (i >= 0) {
+        const st = state.conversations[i].status;
+        state.conversations.splice(i, 1);
+        state.counts[st] = Math.max(0, (state.counts[st] || 0) - 1);
+        setBadge();
+      }
+      delete state.edits[id];
+      toastOk('Conversation deleted.');
     });
   }
 
@@ -310,6 +348,7 @@
     if (b.dataset.msgDraft) { draft(Number(b.dataset.msgDraft)); return; }
     if (b.dataset.msgSaveDraft) { saveDraft(Number(b.dataset.msgSaveDraft)); return; }
     if (b.dataset.msgSend) { send(Number(b.dataset.msgSend)); return; }
+    if (b.dataset.msgDelete) { remove(Number(b.dataset.msgDelete)); return; }
     if (b.dataset.msgStatus) { setStatus(Number(b.dataset.msgStatus), b.dataset.status); }
   });
 

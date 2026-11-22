@@ -18,10 +18,11 @@
 // Drafting is help with a reply, not a piece of work: metered like the Comments tab's drafts (fair
 // use, no task) — page-comments.ts draftReply.
 
+import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, socialConversations, socialMessages, systemConnections } from '../../db/schema';
+import { aiAssistants, notifications, socialConversations, socialMessages, systemConnections } from '../../db/schema';
 import { getSecret } from './vault';
 import { FB_GRAPH_VERSION } from './social-publish';
 import { messagingEnabled, pageTokenFor, type MessagingPlatform } from './meta-messaging';
@@ -299,6 +300,26 @@ export async function setConversationStatus(
     return row ? viewOf(db, row) : null;
 }
 
+/**
+ * Delete a conversation and every message in it (ON DELETE CASCADE) — for when the person asks the
+ * business to erase what they sent. It stays in Facebook / Instagram; only our copy goes. Owners and
+ * admins only (social-messages.ts endpoint). Returns false when it isn't this assistant's.
+ */
+export async function deleteConversation(db: Db, organisationId: number, assistantId: number, id: number): Promise<boolean> {
+    const gone = await db.delete(socialConversations)
+        .where(and(eq(socialConversations.id, id), eq(socialConversations.organisationId, organisationId), eq(socialConversations.aiAssistantId, assistantId)))
+        .returning({ id: socialConversations.id });
+    if (!gone.length) return false;
+    // Its notification cards carry the person's name and point at it: they go too (the assistant id
+    // is this workspace's, checked above, so no other workspace's cards can match).
+    await db.delete(notifications).where(and(
+        inArray(notifications.type, ['social_message_received', 'social_message_window_closing']),
+        sql`${notifications.metadata}->>'conversationId' = ${String(id)}`,
+        sql`${notifications.metadata}->>'assistantId' = ${String(assistantId)}`,
+    )).catch((err) => console.error('[social-messages] could not clear notifications for a deleted conversation', err instanceof Error ? err.message : err));
+    return true;
+}
+
 export async function saveDraft(db: Db, organisationId: number, assistantId: number, id: number, text: string): Promise<ConversationView | null> {
     const row = await loadConversation(db, organisationId, assistantId, id);
     if (!row) return null;
@@ -425,6 +446,8 @@ export async function sendReply(
     let accepted: { mid: string | null } | null = null;
     // Meta is called only while there is time left to record what it says (the function stops at 26s).
     const startedAt = Date.now();
+    // Made once per send, so the after-commit retry of recordSent hits the same key, never a second row.
+    const placeholderMid = `pending:${id}:${randomUUID()}`;
     const first = await loadConversation(db, organisationId, assistantId, id);
     if (!first) return { ok: false, status: 404, error: 'That conversation isn’t on this assistant’s Messages tab.' };
     const platform: MessagingPlatform = first.platform === 'instagram' ? 'instagram' : 'facebook';
@@ -477,7 +500,7 @@ export async function sendReply(
         // to try again (which would send it twice).
         const mid = sent.messageId;
         try {
-            await (txAny as { transaction: (f: (t: unknown) => Promise<void>) => Promise<void> }).transaction(async (sp) => recordSent(sp as Db, { organisationId, id, mid, reply, userId }));
+            await (txAny as { transaction: (f: (t: unknown) => Promise<void>) => Promise<void> }).transaction(async (sp) => recordSent(sp as Db, { organisationId, id, mid, placeholderMid, reply, userId }));
         } catch (err) {
             console.error(`[social-messages] conversation ${id}: sent, but recording it failed — retrying after commit`, err instanceof Error ? err.message : err);
             return { ok: true as const, recordLater: { mid } as { mid: string | null } };
@@ -490,7 +513,7 @@ export async function sendReply(
         return { ok: true as const, recordLater: { mid: accepted.mid } };
     }).then(async (r) => {
         if (!r.ok) return r;
-        if (r.recordLater) await recordSent(db, { organisationId, id, mid: r.recordLater.mid, reply, userId }).catch((err) => console.error(`[social-messages] conversation ${id}: recording a sent reply failed twice`, err instanceof Error ? err.message : err));
+        if (r.recordLater) await recordSent(db, { organisationId, id, mid: r.recordLater.mid, placeholderMid, reply, userId }).catch((err) => console.error(`[social-messages] conversation ${id}: recording a sent reply failed twice`, err instanceof Error ? err.message : err));
         const fresh = await loadConversation(db, organisationId, assistantId, id).catch(() => null);
         return { ok: true as const, conversation: fresh ? await viewOf(db, fresh).catch(() => conversationView(fresh, [])) : conversationView(first, []) };
     });
@@ -506,14 +529,25 @@ export function isRepeatSend(reply: string, latestOut: { body: string | null; se
 
 /**
  * File a reply Meta accepted. Idempotent on mid: the echo webhook delivers the same message, and
- * whichever lands first, the row ends up marked as sent from here. With no message id from Meta
- * nothing is filed under a made-up one — the echo files it, so it never shows twice.
+ * whichever lands first, the row ends up marked as sent from here. With no message id from Meta it
+ * is filed under a `pending:` placeholder at once — so the repeat guard sees it — and the echo gives
+ * that row Meta's real id instead of filing it again (meta-messaging.ts storeInTx, step 1b).
  */
-async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string | null; reply: string; userId: number | null }): Promise<void> {
-    if (a.mid) {
+async function recordSent(db: Db, a: { organisationId: number; id: number; mid: string | null; placeholderMid: string; reply: string; userId: number | null }): Promise<void> {
+    // No id from Meta, and its echo already beat us here: claim that row (same text, not credited to
+    // anyone, just now) rather than adding a placeholder beside it.
+    const claimedEcho = a.mid ? [] : await db.execute(sql`
+        UPDATE social_messages SET sent_by = ${a.userId}
+        WHERE id = (SELECT id FROM social_messages
+                    WHERE conversation_id = ${a.id} AND direction = 'out' AND body = ${a.reply} AND sent_by IS NULL
+                      AND mid NOT LIKE 'pending:%' AND sent_at > now() - interval '10 minutes'
+                    ORDER BY id DESC LIMIT 1)
+        RETURNING id`) as unknown as unknown[];
+    const echoTaken = (Array.isArray(claimedEcho) ? claimedEcho : (claimedEcho as { rows?: unknown[] }).rows ?? []).length > 0;
+    if (!echoTaken) {
         await db.insert(socialMessages).values({
             organisationId: a.organisationId, conversationId: a.id, direction: 'out',
-            mid: a.mid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
+            mid: a.mid ?? a.placeholderMid, body: a.reply, sentAt: sql`now()` as unknown as Date, sentBy: a.userId,
         }).onConflictDoUpdate({ target: socialMessages.mid, set: { sentBy: sql`COALESCE(${socialMessages.sentBy}, excluded.sent_by)` } });
     }
     await db.update(socialConversations)

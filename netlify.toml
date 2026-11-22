@@ -1341,6 +1341,12 @@ node_bundler = "esbuild"
   external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
   included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
 
+# The Note Taker's send function draws each workspace's picture for its bot (src/utils/meeting-bot-tile.ts) with
+# @napi-rs/canvas, a native module: shipped as it is, never bundled, like the pdf functions below. Loaded only on send.
+[functions.meeting-bots]
+  external_node_modules = ["@napi-rs/canvas"]
+  included_files = ["node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
+
 # pdf-parse v2 (pdfjs-dist 5) must ship as it is, never bundled. Bundled to CJS, pdfjs loses
 # import.meta.url, can't load @napi-rs/canvas for its DOMMatrix polyfill, and throws
 # "DOMMatrix is not defined" AS THE MODULE LOADS, before the handler runs. Every brand document

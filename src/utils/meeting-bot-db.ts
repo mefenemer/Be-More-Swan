@@ -15,8 +15,8 @@ import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
-    cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
-    type BotStatePatch, type BotStatus, type BotVideoTile, type RecallRegion,
+    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
+    type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
@@ -50,12 +50,17 @@ export interface MeetingBotView {
     minutesInCall: number | null;
     /** The meeting record in the Inbox, once the minutes are written. */
     recordId: number | null;
+    /** What happened to the minutes of a finished call, so the strip never goes silent (botWriteUp). */
+    writeUp: BotWriteUp;
+    /** Why they weren't written: 'no_meeting', 'no_transcript', 'failed', … (null otherwise). */
+    writeUpReason: string | null;
 }
 
-export function botView(r: BotRow, recordId: number | null = null): MeetingBotView {
+export function botView(r: BotRow, recordId: number | null = null, imp: { status: string | null; skipReason: string | null; lastError?: string | null } | null = null): MeetingBotView {
     const status = r.status as BotStatus;
     const platform = r.platform as PickupPlatform;
     return {
+        ...botWriteUp(r, imp ? { ...imp, recordId } : (recordId ? { status: 'written', skipReason: null, recordId } : null)),
         id: r.id, assistantId: r.aiAssistantId, platform, platformLabel: PICKUP_PLATFORM_LABELS[platform] ?? platform,
         title: r.title, meetingUrl: r.meetingUrl, joinAt: r.joinAt.toISOString(), status,
         statusWords: BOT_STATUS_WORDS[status] ?? status, statusReason: r.statusReason,
@@ -78,7 +83,12 @@ export interface SendBotInput {
     /** The bot's picture in the call. The meeting-bots function passes it, so only that function's bundle carries the
      *  ~125 KB of picture data (esbuild bundles even a dynamic import; review of #794). */
     videoTile?: BotVideoTile;
+    /** Draws this workspace's own picture (meeting-bot-tile.ts drawBotTiles); `videoTile` is the fallback if it fails. */
+    tileFor?: (names: { assistantName: string | null; businessName: string | null }) => Promise<BotVideoTile>;
 }
+
+/** Drawing the picture must never stop a bot: past this, the fallback picture goes instead. */
+export const TILE_DRAW_TIMEOUT_MS = 4000;
 
 export type SendBotResult =
     | { ok: true; bot: MeetingBotView; alreadySent: boolean }
@@ -113,7 +123,7 @@ const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room',
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
     if (!(await isFeatureEnabled(i.organisationId, MEETING_BOT_FLAG))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
 
-    const [assistant] = await db.select({ id: aiAssistants.id, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
+    const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
         .where(and(eq(aiAssistants.id, i.assistantId), eq(aiAssistants.organisationId, i.organisationId))).limit(1);
     if (!assistant || assistant.roleKey !== 'meeting_note_taker') return fail(404, 'no_assistant', 'Meeting assistant not found in this workspace.');
@@ -170,12 +180,26 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     }
 
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, i.organisationId)).limit(1);
+    let videoTile = i.videoTile;
+    if (i.tileFor) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            videoTile = await Promise.race([
+                i.tileFor({ assistantName: assistant.name ?? null, businessName: org?.name ?? null }),
+                new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), TILE_DRAW_TIMEOUT_MS); }),
+            ]);
+        } catch (err) {
+            console.error('[meeting-bot] own picture not drawn, sending the fallback', { botId: row.id, error: err instanceof Error ? err.message : 'unknown' });
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
     let recallBotId: string;
     try {
         recallBotId = await createRecallBot(region, recallBotRequest({
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
-            videoTile: i.videoTile,
+            videoTile,
         }));
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';
@@ -209,13 +233,13 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
 
 /** Booked, live and the last 30 days' bots for one Note Taker, newest first. */
 export async function listMeetingBots(db: Db, organisationId: number, assistantId: number, now: Date = new Date()): Promise<MeetingBotView[]> {
-    const rows = await db.select({ bot: meetingBots, recordId: meetingImports.recordId }).from(meetingBots)
+    const rows = await db.select({ bot: meetingBots, recordId: meetingImports.recordId, importStatus: meetingImports.status, skipReason: meetingImports.skipReason, lastError: meetingImports.lastError }).from(meetingBots)
         .leftJoin(meetingImports, eq(meetingBots.importId, meetingImports.id))
         .where(and(
             eq(meetingBots.organisationId, organisationId), eq(meetingBots.aiAssistantId, assistantId),
             or(inArray(meetingBots.status, [...OPEN_BOT_STATUSES]), gt(meetingBots.joinAt, new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000))),
         )).orderBy(desc(meetingBots.joinAt)).limit(50);
-    return rows.map((r) => botView(r.bot, r.recordId ?? null));
+    return rows.map((r) => botView(r.bot, r.recordId ?? null, r.bot.importId ? { status: r.importStatus ?? null, skipReason: r.skipReason ?? null, lastError: r.lastError ?? null } : null));
 }
 
 export type RemoveBotResult = { ok: true; bot: MeetingBotView } | { ok: false; status: number; error: string };
@@ -229,7 +253,12 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     // A member limited to other assistants can't touch this Note Taker's bots (the request names only a bot id, so
     // requireTenant's assistant check can't see it; review of #769). Same answer as not found: no hint it exists.
     if (!row || (row.aiAssistantId !== null && !canAccessAssistant(access, row.aiAssistantId))) return { ok: false, status: 404, error: 'That Note Taker was not found.' };
-    if (!OPEN_BOT_STATUSES.includes(row.status as BotStatus) || row.status === 'ended') return { ok: true, bot: botView(row) };
+    if (!OPEN_BOT_STATUSES.includes(row.status as BotStatus) || row.status === 'ended') {
+        // Already over: answer with the real minutes state, not the bare row's 'writing' (review of #803).
+        const [imp] = row.importId ? await db.select({ recordId: meetingImports.recordId, status: meetingImports.status, skipReason: meetingImports.skipReason, lastError: meetingImports.lastError })
+            .from(meetingImports).where(eq(meetingImports.id, row.importId)).limit(1) : [];
+        return { ok: true, bot: botView(row, imp?.recordId ?? null, imp ? { status: imp.status, skipReason: imp.skipReason, lastError: imp.lastError } : null) };
+    }
     // Just sent and Recall hasn't answered yet: there is nothing to withdraw yet, and marking it cancelled now would let
     // the bot join untracked once Recall answers (review of #769). Ask to try again in a moment.
     if (!row.recallBotId && row.createdAt.getTime() > Date.now() - 60_000) {

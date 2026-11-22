@@ -258,9 +258,31 @@ export function replayBotState(row: BotStateRow, changes: readonly BotStatusChan
     return moved ? { ...last, minutesInCall: minutes } : null;
 }
 
+// ── What happened to the minutes (the strip must never go silent; staging test 2026-11-21) ──────
+
+/** written = in the Inbox; writing = still being written; waiting_for_tasks = held until tasks free up (meeting-pickup
+ * retries a task_limit import for up to 7 days); no_meeting = too little said; not_written = gave up. */
+export type BotWriteUp = 'none' | 'writing' | 'waiting_for_tasks' | 'written' | 'no_meeting' | 'not_written';
+
+/**
+ * The minutes' state for a finished bot, from its meeting_imports row. A bot that was in the call and is 'done' but has no
+ * import yet is about to get one ('writing'). Pure.
+ */
+export function botWriteUp(
+    bot: { status: string; joinedAt: unknown },
+    imp: { status: string | null; skipReason: string | null; recordId: number | null; lastError?: string | null } | null,
+): { writeUp: BotWriteUp; writeUpReason: string | null } {
+    if (imp?.recordId) return { writeUp: 'written', writeUpReason: null };
+    if (bot.status !== 'done' || !bot.joinedAt) return { writeUp: 'none', writeUpReason: null };
+    if (imp?.status === 'found' && imp.lastError === 'task_limit') return { writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' };
+    if (!imp || !imp.status || imp.status === 'found' || imp.status === 'writing') return { writeUp: 'writing', writeUpReason: null };
+    if (imp.status === 'skipped' && imp.skipReason === 'no_meeting') return { writeUp: 'no_meeting', writeUpReason: 'no_meeting' };
+    return { writeUp: 'not_written', writeUpReason: imp.skipReason ?? imp.status };
+}
+
 // ── The request to Recall ────────────────────────────────────────────────────────────────────────
 
-/** The bot's video tile, base64 JPEGs (meeting-bot-tile-data.ts, imported only by netlify/functions/meeting-bots.ts). */
+/** The bot's video tile, base64 JPEGs: drawn per workspace (meeting-bot-tile.ts) or the fallback (meeting-bot-tile-data.ts). */
 export interface BotVideoTile { recordingJpegB64: string; notRecordingJpegB64: string }
 
 export interface BotRequestInput {
@@ -286,8 +308,8 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
         bot_name: botName(i.businessName),
         ...(i.scheduled ? { join_at: i.joinAt.toISOString() } : {}),
         chat: { on_bot_join: { send_to: 'everyone', message: joinMessage(i.businessName), pin: true } },
-        // Its video tile: a still Be More Swan picture saying it is taking notes, so everyone can see what it is
-        // (scripts/gen-meeting-bot-tile.js; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
+        // Its video tile: a still picture with the business's name saying it is taking notes, so everyone can see what
+        // it is (meeting-bot-tile.ts; Recall: JPEG 16:9 ≤ 1.3 MB, on Meet, Teams and Zoom).
         ...(i.videoTile ? {
             automatic_video_output: {
                 in_call_recording: { kind: 'jpeg', b64_data: i.videoTile.recordingJpegB64 },
