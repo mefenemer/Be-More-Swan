@@ -905,6 +905,10 @@ window.showComplianceModals = function showComplianceModals(force) {
           class="btn-primary flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition cursor-pointer">Add</button>
         <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
           class="btn-primary flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition cursor-pointer">Replace with this</button>
+        <!-- Formats that hold several pictures (a Document carousel, an Instagram carousel, an X image grid):
+             the ticked pictures become the post's slides, in the order they were ticked. -->
+        <button type="button" id="gp-ai-own-slides" onclick="window._pceOwnUseAsSlides()"
+          class="hidden btn-primary flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition cursor-pointer disabled:opacity-50">Use these</button>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -13314,6 +13318,29 @@ function _pceOpenInlineCaption() {
     const hint = document.createElement('p');
     hint.className = 'text-[10px] text-gray-400 mt-1';
     hint.textContent = 'Click away to save · Esc to cancel';
+    // Say WHERE it saves. An edit applies to every destination by default (post-review-amend-all-cb,
+    // seeded true per post) — but that checkbox lives in the side panel, so typing the carousel's
+    // caption here silently rewrote the Feed post's too (2026-11-19). The scope is shown on the box
+    // being typed in, with the one-click way to keep it to this destination.
+    const allCb = _pceEl('post-review-amend-all-cb');
+    if (_rqReviewGroupIds.length > 1 && allCb) {
+        const paintScope = () => {
+            const n = _rqReviewGroupIds.length;
+            hint.innerHTML = allCb.checked
+                ? `Saves to all ${n} destinations · <button type="button" data-pce-caption-scope="one" class="underline font-semibold">only this one</button> · Esc to cancel`
+                : `Saves to this destination only · <button type="button" data-pce-caption-scope="all" class="underline font-semibold">all ${n}</button> · Esc to cancel`;
+        };
+        paintScope();
+        // mousedown, not click: the textarea saves on blur, and a click would commit before the scope changed.
+        hint.addEventListener('mousedown', (ev) => {
+            const b = ev.target.closest('[data-pce-caption-scope]');
+            if (!b) return;
+            ev.preventDefault();
+            allCb.checked = b.getAttribute('data-pce-caption-scope') === 'all';
+            paintScope();
+            ta.focus();
+        });
+    }
 
     host.innerHTML = '';
     host.appendChild(ta);
@@ -13689,12 +13716,39 @@ function _pceSyncOwnSelection() {
     const rep = document.getElementById('gp-ai-own-replace');
     const n = _pceOwnPicked.length;
     const canAdd = _pceCanAddClip();
+    const slides = _pceOwnSlideLimits();
+    // Several pictures ticked on a format that holds several (a carousel or grid): they become its
+    // slides. Without this the bar stayed hidden — "Add" is for video clips, "Replace" for one
+    // picture — so a Document carousel could not be built from the library at all (2026-11-19).
+    const pickedVideo = !!slides && slides.picturesOnly && _pceOwnPicked.some(id => (_pceOwnAssets[id] || {}).type === 'video');
+    const room = slides ? Math.max(0, slides.max - slides.have) : 0;
+    // Only pictures that aren't already slides count — they are all the click adds.
+    const fresh = slides ? _pceOwnPicked.filter(id => !slides.ids.includes(id)).length : 0;
+    // The button acts on the post open in the editor; from the generate-post sheet with no post open
+    // it could only say "open the post", so it doesn't show there.
+    const canSlides = !!slides && slides.editable && !_pcePickerAddOnly && n > 1;
     // Replacing is one picture's job — with several ticked there is no single answer to "with
     // what" — and it needs something to replace.
     const canReplace = !_pcePickerAddOnly && n === 1 && (!canAdd || _pceHasClipToAddTo());
     // An empty bar is worse than no bar: two tiles ticked used to show a blank strip, because both
     // buttons were hidden and nothing said why.
-    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace));
+    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace && !canSlides));
+    const sl = document.getElementById('gp-ai-own-slides');
+    if (sl) {
+        sl.classList.toggle('hidden', !canSlides);
+        if (canSlides) {
+            const over = fresh > room;
+            sl.disabled = over || pickedVideo || fresh === 0;
+            sl.textContent = pickedVideo ? 'Pictures only'
+                : fresh === 0 ? 'Already slides'
+                : over ? (room ? `Room for ${room} more` : `${slides.max} slides already`)
+                : (slides.have ? `Add ${fresh} as slide${fresh === 1 ? '' : 's'}` : `Use these ${fresh} pictures`);
+            sl.title = pickedVideo ? 'This format takes pictures, not video. Untick the video.'
+                : fresh === 0 ? 'Every ticked picture is already one of this post\u2019s slides.'
+                : over ? `This format takes up to ${slides.max} slides and has ${slides.have}. Untick ${fresh - room}.`
+                : 'They go after the existing slides, in the order you ticked them.';
+        }
+    }
     if (add) {
         add.classList.toggle('hidden', !canAdd);
         add.textContent = n === 1 ? 'Add' : `Add ${n} clips`;
@@ -13710,6 +13764,54 @@ window._pceOwnAdd = async function () {
     await _pceAppendClipAssets(ids.map(id => ({ id, name: (_pceOwnAssets[id] || {}).name, url: (_pceOwnAssets[id] || {}).url })));
     _pceExitClipAddMode();
     _pceCloseMediaPicker();
+};
+
+/**
+ * The picture limits of the post's format when it holds several pictures (min/max from
+ * src/config/post-formats.ts via PlatformConstants), else null. Video-only formats and one-picture
+ * formats return null: those use Add / Replace.
+ */
+function _pceOwnSlideLimits() {
+    const post = _pcePickerPost();
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    if (!fmt || fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)) return null;
+    // A branded-card post shows no slide strip (_pceRenderSlides skips it), so slides added here would
+    // be invisible and unmovable. Leave it to Replace / the card editor.
+    if (post.brandCard) return null;
+    const ids = typeof _pceSlideIds === 'function' ? _pceSlideIds(post) : [];
+    const editable = _rqReviewPostId != null && _rqPostCache[_rqReviewPostId] === post;
+    return { min: Number(fmt.min) || 0, max: Number(fmt.max), have: ids.length, ids, picturesOnly: fmt.m === 'image', editable };
+}
+
+/**
+ * The ticked pictures are ADDED after the post's existing slides, in tick order, through the one slide
+ * write path — the same as the slide panel's "From your library" (it never replaces what is there).
+ * Ticks are kept until the save has really taken, so a failure leaves the selection to retry.
+ */
+window._pceOwnUseAsSlides = async function () {
+    const slides = _pceOwnSlideLimits();
+    const picked = _pceOwnPicked.slice();
+    if (!slides || picked.length < 2) return;
+    if (slides.picturesOnly && picked.some(id => (_pceOwnAssets[id] || {}).type === 'video')) return;
+    const post = _pcePickerPost();
+    if (!post || _rqReviewPostId == null || _rqPostCache[_rqReviewPostId] !== post) {
+        window.showToast?.('Open the post to add slides to it.');
+        return;
+    }
+    const existing = _pceSlideIds(post);
+    const additions = picked.filter(id => !existing.includes(id));
+    const wanted = existing.concat(additions);
+    if (!additions.length || wanted.length > slides.max) return;
+    _pceClipAddMode = false;
+    await _pcePersistSlides(wanted);
+    // _pcePersistSlides reports its own failure and leaves the post as it was. It took only if the
+    // post's slides are now exactly the list we sent, in that order.
+    const now = _pceSlideIds(post);
+    if (now.length === wanted.length && now.every((id, i) => id === wanted[i])) {
+        _pceOwnPicked = [];
+        _pceSyncOwnSelection();
+        _pceCloseMediaPicker();
+    }
 };
 
 window._pceOwnReplace = async function () {
@@ -22696,7 +22798,7 @@ async function gpAiUseOwn() {
             tick.style.background = 'rgba(255,255,255,.9)';
             tick.style.borderColor = '#d1d5db';
             cell.appendChild(tick);
-            _pceOwnAssets[a.id] = { name: a.name, url: thumb };
+            _pceOwnAssets[a.id] = { name: a.name, url: thumb, type: a.assetType };
             grid.appendChild(cell);
         });
         _pceSyncOwnSelection();
