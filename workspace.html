@@ -13722,7 +13722,11 @@ function _pceSyncOwnSelection() {
     // picture — so a Document carousel could not be built from the library at all (2026-11-19).
     const pickedVideo = !!slides && slides.picturesOnly && _pceOwnPicked.some(id => (_pceOwnAssets[id] || {}).type === 'video');
     const room = slides ? Math.max(0, slides.max - slides.have) : 0;
-    const canSlides = !!slides && !_pcePickerAddOnly && n > 1;
+    // Only pictures that aren't already slides count — they are all the click adds.
+    const fresh = slides ? _pceOwnPicked.filter(id => !slides.ids.includes(id)).length : 0;
+    // The button acts on the post open in the editor; from the generate-post sheet with no post open
+    // it could only say "open the post", so it doesn't show there.
+    const canSlides = !!slides && slides.editable && !_pcePickerAddOnly && n > 1;
     // Replacing is one picture's job — with several ticked there is no single answer to "with
     // what" — and it needs something to replace.
     const canReplace = !_pcePickerAddOnly && n === 1 && (!canAdd || _pceHasClipToAddTo());
@@ -13733,13 +13737,15 @@ function _pceSyncOwnSelection() {
     if (sl) {
         sl.classList.toggle('hidden', !canSlides);
         if (canSlides) {
-            const over = n > room;
-            sl.disabled = over || pickedVideo;
+            const over = fresh > room;
+            sl.disabled = over || pickedVideo || fresh === 0;
             sl.textContent = pickedVideo ? 'Pictures only'
+                : fresh === 0 ? 'Already slides'
                 : over ? (room ? `Room for ${room} more` : `${slides.max} slides already`)
-                : (slides.have ? `Add these ${n} as slides` : `Use these ${n} pictures`);
+                : (slides.have ? `Add ${fresh} as slide${fresh === 1 ? '' : 's'}` : `Use these ${fresh} pictures`);
             sl.title = pickedVideo ? 'This format takes pictures, not video. Untick the video.'
-                : over ? `This format takes up to ${slides.max} slides and has ${slides.have}. Untick ${n - room}.`
+                : fresh === 0 ? 'Every ticked picture is already one of this post\u2019s slides.'
+                : over ? `This format takes up to ${slides.max} slides and has ${slides.have}. Untick ${fresh - room}.`
                 : 'They go after the existing slides, in the order you ticked them.';
         }
     }
@@ -13769,8 +13775,9 @@ function _pceOwnSlideLimits() {
     const post = _pcePickerPost();
     const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
     if (!fmt || fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)) return null;
-    const have = typeof _pceSlideIds === 'function' ? _pceSlideIds(post).length : 0;
-    return { min: Number(fmt.min) || 0, max: Number(fmt.max), have, picturesOnly: fmt.m === 'image' };
+    const ids = typeof _pceSlideIds === 'function' ? _pceSlideIds(post) : [];
+    const editable = _rqReviewPostId != null && _rqPostCache[_rqReviewPostId] === post;
+    return { min: Number(fmt.min) || 0, max: Number(fmt.max), have: ids.length, ids, picturesOnly: fmt.m === 'image', editable };
 }
 
 /**

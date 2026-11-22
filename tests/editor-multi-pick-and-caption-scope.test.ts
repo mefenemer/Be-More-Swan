@@ -27,9 +27,10 @@ check('the picker bar has a "Use these" button for multi-picture formats', () =>
 
 check('several ticked pictures on a multi-picture format show it; the bar is no longer blank', () => {
     const sync = between('function _pceSyncOwnSelection() {', 'window._pceOwnAdd = async function');
-    assert.ok(sync.includes('const canSlides = !!slides && !_pcePickerAddOnly && n > 1;'));
     assert.ok(sync.includes("bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace && !canSlides));"));
-    assert.ok(sync.includes('const over = n > room;') && sync.includes('sl.disabled = over || pickedVideo;'), 'over the room left: disabled and says so');
+    assert.ok(sync.includes('const over = fresh > room;') && sync.includes('sl.disabled = over || pickedVideo || fresh === 0;'), 'counts only new pictures; over the room left or nothing new: disabled and says so');
+    assert.ok(sync.includes('const fresh = slides ? _pceOwnPicked.filter(id => !slides.ids.includes(id)).length : 0;'));
+    assert.ok(sync.includes('const canSlides = !!slides && slides.editable && !_pcePickerAddOnly && n > 1;'), 'hidden where it cannot act');
 });
 
 check('multi-picture means an image/mixed format with max > 1 — never video or one-picture formats', () => {
@@ -60,7 +61,6 @@ check('a picture-only format refuses ticked videos, and the room left is what co
     const sync = between('function _pceSyncOwnSelection() {', 'window._pceOwnAdd = async function');
     assert.ok(sync.includes("slides.picturesOnly && _pceOwnPicked.some(id => (_pceOwnAssets[id] || {}).type === 'video')"));
     assert.ok(sync.includes('const room = slides ? Math.max(0, slides.max - slides.have) : 0;'));
-    assert.ok(sync.includes('sl.disabled = over || pickedVideo;'));
     const lim = between('function _pceOwnSlideLimits() {', 'window._pceOwnUseAsSlides = async function');
     assert.ok(lim.includes("picturesOnly: fmt.m === 'image'"));
     assert.ok(html.includes('_pceOwnAssets[a.id] = { name: a.name, url: thumb, type: a.assetType };'), 'the tile records its kind');
