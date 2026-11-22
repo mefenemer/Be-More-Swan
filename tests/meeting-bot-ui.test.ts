@@ -70,6 +70,7 @@ await test('staging test 2026-11-21: a finished call never vanishes — the stri
     assert.match(MB._rowHtml(done({ writeUp: 'writing' }), NOW) as string, /Writing the minutes…/);
     assert.match(MB._rowHtml(done({ writeUp: 'no_meeting', writeUpReason: 'no_meeting' }), NOW) as string, /No minutes: too little was said in the call to write them\./);
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'no_transcript' }), NOW) as string, /no transcript for this call/);
+    assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'nobody_spoke' }), NOW) as string, /No minutes: nobody spoke while the Note Taker was in the call\./);
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'failed' }), NOW) as string, /The minutes couldn’t be written\./);
     const written = MB._rowHtml(done({ writeUp: 'written', recordId: 7 }), NOW) as string;
     assert.match(written, /Minutes in your Inbox/);
@@ -83,7 +84,10 @@ await test('staging test 2026-11-21: a finished call never vanishes — the stri
     assert.deepEqual(rows.map((r) => r.id), [10, 11]);
     const src = read('src/components/meeting-bots.js');
     assert.ok(src.includes("(b.status === 'done' && b.writeUp === 'writing' && recent(b))"), 'keeps refreshing until the minutes land, only for rows still shown');
-    assert.match(MB._rowHtml(done({ writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }), NOW) as string, /Minutes waiting: your monthly task allowance is used up/);
+    const waiting = MB._rowHtml(done({ writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }), NOW) as string;
+    assert.match(waiting, /Minutes waiting: your monthly task allowance is used up\. Upgrade your plan/);
+    assert.ok(!/add tasks/i.test(waiting), 'no task top-up exists to buy');
+    assert.match(waiting, /<a href="\/workspace\.html\?view=billing"[^>]*min-height:44px[^>]*>See plans<\/a>/, 'links to the billing page');
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'task_limit' }), NOW) as string, /No minutes: your monthly task allowance was used up\./);
 });
 
@@ -93,6 +97,7 @@ await test('the server works out the minutes\' state from the import (botWriteUp
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'written', skipReason: null, recordId: 9 }).writeUp, 'written');
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'no_meeting', recordId: null }), { writeUp: 'no_meeting', writeUpReason: 'no_meeting' });
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'no_transcript', recordId: null }), { writeUp: 'not_written', writeUpReason: 'no_transcript' });
+    assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'skipped', skipReason: 'nobody_spoke', recordId: null }), { writeUp: 'not_written', writeUpReason: 'nobody_spoke' });
     assert.deepEqual(botWriteUp({ status: 'done', joinedAt: 1 }, { status: 'failed', skipReason: null, recordId: null }), { writeUp: 'not_written', writeUpReason: 'failed' });
     assert.equal(botWriteUp({ status: 'not_admitted', joinedAt: null }, null).writeUp, 'none', 'never in the call: no minutes expected');
     assert.equal(botWriteUp({ status: 'in_call', joinedAt: 1 }, null).writeUp, 'none');
@@ -266,6 +271,43 @@ await test('round 5: archiving or purging cancels a bot still being sent (no Rec
     const w = db.slice(db.indexOf('export async function withdrawMeetingBots'));
     const cancel = w.indexOf('isNull(meetingBots.recallBotId), inArray(meetingBots.status, [...OPEN_BOT_STATUSES])');
     assert.ok(cancel > 0 && cancel < w.indexOf('const rows = await db.select()'), 'id-less open bots cancelled first');
+});
+
+// ── Where the minutes came from (owner 2026-11-22: run 5's minutes card never said the Note Taker joined) ──────────
+
+function loadRegistry() {
+    const sandbox: Record<string, unknown> = {
+        window: {} as Record<string, unknown>, console, setTimeout, clearTimeout,
+        document: { addEventListener() {}, querySelector() { return null; }, createElement() { return {}; } },
+    };
+    vm.runInNewContext(read('src/components/disruptive-ui-registry.js'), sandbox);
+    return (sandbox.window as { DisruptiveUIRegistry: { meetingSourceLabel: (d: unknown) => string; meetingSourcePillHtml: (d: unknown) => string } }).DisruptiveUIRegistry;
+}
+
+await test('minutes source label: bot → "Joined by the Note Taker", pick-up → "Picked up from", pasted → nothing; escaped', () => {
+    const R = loadRegistry();
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'bot', label: 'Google Meet', importId: 7 } }), 'Joined by the Note Taker · Google Meet');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'bot' } }), 'Joined by the Note Taker');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { label: 'Microsoft Teams' } }), 'Picked up from Microsoft Teams', 'older pick-up records have no via');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'transcript', label: 'Google Meet' } }), 'Picked up from Google Meet');
+    assert.equal(R.meetingSourceLabel({ pickedUpFrom: { via: 'transcript' } }), '');
+    assert.equal(R.meetingSourceLabel({ meetingSummary: 'pasted' }), '');
+    assert.equal(R.meetingSourceLabel(null), '');
+    assert.equal(R.meetingSourcePillHtml({}), '');
+    const pill = R.meetingSourcePillHtml({ pickedUpFrom: { via: 'bot', label: '<img src=x>' } });
+    assert.match(pill, /data-meeting-source/);
+    assert.ok(!pill.includes('<img'), 'label escaped');
+});
+
+await test('both minutes views show the label: the stored card (Inbox + chat) and the Meeting Notes tab', () => {
+    const reg = read('src/components/disruptive-ui-registry.js');
+    const card = reg.slice(reg.indexOf('function renderActionItemAssignmentCard'));
+    assert.ok(card.indexOf('meetingSourcePillHtml(ui, esc)') > 0, 'card header draws the pill');
+    assert.ok(card.indexOf('meetingSourcePillHtml(ui, esc)') < card.indexOf('${bodyHtml}'), 'in the header, above the summary');
+    const hub = read('src/components/assistant-data-hub.js');
+    const detail = hub.slice(hub.indexOf('function meetingDetail(record)'));
+    assert.ok(detail.indexOf('DisruptiveUIRegistry.meetingSourcePillHtml(data)') > 0, 'Meeting Notes tab uses the same helper');
+    assert.ok(detail.indexOf('meetingSourcePillHtml(data)') < detail.indexOf('data.meetingSummary ?'), 'above the summary');
 });
 
 console.log(`meeting-bot-ui: ${passed} passed`);

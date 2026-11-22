@@ -7,10 +7,10 @@ import { readFileSync } from 'node:fs';
 import {
     ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
-    nextBotState, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
+    nextBotState, readRecallTranscript, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
 } from '../src/utils/meeting-bot';
-import { botExternalId, parseBotExternalId } from '../src/utils/meeting-bot-db';
+import { botExternalId, meetingBotSource, parseBotExternalId } from '../src/utils/meeting-bot-db';
 import {
     sourceFor, writeImport, type ImportRelease, type ImportRow, type MeetingSource, type PickupStore, type WriterDeps,
 } from '../src/utils/meeting-pickup';
@@ -125,6 +125,27 @@ await test('a normal call: joining → waiting room → in the call → ended �
     assert.equal(r.minutes, 30);
 });
 
+await test('everyone left: the empty-call wait (ALONE_TIMEOUT_S) is not charged (owner 2026-11-22: run 5 was 3 min talk + 2 min alone)', () => {
+    const alone = ALONE_TIMEOUT_S / 60;
+    // Staging run 5 shape: in 05:14:35, people gone ~05:15:42, bot left 05:17:42 with timeout_exceeded_everyone_left.
+    const r = run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 4 + alone], ['done', null, 4.2 + alone]]);
+    assert.equal(r.status, 'done');
+    assert.equal(r.reason, 'timeout_exceeded_everyone_left');
+    assert.equal(r.minutes, 4, 'charged to when the last person left, not when the bot left');
+    assert.equal(chargeUnits(r.minutes ?? 0, 1), 1, 'a 4-minute call stays 1 task, not 2');
+    // A 'done' that brings its own sub-code must not hide the call_ended leave reason.
+    const r2 = run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 4 + alone], ['done', 'something_else', 4.2 + alone]]);
+    assert.equal(r2.minutes, 4);
+    // Fatal after everyone left: same rule.
+    assert.equal(run([['in_call_recording', null, 0], ['call_ended', 'timeout_exceeded_everyone_left', 3 + alone], ['fatal', null, 3.1 + alone]]).minutes, 3);
+    // Other endings are charged to when the bot left, as before.
+    assert.equal(minutesInCall(at(0), at(4 + alone), 'call_ended_by_host'), Math.ceil(4 + alone));
+    assert.equal(minutesInCall(at(0), at(4 + alone), null), Math.ceil(4 + alone));
+    // Host let it in then everyone left at once: nothing to charge.
+    assert.equal(minutesInCall(at(0), at(alone), 'timeout_exceeded_everyone_left'), 0);
+    assert.equal(minutesInCall(at(0), at(alone + 0.1), 'timeout_exceeded_everyone_left'), 1, 'any time with people is a started minute');
+});
+
 await test('never let in: waiting room then the timeout is not_admitted, and a later done changes nothing', () => {
     const r = run([['in_waiting_room', null, 0], ['call_ended', 'timeout_exceeded_waiting_room', 10], ['done', null, 11]]);
     assert.equal(r.status, 'not_admitted');
@@ -222,6 +243,89 @@ await test('the bot\'s video tile: a JPEG for recording and one for not recordin
         assert.deepEqual(size, [1280, 720], `${state}: 1280×720`);
     }
     assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
+});
+
+await test('the bot\'s transcript is FINISHED once Recall has it: empty = nobody spoke (no 24 h wait), failed = no transcript', async () => {
+    // Drives meetingBotSource(db).fetchTranscript end to end: a fake db row, and Recall's two HTTP calls (the bot read,
+    // then the presigned transcript) answered by a stubbed global fetch. No production seam is added.
+    const ORG = 58, RECALL_ID = 'bot-abc', URL_T = 'https://files.example/transcript.json';
+    const rows: unknown[] = [{ id: 7, organisationId: ORG, recallRegion: 'eu', recallBotId: RECALL_ID }];
+    const db = { select: () => ({ from: () => ({ where: () => ({ limit: async () => rows }) }) }) } as unknown as Parameters<typeof meetingBotSource>[0];
+    const source = meetingBotSource(db);
+    const account = { organisationId: ORG, assistantId: 0, platform: 'google_meet' as const };
+    const realFetch = globalThis.fetch, realKey = process.env.RECALL_EU_API_KEY;
+    let calls: string[] = [];
+    const recall = (o: { code?: string; status?: string; url?: string; body?: unknown; bodyStatus?: number }) => {
+        calls = [];
+        globalThis.fetch = (async (input: string | URL | Request) => {
+            const u = String(input);
+            calls.push(u);
+            if (u === URL_T) return new Response(JSON.stringify(o.body ?? null), { status: o.bodyStatus ?? 200 });
+            assert.ok(u.endsWith(`/api/v1/bot/${RECALL_ID}/`), `only the bot read and the transcript are fetched (got ${u})`);
+            return new Response(JSON.stringify({
+                status_changes: [{ code: o.code ?? 'done', created_at: '2026-11-19T10:30:00Z' }],
+                recordings: [{ media_shortcuts: { transcript: { status: o.status ? { code: o.status } : undefined, data: o.url ? { download_url: o.url } : undefined } } }],
+            }), { status: 200 });
+        }) as typeof fetch;
+    };
+    const get = () => source.fetchTranscript(account, botExternalId('eu', RECALL_ID), null);
+    process.env.RECALL_EU_API_KEY = 'test-key';
+    try {
+        recall({ status: 'done', url: URL_T, body: [] });
+        assert.deepEqual(await get(), { lines: [], attendees: [], finished: 'complete' }, 'done + zero words: finished empty (nobody spoke), no 24 h wait');
+        assert.deepEqual(calls.slice(1), [URL_T], 'the transcript itself was read');
+
+        recall({ status: 'done', url: URL_T, body: [{ participant: { name: 'Ana' }, words: [] }] });
+        assert.deepEqual(await get(), { lines: [], attendees: [], finished: 'complete' }, 'done + blocks with no words: finished empty');
+
+        recall({ status: 'done', url: URL_T, body: [{ participant: { name: 'Ana' }, words: [{ text: 'Hello' }] }] });
+        assert.deepEqual(await get(), { lines: [{ speaker: 'Ana', text: 'Hello' }], attendees: ['Ana'], finished: 'complete' }, 'done + words: finished with them');
+
+        for (const status of ['failed', 'deleted']) {
+            recall({ code: 'done', status });
+            assert.deepEqual(await get(), { lines: [], finished: 'failed' }, `${status} (Recall "none"): failed at once`);
+        }
+
+        recall({ code: 'in_call_recording', status: 'failed' });
+        assert.equal(await get(), null, 'a failed status before the bot is done: keep waiting');
+        recall({ code: 'done', status: 'processing' });
+        assert.equal(await get(), null, 'still processing, no URL: keep waiting');
+        recall({ code: 'done' });
+        assert.equal(await get(), null, 'no transcript status at all: keep waiting');
+        recall({ status: 'processing', url: URL_T, body: [] });
+        assert.equal(await get(), null, 'a URL before Recall says done: keep waiting');
+        recall({ status: 'done', url: URL_T, body: { error: 'oops' } });
+        assert.equal(await get(), null, 'unreadable body: keep waiting, not "nobody spoke"');
+        recall({ status: 'done', url: URL_T, body: [{ segments: [] }] });
+        assert.equal(await get(), null, 'renamed fields: keep waiting, not "nobody spoke"');
+        recall({ status: 'done', url: URL_T, body: [], bodyStatus: 403 });
+        assert.equal(await get(), null, 'the transcript download failed: keep waiting');
+
+        recall({ status: 'done', url: URL_T, body: [] });
+        assert.equal(await source.fetchTranscript({ ...account, organisationId: ORG + 1 }, botExternalId('eu', RECALL_ID), null), null, 'another workspace\'s bot: nothing');
+        assert.equal(await source.fetchTranscript(account, 'not-a-bot-id', null), null, 'not a bot id: nothing');
+        rows.length = 0;
+        assert.equal(await get(), null, 'no bot row: nothing');
+        assert.deepEqual(calls, [], 'Recall is never asked about a bot this workspace does not own');
+    } finally {
+        globalThis.fetch = realFetch;
+        if (realKey === undefined) delete process.env.RECALL_EU_API_KEY; else process.env.RECALL_EU_API_KEY = realKey;
+    }
+});
+
+await test('readRecallTranscript: final only when Recall says done AND the body is a transcript; empty array = nobody spoke', () => {
+    const one = [{ participant: { name: 'Ana' }, words: [{ text: 'Hello' }] }];
+    assert.deepEqual(readRecallTranscript('done', one), { state: 'ready', lines: [{ speaker: 'Ana', text: 'Hello' }] });
+    assert.deepEqual(readRecallTranscript('done', []), { state: 'ready', lines: [] }, 'a real empty transcript: final, nobody spoke');
+    assert.deepEqual(readRecallTranscript('processing', one), { state: 'not_ready' }, 'a URL before it is done: keep waiting');
+    assert.deepEqual(readRecallTranscript(null, []), { state: 'not_ready' });
+    assert.deepEqual(readRecallTranscript('done', { error: 'oops' }), { state: 'not_ready' }, 'an error object is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', null), { state: 'not_ready' }, 'unreadable JSON is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', [{ segments: [] }]), { state: 'not_ready' }, 'a renamed field (format change) is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', [{ participant: { name: 'Ana' }, words: [] }]), { state: 'ready', lines: [] }, 'blocks with no words: final, nobody spoke');
+    assert.deepEqual(readRecallTranscript('done', [{ words: [{ word: 'x' }] }]), { state: 'not_ready' }, 'words we can\'t read (renamed text) are not silence');
+    assert.deepEqual(readRecallTranscript('done', [{ words: [{ text: '  ' }] }]), { state: 'not_ready' }, 'any word entries but no readable text: keep waiting');
+    assert.ok(read('src/utils/meeting-bot-recall.ts').includes('readRecallTranscript(bot.transcriptStatus, await res.json().catch(() => null))'), 'the fetch uses it');
 });
 
 await test('the tile pictures are bundled only where a bot is sent: no src/ or function file but meeting-bots.ts imports them', () => {

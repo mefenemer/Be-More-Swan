@@ -122,11 +122,16 @@
     </script>
     <!-- /SEO -->
     <!--    <script src="https://cdn.tailwindcss.com"></script>-->
+    <!-- style.css @imports this font, which made it wait for style.css first (Lighthouse, 2026-11-22). The preload starts it now, in parallel. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&amp;display=swap">
     <link id="stylesheet" href="./style.css" rel="stylesheet">
     <script src="/site-theme.js"></script>
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
-    <link rel="manifest" href="/favicon/manifest.json">
+    <link rel="manifest" href="/public.webmanifest">
+    <meta name="theme-color" content="#ffffff">
     <!-- US-I18N-1.1: i18n utility — loads locale JSON and applies translations -->
     <script src="/src/i18n.js"></script>
   <script src="/waitlist-mode.js" defer></script>
@@ -221,7 +226,7 @@
                              class="w-20 h-20 rounded-full mb-6 object-cover">
                     </picture>
                     <h3 class="text-xl font-bold mb-3">2. Connect Tools &amp; Set SMART Goals</h3>
-                    <p class="text-gray-600">Securely plug your assistant into the apps you already use (Facebook, Instagram, LinkedIn, Gmail, Outlook, and <a href="connections.html" class="font-semibold text-emerald-700 underline">more</a>). Tell them exactly what to achieve—like &ldquo;Increase qualified leads by 50% this month&rdquo;—with built-in SMART Goals.</p>
+                    <p class="text-gray-600">Securely plug your assistant into the apps you already use (Facebook, Instagram, LinkedIn, Gmail, Outlook, and <a href="connections.html" class="font-semibold text-emerald-700 underline">more connections</a>). Tell them exactly what to achieve—like &ldquo;Increase qualified leads by 50% this month&rdquo;—with built-in SMART Goals.</p>
                 </div>
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
                     <picture>

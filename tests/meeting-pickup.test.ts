@@ -216,6 +216,37 @@ await test('transcript not ready: waits without using an attempt, nothing charge
     assert.ok(r.leaseUntil && r.leaseUntil > d.now(), 'not due again until the back-off passes');
 });
 
+await test('finished transcript with nobody speaking: skipped at once as nobody_spoke, no model, no charge (not a 24 h wait)', async () => {
+    const { store, rows, id } = await oneFound();
+    const src = fakeSource({ transcript: { lines: [], finished: 'complete' } });
+    const { d, log } = deps(store, src);
+    assert.equal(await writeImport(id, d), 'skipped_nobody_spoke');
+    const r = rows.get(id)!;
+    assert.deepEqual([r.status, r.skipReason, log.written.length, log.charged.length, log.capacityAsked], ['skipped', 'nobody_spoke', 0, 0, 0]);
+    assert.equal(await writeImport(id, d), 'not_claimed', 'never picked up again');
+});
+
+await test('finished transcript of only empty lines counts as nobody speaking', async () => {
+    const { store, rows, id } = await oneFound();
+    const src = fakeSource({ transcript: { lines: [{ speaker: 'Ana', text: '   ' }], finished: 'complete' } });
+    assert.equal(await writeImport(id, deps(store, src).d), 'skipped_nobody_spoke');
+    assert.equal(rows.get(id)!.skipReason, 'nobody_spoke');
+});
+
+await test('transcript the platform says FAILED: skipped at once as no_transcript', async () => {
+    const { store, rows, id } = await oneFound();
+    const src = fakeSource({ transcript: { lines: [], finished: 'failed' } });
+    assert.equal(await writeImport(id, deps(store, src).d), 'skipped_no_transcript');
+    assert.equal(rows.get(id)!.skipReason, 'no_transcript');
+});
+
+await test('empty transcript NOT marked finished (picked-up platforms): still waits, as before', async () => {
+    const { store, rows, id } = await oneFound();
+    const src = fakeSource({ transcript: { lines: [] } });
+    assert.equal(await writeImport(id, deps(store, src).d), 'waiting_for_transcript');
+    assert.equal(rows.get(id)!.status, 'found');
+});
+
 await test('no transcript after 24 h: skipped', async () => {
     const m = memStore();
     const src = fakeSource({ meetings: [meeting('conferenceRecords/old', 25 * 60)], transcript: null });

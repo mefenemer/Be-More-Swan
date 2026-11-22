@@ -1539,7 +1539,10 @@
     const wrap = document.createElement('div');
     const data = record.data || {};
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    const sourcePill = window.DisruptiveUIRegistry && window.DisruptiveUIRegistry.meetingSourcePillHtml
+      ? window.DisruptiveUIRegistry.meetingSourcePillHtml(data) : '';
     wrap.innerHTML = `
+      ${sourcePill ? `<div class="mb-3">${sourcePill}</div>` : ''}
       ${data.meetingSummary ? `<p class="text-sm text-gray-700 whitespace-pre-line mb-4">${esc(data.meetingSummary)}</p>` : ''}
       ${tasks.length ? `
         <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Action items</p>

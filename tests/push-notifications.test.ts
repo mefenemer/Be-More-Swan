@@ -154,8 +154,8 @@ check('the service worker is at the site ROOT', () => {
 });
 
 check('the app manifest is installable, and is not the favicon icon set', () => {
-    // favicon/manifest.json has icons and nothing else — no start_url, no display — so a browser
-    // will not offer to install it, and without installation iOS never delivers a push.
+    // start_url + display are what make a browser offer to install, and without installation iOS
+    // never delivers a push. (The icon-only favicon/manifest.json lacked both; deleted 2026-11-22.)
     const m = JSON.parse(read('manifest.webmanifest'));
     assert.ok(m.start_url, 'start_url is required for installability');
     assert.equal(m.display, 'standalone');

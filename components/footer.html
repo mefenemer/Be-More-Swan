@@ -1,4 +1,14 @@
 <!-- Consistent Footer -->
+<!-- Phone tap targets (2026-11-22): the stacked footer links were 18px tall with 8px between them, so
+     Lighthouse failed 59% of the page's tap targets on them alone. Below 640px each link is a full 48px
+     row. A <style> here because this file is innerHTML-injected (styles apply, scripts would not) and
+     the prebuilt style.css has no utility for it — same pattern as components/nav.html. -->
+<style>
+  @media (max-width: 639px) {
+    .bms-footer-links > li { margin-block: 0 !important; }
+    .bms-footer-links a { display: flex; align-items: center; min-height: 48px; }
+  }
+</style>
 <footer class="bg-gray-900 text-gray-400 py-12 mt-auto">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -25,7 +35,7 @@
       </div>
       <div>
         <h4 class="font-bold text-white mb-4" data-i18n="footer.platform">Platform</h4>
-        <ul class="space-y-2 text-sm">
+        <ul class="bms-footer-links space-y-2 text-sm">
           <li><a href="/how-it-works.html" class="hover:text-emerald-400 transition" data-i18n="footer.how_it_works">How it Works</a></li>
           <li><a href="/assistants.html" class="hover:text-emerald-400 transition" data-i18n="footer.assistant_library">Meet the Assistants</a></li>
           <li><a href="/connections.html" class="hover:text-emerald-400 transition" data-i18n="footer.connections">Connections</a></li>
@@ -47,7 +57,7 @@
       </div>
       <div>
         <h4 class="font-bold text-white mb-4" data-i18n="footer.legal">Legal</h4>
-        <ul class="space-y-2 text-sm">
+        <ul class="bms-footer-links space-y-2 text-sm">
           <li><a href="/privacy.html" class="hover:text-emerald-400 transition" data-i18n="footer.privacy_policy">Privacy Policy</a></li>
           <li><a href="/terms_of_service.html" class="hover:text-emerald-400 transition" data-i18n="footer.terms_of_service">Terms of Service</a></li>
           <li><a href="/trust.html" class="hover:text-emerald-400 transition" data-i18n="footer.trust_security">Trust &amp; Security</a></li>

@@ -27,8 +27,8 @@ self.addEventListener('push', (event) => {
     const title = data.title || 'Be More Swan';
     const options = {
         body: data.body || 'You have a new notification.',
-        // Real files — favicon/manifest.json references a set of android-icon-*.png that are NOT
-        // in the repo, so anything copied from there 404s and the notification renders iconless.
+        // Real files only — the old favicon/manifest.json (deleted 2026-11-22) listed android-icon-*.png
+        // that were never in the repo, and an icon that 404s renders the notification iconless.
         icon: '/favicon/web-app-manifest-192x192.png',
         badge: '/favicon/favicon-96x96.png',
         // Two alerts sharing a tag replace each other rather than stacking — right for a

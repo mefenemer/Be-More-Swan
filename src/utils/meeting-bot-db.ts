@@ -475,8 +475,11 @@ export function meetingBotSource(db: Db): MeetingSource {
             const row = await loadBotByRecallId(db, id.region, id.recallBotId);
             if (!row || row.organisationId !== account.organisationId) return null;
             const t = await fetchRecallTranscript(id.region, id.recallBotId);
+            // Recall's transcript is made once, when the bot is done: ready = finished (empty = nobody spoke),
+            // none = it failed. Either way the writer stops at once instead of waiting a day.
+            if (t.state === 'none') return { lines: [], finished: 'failed' };
             if (t.state !== 'ready') return null;
-            return { lines: t.lines, attendees: t.attendees };
+            return { lines: t.lines, attendees: t.attendees, finished: 'complete' };
         },
     };
 }
@@ -486,7 +489,7 @@ export async function chargeBotMeeting(db: Db, organisationId: number, assistant
     const [row] = await db.select().from(meetingBots)
         .where(and(eq(meetingBots.importId, importId), eq(meetingBots.organisationId, organisationId))).limit(1);
     if (!row) return;
-    const minutes = row.minutesInCall ?? minutesInCall(row.joinedAt, row.leftAt);
+    const minutes = row.minutesInCall ?? minutesInCall(row.joinedAt, row.leftAt, row.statusReason);
     const units = chargeUnits(minutes, (await getTaskCosts()).weights.meeting_bot_call);
     if (units > 0) await recordCompletedWork(db, organisationId, 'meeting_bot_call', { units, ref: `meeting_bot:${row.id}`, assistantId });
     await deleteBotMedia(db, row).catch(() => false);

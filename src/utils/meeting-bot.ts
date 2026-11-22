@@ -120,10 +120,18 @@ export function cleanJoinAt(raw: unknown, now: Date): JoinAtResult {
     return { ok: true, joinAt: t, scheduled: true };
 }
 
-/** Whole minutes from joining to leaving, rounded up. Pure. */
-export function minutesInCall(joinedAt: Date | null, leftAt: Date | null): number {
+/** Recall's leave reason when the bot left because everyone else had gone (after ALONE_TIMEOUT_S on its own). */
+const EVERYONE_LEFT_REASON = /everyone_left/i;
+
+/**
+ * Whole minutes from joining to leaving, rounded up: the minutes that are charged. When the bot left because everyone
+ * else had gone, Recall kept it in the empty call for ALONE_TIMEOUT_S first; that wait is not charged (owner,
+ * 2026-11-22: a 4-minute call must not become 6). Pure.
+ */
+export function minutesInCall(joinedAt: Date | null, leftAt: Date | null, leaveReason?: string | null): number {
     if (!joinedAt || !leftAt) return 0;
-    const ms = leftAt.getTime() - joinedAt.getTime();
+    let ms = leftAt.getTime() - joinedAt.getTime();
+    if (leaveReason && EVERYONE_LEFT_REASON.test(leaveReason)) ms -= ALONE_TIMEOUT_S * 1000;
     return ms > 0 ? Math.ceil(ms / 60_000) : 0;
 }
 
@@ -216,14 +224,17 @@ export function nextBotState(row: BotStateRow, code: string, subCode: string | n
             }
             // Removed by the host after joining: what was heard is still written up (plan §6); the call_ended reason stays.
             const leftAt = left();
-            return { ...base, status: 'done', statusReason: reason ?? base.statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
+            const statusReason = reason ?? base.statusReason;
+            // call_ended carries the leave reason; a 'done' with its own sub-code must not hide it.
+            return { ...base, status: 'done', statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt, `${reason ?? ''} ${base.statusReason ?? ''}`) };
         }
         case 'fatal': {
             if (isFinal && row.status !== 'removed') return null;
             if (row.joinedAt) {
                 // It got some of the call: treat like an early end, so what was heard can still be written up.
                 const leftAt = left();
-                return { ...base, status: 'done', statusReason: reason ?? 'fatal', leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt) };
+                const statusReason = reason ?? 'fatal';
+                return { ...base, status: 'done', statusReason, leftAt, minutesInCall: minutesInCall(row.joinedAt, leftAt, `${reason ?? ''} ${base.statusReason ?? ''}`) };
             }
             const status: BotStatus = WAITING_ROOM_REASON.test(reason ?? '') ? 'not_admitted' : REMOVED_REASON.test(reason ?? '') ? 'removed' : 'failed';
             return { ...base, status, statusReason: reason ?? 'fatal', leftAt: left() };
@@ -336,6 +347,23 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
 // ── Recall's transcript ──────────────────────────────────────────────────────────────────────────
 
 export interface BotTranscriptLine { speaker: string | null; text: string }
+
+/**
+ * Whether a downloaded transcript is FINAL (review of #804): only when Recall's transcript status is 'done' AND the body
+ * really is a transcript (an array of blocks that each have `words`). Then an empty one means nobody spoke. Anything else (still processing, an error
+ * object, a changed format) is 'not_ready', so the writer keeps its 24-hour wait rather than say "nobody spoke". Pure.
+ */
+export function readRecallTranscript(status: string | null, body: unknown): { state: 'ready'; lines: BotTranscriptLine[] } | { state: 'not_ready' } {
+    if (status !== 'done' || !Array.isArray(body)) return { state: 'not_ready' };
+    // Every block must look like Recall's ({ words: [...] }); a renamed field would otherwise read as "nobody spoke".
+    if (!body.every((b) => b && typeof b === 'object' && Array.isArray((b as { words?: unknown }).words))) return { state: 'not_ready' };
+    const lines = recallTranscriptLines(body);
+    // "Nobody spoke" only when there were no words at all. Words we couldn't read (a renamed `text`, any deeper change)
+    // are not silence: keep waiting.
+    const words = body.reduce((n: number, b) => n + ((b as { words: unknown[] }).words.length), 0);
+    if (!lines.length && words > 0) return { state: 'not_ready' };
+    return { state: 'ready', lines };
+}
 
 /** Recall's transcript download, [{ participant: { name }, words: [{ text }] }], as lines. Pure. */
 export function recallTranscriptLines(json: unknown): BotTranscriptLine[] {
