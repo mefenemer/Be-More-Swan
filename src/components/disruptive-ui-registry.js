@@ -4816,6 +4816,24 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // Notion, Jira/Asana tickets) as approving in the Inbox, and only then. It used to post the
   // UNAPPROVED summary straight to Slack or Notion. No recordId (an older transcript) = no button;
   // the Inbox link under the card is the way in.
+  // Where a meeting's minutes came from (data.pickedUpFrom, server-owned: src/utils/meeting-pickup.ts pickedUpFrom()).
+  // via 'bot' = the Note Taker joined the call itself; otherwise it read the platform's own transcript. '' when the
+  // minutes came from a pasted or uploaded transcript. Shared by this card (Inbox + chat) and the Meeting Notes tab
+  // (assistant-data-hub.js meetingDetail) so both say the same thing. Pure.
+  function meetingSourceLabel(data) {
+    const p = data && typeof data === 'object' ? data.pickedUpFrom : null;
+    if (!p || typeof p !== 'object') return '';
+    const platform = typeof p.label === 'string' ? p.label.trim().slice(0, 40) : '';
+    if (p.via === 'bot') return platform ? `Joined by the Note Taker · ${platform}` : 'Joined by the Note Taker';
+    return platform ? `Picked up from ${platform}` : '';
+  }
+  function meetingSourcePillHtml(data, esc) {
+    const label = meetingSourceLabel(data);
+    return label
+      ? `<span data-meeting-source class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-semibold text-emerald-800">${esc(label)}</span>`
+      : '';
+  }
+
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
@@ -4890,6 +4908,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <div class="min-w-0">
           <p class="text-xs font-bold text-emerald-700 tracking-wider uppercase">Meeting Minutes</p>
           <p class="font-bold text-gray-900 truncate">Summary &amp; action items</p>
+          ${meetingSourceLabel(ui) ? `<div class="mt-1">${meetingSourcePillHtml(ui, esc)}</div>` : ''}
         </div>
       </div>
 
@@ -8063,5 +8082,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   window.DisruptiveUIRegistry = {
     register, has, render, escapeHtml,
     nextStepFooterHtml: (guidance) => nextStepFooter(guidance, escapeHtml),
+    meetingSourceLabel,
+    meetingSourcePillHtml: (data) => meetingSourcePillHtml(data, escapeHtml),
   };
 })();
