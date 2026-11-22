@@ -516,7 +516,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'Your Partner Assistant has your first-week plan ready.',
         bodyHtml: greet +
             p('Welcome to the partner team — your application is approved.') +
-            p('From today you earn {{partner.rate_line | "commission"}} when someone you invite becomes a paying customer.') +
+            p('From today you earn {{partner.rate_line | "commission on every customer you invite"}}. It starts when someone you invite first pays.') +
             p('Your Partner page has your personal invite link and a short first-week plan. Your Partner Assistant is there too: it writes posts, emails and scripts in your voice (with your link and an ad label added), answers what you’ve earned, and tells you what to do next.') +
             button('Meet your Partner Assistant', 'link.action_url') + signoff,
     },

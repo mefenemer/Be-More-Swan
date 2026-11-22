@@ -392,7 +392,8 @@
     try {
       await post({ action: 'accept_terms' });
       show('pt-terms-banner', false);
-      if (data.partnerTerms) { data.partnerTerms.accepted = true; markStepLocally('terms'); render(); }   // the payout note changes
+      // Reload: the payout note, the list, the greeting and the starters all change once the Terms are accepted.
+      await load();
       window.showToast?.('Thanks — the Partner Terms are accepted.');
     } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); btn.disabled = false; }
   }
@@ -424,7 +425,13 @@
   function chatRender() {
     const log = document.getElementById('pa-log');
     if (!log) return;
-    show('pa-starters', chat.turns.length === 0);
+    // Until the current Terms are accepted the assistant answers nothing (partner-assistant.ts 403), so the box
+    // says so, and no starter invites a message that would bounce (review of #813).
+    const locked = !!data?.partnerTerms && !data.partnerTerms.accepted;
+    show('pa-starters', chat.turns.length === 0 && !locked);
+    const input = document.getElementById('pa-input');
+    input.disabled = locked; document.getElementById('pa-send').disabled = locked || chat.busy;
+    input.placeholder = locked ? 'Accept the Partner Terms (step 1 above) to start' : 'e.g. Write an Instagram caption for my coaching clients';
     // Starters that follow their progress (partner-onboarding.ts startersFor); the static ones are the fallback.
     const starters = data?.onboarding?.starters;
     if (starters?.length && chat.turns.length === 0) {

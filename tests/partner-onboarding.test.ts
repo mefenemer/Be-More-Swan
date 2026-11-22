@@ -97,15 +97,27 @@ check('starters follow her funnel: no visits → first post; visits → why no s
     assert.strictEqual(at({ clicks_all: 9, signups: 0, paying: 0 }), 'Why no sign-ups yet?');
     assert.strictEqual(at({ clicks_all: 9, signups: 2, paying: 0 }), 'My sign-ups are in trial');
     assert.strictEqual(at({ clicks_all: 9, signups: 2, paying: 1 }), 'What should I do next?');
-    assert.strictEqual(startersFor(buildChecklist(none), none.stats)[0].label, 'What’s in the Terms?');
-    assert.ok(startersFor(buildChecklist(none), none.stats).length <= 5);
+    assert.ok(startersFor(buildChecklist({ ...base, stats: { clicks_all: 0, signups: 0, paying: 0 } }), null).length <= 5);
 });
 
-check('D7: 100 messages in the first 30 days after approval, then 50', () => {
+check('Terms not accepted → no starters and no "where would you like to start?" (the assistant would refuse; review of #813)', () => {
+    assert.deepStrictEqual(startersFor(buildChecklist(none), none.stats), []);
+    const g = welcomeGreeting({ firstName: 'Angela', businessName: null, terms: angela, planPriceGbp: 79, steps: buildChecklist(none) });
+    assert.ok(!g.includes('Where would you like to start?'));
+    assert.ok(g.includes('Once you’ve accepted the Partner Terms (step 1 on your first-week list)'));
+    const page = read('partner-content.html');
+    assert.ok(page.includes("input.disabled = locked;"), 'the chat box is locked until then');
+    assert.ok(read('netlify/functions/partner-assistant.ts').includes('it’s step 1 of your first-week list'), 'the 403 points at the list, not a hidden banner');
+});
+
+check('D7: 100 messages in the first 30 days from their FIRST message, then 50 — not from decided_at, which status changes reset', () => {
     const now = new Date('2026-11-22T12:00:00Z');
     assert.strictEqual(partnerAssistantLimit(new Date('2026-11-20T12:00:00Z'), now), ASSISTANT_LIMIT_FIRST_MONTH);
     assert.strictEqual(partnerAssistantLimit(new Date('2026-10-01T12:00:00Z'), now), ASSISTANT_LIMIT_AFTER);
-    assert.strictEqual(partnerAssistantLimit(null, now), ASSISTANT_LIMIT_AFTER);
+    assert.strictEqual(partnerAssistantLimit(null, now), ASSISTANT_LIMIT_FIRST_MONTH, 'no start yet = this is the first message');
+    const src = read('netlify/functions/partner-assistant.ts');
+    assert.ok(!src.includes('partnerAssistantLimit(p.decidedAt'));
+    assert.ok(src.includes("COALESCE(${partners.onboarding}->>'assistant_started_at'"), 'written once');
     assert.strictEqual(ASSISTANT_LIMIT_FIRST_MONTH, 100);
     assert.strictEqual(ASSISTANT_LIMIT_AFTER, 50);
 });
@@ -145,7 +157,9 @@ check('my_results reads ONLY the partner’s own workspace and user row', () => 
     assert.ok(block.length > 0);
     assert.strictEqual((block.match(/organisation_id = \$\{orgId\}/g) || []).length, 3);
     assert.ok(block.includes('WHERE id = ${userId}'));
-    assert.ok(block.includes('if (!orgId) return { hasWorkspace: false'));
+    assert.ok(block.includes('if (!orgId || !ownsWorkspace) return { hasWorkspace: false'));
+    assert.ok(src.includes("CASE WHEN ${userOrganisations.role} = 'owner' THEN 0 ELSE 1 END"), 'their own workspace first');
+    assert.ok(read('netlify/functions/partner-hub.ts').includes("eq(userOrganisations.role, 'owner')"), 'greeting names only a business they own');
 });
 
 check('first draft ticks the list; page marks are whitelisted and only touch her own row', () => {
@@ -165,7 +179,7 @@ check('approval: email opens the Partner page with the rate; bell notification e
     assert.ok(apps.includes("/workspace.html?view=partner"));
     const email = read('src/utils/email-templates-catalog.ts');
     assert.ok(email.includes("button('Meet your Partner Assistant', 'link.action_url')"));
-    assert.ok(email.includes('{{partner.rate_line | "commission"}}'));
+    assert.ok(email.includes('{{partner.rate_line | "commission on every customer you invite"}}'));
     const n = getNotificationDefault('partner_approved');
     assert.ok(n && n.type === 'referral_reward');
     assert.ok(read('notifications.js').includes("meta.action === 'partner_page'"), 'action opens the Partner page');
@@ -177,7 +191,9 @@ check('SQL file and schema mirror agree on partners.onboarding', () => {
 });
 
 check('sidebar keeps the Partner page for ended partners (their earnings + payout details)', () => {
-    assert.ok(read('workspace.html').includes("['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)"));
+    const ws = read('workspace.html');
+    assert.ok(ws.includes("['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)"));
+    assert.ok(ws.includes("partnerStatus === 'approved' || partnerStatus === 'suspended' || partnerStatus === 'ended';"), 'and never hard-gated by the plan picker');
 });
 
 console.log(`\n${passed} passed`);

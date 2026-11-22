@@ -79,7 +79,8 @@ export default withLambda(async (event) => {
                 .where(and(eq(masterPlans.isActive, true), gt(masterPlans.monthlyPriceGbp, sql`0`))).orderBy(asc(masterPlans.monthlyPriceGbp)).limit(1);
             const [org] = await db.select({ name: organisations.name }).from(userOrganisations)
                 .innerJoin(organisations, eq(organisations.id, userOrganisations.organisationId))
-                .where(eq(userOrganisations.userId, userId)).limit(1);
+                .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.role, 'owner')))
+                .orderBy(asc(userOrganisations.organisationId)).limit(1);   // their OWN business, never one they only work in
             onboarding = {
                 steps, folded: checklistFolded(steps, marks), starters: startersFor(steps, stats),
                 greeting: welcomeGreeting({
@@ -153,7 +154,7 @@ export default withLambda(async (event) => {
         }
         return json(200, { ok: true });
     }
-        if (body.action === 'cancel_payout_change') {
+    if (body.action === 'cancel_payout_change') {
         await cancelPayoutChange(db, p.id);
         return json(200, { ok: true });
     }

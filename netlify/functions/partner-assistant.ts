@@ -113,7 +113,7 @@ export default withLambda(async (event) => {
     const p = await loadContext(db, userId);
     if (!p || (p.status !== 'approved' && p.status !== 'suspended')) return json(403, { error: 'The Partner Assistant is for approved partners.' });
     // The Terms hold the rules for promoting us (labelling ads, no spam) — no drafting before they're accepted.
-    if (!hasAcceptedCurrentTerms(p.termsVersion)) return json(403, { error: 'Please accept the Partner Terms at the top of this page first. They include the rules for promoting Be More Swan.' });
+    if (!hasAcceptedCurrentTerms(p.termsVersion)) return json(403, { error: 'Please accept the Partner Terms first — it’s step 1 of your first-week list on this page (or the banner at the top, if you’ve hidden the list). They include the rules for promoting Be More Swan.' });
 
     let body: { messages?: Array<{ role?: unknown; content?: unknown }> };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request.' }); }
@@ -125,16 +125,28 @@ export default withLambda(async (event) => {
     if (!history.length || history[history.length - 1].role !== 'user') return json(400, { error: 'Ask a question first.' });
 
     // Free, capped (owner decisions): 100 messages in the first 30 days after approval, then 50 in any 30 days.
-    const limit = partnerAssistantLimit(p.decidedAt ?? null);
+    const startedAt = (p.onboarding as { assistant_started_at?: string } | null)?.assistant_started_at;
+    const limit = partnerAssistantLimit(startedAt ? new Date(startedAt) : null);
     const { allowed } = await checkRateLimit(db, 'partner_assistant', `partner:${p.id}`, { ...PARTNER_ASSISTANT_LIMIT, maxAttempts: limit });
+    if (!startedAt) {   // the first-month clock starts once, at their first message
+        await db.update(partners).set({ onboarding: sql`${partners.onboarding} || jsonb_build_object('assistant_started_at', COALESCE(${partners.onboarding}->>'assistant_started_at', ${new Date().toISOString()}::text))` })
+            .where(eq(partners.id, p.id)).catch((err) => console.error('[partner-assistant] start mark failed (non-blocking):', err));
+    }
     if (!allowed) return json(429, { error: `You’ve used this month’s ${limit} Partner Assistant messages. They top up as the month rolls on — your link and numbers on this page keep working.` });
 
     const code = await ensureReferralCode(db, userId);
     const inviteUrl = code ? `${baseUrl()}/invite/${code}` : null;
     const partnerCode = p.status === 'approved' ? p.promoCode : null;
     const [u] = await db.select({ firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
-    const [membership] = await db.select({ orgId: userOrganisations.organisationId }).from(userOrganisations).where(eq(userOrganisations.userId, userId)).limit(1);
+    // Their OWN workspace: one they own first. A partner who is only a team member elsewhere must not get
+    // that business's name or counts as "your results" (review of #813).
+    const [membership] = await db.select({ orgId: userOrganisations.organisationId }).from(userOrganisations)
+        .where(eq(userOrganisations.userId, userId))
+        .orderBy(sql`CASE WHEN ${userOrganisations.role} = 'owner' THEN 0 ELSE 1 END`, asc(userOrganisations.organisationId)).limit(1);
     const orgId = membership?.orgId ?? null;
+    const [own] = orgId ? await db.select({ role: userOrganisations.role }).from(userOrganisations)
+        .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.organisationId, orgId))).limit(1) : [];
+    const ownsWorkspace = own?.role === 'owner';
     const team = orgId ? await db.select({ id: aiAssistants.id, name: aiAssistants.name, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).innerJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
         .where(and(eq(aiAssistants.organisationId, orgId), eq(aiAssistants.isActive, true))) : [];
@@ -171,7 +183,8 @@ export default withLambda(async (event) => {
                 if (!orgId) return { hasWorkspace: false, firstName: u?.firstName ?? null };
                 const [org] = await db.select({ name: organisations.name, industry: organisations.industry, websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
                 return {
-                    hasWorkspace: true, firstName: u?.firstName ?? null, business: org ?? null,
+                    // Only a business they OWN is "their business"; as a team member elsewhere they can still hand off.
+                    hasWorkspace: true, firstName: u?.firstName ?? null, business: ownsWorkspace ? org ?? null : null,
                     products: await loadProductsBlock(db, orgId, org?.name).catch(() => null),
                     assistants: team.filter((a) => a.roleKey in HANDOFF_ROLES).map((a) => ({ role: a.roleKey, name: a.name })),
                 };
@@ -181,7 +194,7 @@ export default withLambda(async (event) => {
                 return (PLAYBOOK_TOPICS as readonly string[]).includes(topic) ? PARTNER_PLAYBOOK[topic] : { problem: 'Unknown topic.', topics: PLAYBOOK_TOPICS };
             }
             case 'my_results': {
-                if (!orgId) return { hasWorkspace: false, note: 'No workspace — do not suggest a personal results story; recommend from the facts instead.' };
+                if (!orgId || !ownsWorkspace) return { hasWorkspace: false, note: 'No workspace of their own — do not suggest a personal results story; recommend from the facts instead.' };
                 const [r] = (await db.execute(sql`
                     SELECT
                       (SELECT COUNT(*) FROM scheduled_posts WHERE organisation_id = ${orgId} AND published_at IS NOT NULL)::int AS social_posts_published,

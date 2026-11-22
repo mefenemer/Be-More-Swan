@@ -10,7 +10,7 @@
 import { commissionPence } from './partner-rate-periods';
 
 export interface PartnerTermsNow { rateBps: number; costDeductionBps: number; durationMonths: number | null }
-export interface OnboardingMarks { link_copied_at?: string; first_draft_at?: string; dismissed_at?: string }
+export interface OnboardingMarks { link_copied_at?: string; first_draft_at?: string; dismissed_at?: string; assistant_started_at?: string }
 export interface OnboardingStats { clicks_all?: number; signups?: number; paying?: number }
 
 export type StepKey = 'terms' | 'payout' | 'first_draft' | 'share' | 'first_visit' | 'first_signup' | 'first_paying';
@@ -74,8 +74,10 @@ export interface Starter { label: string; prompt: string }
 export function startersFor(steps: OnboardingStep[], stats: OnboardingStats | null): Starter[] {
     const done = (k: StepKey) => !!steps.find((s) => s.key === k)?.done;
     const s = stats || {};
+    // The assistant refuses every message until the current Terms are accepted (partner-assistant.ts 403), so
+    // no starter is offered before then — the page shows "accept step 1 first" instead (review of #813).
+    if (!done('terms')) return [];
     const out: Starter[] = [];
-    if (!done('terms')) out.push({ label: 'What’s in the Terms?', prompt: 'In plain English, what do the Partner Terms ask of me when I promote Be More Swan?' });
     if (!done('first_draft') || !Number(s.clicks_all || 0)) out.push({ label: 'Write my first post', prompt: 'Help me write my first post about how I use Be More Swan, in my own voice.' });
     else if (!Number(s.signups || 0)) out.push({ label: 'Why no sign-ups yet?', prompt: 'People are visiting my link but nobody has signed up yet. What should I change?' });
     else if (!Number(s.paying || 0)) out.push({ label: 'My sign-ups are in trial', prompt: 'I have sign-ups but nobody paying yet — they are probably in the free trial. What can I do now?' });
@@ -104,13 +106,20 @@ export function welcomeGreeting(input: {
     const plan = todo.length
         ? `Here’s your plan for this week:\n${todo.slice(0, 3).map((t, i) => `${i + 1}. ${t[0].toUpperCase()}${t.slice(1)}`).join('\n')}`
         : 'Your setup is done. Ask me for a 30-day plan, a post, an email to your list or a demo script — or what to do next from your numbers.';
-    return `${hi} ${earn}\n\n${plan}\n\nI write in your voice and always add your link and an ad label. Where would you like to start?`;
+    const close = done('terms')
+        ? 'I write in your voice and always add your link and an ad label. Where would you like to start?'
+        : 'Once you’ve accepted the Partner Terms (step 1 on your first-week list), I’m ready to help — I write in your voice and always add your link and an ad label.';
+    return `${hi} ${earn}\n\n${plan}\n\n${close}`;
 }
 
-/** D7: 100 messages in the first 30 days after approval, then 50 in any 30 days. */
+/**
+ * D7: 100 messages in the first 30 days, then 50 in any 30 days. The month starts at their FIRST
+ * message (onboarding.assistant_started_at, written once) — not partners.decided_at, which every
+ * suspend / reinstate / re-approve resets and would hand out another 100 (review of #813).
+ */
 export const ASSISTANT_LIMIT_FIRST_MONTH = 100;
 export const ASSISTANT_LIMIT_AFTER = 50;
-export function partnerAssistantLimit(approvedAt: Date | null, now = new Date()): number {
-    if (!approvedAt) return ASSISTANT_LIMIT_AFTER;
-    return now.getTime() - approvedAt.getTime() < 30 * 86_400_000 ? ASSISTANT_LIMIT_FIRST_MONTH : ASSISTANT_LIMIT_AFTER;
+export function partnerAssistantLimit(startedAt: Date | null, now = new Date()): number {
+    if (!startedAt || Number.isNaN(startedAt.getTime())) return ASSISTANT_LIMIT_FIRST_MONTH;   // this is their first message
+    return now.getTime() - startedAt.getTime() < 30 * 86_400_000 ? ASSISTANT_LIMIT_FIRST_MONTH : ASSISTANT_LIMIT_AFTER;
 }
