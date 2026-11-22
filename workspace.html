@@ -905,6 +905,10 @@ window.showComplianceModals = function showComplianceModals(force) {
           class="btn-primary flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition cursor-pointer">Add</button>
         <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
           class="btn-primary flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition cursor-pointer">Replace with this</button>
+        <!-- Formats that hold several pictures (a Document carousel, an Instagram carousel, an X image grid):
+             the ticked pictures become the post's slides, in the order they were ticked. -->
+        <button type="button" id="gp-ai-own-slides" onclick="window._pceOwnUseAsSlides()"
+          class="hidden btn-primary flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition cursor-pointer disabled:opacity-50">Use these</button>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -13314,6 +13318,29 @@ function _pceOpenInlineCaption() {
     const hint = document.createElement('p');
     hint.className = 'text-[10px] text-gray-400 mt-1';
     hint.textContent = 'Click away to save · Esc to cancel';
+    // Say WHERE it saves. An edit applies to every destination by default (post-review-amend-all-cb,
+    // seeded true per post) — but that checkbox lives in the side panel, so typing the carousel's
+    // caption here silently rewrote the Feed post's too (2026-11-19). The scope is shown on the box
+    // being typed in, with the one-click way to keep it to this destination.
+    const allCb = _pceEl('post-review-amend-all-cb');
+    if (_rqReviewGroupIds.length > 1 && allCb) {
+        const paintScope = () => {
+            const n = _rqReviewGroupIds.length;
+            hint.innerHTML = allCb.checked
+                ? `Saves to all ${n} destinations · <button type="button" data-pce-caption-scope="one" class="underline font-semibold">only this one</button> · Esc to cancel`
+                : `Saves to this destination only · <button type="button" data-pce-caption-scope="all" class="underline font-semibold">all ${n}</button> · Esc to cancel`;
+        };
+        paintScope();
+        // mousedown, not click: the textarea saves on blur, and a click would commit before the scope changed.
+        hint.addEventListener('mousedown', (ev) => {
+            const b = ev.target.closest('[data-pce-caption-scope]');
+            if (!b) return;
+            ev.preventDefault();
+            allCb.checked = b.getAttribute('data-pce-caption-scope') === 'all';
+            paintScope();
+            ta.focus();
+        });
+    }
 
     host.innerHTML = '';
     host.appendChild(ta);
@@ -13689,12 +13716,27 @@ function _pceSyncOwnSelection() {
     const rep = document.getElementById('gp-ai-own-replace');
     const n = _pceOwnPicked.length;
     const canAdd = _pceCanAddClip();
+    const slides = _pceOwnSlideLimits();
+    // Several pictures ticked on a format that holds several (a carousel or grid): they become its
+    // slides. Without this the bar stayed hidden — "Add" is for video clips, "Replace" for one
+    // picture — so a Document carousel could not be built from the library at all (2026-11-19).
+    const canSlides = !!slides && !_pcePickerAddOnly && n > 1;
     // Replacing is one picture's job — with several ticked there is no single answer to "with
     // what" — and it needs something to replace.
     const canReplace = !_pcePickerAddOnly && n === 1 && (!canAdd || _pceHasClipToAddTo());
     // An empty bar is worse than no bar: two tiles ticked used to show a blank strip, because both
     // buttons were hidden and nothing said why.
-    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace));
+    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace && !canSlides));
+    const sl = document.getElementById('gp-ai-own-slides');
+    if (sl) {
+        sl.classList.toggle('hidden', !canSlides);
+        if (canSlides) {
+            const over = n > slides.max;
+            sl.disabled = over;
+            sl.textContent = over ? `${slides.max} pictures at most` : `Use these ${n} pictures`;
+            sl.title = over ? `This format takes up to ${slides.max} pictures. Untick ${n - slides.max}.` : 'They go in the order you ticked them.';
+        }
+    }
     if (add) {
         add.classList.toggle('hidden', !canAdd);
         add.textContent = n === 1 ? 'Add' : `Add ${n} clips`;
@@ -13710,6 +13752,37 @@ window._pceOwnAdd = async function () {
     await _pceAppendClipAssets(ids.map(id => ({ id, name: (_pceOwnAssets[id] || {}).name, url: (_pceOwnAssets[id] || {}).url })));
     _pceExitClipAddMode();
     _pceCloseMediaPicker();
+};
+
+/**
+ * The picture limits of the post's format when it holds several pictures (min/max from
+ * src/config/post-formats.ts via PlatformConstants), else null. Video-only formats and one-picture
+ * formats return null: those use Add / Replace.
+ */
+function _pceOwnSlideLimits() {
+    const post = _pcePickerPost();
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    if (!fmt || fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)) return null;
+    return { min: Number(fmt.min) || 0, max: Number(fmt.max) };
+}
+
+/** The ticked pictures become the post's slides, in tick order, through the one slide write path. */
+window._pceOwnUseAsSlides = async function () {
+    const slides = _pceOwnSlideLimits();
+    const ids = _pceOwnPicked.slice();
+    if (!slides || ids.length < 2 || ids.length > slides.max) return;
+    const post = _pcePickerPost();
+    if (!post || _rqReviewPostId == null || _rqPostCache[_rqReviewPostId] !== post) {
+        window.showToast?.('Open the post to add slides to it.');
+        return;
+    }
+    _pceOwnPicked = [];
+    _pceSyncOwnSelection();
+    _pceClipAddMode = false;
+    await _pcePersistSlides(ids);
+    // _pcePersistSlides reports its own failure and leaves the post as it was; close only if it took.
+    const now = new Set(_pceSlideIds(post));
+    if (ids.every(id => now.has(id))) _pceCloseMediaPicker();
 };
 
 window._pceOwnReplace = async function () {
