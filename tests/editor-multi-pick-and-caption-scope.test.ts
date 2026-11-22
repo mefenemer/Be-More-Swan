@@ -29,7 +29,7 @@ check('several ticked pictures on a multi-picture format show it; the bar is no 
     const sync = between('function _pceSyncOwnSelection() {', 'window._pceOwnAdd = async function');
     assert.ok(sync.includes('const canSlides = !!slides && !_pcePickerAddOnly && n > 1;'));
     assert.ok(sync.includes("bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace && !canSlides));"));
-    assert.ok(sync.includes('const over = n > slides.max;') && sync.includes('sl.disabled = over;'), 'over the format’s limit: disabled and says so');
+    assert.ok(sync.includes('const over = n > room;') && sync.includes('sl.disabled = over || pickedVideo;'), 'over the room left: disabled and says so');
 });
 
 check('multi-picture means an image/mixed format with max > 1 — never video or one-picture formats', () => {
@@ -39,12 +39,31 @@ check('multi-picture means an image/mixed format with max > 1 — never video or
     assert.match(consts, /"k":"li_document"[^}]*"m":"image"[^}]*"max":20/, 'a Document carousel qualifies');
 });
 
-check('"Use these" goes through the one slide write path, in tick order, and closes only when it took', () => {
+check('"Use these" ADDS after the existing slides (never replaces), in tick order, through the one write path', () => {
     const fn = between('window._pceOwnUseAsSlides = async function () {', 'window._pceOwnReplace = async function');
-    assert.ok(fn.includes('const ids = _pceOwnPicked.slice();'));
-    assert.ok(fn.includes('await _pcePersistSlides(ids);'));
-    assert.ok(fn.includes('if (ids.every(id => now.has(id))) _pceCloseMediaPicker();'));
-    assert.ok(fn.includes('ids.length > slides.max) return;'), 'never sends more than the format holds');
+    assert.ok(fn.includes('const existing = _pceSlideIds(post);'));
+    assert.ok(fn.includes('const additions = picked.filter(id => !existing.includes(id));'), 'no duplicates');
+    assert.ok(fn.includes('const wanted = existing.concat(additions);'), 'existing slides kept, additions after');
+    assert.ok(fn.includes('wanted.length > slides.max) return;'), 'never sends more than the format holds');
+    assert.ok(fn.includes('await _pcePersistSlides(wanted);'));
+});
+
+check('ticks are cleared and the picker closes only when the save really took, in order', () => {
+    const fn = between('window._pceOwnUseAsSlides = async function () {', 'window._pceOwnReplace = async function');
+    const save = fn.indexOf('await _pcePersistSlides(wanted);');
+    const clear = fn.indexOf('_pceOwnPicked = [];');
+    assert.ok(save > 0 && clear > save, 'selection kept until after the save');
+    assert.ok(fn.includes('now.every((id, i) => id === wanted[i])'), 'order checked, not just presence');
+});
+
+check('a picture-only format refuses ticked videos, and the room left is what counts', () => {
+    const sync = between('function _pceSyncOwnSelection() {', 'window._pceOwnAdd = async function');
+    assert.ok(sync.includes("slides.picturesOnly && _pceOwnPicked.some(id => (_pceOwnAssets[id] || {}).type === 'video')"));
+    assert.ok(sync.includes('const room = slides ? Math.max(0, slides.max - slides.have) : 0;'));
+    assert.ok(sync.includes('sl.disabled = over || pickedVideo;'));
+    const lim = between('function _pceOwnSlideLimits() {', 'window._pceOwnUseAsSlides = async function');
+    assert.ok(lim.includes("picturesOnly: fmt.m === 'image'"));
+    assert.ok(html.includes('_pceOwnAssets[a.id] = { name: a.name, url: thumb, type: a.assetType };'), 'the tile records its kind');
 });
 
 check('the inline caption box says where it saves and offers "only this one"', () => {

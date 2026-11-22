@@ -13720,6 +13720,8 @@ function _pceSyncOwnSelection() {
     // Several pictures ticked on a format that holds several (a carousel or grid): they become its
     // slides. Without this the bar stayed hidden — "Add" is for video clips, "Replace" for one
     // picture — so a Document carousel could not be built from the library at all (2026-11-19).
+    const pickedVideo = !!slides && slides.picturesOnly && _pceOwnPicked.some(id => (_pceOwnAssets[id] || {}).type === 'video');
+    const room = slides ? Math.max(0, slides.max - slides.have) : 0;
     const canSlides = !!slides && !_pcePickerAddOnly && n > 1;
     // Replacing is one picture's job — with several ticked there is no single answer to "with
     // what" — and it needs something to replace.
@@ -13731,10 +13733,14 @@ function _pceSyncOwnSelection() {
     if (sl) {
         sl.classList.toggle('hidden', !canSlides);
         if (canSlides) {
-            const over = n > slides.max;
-            sl.disabled = over;
-            sl.textContent = over ? `${slides.max} pictures at most` : `Use these ${n} pictures`;
-            sl.title = over ? `This format takes up to ${slides.max} pictures. Untick ${n - slides.max}.` : 'They go in the order you ticked them.';
+            const over = n > room;
+            sl.disabled = over || pickedVideo;
+            sl.textContent = pickedVideo ? 'Pictures only'
+                : over ? (room ? `Room for ${room} more` : `${slides.max} slides already`)
+                : (slides.have ? `Add these ${n} as slides` : `Use these ${n} pictures`);
+            sl.title = pickedVideo ? 'This format takes pictures, not video. Untick the video.'
+                : over ? `This format takes up to ${slides.max} slides and has ${slides.have}. Untick ${n - room}.`
+                : 'They go after the existing slides, in the order you ticked them.';
         }
     }
     if (add) {
@@ -13763,26 +13769,39 @@ function _pceOwnSlideLimits() {
     const post = _pcePickerPost();
     const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
     if (!fmt || fmt.m === 'video' || fmt.m === 'none' || !(Number(fmt.max) > 1)) return null;
-    return { min: Number(fmt.min) || 0, max: Number(fmt.max) };
+    const have = typeof _pceSlideIds === 'function' ? _pceSlideIds(post).length : 0;
+    return { min: Number(fmt.min) || 0, max: Number(fmt.max), have, picturesOnly: fmt.m === 'image' };
 }
 
-/** The ticked pictures become the post's slides, in tick order, through the one slide write path. */
+/**
+ * The ticked pictures are ADDED after the post's existing slides, in tick order, through the one slide
+ * write path — the same as the slide panel's "From your library" (it never replaces what is there).
+ * Ticks are kept until the save has really taken, so a failure leaves the selection to retry.
+ */
 window._pceOwnUseAsSlides = async function () {
     const slides = _pceOwnSlideLimits();
-    const ids = _pceOwnPicked.slice();
-    if (!slides || ids.length < 2 || ids.length > slides.max) return;
+    const picked = _pceOwnPicked.slice();
+    if (!slides || picked.length < 2) return;
+    if (slides.picturesOnly && picked.some(id => (_pceOwnAssets[id] || {}).type === 'video')) return;
     const post = _pcePickerPost();
     if (!post || _rqReviewPostId == null || _rqPostCache[_rqReviewPostId] !== post) {
         window.showToast?.('Open the post to add slides to it.');
         return;
     }
-    _pceOwnPicked = [];
-    _pceSyncOwnSelection();
+    const existing = _pceSlideIds(post);
+    const additions = picked.filter(id => !existing.includes(id));
+    const wanted = existing.concat(additions);
+    if (!additions.length || wanted.length > slides.max) return;
     _pceClipAddMode = false;
-    await _pcePersistSlides(ids);
-    // _pcePersistSlides reports its own failure and leaves the post as it was; close only if it took.
-    const now = new Set(_pceSlideIds(post));
-    if (ids.every(id => now.has(id))) _pceCloseMediaPicker();
+    await _pcePersistSlides(wanted);
+    // _pcePersistSlides reports its own failure and leaves the post as it was. It took only if the
+    // post's slides are now exactly the list we sent, in that order.
+    const now = _pceSlideIds(post);
+    if (now.length === wanted.length && now.every((id, i) => id === wanted[i])) {
+        _pceOwnPicked = [];
+        _pceSyncOwnSelection();
+        _pceCloseMediaPicker();
+    }
 };
 
 window._pceOwnReplace = async function () {
@@ -22769,7 +22788,7 @@ async function gpAiUseOwn() {
             tick.style.background = 'rgba(255,255,255,.9)';
             tick.style.borderColor = '#d1d5db';
             cell.appendChild(tick);
-            _pceOwnAssets[a.id] = { name: a.name, url: thumb };
+            _pceOwnAssets[a.id] = { name: a.name, url: thumb, type: a.assetType };
             grid.appendChild(cell);
         });
         _pceSyncOwnSelection();
