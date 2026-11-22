@@ -19,6 +19,159 @@ developers.facebook.com/requests, and then they can connect. `request-meta-teste
 
 ---
 
+## Submission 3 (planned 2026-11-22): `pages_messaging` + `pages_manage_metadata` + `instagram_manage_messages`
+
+The Messages tab (docs/meta-messages-plan.md) is live on prod with `META_MESSAGING_ENABLED` **off**.
+It was proven on staging on 2026-11-21: real Messenger and Instagram replies were sent from the tab.
+All three permissions already have **Standard access** (App Review → Permissions and Features), and
+the **Messenger** product is added. This submission asks for **Advanced access** for all three, in
+**one** submission (owner decision D2).
+
+**Not requested:** the `HUMAN_AGENT` tag (D3), Meta ads, Threads. Don't tick anything else in the
+form. A stray tick once put `pages_user_gender` into a draft (2026-11-20; removed). Check the "New
+requests" list holds exactly these three before submitting.
+
+### What reviewers look for (from the 2026-11-02 rejection, still true)
+
+1. The complete Meta login and the permission **visibly granted**. Remove the app first (M4), or
+   Meta skips the permission screen.
+2. The feature used end to end, in one unbroken take: a message arrives, and the reply is seen
+   arriving **on the other person's screen**.
+3. English UI, with captions explaining each button.
+4. A statement that it is not server-to-server.
+
+### Before recording (on production)
+
+- **M1. Point Meta's webhooks at prod.** Meta dashboard → Webhooks → **Page** object and
+  **Instagram** object: callback `https://bemoreswan.com/.netlify/functions/meta-webhook`, verify
+  token = prod `META_WEBHOOK_VERIFY_TOKEN`. Keep the same fields: Page `messages`,
+  `messaging_postbacks`, `message_echoes`; Instagram `messages`, `messaging_postbacks`.
+  ⚠️ One app has one callback per object, so staging stops receiving from then on. That's expected.
+- **M2. Netlify prod env:** `META_WEBHOOK_VERIFY_TOKEN` (long random string, the same value as M1)
+  and `META_MESSAGING_ENABLED=true`, then **Trigger deploy**. Netlify only applies env changes on
+  the next deploy, and Meta's "Verify and save" in M1 fails with a 403 until that deploy is live,
+  so do M2 before M1's verify. With the flag on but no Advanced access, only app-role holders
+  (admins, developers, testers) can grant the three permissions. Everyone else still gets the
+  posting permissions as today.
+- **M3. Record in the workspace that owns the Page** (prod org 37, Be More Swan's own). The
+  one-workspace-per-account block refuses @bemoreswan anywhere else. Check org 37's Business Info
+  names **Be More Swan**, so a drafted reply introduces the right business. On staging, workspace
+  58 says "Marmalade Productions", which is why the staging test used typed wording.
+- **M4. Remove Be More Swan from the Facebook login** (Settings → Business integrations → Be More
+  Swan → Remove), so the full permission screen shows. ⚠️ This cuts every connection made with
+  that login, including Love Cat Studio (org 38). Reconnect both afterwards, ticking the same
+  businesses, Pages and Instagram accounts (Be More Swan + Love Cat Studio; Be MORE SWAN LTD +
+  Lovecatstudio; bemoreswan + love.cat.studio). Do M4 again before Recording B.
+- **M5. A second person on camera, who has a role on the app.** Until Advanced access, Meta only
+  delivers messages from app-role holders. Mark (Tester) sends the message from his own Messenger
+  and Instagram. His screen must be recorded too: a phone screen recording (iOS Control Centre →
+  Screen Recording), or his browser in a second window placed side by side.
+- **M6. Instagram:** "Allow access to messages" stays on for @bemoreswan. It was already on during
+  the 2026-11-21 staging test.
+- **M7. Dry run once, off camera,** on prod, after M1–M2: Mark messages the Page → it appears on
+  the Messages tab within seconds → Draft → Send → it reaches Mark. Repeat on Instagram. Then
+  delete the two test conversations with **Delete conversation** (owner).
+- **M8. English UI** on Facebook, Instagram and the browser, a window ≤ 1440 px wide,
+  notifications off, and no personal tabs. Log out of Be More Swan and Facebook before pressing
+  record. Use `ffmpeg -f avfoundation` (not `screencapture -v`, which stops on any keypress).
+  Captions are rendered with Pillow and overlaid (Homebrew ffmpeg has no drawtext).
+
+### Recording A — `pages_messaging` + `pages_manage_metadata` (Facebook, ~4 min, one unbroken take)
+
+| # | On screen | Caption |
+|---|---|---|
+| 1 | bemoreswan.com → Log in → sign in | "Be More Swan: an AI team for small businesses. The business owner logs in." |
+| 2 | Social Media Assistant → Connections → Facebook → **Connect** | "The owner connects their Facebook Page so Be More Swan can publish and answer messages." |
+| 3 | facebook.com login → email + password | "Meta login: the owner logs in to Facebook." |
+| 4 | Meta dialog → business → **Page** ticked → Instagram (as asked) | "The owner chooses which Facebook Page Be More Swan can use." |
+| 5 | Permission review screen, **zoomed**: "Manage and access Page conversations in Messenger" and "Manage accounts, settings and webhooks for a Page" both on → Save | "Granting pages_messaging (read and answer Page messages) and pages_manage_metadata (subscribe the Page to message notifications)." |
+| 6 | Back in Be More Swan → account picker → **Be More Swan** → Connected | "Connected. Be More Swan subscribes the Page to message webhooks: POST /{page-id}/subscribed_apps (pages_manage_metadata)." |
+| 7 | Split screen: Mark's Messenger → messages the Be More Swan Page, e.g. "Hi, are you open on Sunday?" | "A customer sends the business's Facebook Page a message." |
+| 8 | Be More Swan: the bell shows "Someone messaged you on Facebook" → **Open messages** | "Meta sends the message to Be More Swan's webhook; the owner is notified." |
+| 9 | **Messages** tab: the conversation with Mark's name, his message, and the "23h 59m left to reply" pill | "The Messages tab shows the conversation. Meta allows a reply within 24 hours of the customer's last message." |
+| 10 | **Draft a reply** → the draft appears → edit a word | "The assistant drafts a reply in the business's voice. Nothing is sent until the owner presses Send." |
+| 11 | **Send** → confirm dialog ("Send this on Facebook?") → **Send** | "Only the owner's click sends it: POST /{page-id}/messages with the Page token (pages_messaging)." |
+| 12 | The conversation moves to **Replied**, with "Sent from here" | "Sent and filed. The conversation is marked replied." |
+| 13 | Mark's Messenger: the reply from the Be More Swan Page, **zoomed** | "The customer receives the reply in Messenger, from the business's Page." |
+
+### Recording B — `instagram_manage_messages` (Instagram, ~4 min, one unbroken take)
+
+Do M4 again first.
+
+| # | On screen | Caption |
+|---|---|---|
+| 1 | Same as Recording A | (same) |
+| 2 | Connections → Instagram → **Connect** → Continue to Facebook | "Instagram professional accounts connect through Facebook Login." |
+| 3–4 | Facebook login → business → Page → **Instagram account** ticked | "The owner chooses the Instagram account Be More Swan can use." |
+| 5 | Permission screen, **zoomed**: "Manage and access messages for the Instagram account" on → Save | "Granting instagram_manage_messages: read and answer the Instagram account's messages." |
+| 6 | Picker → **@bemoreswan** → Connected | "The Instagram account is connected; its messages arrive through the linked Page's subscription." |
+| 7 | Split screen: Mark's Instagram → DMs @bemoreswan | "A customer sends the business a direct message on Instagram." |
+| 8–12 | Bell → Messages tab → Instagram conversation → Draft → Send → confirm → Replied | (as Recording A, saying "Instagram"; the call is the same POST /{page-id}/messages with the Page token) |
+| 13 | Mark's Instagram: the reply from @bemoreswan, **zoomed** | "The customer receives the reply on Instagram, from the business's account." |
+
+### How the app uses each permission (paste into "Allowed usage")
+
+**`pages_messaging`:** Be More Swan is a web app that helps small businesses run their social media.
+When a business owner connects their Facebook Page, people's messages to that Page appear on the
+Social Media Assistant's Messages tab. The owner sees the conversation and how long Meta allows for
+a reply. They can ask the assistant to draft a reply in the business's voice, edit it, and press
+Send. Be More Swan then sends that one reply with `POST /{page-id}/messages` (`messaging_type:
+RESPONSE`), using the Page's access token. A reply is only ever sent by the owner's click, and only
+within 24 hours of the customer's last message: the server checks this immediately before sending.
+Be More Swan never messages anyone who hasn't messaged the Page first, sends no automated or bulk
+messages, and does not use message tags. Message text is deleted after 90 days.
+_Code: `src/utils/social-messages.ts` (`sendReply`), `netlify/functions/social-messages.ts`, `netlify/functions/meta-webhook.ts`._
+
+**`pages_manage_metadata`:** used only to subscribe the connected Page to our app's webhook, so that
+messages sent to the Page reach Be More Swan: `POST /{page-id}/subscribed_apps` with
+`messages,messaging_postbacks,message_echoes` when the owner connects, and `DELETE
+/{page-id}/subscribed_apps` when they disconnect. It is not used to change any Page settings.
+_Code: `src/utils/meta-messaging.ts` (`subscribePageToMessages`, `unsubscribePageFromMessages`), `netlify/functions/meta-oauth.ts`._
+
+**`instagram_manage_messages`:** the same flow as above for the owner's Instagram professional
+account, which is linked to their Facebook Page. Direct messages to the account appear on the
+Messages tab. The owner can have the assistant draft a reply, edit it, and press Send. Be More
+Swan sends that one reply with `POST /{page-id}/messages`, using the linked Page's access token,
+only on the owner's click and only within 24 hours of the customer's last message. There are no
+automated, bulk or unsolicited messages. Message text is deleted after 90 days.
+_Code: as `pages_messaging`._
+
+### Reviewer instructions (add to "Provide testing instructions")
+
+> **Messages (pages_messaging, pages_manage_metadata, instagram_manage_messages)**
+> 1. Log in at https://bemoreswan.com/review-login.html (meta-review@bemoreswan.com, password
+>    as above) and open the Social Media Assistant.
+> 2. Under Connections, connect Facebook with your test user and Page (and Instagram with its
+>    linked professional account), leaving the messaging permissions ticked.
+> 3. From a second test user who has a role on our app, send your Page a message, or DM the
+>    Instagram account.
+> 4. It appears within seconds on the assistant's **Messages** tab. Press **Draft a reply**, edit
+>    it if you like, then **Send** and confirm. The reply arrives in Messenger / Instagram.
+> Replies are only sent when the user presses Send, and only within 24 hours of the person's
+> last message. Be More Swan never starts a conversation.
+
+### In the submission form
+
+- Notes: *"Be More Swan is a web app using Facebook Login with the user's own access token. It is
+  not a server-to-server app and does not use system user tokens. Every reply is sent by the
+  business owner's click inside Meta's 24-hour window; there are no automated messages and no
+  message tags. pages_manage_metadata is used only for subscribed_apps."*
+- Data handling: message text is stored to show the conversation and is deleted after 90 days.
+  Owners can delete a conversation at any time. Meta's data-deletion callback removes it. The
+  privacy notice §14 (live 2026-11-22) says so.
+- Only an app admin (Catherine) can submit or tick the certifications.
+- Check the reviewer login still works, and hasn't expired (`META_REVIEW_LOGIN_EXPIRES`), in a
+  private window first.
+
+### After approval
+
+Leave `META_MESSAGING_ENABLED=true` on prod. Every customer's Facebook/Instagram connect then asks
+for the messaging permissions, and existing connections get them on their next Reconnect (the
+Messages tab offers it). Add the What's New item and the help article ("Reply to Facebook and
+Instagram messages"), and update the /connections Facebook and Instagram cards to say Messages.
+
+---
+
 ## Resubmission 2026-11-02: `pages_manage_posts` + `instagram_content_publish`
 
 **Result of the first review:** approved `instagram_manage_insights`, `instagram_basic`,
