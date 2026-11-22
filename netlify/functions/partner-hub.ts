@@ -9,22 +9,25 @@
 //   POST { action: 'confirm_payout', token }  → { display }
 //   POST { action: 'cancel_payout_change' }
 //   POST { action: 'accept_terms' }           → records acceptance of the current Partner Terms
+//   POST { action: 'onboarding', mark }       → 'link_copied' | 'dismissed' | 'reopened' (the first-week card,
+//                                               docs/partner-onboarding-plan.md §2)
 //
 // Reads are the signed-in user's own partner row only. Writes are blocked during admin
 // impersonation (an admin must never change where someone else is paid). Customers are never named
 // to the partner (partner-ops.ts partnerHubSummary).
 
 import jwt from 'jsonwebtoken';
-import { eq, or, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, or, isNull, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { partnerProgrammeSettings, partnerRatePeriods, partners, users } from '../../db/schema';
+import { masterPlans, organisations, partnerProgrammeSettings, partnerRatePeriods, partners, userOrganisations, users } from '../../db/schema';
 import { partnerHubSummary } from '../../src/utils/partner-ops';
 import { resolvePeriodAt } from '../../src/utils/partner-rate-periods';
 import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { checkRateLimit } from '../../src/utils/rate-limit';
+import { PAGE_MARKS, buildChecklist, checklistFolded, startersFor, welcomeGreeting, type OnboardingMarks, type PageMark } from '../../src/utils/partner-onboarding';
 import {
     PAYOUT_REQUEST_LIMIT, cancelPayoutChange, confirmPayoutChange, requestPayoutChange, validatePayoutDetails,
 } from '../../src/utils/partner-payouts';
@@ -64,11 +67,33 @@ export default withLambda(async (event) => {
         const current = resolvePeriodAt(periods, p.id, now);
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         const { stats, commissions } = live ? await partnerHubSummary(db, p.id) : { stats: null, commissions: [] };
-        const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+        const [u] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
+        const termsAccepted = p.termsVersion === PARTNER_TERMS_VERSION;
+        // The first-week card and the Partner Assistant's opening words (docs/partner-onboarding-plan.md §2).
+        // Built from data, never a model call (owner decision D2). Not for 'ended' partners — no link, no assistant.
+        let onboarding: Record<string, unknown> | null = null;
+        if (p.status === 'approved' || p.status === 'suspended') {
+            const marks = (p.onboarding || {}) as OnboardingMarks;
+            const steps = buildChecklist({ termsAccepted, payoutSet: !!(p.payoutDetailsConfirmedAt && p.payoutDisplay), marks, stats });
+            const [plan] = await db.select({ price: masterPlans.monthlyPriceGbp }).from(masterPlans)
+                .where(and(eq(masterPlans.isActive, true), gt(masterPlans.monthlyPriceGbp, sql`0`))).orderBy(asc(masterPlans.monthlyPriceGbp)).limit(1);
+            const [org] = await db.select({ name: organisations.name }).from(userOrganisations)
+                .innerJoin(organisations, eq(organisations.id, userOrganisations.organisationId))
+                .where(eq(userOrganisations.userId, userId)).limit(1);
+            onboarding = {
+                steps, folded: checklistFolded(steps, marks), starters: startersFor(steps, stats),
+                greeting: welcomeGreeting({
+                    firstName: u?.firstName ?? null, businessName: org?.name ?? null, steps,
+                    terms: current ? { rateBps: current.rateBps, costDeductionBps: current.costDeductionBps, durationMonths: current.durationMonths } : null,
+                    planPriceGbp: plan ? Number(plan.price) : null,
+                }),
+            };
+        }
         return json(200, {
-            partner: { id: p.id, status: p.status, since: p.decidedAt ?? p.createdAt, accountEmail: u?.email ?? null },
+            onboarding,
+            partner: { id: p.id, status: p.status, since: p.decidedAt ?? p.createdAt, accountEmail: u?.email ?? null, firstName: u?.firstName ?? null },
             // Partner Terms (partner-terms.html): has this partner accepted the CURRENT version?
-            partnerTerms: { accepted: p.termsVersion === PARTNER_TERMS_VERSION, version: PARTNER_TERMS_VERSION, updated: PARTNER_TERMS_UPDATED },
+            partnerTerms: { accepted: termsAccepted, version: PARTNER_TERMS_VERSION, updated: PARTNER_TERMS_UPDATED },
             link: code ? {
                 code, inviteUrl: `${baseUrl()}/invite/${code}`, signupUrl: `${baseUrl()}/register.html?ref=${code}`,
                 // A memorable partner code, if an admin has set one (invite-codes.ts) — works like the link.
@@ -114,7 +139,21 @@ export default withLambda(async (event) => {
         await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() }).where(eq(partners.id, p.id));
         return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
     }
-    if (body.action === 'cancel_payout_change') {
+    if (body.action === 'onboarding') {
+        const mark = String(body.mark || '') as PageMark;
+        if (!(PAGE_MARKS as readonly string[]).includes(mark)) return json(400, { error: 'Unknown step.' });
+        // jsonb in place, so a mark the assistant wrote at the same moment (first_draft_at) is never lost.
+        // link_copied keeps its FIRST time; reopened clears the fold.
+        if (mark === 'link_copied') {
+            await db.update(partners).set({ onboarding: sql`${partners.onboarding} || jsonb_build_object('link_copied_at', COALESCE(${partners.onboarding}->>'link_copied_at', ${new Date().toISOString()}::text))` }).where(eq(partners.id, p.id));
+        } else if (mark === 'dismissed') {
+            await db.update(partners).set({ onboarding: sql`${partners.onboarding} || jsonb_build_object('dismissed_at', ${new Date().toISOString()}::text)` }).where(eq(partners.id, p.id));
+        } else {
+            await db.update(partners).set({ onboarding: sql`${partners.onboarding} - 'dismissed_at'` }).where(eq(partners.id, p.id));
+        }
+        return json(200, { ok: true });
+    }
+        if (body.action === 'cancel_payout_change') {
         await cancelPayoutChange(db, p.id);
         return json(200, { ok: true });
     }

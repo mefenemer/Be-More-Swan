@@ -92,7 +92,7 @@ check('the Partner page is a workspace view, and its sidebar link is hidden unti
     assert.ok(ws.includes("'partner': document.getElementById('nav-partner'),"));
     const side = read('components/sidebar.html');
     assert.ok(/<a href="#" id="nav-partner" class="hidden [^"]*" style="display:none">/.test(side));
-    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {"));
+    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)) {"))   // 'ended' added 2026-11-22;
 });
 
 check('"Partner" is translated in every locale', () => {

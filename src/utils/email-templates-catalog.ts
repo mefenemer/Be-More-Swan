@@ -510,12 +510,15 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         name: 'Partner Application — Approved',
         category: 'Account',
         transactional: true,
-        subject: 'You’re a Be More Swan partner',
-        preheader: 'Your partner link is ready.',
+        // docs/partner-onboarding-plan.md §2: a welcome, the rate in one line, and ONE button that opens the
+        // Partner page, where the Partner Assistant greets them with their first-week plan.
+        subject: 'Welcome to the Be More Swan partner team',
+        preheader: 'Your Partner Assistant has your first-week plan ready.',
         bodyHtml: greet +
-            p('Good news — your application is approved. You’re now a Be More Swan partner.') +
-            p('From today you earn commission when someone you invite becomes a paying customer. Sign in to find your personal invite link.') +
-            button('Sign in', 'link.action_url') + signoff,
+            p('Welcome to the partner team — your application is approved.') +
+            p('From today you earn {{partner.rate_line | "commission"}} when someone you invite becomes a paying customer.') +
+            p('Your Partner page has your personal invite link and a short first-week plan. Your Partner Assistant is there too: it writes posts, emails and scripts in your voice (with your link and an ad label added), answers what you’ve earned, and tells you what to do next.') +
+            button('Meet your Partner Assistant', 'link.action_url') + signoff,
     },
     {
         triggerKey: 'partner_approved_create_account',

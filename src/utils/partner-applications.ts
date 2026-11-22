@@ -13,11 +13,14 @@
 // The token is random (32 bytes) and only its sha256 is stored, like a password-reset token.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { partners, users } from '../../db/schema';
+import { partnerRatePeriods, partners, users } from '../../db/schema';
 import { sendEmail, sendTemplatedEmail } from './email';
 import { ensureReferralCode } from './referral-code';
+import { createNotification } from './notify';
+import { resolvePeriodAt } from './partner-rate-periods';
+import { rateLine } from './partner-onboarding';
 import { PARTNER_TERMS_VERSION } from '../config/partner-terms';
 
 type Db = ReturnType<typeof getDb>;
@@ -134,10 +137,15 @@ export async function sendApprovalEmail(
 
     if (row.userId && row.email) {
         await ensureReferralCode(db, row.userId);   // their invite link needs a code
+        // The welcome states their rate and opens the Partner page itself (docs/partner-onboarding-plan.md §2),
+        // where the Partner Assistant greets them — it used to say "sign in" and land on the workspace home.
+        const rate = await currentRateLine(db, partnerId);
         await send({ triggerKey: 'partner_approved', to: row.email, vars: {
             user: { first_name: row.firstName || row.applicantName?.split(/\s+/)[0] || '' },
-            link: { action_url: `${baseUrl()}/workspace.html` },
+            partner: { rate_line: rate },
+            link: { action_url: partnerPageUrl() },
         } });
+        await notifyApproved(db, row.userId);
         return { sent: 'welcome', to: row.email };
     }
     if (!row.applicantEmail) return { sent: 'none', to: null };
@@ -174,6 +182,30 @@ export async function claimPartnerInvite(db: Db, partnerId: number, userId: numb
         .set({ userId, inviteTokenHash: null, inviteExpiresAt: null, updatedAt: new Date() })
         .where(and(eq(partners.id, partnerId), isNull(partners.userId)))
         .returning({ id: partners.id });
-    if (updated.length) await ensureReferralCode(db, userId);   // their invite link needs a code
+    if (updated.length) {
+        await ensureReferralCode(db, userId);   // their invite link needs a code
+        await notifyApproved(db, userId);       // the bell points them at their Partner page
+    }
     return updated.length > 0;
+}
+
+const partnerPageUrl = () => `${baseUrl()}/workspace.html?view=partner`;
+
+/** Their rate today, in one line, for the welcome email. Falls back to the template's default. */
+async function currentRateLine(db: Db, partnerId: number): Promise<string> {
+    try {
+        const periods = await db.select().from(partnerRatePeriods)
+            .where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, partnerId)));
+        const t = resolvePeriodAt(periods, partnerId, new Date());
+        return t ? rateLine(t) : 'commission';
+    } catch (err) {
+        console.error('[partner-applications] rate lookup failed (non-blocking):', err);
+        return 'commission';
+    }
+}
+
+/** In-app welcome (notifications.js opens the Partner page for action 'partner_page'). Never throws. */
+async function notifyApproved(db: Db, userId: number): Promise<void> {
+    await createNotification(db, 'partner_approved', { userId, metadata: { action: 'partner_page' } })
+        .catch((err) => console.error('[partner-applications] approval notification failed (non-blocking):', err));
 }

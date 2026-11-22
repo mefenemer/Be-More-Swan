@@ -4488,7 +4488,7 @@ function formatCurrency(amount, currency) {
       // (and dismissible) from the upgrade prompts there.
       const partnerStatus = cap?.partnerStatus || null;
       const navPartner = document.getElementById('nav-partner');
-      if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {
+      if (navPartner && ['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)) {   // 'ended' keeps its earnings + payout page (Terms 7.3)
         navPartner.classList.remove('hidden'); navPartner.style.display = '';
       }
       const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended';
