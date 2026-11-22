@@ -224,6 +224,15 @@ await test('the bot\'s video tile: a JPEG for recording and one for not recordin
     assert.notEqual(req.automatic_video_output.in_call_recording.b64_data, req.automatic_video_output.in_call_not_recording.b64_data, 'two different pictures');
 });
 
+await test('the bot\'s transcript is FINISHED once Recall has it: empty = nobody spoke (no 24 h wait), failed = no transcript', () => {
+    const db = read('src/utils/meeting-bot-db.ts');
+    const at = db.indexOf('async fetchTranscript(account, externalId)');
+    const body = db.slice(at, at + 900);
+    assert.ok(body.includes("if (t.state === 'none') return { lines: [], finished: 'failed' };"), 'a failed transcript stops at once');
+    assert.ok(body.includes("return { lines: t.lines, attendees: t.attendees, finished: 'complete' };"), 'a ready transcript is final');
+    assert.ok(body.indexOf("t.state !== 'ready') return null") > body.indexOf("t.state === 'none'"), 'not ready yet still waits');
+});
+
 await test('the tile pictures are bundled only where a bot is sent: no src/ or function file but meeting-bots.ts imports them', () => {
     // esbuild bundles even a dynamic import, so ANY import (static or dynamic) adds ~125 KB to that function.
     const hits = execSync("grep -rlE \"meeting-bot-tile-data['\\\"]\" src netlify || true", { encoding: 'utf8' }).split('\n').filter(Boolean).sort();

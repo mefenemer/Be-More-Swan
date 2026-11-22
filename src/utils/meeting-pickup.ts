@@ -68,6 +68,12 @@ export interface PickedTranscript {
     lines: TranscriptLine[];
     /** Everyone the platform says took part, by name (speakers or not). */
     attendees?: string[];
+    /**
+     * The platform says this transcript is FINISHED, so no lines means there will never be any: 'complete' (it heard
+     * nobody speak) or 'failed' (it couldn't make one). Absent = it may still be coming, so empty means wait (up to 24 h).
+     * Only Recall says this today (the bot); a picked-up transcript keeps the wait.
+     */
+    finished?: 'complete' | 'failed';
 }
 
 /** How a meeting's transcript reached us: the platform's own (picked up) or our bot's (docs/note-taker-bot-plan.md). */
@@ -188,7 +194,7 @@ export interface ImportRow {
 
 export type ImportRelease =
     | { status: 'found'; retryAt?: Date | null; lastError?: string | null; refundAttempt?: boolean }
-    | { status: 'skipped'; skipReason: 'no_transcript' | 'no_meeting' | 'task_limit' | 'assistant_gone' | 'disconnected' | 'blocked' }
+    | { status: 'skipped'; skipReason: 'no_transcript' | 'nobody_spoke' | 'no_meeting' | 'task_limit' | 'assistant_gone' | 'disconnected' | 'blocked' }
     | { status: 'failed'; lastError: string };
 
 export interface PickupStore {
@@ -269,7 +275,7 @@ export interface WriterDeps {
 
 export type WriteOutcome =
     | 'not_claimed' | 'written' | 'lost_latch' | 'waiting_for_transcript' | 'waiting_for_tasks'
-    | 'skipped_no_transcript' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
+    | 'skipped_no_transcript' | 'skipped_nobody_spoke' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
     | 'skipped_disconnected' | 'skipped_blocked' | 'retry' | 'failed';
 
 export async function writeImport(importId: number, d: WriterDeps): Promise<WriteOutcome> {
@@ -302,6 +308,15 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
         const transcript = await source.fetchTranscript(account, row.externalId, row.endedAt);
         const lines = transcript ? speakerLines(transcript.lines) : [];
         if (!lines.length) {
+            // Finished and empty: waiting can't help, so say so now rather than show "writing" for a day.
+            if (transcript?.finished === 'complete') {
+                await d.store.release(row.id, { status: 'skipped', skipReason: 'nobody_spoke' }, d.now());
+                return 'skipped_nobody_spoke';
+            }
+            if (transcript?.finished === 'failed') {
+                await d.store.release(row.id, { status: 'skipped', skipReason: 'no_transcript' }, d.now());
+                return 'skipped_no_transcript';
+            }
             const retryAt = transcriptRetryAt(row.endedAt, d.now());
             if (!retryAt) {
                 await d.store.release(row.id, { status: 'skipped', skipReason: 'no_transcript' }, d.now());
