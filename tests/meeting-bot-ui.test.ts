@@ -83,7 +83,10 @@ await test('staging test 2026-11-21: a finished call never vanishes — the stri
     assert.deepEqual(rows.map((r) => r.id), [10, 11]);
     const src = read('src/components/meeting-bots.js');
     assert.ok(src.includes("(b.status === 'done' && b.writeUp === 'writing' && recent(b))"), 'keeps refreshing until the minutes land, only for rows still shown');
-    assert.match(MB._rowHtml(done({ writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }), NOW) as string, /Minutes waiting: your monthly task allowance is used up/);
+    const waiting = MB._rowHtml(done({ writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }), NOW) as string;
+    assert.match(waiting, /Minutes waiting: your monthly task allowance is used up\. Upgrade your plan/);
+    assert.ok(!/add tasks/i.test(waiting), 'no task top-up exists to buy');
+    assert.match(waiting, /<a href="\/workspace\.html\?view=billing"[^>]*min-height:44px[^>]*>See plans<\/a>/, 'links to the billing page');
     assert.match(MB._rowHtml(done({ writeUp: 'not_written', writeUpReason: 'task_limit' }), NOW) as string, /No minutes: your monthly task allowance was used up\./);
 });
 

@@ -143,6 +143,19 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await noSideScroll(page);
         });
 
+        test('minutes held for tasks link to the plans, not to a top-up that does not exist', async ({ page, api }) => {
+            api.set('meeting-bots', async (route) => (route.request().method() === 'GET'
+                ? { available: true, dpaAccepted: true, tasksPer5Min: 1, bots: [{ ...BOTS[0], id: 8, status: 'done', statusWords: 'Done', statusReason: 'call_ended_by_host', leftAt: new Date(Date.now() - 5 * 60_000).toISOString(), writeUp: 'waiting_for_tasks', writeUpReason: 'task_limit' }] }
+                : {}));
+            await open(page);
+            const row = page.locator('[data-mb-bot="8"]');
+            await expect(row).toContainText('Minutes waiting: your monthly task allowance is used up.');
+            const link = row.getByRole('link', { name: 'See plans' });
+            await expect(link).toHaveAttribute('href', '/workspace.html?view=billing');
+            expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+            await noSideScroll(page);
+        });
+
         test('nothing shows while the flag is off', async ({ page, api }) => {
             stub(api, { available: false });
             await open(page);
