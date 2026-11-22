@@ -339,11 +339,13 @@ export interface BotTranscriptLine { speaker: string | null; text: string }
 
 /**
  * Whether a downloaded transcript is FINAL (review of #804): only when Recall's transcript status is 'done' AND the body
- * really is a transcript (an array). Then an empty one means nobody spoke. Anything else (still processing, an error
+ * really is a transcript (an array of blocks that each have `words`). Then an empty one means nobody spoke. Anything else (still processing, an error
  * object, a changed format) is 'not_ready', so the writer keeps its 24-hour wait rather than say "nobody spoke". Pure.
  */
 export function readRecallTranscript(status: string | null, body: unknown): { state: 'ready'; lines: BotTranscriptLine[] } | { state: 'not_ready' } {
     if (status !== 'done' || !Array.isArray(body)) return { state: 'not_ready' };
+    // Every block must look like Recall's ({ words: [...] }); a renamed field would otherwise read as "nobody spoke".
+    if (!body.every((b) => b && typeof b === 'object' && Array.isArray((b as { words?: unknown }).words))) return { state: 'not_ready' };
     return { state: 'ready', lines: recallTranscriptLines(body) };
 }
 

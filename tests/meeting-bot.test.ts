@@ -241,6 +241,8 @@ await test('readRecallTranscript: final only when Recall says done AND the body 
     assert.deepEqual(readRecallTranscript(null, []), { state: 'not_ready' });
     assert.deepEqual(readRecallTranscript('done', { error: 'oops' }), { state: 'not_ready' }, 'an error object is not "nobody spoke"');
     assert.deepEqual(readRecallTranscript('done', null), { state: 'not_ready' }, 'unreadable JSON is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', [{ segments: [] }]), { state: 'not_ready' }, 'a renamed field (format change) is not "nobody spoke"');
+    assert.deepEqual(readRecallTranscript('done', [{ participant: { name: 'Ana' }, words: [] }]), { state: 'ready', lines: [] }, 'blocks with no words: final, nobody spoke');
     assert.ok(read('src/utils/meeting-bot-recall.ts').includes('readRecallTranscript(bot.transcriptStatus, await res.json().catch(() => null))'), 'the fetch uses it');
 });
 
