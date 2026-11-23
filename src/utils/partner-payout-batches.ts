@@ -252,6 +252,9 @@ export async function listBatches(db: Db): Promise<Row[]> {
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'wise')::int AS wise_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'us_bank')::int AS us_bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'eu_bank')::int AS eu_bank_partners,
+               -- What the Wise files in this run pay out, in GBP: the owner pays from a GBP balance in Wise (decision
+               -- 2026-11-23) and tops it up from EUR first, so the Payouts screen says how much.
+               COALESCE(SUM(c.commission_pence) FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id

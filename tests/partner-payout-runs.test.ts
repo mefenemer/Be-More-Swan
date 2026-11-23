@@ -132,4 +132,16 @@ check('Partner Terms 1.3 4.2 / 7.3: small balances are paid after 6 months (if Â
     assert.strictEqual(underMinimumReason(300, 5000, 'ended', new Date('2027-06-14T00:00:00Z'), now), null, 'ended: any balance');
 });
 
+check('Payouts screen: Wise is paid from the GBP balance, and each open run says how much to top it up by (owner 2026-11-23)', () => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const root = path.join(__dirname, '..');
+    const adm = fs.readFileSync(path.join(root, 'admin.html'), 'utf8');
+    assert.ok(adm.includes('Wise: this run needs ${_pMoney(b.wise_total_pence)} in your GBP balance'));
+    assert.ok(adm.includes('together their Wise files need'), 'several open runs â†’ the combined amount');
+    assert.ok(adm.includes('partners are paid from your Wise <strong>GBP balance</strong>'));
+    const src = fs.readFileSync(path.join(root, 'src/utils/partner-payout-batches.ts'), 'utf8');
+    assert.ok(src.includes("FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence"), 'PayPal is not in the Wise total');
+});
+
 console.log(`\n${passed} passed`);
