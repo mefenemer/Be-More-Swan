@@ -233,6 +233,20 @@ async function main() {
             assert.ok(after.every((r: any) => r.status === 'voided'), 'fully refunded → every month voided');
         });
 
+        await check('a month whose customer deleted their account (referral gone → NULL) is checked at the minimum and released (review of #827)', async () => {
+            const [p1row] = await sql.unsafe(`SELECT id FROM partners WHERE user_id = 100`);
+            await sql.unsafe(`INSERT INTO partner_commissions (partner_id, partner_referral_id, kind, stripe_invoice_id, net_amount_pence, rate_bps, cost_deduction_bps,
+                                commission_pence, status, available_at, service_period_start, service_period_end)
+                              VALUES (${p1row.id}, NULL, 'invoice', 'in_gone1', 6900, 5000, 2000, 2760, 'pending', '2027-02-01', '2027-01-01', '2027-02-01')`);
+            await trueUpCommissions(db, d('2027-02-03'));
+            const [g] = await commissions('in_gone1');
+            assert.ok(g.costs_checked_at, 'checked even with no customer');
+            assert.strictEqual(g.deduction_basis, 'minimum');
+            assert.strictEqual(g.commission_pence, 2760);
+            await releaseDueCommissions(db, d('2027-02-03'));
+            assert.strictEqual((await commissions('in_gone1'))[0].status, 'payable', 'not stuck pending');
+        });
+
         await check("a partner's referral qualifies as 'partner', never as a token", async () => {
             await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 205, 'p1')`);
             assert.strictEqual(await qualifyPendingReferral(db, 205), false);

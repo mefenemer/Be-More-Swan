@@ -462,7 +462,10 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
         await db.update(partnerCommissions).set({ status: 'voided', voidedAt: at, voidReason: plan.row.reason, payoutBatchId: null })
             .where(eq(partnerCommissions.id, row.id));
     } else if (plan.row) {
-        const status = row.status === 'voided' ? (row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
+        // A month not yet costed goes back to 'pending' even if its date has passed: the true-up must run before it can be
+        // released, or a won dispute would pay a heavy user's month at the provisional figure (review of #827).
+        const uncosted = !!row.servicePeriodEnd && !row.costsCheckedAt;
+        const status = row.status === 'voided' ? (!uncosted && row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
         await db.update(partnerCommissions).set({
             status, commissionPence: plan.row.amount, voidedAt: null, voidReason: null,
             note: row.status === 'voided' ? `Dispute won — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,

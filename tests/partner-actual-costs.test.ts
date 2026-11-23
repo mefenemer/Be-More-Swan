@@ -129,7 +129,7 @@ check('the true-up only touches PENDING, unchecked rows, in month order per cust
     const db = read('src/utils/partner-costs-db.ts');
     assert.ok(db.includes("eq(partnerCommissions.status, 'pending'),") && db.includes('isNull(partnerCommissions.costsCheckedAt), lte(partnerCommissions.servicePeriodEnd, now)'));
     assert.ok(db.includes('.orderBy(asc(partnerCommissions.partnerReferralId), asc(partnerCommissions.servicePeriodStart)'));
-    assert.ok(db.includes('set({ costCarryPence: r.carryOutPence })'));
+    assert.ok(db.includes('.set({ costCarryPence: r.carryOutPence })'));
     assert.ok(db.includes('Math.min(row.commissionPence, r.commissionPence)'), 'a refund applied while waiting is kept');
     assert.ok(db.includes("role = 'owner'"), 'costs of the workspaces the customer owns');
 });
@@ -176,8 +176,8 @@ check('H1: a refund or dispute with only the invoice id still finds all 12 annua
 
 check('M2: overlapping months (a mid-month plan change) never count the same days twice', () => {
     const db = read('src/utils/partner-costs-db.ts');
-    assert.ok(db.includes('const countFrom = await costsCountedUntil(db, refId, row.id, row.servicePeriodStart!);'));
-    assert.ok(db.includes('await customerCostUsd(db, Number(userId), countFrom, row.servicePeriodEnd!) : 0;'));
+    assert.ok(db.includes('const countFrom = await costsCountedUntil(db, refId!, row.id, row.servicePeriodStart!);'));
+    assert.ok(db.includes('await customerCostUsd(db, Number(userId), countFrom, countTo) : 0;'));
     assert.ok(db.includes("AND kind = 'invoice' AND id <> ${rowId} AND costs_checked_at IS NOT NULL"));
 });
 
@@ -194,6 +194,35 @@ check('L4 / L5: only inserted months are announced; the ECB fetch times out', ()
     const led = read('src/utils/partner-ledger.ts');
     assert.ok(led.includes('values.filter((v) => insertedRefs.has(v.stripeInvoiceId))'));
     assert.ok(read('src/utils/partner-costs.ts').includes('signal: AbortSignal.timeout(8_000)'));
+});
+
+console.log('second review of #827');
+
+check('H1: a month whose customer deleted their account is still checked (minimum, no costs, no carry) — never stuck', () => {
+    const db = read('src/utils/partner-costs-db.ts');
+    assert.ok(db.includes('.leftJoin(partnerReferrals, eq(partnerReferrals.id, partnerCommissions.partnerReferralId))'));
+    assert.ok(db.includes('const orphan = !refId || !refExists || !userId;'));
+    assert.ok(db.includes('carryOutPence: orphan ? 0 : r.carryOutPence'));
+});
+
+check('M2: a won dispute on a month not yet costed goes back to pending, never straight to payable', () => {
+    const led = read('src/utils/partner-ledger.ts');
+    assert.ok(led.includes("const uncosted = !!row.servicePeriodEnd && !row.costsCheckedAt;"));
+    assert.ok(led.includes("(!uncosted && row.availableAt && row.availableAt <= at ? 'payable' : 'pending')"));
+});
+
+check('L3: after a partial refund, costs come off what is left of the payment (£100, half refunded, £40 costs → £5)', () => {
+    // provisional at the 20% minimum = £40; half refunded → row £20 → remaining payment £50; costs £40 → (50 − 40) × 50% = £5
+    const payment = Math.floor((10000 * 2000) / 4000);
+    assert.strictEqual(payment, 5000);
+    assert.strictEqual(applyCostRule({ paymentPence: payment, minDeductionBps: 2000, costPence: 4000, cardFeePence: 0, carryInPence: 0, rateBps: 5000 }).commissionPence, 500);
+    assert.ok(read('src/utils/partner-costs-db.ts').includes('row.commissionPence < provisional ? Math.floor((net * row.commissionPence) / provisional) : net'));
+});
+
+check('L4: the last month counts only its costs inside the commission period (it earns pro rata)', () => {
+    const db = read('src/utils/partner-costs-db.ts');
+    assert.ok(db.includes('const windowEnd = subscribedAt && durationMonths != null ? addMonthsUtc(new Date(subscribedAt), durationMonths) : null;'));
+    assert.ok(db.includes('await customerCostUsd(db, Number(userId), countFrom, countTo)'));
 });
 
 console.log(`\n${passed} passed`);

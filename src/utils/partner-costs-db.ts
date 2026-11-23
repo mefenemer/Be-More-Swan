@@ -15,6 +15,7 @@ import { and, asc, desc, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { fxRates, partnerCommissions, partnerReferrals } from '../../db/schema';
 import { applyCostRule, fetchEcbUsdGbp, usdToPence } from './partner-costs';
+import { addMonthsUtc, commissionPence } from './partner-rate-periods';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -59,11 +60,16 @@ export async function costsCountedUntil(db: Db, referralId: number, rowId: numbe
 }
 
 export async function trueUpCommissions(db: Db, now: Date = new Date()): Promise<{ checked: number; waiting: number }> {
+    // LEFT join: a customer who deleted their account takes their user_referrals / partner_referrals rows with them
+    // (partner_referral_id → NULL). Those months are still checked — at the minimum, no costs, no carry — so they are
+    // never stuck pending (review of #827).
     const due = await db.select({
-        row: partnerCommissions, carry: partnerReferrals.costCarryPence,
-        userId: sql<number>`(SELECT referred_user_id FROM user_referrals WHERE id = ${partnerReferrals.referralId})`,
+        row: partnerCommissions,
+        refExists: sql<boolean>`${partnerReferrals.id} IS NOT NULL`,
+        subscribedAt: partnerReferrals.subscribedAt, durationMonths: partnerReferrals.durationMonths,
+        userId: sql<number | null>`(SELECT referred_user_id FROM user_referrals WHERE id = ${partnerReferrals.referralId})`,
     }).from(partnerCommissions)
-        .innerJoin(partnerReferrals, eq(partnerReferrals.id, partnerCommissions.partnerReferralId))
+        .leftJoin(partnerReferrals, eq(partnerReferrals.id, partnerCommissions.partnerReferralId))
         .where(and(
             eq(partnerCommissions.kind, 'invoice'), eq(partnerCommissions.status, 'pending'),
             isNull(partnerCommissions.costsCheckedAt), lte(partnerCommissions.servicePeriodEnd, now),
@@ -72,35 +78,44 @@ export async function trueUpCommissions(db: Db, now: Date = new Date()): Promise
 
     let checked = 0, waiting = 0;
     const blocked = new Set<number>();   // a customer whose earlier month is waiting: later months wait too (carry order)
-    for (const { row, userId } of due) {
-        const refId = row.partnerReferralId!;
-        if (blocked.has(refId)) { waiting++; continue; }
-        const rate = await usdGbpOn(db, row.servicePeriodEnd!);
-        if (!rate || !userId) { blocked.add(refId); waiting++; continue; }
-        // Never count the same days twice: a plan change mid-month (or monthly → annual) gives rows whose months overlap.
-        // Costs are counted from where this customer's already-checked months end (review of #827).
-        const countFrom = await costsCountedUntil(db, refId, row.id, row.servicePeriodStart!);
-        const usd = countFrom.getTime() < row.servicePeriodEnd!.getTime()
-            ? await customerCostUsd(db, Number(userId), countFrom, row.servicePeriodEnd!) : 0;
-        const costPence = usdToPence(usd, rate);
+    for (const { row, refExists, subscribedAt, durationMonths, userId } of due) {
+        const refId = row.partnerReferralId;
+        const orphan = !refId || !refExists || !userId;
+        if (refId && blocked.has(refId)) { waiting++; continue; }
+        let rate: number | null = null;
+        let costPence = 0;
+        if (!orphan) {
+            rate = await usdGbpOn(db, row.servicePeriodEnd!);
+            if (!rate) { blocked.add(refId!); waiting++; continue; }
+            // Never count the same days twice (overlapping months after a plan change), and never past the end of the
+            // customer's commission period — the last month earns pro rata, so only its days inside count (review of #827).
+            const countFrom = await costsCountedUntil(db, refId!, row.id, row.servicePeriodStart!);
+            const windowEnd = subscribedAt && durationMonths != null ? addMonthsUtc(new Date(subscribedAt), durationMonths) : null;
+            const countTo = windowEnd && windowEnd.getTime() < row.servicePeriodEnd!.getTime() ? windowEnd : row.servicePeriodEnd!;
+            const usd = countFrom.getTime() < countTo.getTime() ? await customerCostUsd(db, Number(userId), countFrom, countTo) : 0;
+            costPence = usdToPence(usd, rate);
+        }
         await db.transaction(async (tx) => {
             // Re-read the carry inside the transaction: it is what earlier months of this customer left.
-            const [ref] = await tx.select({ carry: partnerReferrals.costCarryPence }).from(partnerReferrals).where(eq(partnerReferrals.id, refId)).limit(1);
-            const carryIn = Math.max(0, ref?.carry ?? 0);
+            const carryIn = orphan ? 0 : Math.max(0, (await tx.select({ carry: partnerReferrals.costCarryPence }).from(partnerReferrals)
+                .where(eq(partnerReferrals.id, refId!)).limit(1))[0]?.carry ?? 0);
+            // A row lowered since it was recorded (a partial refund, a dispute won after one) is worked out on what is
+            // left of the payment, in proportion — so costs come off the remaining payment, not the full one (review of #827).
+            const net = row.netAmountPence ?? 0;
+            const provisional = commissionPence(net, row.rateBps ?? 0, row.costDeductionBps);
+            const payment = provisional > 0 && row.commissionPence < provisional ? Math.floor((net * row.commissionPence) / provisional) : net;
             const r = applyCostRule({
-                paymentPence: row.netAmountPence ?? 0, minDeductionBps: row.costDeductionBps, costPence,
-                cardFeePence: row.cardFeePence ?? 0, carryInPence: carryIn, rateBps: row.rateBps ?? 0,
+                paymentPence: payment, minDeductionBps: row.costDeductionBps, costPence,
+                cardFeePence: orphan ? 0 : row.cardFeePence ?? 0, carryInPence: carryIn, rateBps: row.rateBps ?? 0,
             });
-            // Never raise a row: it was recorded at the minimum deduction (the most the rule can give), so anything that has
-            // lowered it since — a refund, a dispute won after a partial refund — stays applied (review of #827). The
-            // carried-out shortfall is worked out on the full payment, which can only favour the partner after a refund.
+            // Never raise a row: it was recorded at the minimum deduction, the most the rule can give.
             const commission = Math.min(row.commissionPence, r.commissionPence);
             const updated = await tx.update(partnerCommissions).set({
                 commissionPence: commission, costPence, deductionPence: r.deductionPence, deductionBasis: r.basis,
-                carryInPence: carryIn, carryOutPence: r.carryOutPence, usdGbpRate: String(rate), costsCheckedAt: now,
+                carryInPence: carryIn, carryOutPence: orphan ? 0 : r.carryOutPence, usdGbpRate: rate ? String(rate) : null, costsCheckedAt: now,
             }).where(and(eq(partnerCommissions.id, row.id), eq(partnerCommissions.status, 'pending'), isNull(partnerCommissions.costsCheckedAt)))
                 .returning({ id: partnerCommissions.id });
-            if (updated.length) await tx.update(partnerReferrals).set({ costCarryPence: r.carryOutPence }).where(eq(partnerReferrals.id, refId));
+            if (updated.length && !orphan) await tx.update(partnerReferrals).set({ costCarryPence: r.carryOutPence }).where(eq(partnerReferrals.id, refId!));
         });
         checked++;
     }
