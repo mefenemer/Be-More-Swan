@@ -23,6 +23,7 @@
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
+import { invitePageView } from '../../src/utils/partner-invite-profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { partnerProgrammeSettings, partnerRatePeriods, users } from '../../db/schema';
@@ -35,7 +36,7 @@ import { listBatches, listLedger, previewPayout } from '../../src/utils/partner-
 import {
     proposeAddPartner, proposeBatchStatus, proposeBonus, proposeCreateBatch, proposeDecision, proposeEndSpecialRate, proposePayoutRules, proposeProgrammeRate,
     proposeEraseApplication, proposePartnerCode, proposeResendInvite, proposeSpecialRate, proposeVoidCommission,
-    type ActionCard, type PartnerLite, type ProposalResult,
+    proposeInvitePage, type ActionCard, type PartnerLite, type ProposalResult,
 } from '../../src/utils/partner-ops-proposals';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -78,6 +79,7 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
     tool('propose_cancel_batch', 'Offer a card cancelling an unpaid payout run (its commission goes back to ready-to-pay).', { batchId: { type: 'integer' } }),
     tool('propose_partner_code', 'Offer a card setting, changing (code) or turning off (null) a partner\'s memorable partner code — e.g. SAMSWAN, 4–20 letters/numbers starting with a letter. It works anywhere their invite link does, for new customers.', { partnerId: { type: 'integer' }, code: { type: ['string', 'null'] } }),
     tool('propose_erase_application', 'Offer a card deleting an application from someone with no account (applied or declined) — e.g. they asked us to delete their data. Partners with an account need GDPR erasure on their user instead.', { partnerId: { type: 'integer' } }),
+    tool('propose_invite_page', "Offer a card about a partner's own invite page (their photo, headline and words on /invite/<code>): approve = put the version waiting for review live; changes = send it back with a note they see (required); take_down = remove the live one (their link shows the standard page). Check list_partners → invitePage first: only a page in state 'waiting' can be approved or sent back. Judge it against the Partner Terms 5.2–5.3: honest, no links or handles, nothing that looks official or promises results or income, a real photo of them.", { partnerId: { type: 'integer' }, decision: { type: 'string', enum: ['approve', 'changes', 'take_down'] }, note: { type: ['string', 'null'] } }),
     tool('propose_resend_invite', "Offer a card emailing an approved partner who has no account yet a fresh private link to create one (e.g. they lost the first, or it expired).", { partnerId: { type: 'integer' } }),
 ];
 
@@ -174,6 +176,8 @@ export default withLambda(async (event) => {
                     payoutDetailsOnFile: !!r.has_payout_details, application: r.application, decisionNote: r.decision_note,
                     hasAccount: !!r.has_account, accountLinkSentAt: r.invited_at ?? null, partnerCode: r.promo_code ?? null,
                     specialRates: periods.filter((p) => p.partnerId === r.id).map((p) => ({ id: p.id, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt })),
+                    // Their own invite page: state waiting / changes_requested / live / none, with the words (the photo is checked on the screen).
+                    invitePage: (({ state, live, pending, note }) => ({ state, live: live && { headline: live.headline, quote: live.quote, hasPhoto: !!live.photoUrl }, pending: pending && { headline: pending.headline, quote: pending.quote, hasPhoto: !!pending.photoUrl }, note }))(invitePageView(r)),
                 }));
             }
             case 'partner_detail': return partnerDetail(db, Number(input.partnerId));
@@ -205,6 +209,13 @@ export default withLambda(async (event) => {
             case 'propose_partner_code': return offer(proposePartnerCode((await state()).partners, input as any));
             case 'propose_erase_application': return offer(proposeEraseApplication((await state()).partners, input as any));
             case 'propose_resend_invite': return offer(proposeResendInvite((await state()).partners, input as any));
+            case 'propose_invite_page': {
+                const list = (await listPartnersWithNumbers(db)).map((r) => ({
+                    id: r.id, status: r.status, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, email: r.email ?? null,
+                    invitePageState: invitePageView(r).state, headline: (r.invite_profile_pending ?? r.invite_profile)?.headline ?? null,
+                }));
+                return offer(proposeInvitePage(list, input as any));
+            }
             default: throw new Error(`Unknown tool ${name}`);
         }
     }

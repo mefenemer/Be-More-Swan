@@ -11,6 +11,9 @@
 //   POST { action: 'accept_terms' }           → records acceptance of the current Partner Terms
 //   POST { action: 'onboarding', mark }       → 'link_copied' | 'dismissed' | 'reopened' (the first-week card,
 //                                               docs/partner-onboarding-plan.md §2)
+//   POST { action: 'invite_profile_submit', headline, quote, photo: <base64 JPEG> | 'keep' | null }
+//                                             → their own invite page, sent for review (plan §3.3)
+//   POST { action: 'invite_profile_withdraw' } → take back what's waiting for review
 //
 // Reads are the signed-in user's own partner row only. Writes are blocked during admin
 // impersonation (an admin must never change where someone else is paid). Customers are never named
@@ -28,6 +31,10 @@ import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { PAGE_MARKS, buildChecklist, checklistFolded, startersFor, welcomeGreeting, type OnboardingMarks, type PageMark } from '../../src/utils/partner-onboarding';
+import {
+    checkJpeg, deletePhoto, inviteProfileState, newPhotoKey, orphanedKeys, photoUrl, putPhoto, validateInviteText, type InviteProfile,
+} from '../../src/utils/partner-invite-profile';
+import { sendEmail } from '../../src/utils/email';
 import {
     PAYOUT_REQUEST_LIMIT, cancelPayoutChange, confirmPayoutChange, requestPayoutChange, validatePayoutDetails,
 } from '../../src/utils/partner-payouts';
@@ -74,7 +81,7 @@ export default withLambda(async (event) => {
         let onboarding: Record<string, unknown> | null = null;
         if (p.status === 'approved' || p.status === 'suspended') {
             const marks = (p.onboarding || {}) as OnboardingMarks;
-            const steps = buildChecklist({ termsAccepted, payoutSet: !!(p.payoutDetailsConfirmedAt && p.payoutDisplay), marks, stats });
+            const steps = buildChecklist({ termsAccepted, payoutSet: !!(p.payoutDetailsConfirmedAt && p.payoutDisplay), marks, stats, invitePageLive: !!p.inviteProfile });
             const [plan] = await db.select({ price: masterPlans.monthlyPriceGbp }).from(masterPlans)
                 .where(and(eq(masterPlans.isActive, true), gt(masterPlans.monthlyPriceGbp, sql`0`))).orderBy(asc(masterPlans.monthlyPriceGbp)).limit(1);
             const [org] = await db.select({ name: organisations.name }).from(userOrganisations)
@@ -90,8 +97,15 @@ export default withLambda(async (event) => {
                 }),
             };
         }
+        // Their own invite page: what's live, what's waiting, and the admin's note if it was sent back.
+        const invitePage = live && p.status !== 'ended' ? {
+            state: inviteProfileState(p),
+            live: p.inviteProfile ? { headline: p.inviteProfile.headline, quote: p.inviteProfile.quote, photoUrl: photoUrl(p.id, p.inviteProfile.photoKey) } : null,
+            pending: p.inviteProfilePending ? { headline: p.inviteProfilePending.headline, quote: p.inviteProfilePending.quote, photoUrl: photoUrl(p.id, p.inviteProfilePending.photoKey), submittedAt: p.inviteProfilePending.submittedAt } : null,
+            note: p.inviteProfileNote ?? null,
+        } : null;
         return json(200, {
-            onboarding,
+            onboarding, invitePage,
             partner: { id: p.id, status: p.status, since: p.decidedAt ?? p.createdAt, accountEmail: u?.email ?? null, firstName: u?.firstName ?? null },
             // Partner Terms (partner-terms.html): has this partner accepted the CURRENT version?
             partnerTerms: { accepted: termsAccepted, version: PARTNER_TERMS_VERSION, updated: PARTNER_TERMS_UPDATED },
@@ -153,6 +167,46 @@ export default withLambda(async (event) => {
             await db.update(partners).set({ onboarding: sql`${partners.onboarding} - 'dismissed_at'` }).where(eq(partners.id, p.id));
         }
         return json(200, { ok: true });
+    }
+    if (body.action === 'invite_profile_submit' || body.action === 'invite_profile_withdraw') {
+        if (p.status !== 'approved') return json(403, { error: 'Your invite page can be changed while your partnership is active.' });
+        // The page carries their words under our name: the Terms (5.1–5.3) come first.
+        if (p.termsVersion !== PARTNER_TERMS_VERSION) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
+        const pending = p.inviteProfilePending as InviteProfile | null;
+        const liveKey = (p.inviteProfile as InviteProfile | null)?.photoKey ?? null;
+        if (body.action === 'invite_profile_withdraw') {
+            await db.update(partners).set({ inviteProfilePending: null, inviteProfileNote: null, updatedAt: new Date() }).where(eq(partners.id, p.id));
+            for (const k of orphanedKeys([pending?.photoKey], [liveKey])) await deletePhoto(k);
+            return json(200, { ok: true });
+        }
+        const text = validateInviteText(body);
+        if (!text.ok) return json(400, { error: text.error });
+        const { allowed } = await checkRateLimit(db, 'partner_invite_profile', `partner:${p.id}`, { maxAttempts: 10, windowSecs: 86_400 });
+        if (!allowed) return json(429, { error: 'You’ve sent your invite page a few times today — please try again tomorrow.' });
+        // Photo: a new one (uploaded now), 'keep' (whatever is waiting, else what's live), or null (none).
+        let photoKey: string | null = null;
+        if (body.photo === 'keep') photoKey = pending?.photoKey ?? liveKey;
+        else if (body.photo) {
+            const jpeg = checkJpeg(body.photo);
+            if (!jpeg.ok) return json(400, { error: jpeg.error });
+            photoKey = newPhotoKey(p.id);
+            const stored = await putPhoto(photoKey, jpeg.bytes).catch((err) => { console.error('[partner-hub] photo upload failed', err); return false; });
+            if (!stored) return json(503, { error: 'Your photo could not be saved just now. Please try again, or send it without a photo.' });
+        }
+        const next: InviteProfile = { headline: text.headline, quote: text.quote, photoKey, submittedAt: new Date().toISOString() };
+        await db.update(partners).set({ inviteProfilePending: next, inviteProfileNote: null, updatedAt: new Date() }).where(eq(partners.id, p.id));
+        for (const k of orphanedKeys([pending?.photoKey], [photoKey, liveKey])) await deletePhoto(k);
+        // A heads-up for whoever reviews partners (same inbox as new applications).
+        const [who] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+        const name = [who?.firstName, who?.lastName].filter(Boolean).join(' ') || who?.email || `Partner #${p.id}`;
+        const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+        await sendEmail({
+            to: process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com',
+            subject: `🖼️ Invite page to review: ${name}`,
+            html: `<p style="margin:0 0 12px;"><strong>${esc(name)}</strong> sent their invite page for review.</p><p style="margin:0 0 8px;"><strong>Headline:</strong> ${esc(next.headline)}</p><p style="margin:0 0 8px;"><strong>Their words:</strong> ${esc(next.quote || '—')}</p><p style="margin:0 0 8px;"><strong>Photo:</strong> ${photoKey ? 'yes' : 'none'}</p><p style="margin:16px 0 0;"><a href="${baseUrl()}/admin.html?view=partners">Review it in Admin → Money → Partners</a>.</p>`,
+            text: `${name} sent their invite page for review.\nHeadline: ${next.headline}\nTheir words: ${next.quote || '—'}\nPhoto: ${photoKey ? 'yes' : 'none'}\nReview: ${baseUrl()}/admin.html?view=partners`,
+        }).catch((err) => console.error('[partner-hub] review alert failed (non-blocking):', err));
+        return json(200, { ok: true, state: 'waiting' });
     }
     if (body.action === 'cancel_payout_change') {
         await cancelPayoutChange(db, p.id);

@@ -52,7 +52,7 @@ console.log('first-week list');
 
 check('ticks come only from data: nothing done → nothing ticked; data → ticked', () => {
     assert.ok(buildChecklist(none).every((s) => !s.done));
-    const all = buildChecklist({ termsAccepted: true, payoutSet: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: { clicks_all: 3, signups: 1, paying: 1 } });
+    const all = buildChecklist({ termsAccepted: true, payoutSet: true, invitePageLive: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: { clicks_all: 3, signups: 1, paying: 1 } });
     assert.ok(all.every((s) => s.done));
 });
 
@@ -65,7 +65,8 @@ check('the four setup steps are hers; visits / sign-ups / paying tick themselves
 check('the list folds once setup is done, or when she hides it — not before', () => {
     assert.strictEqual(checklistFolded(buildChecklist(none), {}), false);
     assert.strictEqual(checklistFolded(buildChecklist(none), { dismissed_at: 'x' }), true);
-    const setup = { termsAccepted: true, payoutSet: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: null };
+    const setup = { termsAccepted: true, payoutSet: true, invitePageLive: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: null };
+    assert.strictEqual(checklistFolded(buildChecklist({ ...setup, invitePageLive: false }), setup.marks), false, 'the invite page is a setup step (Phase 2)');
     assert.strictEqual(checklistFolded(buildChecklist(setup), setup.marks), true);
 });
 
@@ -78,12 +79,15 @@ check('greeting: her name, her rate, an exact example, and her next three steps'
     assert.ok(g.includes('£31.60'));
     assert.ok(g.includes('1. Accept the Partner Terms'));
     assert.ok(g.includes('2. Tell us where to pay you'));
-    assert.ok(g.includes('3. Write your first post about how Kudzu Collab uses Be More Swan'));
+    assert.ok(g.includes('3. Make your invite page yours'));
+    const later = welcomeGreeting({ firstName: 'Angela', businessName: 'Kudzu Collab', terms: angela, planPriceGbp: 79,
+        steps: buildChecklist({ termsAccepted: true, payoutSet: true, invitePageLive: true, marks: {}, stats: null }) });
+    assert.ok(later.includes('1. Write your first post about how Kudzu Collab uses Be More Swan'));
     assert.ok(!g.includes('4.'), 'three steps at most');
 });
 
 check('greeting after setup points to what is next, without a to-do list', () => {
-    const done = buildChecklist({ termsAccepted: true, payoutSet: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: null });
+    const done = buildChecklist({ termsAccepted: true, payoutSet: true, invitePageLive: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: null });
     const g = welcomeGreeting({ firstName: null, businessName: null, terms: angela, planPriceGbp: null, steps: done });
     assert.ok(g.startsWith('Hi, I’m your Partner Assistant.'));
     assert.ok(g.includes('Your setup is done'));
@@ -108,7 +112,8 @@ check('Terms not accepted → no starters and no "where would you like to start?
     const page = read('partner-content.html');
     assert.ok(page.includes("input.disabled = locked;"), 'the chat box is locked until then');
     assert.ok(read('netlify/functions/partner-assistant.ts').includes('it’s step 1 of your first-week list'), 'the 403 points at the list, not a hidden banner');
-    assert.ok(page.includes("(k === 'first_draft' || k === 'share') && data.partnerTerms && !data.partnerTerms.accepted"), 'sharing waits for the rules too');
+    assert.ok(page.includes("(k === 'first_draft' || k === 'share' || k === 'invite_page') && data.partnerTerms && !data.partnerTerms.accepted"), 'sharing waits for the rules too');
+    assert.ok(page.includes("if (inputId === 'pt-link' && data?.onboarding && !(data.partnerTerms && !data.partnerTerms.accepted))"), 'from either Copy button');
     assert.ok(!page.includes('Accept the Partner Terms at the top of this page'), 'no pointer to a banner the list hides');
 });
 
@@ -171,7 +176,7 @@ check('first draft ticks the list; page marks are whitelisted and only touch her
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.includes("if (!(PAGE_MARKS as readonly string[]).includes(mark)) return json(400"));
     assert.ok(hub.includes("if (impersonating) return json(403"), 'an admin impersonating can’t tick her list');
-    const marks = hub.slice(hub.indexOf("body.action === 'onboarding'"), hub.indexOf("body.action === 'cancel_payout_change'"));
+    const marks = hub.slice(hub.indexOf("body.action === 'onboarding'"), hub.indexOf("body.action === 'invite_profile_submit'"));
     assert.strictEqual((marks.match(/\.where\(eq\(partners\.id, p\.id\)\)/g) || []).length, 3);
 });
 
