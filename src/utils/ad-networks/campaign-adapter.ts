@@ -9,7 +9,7 @@
 import type { AdNetworkAdapter } from './types';
 import { linkedInAdapter, metaAdapter } from './registry';
 import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../linkedin-ads-connection';
-import { assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken } from '../meta-ads-connection';
+import { assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsAllowedInProduction } from '../meta-ads-connection';
 
 export type CampaignAdapterResult =
     | { ok: true; adapter: AdNetworkAdapter; label: string }
@@ -29,11 +29,11 @@ export async function adapterForCampaign(
     // the optimiser skips rather than halts. Any OTHER construction error (e.g. a malformed stored
     // account id) is a real problem with a live campaign and must halt it and tell the owner
     // (review on e4fb6828).
-    if (env.isProduction) {
-        return { ok: false, label, noAdapter: true, reason: 'Advertising is not available here yet.' };
-    }
-
     if (network === 'meta') {
+        // Production refuses Meta too, EXCEPT for workspaces on META_ADS_PROD_ORG_IDS (reviewer, pilots).
+        if (env.isProduction && !metaAdsAllowedInProduction(organisationId)) {
+            return { ok: false, label, noAdapter: true, reason: 'Advertising is not available here yet.' };
+        }
         const readiness = assessMetaAdsReadiness(await getMetaAdsConnection(db, organisationId));
         if (!readiness.ready) return { ok: false, label, reason: readiness.reason };
         const token = await getMetaAdsToken(db, organisationId);
@@ -44,13 +44,16 @@ export async function adapterForCampaign(
                 accessToken: token,
                 accountId: readiness.connection.selectedAccountId!,
                 pageId: readiness.connection.selectedPageId ?? '',
-            }, env) };
+            }, { isProduction: false }) };
         } catch (err) {
             return { ok: false, label, reason: err instanceof Error ? err.message : 'The Meta advertising connection could not be used.' };
         }
     }
 
-    // LinkedIn — also every campaign staged before ad_network existed.
+    // LinkedIn — also every campaign staged before ad_network existed. Development only, no exceptions.
+    if (env.isProduction) {
+        return { ok: false, label, noAdapter: true, reason: 'Advertising is not available here yet.' };
+    }
     const readiness = assessAdsReadiness(await getAdsConnection(db, organisationId));
     if (!readiness.ready) return { ok: false, label, reason: readiness.reason };
     const token = await getAdsToken(db, organisationId);

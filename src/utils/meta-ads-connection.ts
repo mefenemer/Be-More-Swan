@@ -9,6 +9,22 @@ import { and, eq } from 'drizzle-orm';
 import { systemConnections } from '../../db/schema';
 import { getSecret } from './vault';
 
+/**
+ * Production workspaces allowed to use the (otherwise development-only) Meta ads adapter.
+ *
+ * ⚠️ A NARROW, NAMED EXCEPTION. Netlify variable META_ADS_PROD_ORG_IDS, comma-separated workspace ids,
+ * e.g. the Meta App Review reviewer's workspace (2026-11-23: reviewers try the flow themselves, and
+ * "shown in the screencast only" is a common rejection). Unset = no production workspace can use
+ * Meta ads, exactly as before. Later it is how the first customers are switched on, one by one,
+ * before the adapter is registered for everyone. Campaigns are still created PAUSED and only
+ * launched after "Approve & launch" with the amount confirmed.
+ */
+export function metaAdsAllowedInProduction(organisationId: number): boolean {
+    const ids = String(process.env.META_ADS_PROD_ORG_IDS ?? '')
+        .split(/[\s,]+/).map((x) => x.trim()).filter((x) => /^\d+$/.test(x));
+    return ids.includes(String(organisationId));
+}
+
 /** The Meta ads connection's service name. NEVER 'facebook' or 'instagram'. */
 export const META_ADS_SERVICE_NAME = 'meta_ads';
 

@@ -12,7 +12,7 @@ import {
     metaCampaignBody, metaCreativeBody, metaErrorDetail, toMinorUnits, META_ADS_DEFAULT_GRAPH_VERSION,
 } from '../src/utils/ad-networks/meta';
 import {
-    META_ADS_DEFAULT_SCOPES, assessMetaAdsReadiness, metaAdsCreateProblem, metaAdsScopes,
+    META_ADS_DEFAULT_SCOPES, assessMetaAdsReadiness, metaAdsAllowedInProduction, metaAdsCreateProblem, metaAdsScopes,
     type MetaAdsConnection,
 } from '../src/utils/meta-ads-connection';
 import { anyNetworkAvailable, metaAdapter } from '../src/utils/ad-networks/registry';
@@ -169,8 +169,13 @@ check('a reconnect keeps the chosen account and Page — even when a listing fai
 
 check('only the production refusal skips; any other adapter failure halts', () => {
     const ca = code(read('src/utils/ad-networks/campaign-adapter.ts'));
-    assert.equal((ca.match(/noAdapter: true/g) ?? []).length, 1, 'noAdapter is set for something other than production');
-    assert.ok(ca.indexOf('if (env.isProduction)') < ca.indexOf('noAdapter: true'));
+    // Exactly two: Meta's production refusal (unless allow-listed) and LinkedIn's. Each sits right
+    // under its own production check; nothing else may skip a live campaign.
+    assert.equal((ca.match(/noAdapter: true/g) ?? []).length, 2, 'noAdapter is set for something other than production');
+    for (const m of ca.matchAll(/noAdapter: true/g)) {
+        const before = ca.slice(Math.max(0, m.index! - 220), m.index);
+        assert.ok(/if \(env\.isProduction[^\n]*\)\s*\{\s*\n\s*return \{ ok: false, label, $/.test(before), 'a noAdapter not guarded by a production check');
+    }
 });
 
 check('the callback stores what was GRANTED, not what was asked for', () => {
@@ -181,7 +186,7 @@ check('the callback stores what was GRANTED, not what was asked for', () => {
 check('stage_paid routes Meta; approve and the optimiser pick the adapter by the campaign\'s network', () => {
     const camp = code(read('netlify/functions/campaigns.ts'));
     assert.ok(camp.includes("body.network === 'meta' ? 'meta' : 'linkedin'"));
-    assert.ok(camp.includes('metaAdapter({ accessToken: token, accountId: metaAccountId!, pageId: metaPageId! }, env)'));
+    assert.ok(camp.includes('metaAdapter({ accessToken: token, accountId: metaAccountId!, pageId: metaPageId! },'));
     assert.ok(camp.includes('adNetwork: network,'));
     assert.ok(camp.includes('await adapterForCampaign(db, orgId, campaign.adNetwork'));
     const opt = code(read('netlify/functions/optimise-paid-campaigns.ts'));
@@ -195,7 +200,8 @@ check('off production the surface offers LinkedIn and Meta; in production only t
     const camp = code(read('netlify/functions/campaigns.ts'));
     assert.ok(camp.includes('const devAdaptersAllowed = !isProductionDeploy('));
     assert.ok(camp.includes("? ['linkedin', 'meta']"));
-    assert.ok(camp.includes(': networkAvailability().filter((n) => n.available).map((n) => n.network);'));
+    assert.ok(camp.includes('...networkAvailability().filter((n) => n.available).map((n) => n.network),'));
+    assert.ok(camp.includes("...(metaAdsAllowedInProduction(orgId) ? ['meta'] : []),"), 'production adds Meta only for listed workspaces');
     assert.ok(camp.includes('anyNetwork: anyNetworkAvailable() || offeredNetworks.length > 0,'));
     // The registry itself stays empty — production is still locked.
     assert.equal(anyNetworkAvailable(), false);
@@ -266,6 +272,40 @@ check('a LinkedIn reconnect keeps the chosen account, even when the listing fail
     assert.ok(cb.includes('const accountList = accounts ?? prevAccounts;'));
     assert.ok(cb.includes('selectedAccountUrn: keepAccount,'));
     assert.ok(!cb.includes('selectedAccountUrn: null as string | null'), 'reconnect still wipes the choice');
+});
+
+console.log('\n──── the named production exception (META_ADS_PROD_ORG_IDS) ────');
+
+check('only workspaces listed in META_ADS_PROD_ORG_IDS may use Meta ads on production', () => {
+    const saved = process.env.META_ADS_PROD_ORG_IDS;
+    try {
+        delete process.env.META_ADS_PROD_ORG_IDS;
+        assert.equal(metaAdsAllowedInProduction(58), false);
+        process.env.META_ADS_PROD_ORG_IDS = ' 58, 101 ';
+        assert.equal(metaAdsAllowedInProduction(58), true);
+        assert.equal(metaAdsAllowedInProduction(101), true);
+        assert.equal(metaAdsAllowedInProduction(5), false);
+        process.env.META_ADS_PROD_ORG_IDS = 'all';
+        assert.equal(metaAdsAllowedInProduction(58), false, 'a non-id value must not open it to everyone');
+    } finally {
+        if (saved === undefined) delete process.env.META_ADS_PROD_ORG_IDS; else process.env.META_ADS_PROD_ORG_IDS = saved;
+    }
+});
+
+check('every production gate for Meta uses the exception; LinkedIn has none', () => {
+    const ca = code(read('src/utils/ad-networks/campaign-adapter.ts'));
+    assert.ok(ca.includes('if (env.isProduction && !metaAdsAllowedInProduction(organisationId))'));
+    // LinkedIn's own production refusal stays, unconditional.
+    const raw = read('src/utils/ad-networks/campaign-adapter.ts');
+    const li = raw.slice(raw.indexOf('// LinkedIn —'));
+    assert.ok(/if \(env\.isProduction\) \{\s*\n\s*return \{ ok: false, label, noAdapter: true/.test(li));
+    const camp = code(read('netlify/functions/campaigns.ts'));
+    assert.ok(camp.includes("...(metaAdsAllowedInProduction(orgId) ? ['meta'] : []),"));
+    assert.ok(camp.includes('{ isProduction: env.isProduction && !metaAdsAllowedInProduction(orgId) })'));
+    const media = code(read('netlify/functions/meta-ads-media.ts'));
+    assert.ok(media.includes('&& !metaAdsAllowedInProduction(orgId)'));
+    // The registry itself stays empty.
+    assert.equal(anyNetworkAvailable(), false);
 });
 
 // ── A mocked end-to-end stage. Async, so it runs in main() (the runner is CJS: no top-level await).
