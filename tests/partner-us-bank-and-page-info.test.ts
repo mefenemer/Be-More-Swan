@@ -68,6 +68,8 @@ check('only ever shown masked', () => {
         assert.strictEqual(m, 'US bank · Example Collab LLC · checking ****6789');
         assert.ok(!m.includes('021000021') && !m.includes('Example Street'));
     }
+    const short = validatePayoutDetails({ ...good, accountNumber: '4821' });
+    assert.ok(short.ok && maskPayoutDetails(short.value).endsWith('****21'), 'a 4-digit number is never shown whole');
 });
 
 check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an LLC; other methods left out', () => {

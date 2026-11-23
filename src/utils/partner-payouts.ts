@@ -100,7 +100,8 @@ export function validatePayoutDetails(raw: Record<string, unknown>): { ok: true;
 /** The only form payout details are ever shown in. */
 export function maskPayoutDetails(d: PayoutDetails): string {
     if (d.method === 'bank') return `UK bank · ${d.accountName} · ****${d.accountNumber.slice(-4)}`;
-    if (d.method === 'us_bank') return `US bank · ${d.accountName} · ${d.accountType} ****${d.accountNumber.slice(-4)}`;
+    // US account numbers can be as short as 4 digits: show at most half of them, never the whole number (review of #819).
+    if (d.method === 'us_bank') return `US bank · ${d.accountName} · ${d.accountType} ****${d.accountNumber.slice(-Math.min(4, Math.floor(d.accountNumber.length / 2)))}`;
     const [local, domain] = d.email.split('@');
     return `${d.method === 'paypal' ? 'PayPal' : 'Wise'} · ${local.slice(0, 1)}***@${domain}`;
 }
