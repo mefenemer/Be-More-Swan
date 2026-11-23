@@ -69,6 +69,7 @@
         <div>
           <h2 class="font-semibold text-gray-800">Your invite link</h2>
           <p id="pt-terms" class="text-sm text-gray-600 mt-0.5"></p>
+          <p id="pt-agreement" class="text-xs text-gray-600 mt-1"></p>
         </div>
         <span class="text-xs text-gray-500">Code <span id="pt-code" class="font-mono font-bold text-gray-800"></span></span>
       </div>
@@ -164,27 +165,29 @@
       </div>
     </div>
 
-    <!-- Numbers -->
+    <!-- Numbers. Each card has an ⓘ that says exactly how it is counted (owner request 2026-11-23). -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Visits · 30 days</p><p id="pt-visits" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
-      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Sign-ups</p><p id="pt-signups" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
-      <div class="bg-white border border-gray-200 rounded-xl p-4" title="People you invited who are in their 14-day free trial right now. Commission starts when they first pay."><p class="text-xs font-bold text-gray-500 uppercase">In free trial</p><p id="pt-trial" class="text-2xl font-extrabold text-gray-900">0</p></div>
-      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paying customers</p><p id="pt-paying" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
-      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paid to you</p><p id="pt-paid" class="text-2xl font-extrabold text-gray-900 mt-1">£0.00</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Visits · 30 days<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-visits" aria-label="How Visits is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p><p id="pt-visits" class="text-2xl font-extrabold text-gray-900 mt-1">0</p><p id="pt-info-visits" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">Times your invite link or page was opened in the last 30 days. Repeat opens from the same place are capped at 30 an hour, so refreshing doesn’t inflate it. Nothing is stored on visitors’ devices.</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Sign-ups<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-signups" aria-label="How Sign-ups is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p><p id="pt-signups" class="text-2xl font-extrabold text-gray-900 mt-1">0</p><p id="pt-info-signups" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">People who created a Be More Swan account through your link or partner code since you became a partner. Each person counts once.</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">In free trial<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-trial" aria-label="How In free trial is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p><p id="pt-trial" class="text-2xl font-extrabold text-gray-900 mt-1">0</p><p id="pt-info-trial" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">People you invited whose 14-day free trial is open right now. Each person counts once. Commission starts when they first pay.</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paying customers<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-paying" aria-label="How Paying customers is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p><p id="pt-paying" class="text-2xl font-extrabold text-gray-900 mt-1">0</p><p id="pt-info-paying" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">People you invited who have made at least one payment that took money. Their free first month doesn’t count until they pay.</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paid to you<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-paid" aria-label="How Paid to you is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p><p id="pt-paid" class="text-2xl font-extrabold text-gray-900 mt-1">£0.00</p><p id="pt-info-paid" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">All the commission we have paid out to you so far.</p></div>
     </div>
 
     <!-- Earnings -->
     <div class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <p class="text-xs font-bold text-gray-500 uppercase">Ready to pay</p>
+          <p class="text-xs font-bold text-gray-500 uppercase">Ready to pay<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-payable" aria-label="How Ready to pay is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p>
           <p id="pt-payable" class="text-2xl font-extrabold text-gray-900">£0.00</p>
           <p id="pt-payable-note" class="text-xs text-gray-500 mt-0.5"></p>
+          <p id="pt-info-payable" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none"><span id="pt-info-payable-text">Commission that has passed its holding period. It is paid in the next monthly payout once your balance reaches the minimum; below that it rolls over.</span></p>
         </div>
         <div>
-          <p class="text-xs font-bold text-gray-500 uppercase">Waiting</p>
+          <p class="text-xs font-bold text-gray-500 uppercase">Waiting<button type="button" onclick="window.partnerPage.toggleInfo(this)" aria-expanded="false" aria-controls="pt-info-pending" aria-label="How Waiting is counted" title="How this is counted" style="display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:9999px;border:1px solid #9ca3af;color:#6b7280;font:italic 700 10px/1 Georgia,serif;margin-left:.3rem;vertical-align:middle;cursor:pointer">i</button></p>
           <p id="pt-pending" class="text-2xl font-extrabold text-gray-900">£0.00</p>
           <p id="pt-pending-note" class="text-xs text-gray-500 mt-0.5"></p>
+          <p id="pt-info-pending" class="hidden text-[11px] text-gray-600 mt-1 leading-snug" style="display:none">Commission from recent customer payments, held after each payment in case of a refund. A refund cancels it; otherwise it moves to Ready to pay.</p>
         </div>
       </div>
       <div class="mt-5 overflow-x-auto">
@@ -213,6 +216,7 @@
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="paypal" onchange="window.partnerPage.syncMethod()" checked> PayPal</label>
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="wise" onchange="window.partnerPage.syncMethod()"> Wise</label>
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="bank" onchange="window.partnerPage.syncMethod()"> UK bank account</label>
+          <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="us_bank" onchange="window.partnerPage.syncMethod()"> US bank account</label>
         </fieldset>
         <div id="pt-f-email">
           <label for="pt-email" class="text-xs font-bold text-gray-500 uppercase"><span id="pt-email-label">PayPal</span> email</label>
@@ -222,6 +226,19 @@
           <div class="sm:col-span-3"><label for="pt-acc-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-acc-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <div><label for="pt-sort" class="text-xs font-bold text-gray-500 uppercase">Sort code</label><input id="pt-sort" inputmode="numeric" placeholder="12-34-56" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <div class="sm:col-span-2"><label for="pt-accno" class="text-xs font-bold text-gray-500 uppercase">Account number</label><input id="pt-accno" inputmode="numeric" placeholder="8 digits" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+        </div>
+        <!-- US bank account (ACH), paid via Wise in USD. Wise needs the holder's address for a US account. -->
+        <div id="pt-f-us" class="hidden grid grid-cols-1 sm:grid-cols-6 gap-3" style="display:none">
+          <div class="sm:col-span-4"><label for="pt-us-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-us-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label for="pt-us-holder" class="text-xs font-bold text-gray-500 uppercase">Account belongs to</label><select id="pt-us-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="business">A business (e.g. LLC)</option><option value="person">Me personally</option></select></div>
+          <div class="sm:col-span-2"><label for="pt-us-routing" class="text-xs font-bold text-gray-500 uppercase">Routing number</label><input id="pt-us-routing" inputmode="numeric" placeholder="9 digits" maxlength="11" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label for="pt-us-accno" class="text-xs font-bold text-gray-500 uppercase">Account number</label><input id="pt-us-accno" inputmode="numeric" placeholder="4–17 digits" maxlength="20" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label for="pt-us-type" class="text-xs font-bold text-gray-500 uppercase">Account type</label><select id="pt-us-type" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="checking">Checking</option><option value="savings">Savings</option></select></div>
+          <div class="sm:col-span-6"><label for="pt-us-addr" class="text-xs font-bold text-gray-500 uppercase">Account holder’s street address</label><input id="pt-us-addr" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-3"><label for="pt-us-city" class="text-xs font-bold text-gray-500 uppercase">City</label><input id="pt-us-city" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-1"><label for="pt-us-state" class="text-xs font-bold text-gray-500 uppercase">State</label><input id="pt-us-state" maxlength="2" placeholder="NY" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase"></div>
+          <div class="sm:col-span-2"><label for="pt-us-zip" class="text-xs font-bold text-gray-500 uppercase">ZIP code</label><input id="pt-us-zip" inputmode="numeric" maxlength="10" placeholder="10001" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <p class="sm:col-span-6 text-[11px] text-gray-500">We pay through Wise. Your commission is worked out in pounds and arrives in US dollars at Wise’s exchange rate on the day.</p>
         </div>
         <div id="pt-payout-error" class="hidden text-sm text-red-600"></div>
         <button id="pt-payout-save" type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save payout details</button>
@@ -306,6 +323,12 @@
         ' A customer keeps the rate in force when they first pay.' +
         ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Partner Terms</a>';
     }
+    // Their agreement: partner since, and the renewal date = when the rate they're on now ends.
+    const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>` : '';
+    const renew = !t ? '' : t.renewsOn
+      ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special rate ends; customers who first paid before then keep it' : ' — when this rate ends'}`
+      : 'Renewal date: <strong>none set</strong> — your rate continues until we give you 30 days’ notice of a change (Partner Terms 8.1)';
+    document.getElementById('pt-agreement').innerHTML = [since, renew].filter(Boolean).join(' · ');
     document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
     document.getElementById('pt-signups').textContent = s.signups ?? 0;
     document.getElementById('pt-paying').textContent = s.paying ?? 0;
@@ -318,6 +341,8 @@
       : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
+    const rules = data.payoutRules || {};
+    document.getElementById('pt-info-payable-text').textContent = `Commission that has passed its ${rules.holdingDays ?? 30}-day holding period. It is paid in the next monthly payout once your balance reaches ${money(rules.minPayoutPence ?? 5000)}; below that it rolls over to the next month.`;
     document.getElementById('pt-pending-note').textContent = s.next_release_at
       ? `Held ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund. Next amount is ready on ${day(s.next_release_at)}.`
       : `Commission waits ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund.`;
@@ -524,11 +549,19 @@
   }
   async function copyLinkFromList(btn) { await copy('pt-link', btn); }
 
+  function toggleInfo(btn) {
+    const el = document.getElementById(btn.getAttribute('aria-controls'));
+    const open = btn.getAttribute('aria-expanded') !== 'true';
+    btn.setAttribute('aria-expanded', String(open));
+    show(el.id, open);
+  }
+
   function method() { return (document.querySelector('input[name="pt-method"]:checked') || {}).value || 'paypal'; }
   function syncMethod() {
     const m = method();
-    show('pt-f-email', m !== 'bank');
+    show('pt-f-email', m === 'paypal' || m === 'wise');
     show('pt-f-bank', m === 'bank');
+    show('pt-f-us', m === 'us_bank');
     document.getElementById('pt-email-label').textContent = m === 'wise' ? 'Wise' : 'PayPal';
   }
 
@@ -543,13 +576,17 @@
     const m = method();
     const err = document.getElementById('pt-payout-error');
     const btn = document.getElementById('pt-payout-save');
+    const v = (id) => document.getElementById(id).value;
     const body = m === 'bank'
-      ? { action: 'payout_details', method: m, accountName: document.getElementById('pt-acc-name').value, sortCode: document.getElementById('pt-sort').value, accountNumber: document.getElementById('pt-accno').value }
-      : { action: 'payout_details', method: m, email: document.getElementById('pt-email').value };
+      ? { action: 'payout_details', method: m, accountName: v('pt-acc-name'), sortCode: v('pt-sort'), accountNumber: v('pt-accno') }
+      : m === 'us_bank'
+      ? { action: 'payout_details', method: m, accountName: v('pt-us-name'), holderType: v('pt-us-holder'), routingNumber: v('pt-us-routing'), accountNumber: v('pt-us-accno'),
+          accountType: v('pt-us-type'), addressLine: v('pt-us-addr'), city: v('pt-us-city'), state: v('pt-us-state'), zip: v('pt-us-zip') }
+      : { action: 'payout_details', method: m, email: v('pt-email') };
     err.classList.add('hidden'); btn.disabled = true;
     try {
       const d = await post(body);
-      ['pt-email', 'pt-acc-name', 'pt-sort', 'pt-accno'].forEach((id) => { document.getElementById(id).value = ''; });
+      ['pt-email', 'pt-acc-name', 'pt-sort', 'pt-accno', 'pt-us-name', 'pt-us-routing', 'pt-us-accno', 'pt-us-addr', 'pt-us-city', 'pt-us-state', 'pt-us-zip'].forEach((id) => { document.getElementById(id).value = ''; });
       window.showToast?.(`Check ${d.sentTo || 'your email'} — confirm the change there and it takes effect.`);
       await load();
     } catch (e) {
@@ -709,7 +746,7 @@
   function chatClear() { chat.turns = []; chatRender(); }
   function useInviteCard(i, j) { const c = chat.turns[i]?.cards?.[j]; if (c) fillInvitePage(c.headline, c.quote); }
 
-  window.partnerPage = { savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList,
+  window.partnerPage = { toggleInfo, savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList,
     pickInvitePhoto, removeInvitePhoto, submitInvitePage, withdrawInvitePage, countInvite, fillInvitePage, useInviteCard, setWeekly };
   load();
 })();

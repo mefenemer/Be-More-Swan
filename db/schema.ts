@@ -6667,7 +6667,7 @@ export const partners = pgTable("partners", {
   // Partner Terms acceptance (db/z-affiliate-partner-terms.sql; src/config/partner-terms.ts).
   termsVersion: text("terms_version"),
   termsAcceptedAt: timestamp("terms_accepted_at"),
-  payoutMethod: text("payout_method"),                       // wise | paypal | bank
+  payoutMethod: text("payout_method"),                       // wise | paypal | bank | us_bank (db/z-partner-us-bank.sql)
   payoutDetailsEnc: text("payout_details_enc"),              // UNUSED (always null) — details live in the vault, see below
   payoutDetailsConfirmedAt: timestamp("payout_details_confirmed_at"),
   // Payout details (db/z-affiliate-partner-payouts.sql): the details are in the VAULT
@@ -6708,7 +6708,7 @@ export const partners = pgTable("partners", {
   uniqueIndex("partners_promo_code_uq").on(sql`upper(${t.promoCode})`).where(sql`promo_code IS NOT NULL`),
   uniqueIndex("partners_payout_pending_token_uq").on(t.payoutPendingTokenHash).where(sql`payout_pending_token_hash IS NOT NULL`),
   check("partners_status_check", sql`${t.status} IN ('applied','approved','rejected','suspended')`),
-  check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank')`),
+  check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank','us_bank')`),
 ]);
 
 // Commission rates over time. partnerId null = programme-wide; endsAt null = open-ended;
