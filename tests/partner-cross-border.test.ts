@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { declinedChangeDeadline, runOffAllows, RUN_OFF_REASONS } from '../src/utils/partner-activity';
-import { isAnnualPeriod, isPastClawbackWindow, proRataPence, ANNUAL_HOLDING_DAYS, CLAWBACK_WINDOW_DAYS } from '../src/utils/partner-ledger';
+import { isAnnualPeriod, isPastClawbackWindow, remainingNetPence, proRataPence, ANNUAL_HOLDING_DAYS, CLAWBACK_WINDOW_DAYS } from '../src/utils/partner-ledger';
 import { buildExport, type BatchLine } from '../src/utils/partner-payout-batches';
 import { isUkVatNumber, isUkVatRegistered, normaliseVatNumber, statementHtml, statementNumber, vatPenceFor } from '../src/utils/partner-statements';
 import { DECLINED_CHANGE_DAYS, PARTNER_TERMS_EFFECTIVE, PARTNER_TERMS_VERSION } from '../src/config/partner-terms';
@@ -187,10 +187,10 @@ check('third review of #823: first annual payment carries a 12-month period; run
     const w = read('netlify/functions/stripe-webhook.ts');
     assert.strictEqual((w.match(/\.\.\.\(billingCycle === 'annual' \? annualPeriodFrom\(new Date\(stripeEvent\.created \* 1000\)\) : \{\}\)/g) || []).length, 2, 'both first-payment paths');
     const l = read('src/utils/partner-ledger.ts');
-    assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
-    assert.ok(l.includes('for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
+    assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: plan.row.reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
+    assert.ok(l.includes('for (const r of touched.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
     assert.ok(l.includes("if (!run || run.status !== 'draft') return;"), 'only draft runs change in place');
-    assert.ok(l.includes("inExportedRun = run?.status === 'exported';") && l.includes("&& !inExportedRun) {"), 'an exported run is treated like paid: adjustment, row untouched');
+    assert.ok(l.includes("if (run?.status === 'draft') return { inExportedOrPaid: false, draftBatchId: row.payoutBatchId };") && l.includes('rowEditable: !inExportedOrPaid && (status !== '), 'an exported run is treated like paid: adjustment, row untouched');
     assert.ok(isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2028-01-01T00:00:00Z')));
     assert.ok(!isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2027-03-01T00:00:00Z')), 'a 2-month proration invoice is not annual');
 });
@@ -202,6 +202,19 @@ check('fifth review of #823: idempotent accept, UK-only VAT confirmation, honest
     assert.ok(read('admin.html').includes('outside the UK — reverse charge, no VAT added'));
     assert.ok(read('partner-content.html').includes('If you accepted an earlier version, your commission is still paid (Partner Terms 8.1)'));
     assert.ok(hub.includes('pendingCheck: isUkVatNumber(vat) && !registered') && hub.includes('pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered'), 'only UK numbers wait for an HMRC check');
+});
+
+check('final review of #823: proportional won-dispute reinstatement, no double clawback, frozen VAT on the payouts list', () => {
+    assert.strictEqual(remainingNetPence(5750, 6900, 0), 5750);
+    assert.strictEqual(remainingNetPence(5750, 6900, 3450), 2875, 'half the VAT-inclusive charge refunded = half the net left');
+    assert.strictEqual(remainingNetPence(5750, 1000000, 500000), 2875, 'a yen charge: the share, never yen minus pence');
+    assert.strictEqual(remainingNetPence(5750, 0, 1000), 4750, 'charge unknown: net minus refunded');
+    const l = read('src/utils/partner-ledger.ts');
+    assert.ok(l.includes('const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);'), 'won disputes use the same proportion');
+    assert.ok(l.includes('export function planReconcile(') && l.includes('const want = ev.desired - st.others;'), 'one rule: row + adjustments + bonuses = what the payment earns (sequences in partner-ledger-reconcile.test.ts)');
+    assert.ok(read('netlify/functions/stripe-webhook.ts').includes("'dispute_won', new Date(stripeEvent.created * 1000), chargeAmount);"));
+    assert.ok(read('src/utils/partner-statements.ts').includes('SELECT v.vat_pence FROM partner_payout_vat v WHERE v.batch_id = b.id'));
+    assert.ok(read('partner-content.html').includes("${b.vatPence > 0 ? ' + ' + money(b.vatPence) + ' VAT' : ''}"));
 });
 
 console.log(`\n${passed} passed`);

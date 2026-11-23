@@ -408,7 +408,7 @@
     const paid = data.payouts || [];
     show('pt-statements-card', paid.length > 0);
     document.getElementById('pt-statements').innerHTML = paid.map((b) => `<li class="flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
-        <span class="text-gray-700">${esc(day(b.paidAt))} · ${money(b.commissionPence)}${data.vat?.ukRegistered ? ' + VAT' : ''}</span>
+        <span class="text-gray-700">${esc(day(b.paidAt))} · ${money(b.commissionPence)}${b.vatPence > 0 ? ' + ' + money(b.vatPence) + ' VAT' : ''}</span>
         <a href="${API}?view=statement&batchId=${encodeURIComponent(b.batchId)}" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Statement</a></li>`).join('');
     if (p.pending) {
       document.getElementById('pt-pending-display').textContent = p.pending.display;
