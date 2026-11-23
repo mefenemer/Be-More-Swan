@@ -6754,6 +6754,9 @@ export const partnerReferrals = pgTable("partner_referrals", {
   subscribedAt: timestamp("subscribed_at"),
   // The running shortfall: this customer's costs above what they paid, taken off their next months (z-partner-actual-costs.sql).
   costCarryPence: integer("cost_carry_pence").notNull().default(0),
+  // 'fixed' | 'actual' — set when terms lock (z-partner-actual-costs.sql): actual costs only for customers whose partner had
+  // accepted the Terms version with the rule (ACTUAL_COSTS_TERMS_VERSION) when they first paid.
+  costBasis: text("cost_basis").notNull().default("fixed"),
   ratePeriodId: integer("rate_period_id").references(() => partnerRatePeriods.id, { onDelete: "set null" }),
   rateBps: integer("rate_bps"),
   costDeductionBps: integer("cost_deduction_bps"),

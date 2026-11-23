@@ -26,6 +26,14 @@ ALTER TABLE partner_commissions ADD COLUMN IF NOT EXISTS costs_checked_at     ti
 -- The running shortfall for one customer: costs above what they paid, taken off their next months' commission.
 ALTER TABLE partner_referrals ADD COLUMN IF NOT EXISTS cost_carry_pence integer NOT NULL DEFAULT 0;
 
+-- Which rule a customer's commission follows, fixed when their terms lock at their first payment (review of #827):
+--   'fixed'  — the fixed minimum deduction only, as before (every customer already locked, and any whose partner had not
+--              accepted the Partner Terms version with actual costs when they first paid — v1.2 §3.3 / §8.1 promise that
+--              the deduction on customers who have already paid never goes up);
+--   'actual' — the higher of the minimum or that customer's actual costs, with carry-forward (Terms v1.3+ §3.2).
+-- DEFAULT 'fixed' so every existing row keeps exactly what it was promised.
+ALTER TABLE partner_referrals ADD COLUMN IF NOT EXISTS cost_basis text NOT NULL DEFAULT 'fixed';
+
 -- The European Central Bank's daily reference rate, saved each day by the nightly partner sweep.
 CREATE TABLE IF NOT EXISTS fx_rates (
     day         date PRIMARY KEY,

@@ -15,6 +15,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyCostRule, parseEcbUsdGbp, serviceSlices, sliceRef, usdToPence } from '../src/utils/partner-costs';
 import { commissionForRow, sliceLikePattern } from '../src/utils/partner-ledger';
+import { termsIncludeActualCosts } from '../src/config/partner-terms';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -223,6 +224,21 @@ check('L4: the last month counts only its costs inside the commission period (it
     const db = read('src/utils/partner-costs-db.ts');
     assert.ok(db.includes('const windowEnd = subscribedAt && durationMonths != null ? addMonthsUtc(new Date(subscribedAt), durationMonths) : null;'));
     assert.ok(db.includes('await customerCostUsd(db, Number(userId), countFrom, countTo)'));
+});
+
+console.log('third review of #827');
+
+check('H1: actual costs only for customers whose partner had accepted the Terms with the rule; everyone else keeps the fixed deduction', () => {
+    assert.strictEqual(termsIncludeActualCosts('1.3'), true);
+    assert.strictEqual(termsIncludeActualCosts('1.4'), true);
+    assert.strictEqual(termsIncludeActualCosts('1.2'), false);
+    assert.strictEqual(termsIncludeActualCosts(null), false);
+    const led = read('src/utils/partner-ledger.ts');
+    assert.ok(led.includes("const costBasis = termsIncludeActualCosts(partnerRow?.termsVersion) ? 'actual' : 'fixed';"), 'decided when terms lock');
+    assert.ok(led.includes("if (terms.costBasis !== 'actual') {"), 'fixed customers take the old path');
+    const fixedBlock = led.slice(led.indexOf("if (terms.costBasis !== 'actual') {"), led.indexOf("const periodStart = payment.periodStart ??"));
+    assert.ok(!fixedBlock.includes('servicePeriodEnd'), 'no service month → never costed, released after the hold as before');
+    assert.ok(read('db/z-partner-actual-costs.sql').includes("ADD COLUMN IF NOT EXISTS cost_basis text NOT NULL DEFAULT 'fixed'"), 'every existing customer stays fixed');
 });
 
 console.log(`\n${passed} passed`);

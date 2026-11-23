@@ -40,6 +40,14 @@ carried out = max(0, −available)                                            �
 - Worked example (Angela, 50%, £69 plan): light month costs £4 → deduction £13.80 (20%) → £27.60 commission;
   heavy month costs £30 → £19.50; month where costs are £75 → £0 and £6 carried into next month.
 
+## 2a. Who it applies to
+
+Only customers whose partner had accepted the Partner Terms version with this rule (`ACTUAL_COSTS_TERMS_VERSION`, 1.3)
+when the customer first paid. Every customer already locked, and any whose partner is still on an earlier version, keeps
+the fixed deduction they were promised (v1.2 §3.3: the deduction on customers who have already paid never goes up; §8.1:
+reductions only for customers who first pay after the notice). Recorded on `partner_referrals.cost_basis` ('fixed' |
+'actual') when terms lock; fixed customers keep the old single-row, no-true-up path.
+
 ## 3. Price rises
 
 Commission is a share of what the customer actually pays, so raising prices raises commission in proportion while

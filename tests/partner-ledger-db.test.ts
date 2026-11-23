@@ -191,17 +191,14 @@ async function main() {
             assert.strictEqual((await commissions('in_v1'))[0].status, 'voided');
         });
 
-        await check('the nightly sweep releases only commissions past their holding period — after their month is costed', async () => {
-            // Actual costs (2026-11-23): a month isn't releasable until checked. Nothing logged for these customers →
-            // the 20% minimum applies and the commission is unchanged; the check needs an ECB rate on file.
-            assert.strictEqual((await releaseDueCommissions(db, d('2026-12-06'))).released, 0, 'not released before its costs are checked');
-            await sql.unsafe(`INSERT INTO fx_rates (day, usd_gbp) VALUES ('2026-11-01', 0.79) ON CONFLICT DO NOTHING`);
-            const before = (await commissions('in_a1'))[0].commission_pence;
-            const { checked } = await trueUpCommissions(db, d('2026-12-06'));
-            assert.ok(checked >= 1);
+        await check('the nightly sweep releases only commissions past their holding period', async () => {
+            // Partner 100 never accepted the Terms with actual costs, so its customers are on the FIXED rule (review of
+            // #827): one row, no service month, never touched by the month-end check, released after the hold as before.
             const a1 = (await commissions('in_a1'))[0];
-            assert.strictEqual(a1.deduction_basis, 'minimum');
-            assert.strictEqual(a1.commission_pence, before, 'no logged costs → the minimum → same figure');
+            assert.strictEqual(a1.service_period_end, null, 'fixed rule: no month to cost');
+            await sql.unsafe(`INSERT INTO fx_rates (day, usd_gbp) VALUES ('2026-11-01', 0.79) ON CONFLICT DO NOTHING`);
+            await trueUpCommissions(db, d('2026-12-06'));
+            assert.strictEqual((await commissions('in_a1'))[0].costs_checked_at, null, 'the true-up never touches a fixed-rule row');
             const { released } = await releaseDueCommissions(db, d('2026-12-06'));   // in_a1 due 2026-12-05
             assert.strictEqual(released, 1);
             assert.strictEqual((await commissions('in_a1'))[0].status, 'payable');
@@ -220,6 +217,8 @@ async function main() {
         });
 
         await check('annual plan: 12 monthly rows; a refund matched only by invoice id (Checkout, no PaymentIntent) reaches all 12 (review of #827)', async () => {
+            // This customer's partner has accepted the Terms with actual costs, so they lock on the 'actual' rule.
+            await sql.unsafe(`UPDATE partners SET terms_version = '1.3' WHERE user_id = 100`);
             await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 260, 'p1')`);
             const out = await recordPartnerPayment(db, { userId: 260, paymentRef: 'in_y1', paymentIntentId: null, netAmountPence: 82800, currency: 'gbp', paidAt: d('2026-11-10'), annual: true });
             assert.strictEqual(out.recorded, true);
@@ -231,6 +230,9 @@ async function main() {
             assert.strictEqual(adjusted, 12, 'every month adjusted');
             const after = await sql.unsafe(`SELECT status FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%'`);
             assert.ok(after.every((r: any) => r.status === 'voided'), 'fully refunded → every month voided');
+            const [pr260] = await sql.unsafe(`SELECT pr.cost_basis FROM partner_referrals pr JOIN user_referrals ur ON ur.id = pr.referral_id WHERE ur.referred_user_id = 260`);
+            assert.strictEqual(pr260.cost_basis, 'actual');
+            await sql.unsafe(`UPDATE partners SET terms_version = NULL WHERE user_id = 100`);
         });
 
         await check('a month whose customer deleted their account (referral gone → NULL) is checked at the minimum and released (review of #827)', async () => {

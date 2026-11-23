@@ -34,6 +34,7 @@ import {
     addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
 import { applyCostRule, serviceSlices, sliceRef } from './partner-costs';
+import { termsIncludeActualCosts } from '../config/partner-terms';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -168,8 +169,12 @@ async function lockedTermsFor(db: Db, referralId: number, partnerId: number, pai
     const period = resolvePeriodAt(await loadPeriods(db, partnerId), partnerId, paidAt);
     if (!period) return null;
     const terms = lockTerms(period);
+    // Which rule this customer follows is fixed now, with their terms: actual costs only if the partner had accepted the
+    // Terms version with that rule; otherwise the fixed deduction they were promised (review of #827).
+    const [partnerRow] = await db.select({ termsVersion: partners.termsVersion }).from(partners).where(eq(partners.id, partnerId)).limit(1);
+    const costBasis = termsIncludeActualCosts(partnerRow?.termsVersion) ? 'actual' : 'fixed';
     await db.update(partnerReferrals)
-        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths })
+        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths, costBasis })
         .where(and(eq(partnerReferrals.id, pr.id), isNull(partnerReferrals.subscribedAt)));
     const [locked] = await db.select().from(partnerReferrals).where(eq(partnerReferrals.id, pr.id)).limit(1);
     return locked ?? null;
@@ -224,6 +229,26 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
     const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
     const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
+    const holdDaysFixed = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+
+    // A customer on the FIXED rule (locked before actual costs, or their partner hasn't accepted the Terms with it): one
+    // row, the fixed deduction, released after the holding period exactly as before — no month-end costs (review of #827).
+    if (terms.costBasis !== 'actual') {
+        const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
+        const fixedAmount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
+        const availableAtFixed = new Date(payment.paidAt.getTime() + holdDaysFixed * DAY_MS);
+        const ins = await db.insert(partnerCommissions).values({
+            partnerId: ref.partnerId, partnerReferralId: terms.id, kind: 'invoice',
+            stripeInvoiceId: payment.paymentRef, stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligiblePence, rateBps: terms.rateBps, costDeductionBps, commissionPence: fixedAmount,
+            currency: PROGRAMME_CURRENCY, status: 'pending', availableAt: availableAtFixed,
+        }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+        if (!ins.length) return { recorded: false, reason: 'duplicate' };
+        if (fixedAmount > 0) await notifyCommissionEarned(db, ref.partnerId, fixedAmount, availableAtFixed);
+        return { recorded: true, commissionPence: fixedAmount, partnerId: ref.partnerId };
+    }
+
     const periodStart = payment.periodStart ?? (isAnnual ? payment.paidAt : null);
     const periodEnd = payment.periodEnd ?? (isAnnual ? addMonthsUtc(payment.paidAt, 12) : null);
     // Each month of service is its own row (an annual payment → 12), worked out against that month's actual costs at
@@ -232,8 +257,7 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     const slices = serviceSlices(netPence, periodStart, periodEnd, payment.paidAt)
         .filter((sl) => !windowEnd || sl.periodStart.getTime() < windowEnd.getTime());
     if (!slices.length) return { recorded: false, reason: 'outside_window' };
-    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
-    const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+    const holdDays = holdDaysFixed;
     const holdUntil = payment.paidAt.getTime() + holdDays * DAY_MS;
     const values = slices.map((sl, i) => {
         // The month that straddles the end of the commission period earns only on its days inside it (pro rata).

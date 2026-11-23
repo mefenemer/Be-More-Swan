@@ -13,6 +13,16 @@
 //      Also 4.2: payment through Wise to a US bank account or a euro bank account (IBAN), converted to US dollars
 //      or euros at Wise's rate on the day (owner requests 2026-11-23). docs/legal/partner-terms-v1.3-changes.md
 export const PARTNER_TERMS_VERSION = '1.3';
+/**
+ * The first Partner Terms version whose §3.2 takes actual costs off (docs/partner-actual-costs-plan.md). A customer's
+ * commission follows the actual-costs rule only if their partner had accepted this version (or later) when the customer
+ * first paid; everyone else keeps the fixed deduction they were promised (v1.2 §3.3, §8.1 — review of #827).
+ */
+export const ACTUAL_COSTS_TERMS_VERSION = '1.3';
+export function termsIncludeActualCosts(termsVersion: string | null | undefined): boolean {
+    const v = Number(termsVersion);
+    return Number.isFinite(v) && v >= Number(ACTUAL_COSTS_TERMS_VERSION);
+}
 export const PARTNER_TERMS_UPDATED = '23 November 2026';
 /**
  * When the current version took effect (ISO date). Terms 8.1: a partner who has not accepted it 60 days
