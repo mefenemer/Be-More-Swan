@@ -6690,6 +6690,9 @@ export const partners = pgTable("partners", {
   inviteTokenHash: text("invite_token_hash"),
   inviteExpiresAt: timestamp("invite_expires_at"),
   invitedAt: timestamp("invited_at"),
+  // "Your first week" steps no other column records (db/z-partner-onboarding.sql;
+  // docs/partner-onboarding-plan.md): { link_copied_at?, first_draft_at?, dismissed_at? } as ISO strings.
+  onboarding: jsonb().$type<{ link_copied_at?: string; first_draft_at?: string; dismissed_at?: string }>().notNull().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

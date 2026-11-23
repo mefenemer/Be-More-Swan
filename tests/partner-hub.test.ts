@@ -80,7 +80,7 @@ check('check-capacity reports partner status, and a failed lookup can never brea
 });
 
 check('an approved or suspended partner with no plan goes to the Partner page, never the hard plan gate', () => {
-    const gate = ws.indexOf("const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended';");
+    const gate = ws.indexOf("const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended' || partnerStatus === 'ended';");   // 'ended' added 2026-11-22 (keeps earnings page)
     const exempt = ws.indexOf('if (!planActivated && cap?.noPlan && partnerNeverGated) {');
     const hard = ws.indexOf("} else if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {");
     assert.ok(gate > 0 && exempt > gate && hard > exempt, 'the partner exemption must come before the hard gate, as its else-branch');
@@ -92,7 +92,7 @@ check('the Partner page is a workspace view, and its sidebar link is hidden unti
     assert.ok(ws.includes("'partner': document.getElementById('nav-partner'),"));
     const side = read('components/sidebar.html');
     assert.ok(/<a href="#" id="nav-partner" class="hidden [^"]*" style="display:none">/.test(side));
-    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {"));
+    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)) {"))   // 'ended' added 2026-11-22;
 });
 
 check('"Partner" is translated in every locale', () => {

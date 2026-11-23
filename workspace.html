@@ -4488,10 +4488,11 @@ function formatCurrency(amount, currency) {
       // (and dismissible) from the upgrade prompts there.
       const partnerStatus = cap?.partnerStatus || null;
       const navPartner = document.getElementById('nav-partner');
-      if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {
+      if (navPartner && ['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)) {   // 'ended' keeps its earnings + payout page (Terms 7.3)
         navPartner.classList.remove('hidden'); navPartner.style.display = '';
       }
-      const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended';
+      // 'ended' too: they keep their earnings + payout page (Terms 7.3), so no plan must not lock them out of it.
+      const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended' || partnerStatus === 'ended';
       if (!planActivated && cap?.noPlan && partnerNeverGated) {
         if (!viewParam || viewParam === 'dashboard') await loadView('partner');
       } else if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {

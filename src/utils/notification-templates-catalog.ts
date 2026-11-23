@@ -1581,6 +1581,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        templateKey: 'partner_approved',
+        name: 'Partner application approved',
+        category: 'Billing',
+        type: 'referral_reward',
+        title: '🤝 Welcome to the partner team',
+        message: 'You’re a Be More Swan partner. Open your Partner page for your invite link and a first-week plan from your Partner Assistant.',
+        variables: [],
+    },
+    {
         templateKey: 'partner_commission_earned',
         name: 'Partner commission earned',
         category: 'Billing',

@@ -47,6 +47,22 @@
 
   <div id="pt-content" class="hidden space-y-6">
 
+    <!-- Welcome + "Your first week" (docs/partner-onboarding-plan.md §2). Every tick comes from real data
+         (partner-hub.ts onboarding.steps); folds once steps 1–4 are done or they hide it. -->
+    <div id="pt-welcome" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3" style="display:none">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 id="pt-welcome-title" class="text-lg font-bold text-gray-900">Welcome to the partner team</h2>
+          <p class="text-sm text-gray-600 mt-0.5">Your first week, step by step. Each step ticks itself when it’s done.</p>
+        </div>
+        <button type="button" onclick="window.partnerPage.foldWelcome()" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">Hide this list</button>
+      </div>
+      <ol id="pt-steps" class="space-y-2"></ol>
+    </div>
+    <div id="pt-welcome-folded" class="hidden text-right" style="display:none">
+      <button type="button" onclick="window.partnerPage.unfoldWelcome()" class="text-xs font-semibold text-pink-700 underline">Show your first-week list</button>
+    </div>
+
     <!-- Invite link -->
     <div id="pt-invite-card" class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
       <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -69,12 +85,13 @@
     </div>
 
     <!-- Partner Assistant (partner-assistant.ts): drafts in their voice with their link + an ad label,
-         answers about their money, hands off to their own assistants. Free, 50 messages in 30 days. -->
+         answers about their money, hands off to their own assistants. Free: 100 messages in the first
+         30 days, then 50 in any 30 days. It opens with a greeting built from data (onboarding.greeting). -->
     <div id="pt-assistant-card" class="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
       <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
         <div>
           <h2 class="font-semibold text-gray-800">Partner Assistant</h2>
-          <p class="text-xs text-gray-500 mt-0.5">Drafts posts, emails and scripts in your voice — with your link and an ad label added — and answers questions about what you earn. Free, up to 50 messages a month.</p>
+          <p class="text-xs text-gray-500 mt-0.5">Drafts posts, emails and scripts in your voice — with your link and an ad label added — and answers questions about what you earn. Free — 100 messages in your first month, then 50 a month.</p>
         </div>
         <button type="button" onclick="window.partnerPage.chatClear()" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">New conversation</button>
       </div>
@@ -174,6 +191,7 @@
   const day = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' }) : '';
   const show = (id, on = true) => { const el = document.getElementById(id); if (!el) return; el.classList.toggle('hidden', !on); el.style.display = on ? '' : 'none'; };
   let data = null;
+  let welcomeShown = false;   // they asked to see the list again after it folded (this visit only)
 
   async function load() {
     try {
@@ -199,7 +217,9 @@
     show('pt-applied', status === 'applied');
     show('pt-suspended', status === 'suspended');
     show('pt-ended', status === 'ended');
-    show('pt-terms-banner', (status === 'approved' || status === 'suspended' || status === 'ended') && !!data.partnerTerms && !data.partnerTerms.accepted);
+    // While the first-week list is open it carries the Terms step itself, so the banner waits until it folds.
+    const listOpen = !!data.onboarding && !(data.onboarding.folded && !welcomeShown);
+    show('pt-terms-banner', (status === 'approved' || status === 'suspended' || status === 'ended') && !!data.partnerTerms && !data.partnerTerms.accepted && !listOpen);
     if (data.partnerTerms) document.getElementById('pt-terms-version').textContent = `version ${data.partnerTerms.version}, ${data.partnerTerms.updated}`;
     if (status === 'approved' || status === 'suspended' || status === 'ended') render();
     const cap = await (window.checkCapacity ? window.checkCapacity() : null);
@@ -240,7 +260,7 @@
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
     const min = data.payoutRules?.minPayoutPence ?? 0;
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
-      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms at the top of this page so we can pay you.'
+      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
     document.getElementById('pt-pending-note').textContent = s.next_release_at
@@ -267,7 +287,57 @@
       document.getElementById('pt-account-email').textContent = data.partner.accountEmail || 'your account email';
     }
     document.getElementById('pt-payout-save').textContent = p.display ? 'Change payout details' : 'Save payout details';
+    renderWelcome();
+    chatRender();
   }
+
+  // ── Welcome + first-week list ───────────────────────────────────────────────
+  const STEP_ACTION = {
+    terms: { label: 'Accept', run: "window.partnerPage.acceptTerms()" },
+    payout: { label: 'Add details', run: "document.getElementById('pt-payout-form').scrollIntoView({ behavior: 'smooth', block: 'center' })" },
+    first_draft: { label: 'Write it', run: "window.partnerPage.ask('Help me write my first post about how I use Be More Swan, in my own voice.')" },
+    share: { label: 'Copy my link', run: "window.partnerPage.copyLinkFromList(this)" },
+  };
+  function renderWelcome() {
+    const o = data.onboarding;
+    if (!o) { show('pt-welcome', false); show('pt-welcome-folded', false); return; }
+    const open = !o.folded || welcomeShown;
+    show('pt-welcome', open);
+    show('pt-welcome-folded', !open);
+    const first = data.partner.firstName;
+    document.getElementById('pt-welcome-title').textContent = first ? `Welcome to the partner team, ${first}` : 'Welcome to the partner team';
+    // The Terms hold the rules for promoting us, so drafting and sharing wait for step 1 (review of #813).
+    const termsLocked = (k) => (k === 'first_draft' || k === 'share') && data.partnerTerms && !data.partnerTerms.accepted;
+    document.getElementById('pt-steps').innerHTML = o.steps.map((st, i) => {
+      const mark = st.done
+        ? '<span aria-hidden="true" style="display:inline-flex;width:1.5rem;height:1.5rem;border-radius:9999px;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0">✓</span>'
+        : `<span aria-hidden="true" style="display:inline-flex;width:1.5rem;height:1.5rem;border-radius:9999px;align-items:center;justify-content:center;border:2px solid #d1d5db;color:#6b7280;font-size:.75rem;font-weight:700;flex-shrink:0">${i + 1}</span>`;
+      const a = STEP_ACTION[st.key];
+      const btn = !st.done && a && !termsLocked(st.key)
+        ? `<button type="button" onclick="${a.run}" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">${esc(a.label)}</button>`
+        : termsLocked(st.key) && !st.done ? '<span class="text-xs text-gray-400">after step 1</span>'
+        : st.automatic && !st.done ? '<span class="text-xs text-gray-400">ticks itself</span>' : '';
+      return `<li class="flex items-center gap-3">${mark}<span class="flex-1 text-sm ${st.done ? 'text-gray-400 line-through' : 'text-gray-800'}">${esc(st.label)}${st.key === 'terms' && !st.done ? ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read them</a>' : ''}<span class="sr-only">${st.done ? ' (done)' : ''}</span></span>${btn}</li>`;
+    }).join('');
+  }
+  function markStepLocally(key) {
+    const st = data?.onboarding?.steps?.find((x) => x.key === key);
+    if (st && !st.done) { st.done = true; renderWelcome(); }
+  }
+  async function foldWelcome() {
+    welcomeShown = false;
+    if (data.onboarding) data.onboarding.folded = true;
+    renderWelcome();
+    show('pt-terms-banner', !!data.partnerTerms && !data.partnerTerms.accepted);
+    post({ action: 'onboarding', mark: 'dismissed' }).catch(() => {});
+  }
+  function unfoldWelcome() {
+    welcomeShown = true;
+    renderWelcome();
+    show('pt-terms-banner', false);
+    post({ action: 'onboarding', mark: 'reopened' }).catch(() => {});
+  }
+  async function copyLinkFromList(btn) { await copy('pt-link', btn); }
 
   function method() { return (document.querySelector('input[name="pt-method"]:checked') || {}).value || 'paypal'; }
   function syncMethod() {
@@ -323,7 +393,8 @@
     try {
       await post({ action: 'accept_terms' });
       show('pt-terms-banner', false);
-      if (data.partnerTerms) { data.partnerTerms.accepted = true; render(); }   // the payout note changes
+      // Reload: the payout note, the list, the greeting and the starters all change once the Terms are accepted.
+      await load();
       window.showToast?.('Thanks — the Partner Terms are accepted.');
     } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); btn.disabled = false; }
   }
@@ -342,6 +413,10 @@
     const v = document.getElementById(inputId).value;
     try { await navigator.clipboard.writeText(v); } catch { document.getElementById(inputId).select(); document.execCommand('copy'); }
     const was = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = was; }, 1500);
+    if (inputId === 'pt-link' && data?.onboarding) {
+      markStepLocally('share');
+      post({ action: 'onboarding', mark: 'link_copied' }).catch(() => {});
+    }
   }
 
   // ── Partner Assistant ──────────────────────────────────────────────────────
@@ -351,8 +426,25 @@
   function chatRender() {
     const log = document.getElementById('pa-log');
     if (!log) return;
-    show('pa-starters', chat.turns.length === 0);
-    log.innerHTML = chat.turns.map((t, i) => {
+    // Until the current Terms are accepted the assistant answers nothing (partner-assistant.ts 403), so the box
+    // says so, and no starter invites a message that would bounce (review of #813).
+    const locked = !!data?.partnerTerms && !data.partnerTerms.accepted;
+    show('pa-starters', chat.turns.length === 0 && !locked);
+    const input = document.getElementById('pa-input');
+    input.disabled = locked; document.getElementById('pa-send').disabled = locked || chat.busy;
+    input.placeholder = locked ? 'Accept the Partner Terms (step 1 above) to start' : 'e.g. Write an Instagram caption for my coaching clients';
+    // Starters that follow their progress (partner-onboarding.ts startersFor); the static ones are the fallback.
+    const starters = data?.onboarding?.starters;
+    if (starters?.length && chat.turns.length === 0) {
+      document.getElementById('pa-starters').innerHTML = starters.map((st, k) =>
+        `<button type="button" onclick="window.partnerPage.askStarter(${k})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">${esc(st.label)}</button>`).join('');
+    }
+    // The assistant speaks first: a greeting built from their data (no model call, not one of their messages).
+    // It is shown, never sent — the conversation the model sees starts with their first message.
+    const greeting = data?.onboarding?.greeting && chat.turns.length === 0
+      ? `<div class="max-w-[92%]"><div class="bg-white border border-gray-200 rounded-2xl px-3 py-2 text-sm text-gray-800 whitespace-pre-wrap">${esc(data.onboarding.greeting)}</div></div>`
+      : '';
+    log.innerHTML = greeting + chat.turns.map((t, i) => {
       if (t.role === 'user') return `<div class="flex justify-end"><div class="max-w-[85%] bg-gray-100 rounded-2xl px-3 py-2 text-sm text-gray-900 whitespace-pre-wrap">${esc(t.content)}</div></div>`;
       const cards = (t.cards || []).map((c, j) => {
         if (c.kind === 'draft') return `<div class="border border-gray-200 rounded-xl p-3 bg-gray-50/60">
@@ -380,6 +472,7 @@
   }
 
   function ask(text) { document.getElementById('pa-input').value = text; chatSend(); }
+  function askStarter(k) { const st = data?.onboarding?.starters?.[k]; if (st) ask(st.prompt); }
 
   async function chatSend() {
     const input = document.getElementById('pa-input');
@@ -395,6 +488,7 @@
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'The assistant could not answer just now.');
       chat.turns.push({ role: 'assistant', content: d.reply, cards: d.cards || [] });
+      if ((d.cards || []).some((c) => c.kind === 'draft')) markStepLocally('first_draft');   // the server recorded it too
     } catch (e) {
       chat.turns.pop(); input.value = text;
       window.showToast?.(e.message, { icon: '⚠️' });
@@ -421,7 +515,7 @@
 
   function chatClear() { chat.turns = []; chatRender(); }
 
-  window.partnerPage = { savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, chatSend, copyDraft, openHandoff, chatClear, acceptTerms };
+  window.partnerPage = { savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList };
   load();
 })();
 </script>
