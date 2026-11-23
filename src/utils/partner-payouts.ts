@@ -47,7 +47,8 @@ export function isValidIban(raw: unknown): boolean {
  * always sends EUR, so an IBAN from a non-euro country (GB, CH, PL, SE…) would be refused or converted with fees
  * (review of #821) — UK partners use "UK bank account" instead.
  */
-export const EURO_IBAN_COUNTRIES = ['AT','BE','HR','CY','EE','FI','FR','DE','GR','IE','IT','LV','LT','LU','MT','NL','PT','SK','SI','ES','AD','MC','SM','VA'] as const;
+// Bulgaria joined the euro on 1 January 2026 (review of #821).
+export const EURO_IBAN_COUNTRIES = ['AT','BE','BG','HR','CY','EE','FI','FR','DE','GR','IE','IT','LV','LT','LU','MT','NL','PT','SK','SI','ES','AD','MC','SM','VA'] as const;
 
 /** A BIC / SWIFT code: 4 bank letters, 2 country letters, 2 location characters, optional 3-character branch. */
 export function isValidBic(raw: unknown): boolean { return /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(String(raw || '').replace(/\s+/g, '').toUpperCase()); }
