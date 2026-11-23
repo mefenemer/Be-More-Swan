@@ -193,7 +193,8 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
           (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at IS NOT NULL)::int AS paying,
           -- Phase 3 (docs/partner-onboarding-plan.md §3.5–3.6): who is in the free trial right now, and the last 7 days.
           -- A COUNT only — partners never see who (customers are numbered, never named).
-          (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+          -- DISTINCT: trials is one row per WORKSPACE, so one invitee with two open trials counts once (review of #816).
+          (SELECT COUNT(DISTINCT ur.referred_user_id) FROM user_referrals ur JOIN partners p ON p.id = ${id}
              JOIN trials t ON t.user_id = ur.referred_user_id
              WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
                AND ur.created_at >= COALESCE(p.decided_at, p.created_at)

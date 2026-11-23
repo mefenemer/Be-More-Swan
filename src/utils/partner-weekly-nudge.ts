@@ -47,9 +47,12 @@ export function nudgeDecision(input: { status: string; userId: number | null; ma
     return { send: true };
 }
 
-/** The questions a summary may open the assistant with (?ask=<key>). Whitelisted: the page only fills these. */
+/**
+ * The questions a summary may open the assistant with (?ask=<key>). Whitelisted: the page only fills these.
+ * 'terms' is NOT one: the chat is locked until the Terms are accepted, so ?ask=terms takes them to that
+ * step on the page instead (review of #816).
+ */
 export const ASK_PROMPTS: Record<string, string> = {
-    terms: 'In plain English, what do the Partner Terms ask of me when I promote Be More Swan?',
     invite_page: 'Help me write the headline and a short line in my own words for my invite page.',
     first_post: 'Help me write my first post about how I use Be More Swan, in my own voice.',
     no_signups: 'People are visiting my link but nobody has signed up yet. What should I change?',
@@ -59,7 +62,7 @@ export const ASK_PROMPTS: Record<string, string> = {
 };
 
 /** The ONE thing to do this week, from where they are. */
-export function weeklyAction(steps: OnboardingStep[], stats: WeekStats): { key: keyof typeof ASK_PROMPTS; line: string } {
+export function weeklyAction(steps: OnboardingStep[], stats: WeekStats): { key: 'terms' | keyof typeof ASK_PROMPTS; line: string } {
     const done = (k: string) => !!steps.find((s) => s.key === k)?.done;
     if (!done('terms')) return { key: 'terms', line: 'Accept the Partner Terms on your Partner page, so your assistant can start helping.' };
     if (Number(stats.in_trial || 0) > 0) return { key: 'trial', line: `${stats.in_trial} ${stats.in_trial === 1 ? 'person is' : 'people are'} in their free trial. If you know who, offer to help them get going — people helped early are far more likely to stay.` };

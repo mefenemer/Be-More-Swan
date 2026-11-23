@@ -349,8 +349,14 @@
     show('pa-weekly', !!data.onboarding && data.partner.status !== 'ended');
     if (data.onboarding) document.getElementById('pa-weekly-box').checked = data.onboarding.weeklyNudge !== false;
     const askKey = window._partnerAsk; window._partnerAsk = null;
-    const askText = askKey && data.onboarding?.askPrompts?.[askKey];
-    if (askText && !(data.partnerTerms && !data.partnerTerms.accepted && askKey !== 'terms')) {
+    const prompts = data.onboarding?.askPrompts || {};
+    // Own keys only — `constructor` / `__proto__` would otherwise find built-ins (review of #816).
+    const askText = askKey && Object.prototype.hasOwnProperty.call(prompts, askKey) ? prompts[askKey] : null;
+    if (askKey === 'terms') {
+      // The chat waits for the Terms, so their button goes to that step (the list, or the banner if it's hidden).
+      const target = document.getElementById('pt-welcome').style.display !== 'none' ? 'pt-welcome' : 'pt-terms-banner';
+      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (askText) {
       const input = document.getElementById('pa-input');
       if (!input.disabled) { input.value = askText; document.getElementById('pt-assistant-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); input.focus(); }
     }

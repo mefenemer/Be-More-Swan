@@ -83,7 +83,11 @@ check('one action, in order: Terms → people in trial → invite page → first
 });
 
 check('every action key has a question we wrote (the button can open nothing else)', () => {
-    for (const k of ['terms', 'trial', 'invite_page', 'first_post', 'no_signups', 'next']) assert.ok(ASK_PROMPTS[k], k);
+    for (const k of ['trial', 'invite_page', 'first_post', 'no_signups', 'next']) assert.ok(ASK_PROMPTS[k], k);
+    assert.ok(!('terms' in ASK_PROMPTS), 'the chat is locked before the Terms — terms goes to the step instead');
+    const page = read('partner-content.html');
+    assert.ok(page.includes("if (askKey === 'terms') {") && page.includes("'pt-welcome' : 'pt-terms-banner'"));
+    assert.ok(page.includes('Object.prototype.hasOwnProperty.call(prompts, askKey)'), 'no ?ask=constructor junk');
 });
 
 console.log('wiring');
@@ -123,7 +127,7 @@ check('?ask= only fills a whitelisted question from the server — never text fr
     const ws = read('workspace.html');
     assert.ok(ws.includes("askParam && /^[a-z_]{2,20}$/.test(askParam)) window._partnerAsk = askParam;"));
     const page = read('partner-content.html');
-    assert.ok(page.includes('const askText = askKey && data.onboarding?.askPrompts?.[askKey];'));
+    assert.ok(page.includes('Object.prototype.hasOwnProperty.call(prompts, askKey) ? prompts[askKey] : null'));
     assert.ok(!page.includes('input.value = askKey'), 'the key is never shown');
     assert.ok(page.includes("if (!input.disabled) { input.value = askText;"), 'filled, never sent');
 });
@@ -134,7 +138,7 @@ check('"In free trial" is a count of their own invitees in an open trial, never 
     const q = ops.slice(ops.indexOf('who is in the free trial right now'), ops.indexOf('AS in_trial'));
     assert.ok(q.includes('JOIN trials t ON t.user_id = ur.referred_user_id'));
     assert.ok(q.includes('t.ended_at IS NULL AND t.converted_at IS NULL AND t.ends_at > now()'));
-    assert.ok(q.includes('COUNT(*)') && !/email|first_name/.test(q));
+    assert.ok(q.includes('COUNT(DISTINCT ur.referred_user_id)') && !/email|first_name/.test(q), 'one invitee counts once');
     assert.ok(read('partner-content.html').includes('id="pt-trial"'));
 });
 
