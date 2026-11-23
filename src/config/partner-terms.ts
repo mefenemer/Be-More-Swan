@@ -22,6 +22,8 @@ export const PARTNER_TERMS_UPDATED = '23 November 2026';
 // The date each version took effect (Terms 8.1: 60 days after it, a partner still on an older version is treated as
 // leaving). Add the new version HERE when you bump PARTNER_TERMS_VERSION — the nightly sweep does nothing (and logs
 // an error) while the current version has no date, so forgetting it can never end partners early (review of #823).
+// 1.3: no partner had accepted any earlier version (owner, 2026-11-23), so this date can't shorten anyone's notice.
+// For a later version, use the day the notice actually goes out to partners, not the day the code changes.
 export const PARTNER_TERMS_EFFECTIVE_DATES: Record<string, string> = { '1.3': '2026-11-23' };
 export const PARTNER_TERMS_EFFECTIVE: string | null = PARTNER_TERMS_EFFECTIVE_DATES[PARTNER_TERMS_VERSION] ?? null;
 export const DECLINED_CHANGE_DAYS = 60;

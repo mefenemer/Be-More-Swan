@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runOffAllows, RUN_OFF_REASONS } from '../src/utils/partner-activity';
+import { declinedChangeDeadline, runOffAllows, RUN_OFF_REASONS } from '../src/utils/partner-activity';
 import { isAnnualPeriod, isPastClawbackWindow, proRataPence, ANNUAL_HOLDING_DAYS, CLAWBACK_WINDOW_DAYS } from '../src/utils/partner-ledger';
 import { buildExport, type BatchLine } from '../src/utils/partner-payout-batches';
 import { isUkVatNumber, isUkVatRegistered, normaliseVatNumber, statementHtml, statementNumber, vatPenceFor } from '../src/utils/partner-statements';
@@ -163,6 +163,24 @@ check('review of #823: VAT is frozen per payout run — statements, exports and 
 check('review of #823: non-GBP Stripe lookups only for partner referrals', () => {
     const w = read('netlify/functions/stripe-webhook.ts');
     assert.ok(w.includes("payment.gbpNetAmountPence == null && await hasPartnerReferral(db, payment.userId))"));
+});
+
+check('review of #823: a declined change counts 60 days from the LATER of the version date and the latest approval', () => {
+    const d = (x: string) => new Date(`${x}T00:00:00Z`);
+    assert.deepStrictEqual(declinedChangeDeadline('2026-11-23', d('2026-10-01')), d('2027-01-22'), 'approved before the version: 60 days from the version');
+    assert.deepStrictEqual(declinedChangeDeadline('2026-11-23', d('2027-03-01')), d('2027-04-30'), 'approved (or reinstated) after: their own 60 days');
+    assert.deepStrictEqual(declinedChangeDeadline('2026-11-23', null), d('2027-01-22'));
+    const a = read('src/utils/partner-activity.ts');
+    assert.ok(a.includes('AND COALESCE(approved_at, decided_at, created_at) <= ${new Date(now.getTime() - DECLINED_CHANGE_DAYS * DAY_MS).toISOString()}::timestamp'), 'the sweep applies the approval rule');
+});
+check('review of #823: a partner-entered VAT number adds no VAT until an admin confirms it', () => {
+    const hub = read('netlify/functions/partner-hub.ts');
+    assert.ok(hub.includes('...(same ? {} : { vatRegistered: false })'), 'a new or changed number resets confirmation');
+    assert.ok(!hub.includes('vatRegistered: !!vat'), 'saving never switches VAT on');
+    const adm = read('netlify/functions/admin-partners.ts');
+    assert.ok(adm.includes("body.action === 'confirm_vat'") && adm.includes('WHERE id = ${partnerId} AND vat_number = ${expected} AND vat_registered = FALSE'));
+    assert.ok(read('admin.html').includes('Confirm after HMRC check'));
+    assert.ok(read('src/utils/partner-payout-batches.ts').includes('${vatPenceFor(d.amountPence, ukVat)})'), 'VAT amount and number frozen from the same read');
 });
 
 console.log(`\n${passed} passed`);

@@ -133,7 +133,7 @@ export async function createBatch(db: Db, adminId: number): Promise<{ ok: true; 
             const ukVat = isUkVatRegistered(p ?? {});
             await tx.execute(sql`
                 INSERT INTO partner_payout_vat (batch_id, partner_id, vat_number, vat_pence)
-                VALUES (${batch.id}, ${d.partnerId}, ${ukVat ? p.vat_number : null}, ${ukVat ? d.vatPence : 0})
+                VALUES (${batch.id}, ${d.partnerId}, ${ukVat ? p.vat_number : null}, ${vatPenceFor(d.amountPence, ukVat)})
                 ON CONFLICT (batch_id, partner_id) DO NOTHING`);
         }
         await tx.update(partnerPayoutBatches).set({ totalPence: total, partnerCount: count }).where(eq(partnerPayoutBatches.id, batch.id));

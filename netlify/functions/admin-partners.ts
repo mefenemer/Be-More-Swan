@@ -15,6 +15,7 @@
 //   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate'|'end', note?, endReason? }
 //        endReason (end only) = 'closure'|'left'|'breach'|'other' — decides the run-off (Terms 1.3 §7.2 / §7.4)
 //   POST { action: 'inactivity_notice', partnerId } | { action: 'end_inactivity', partnerId }   → Terms 1.3 §7.5
+//   POST { action: 'confirm_vat', partnerId, vatNumber }  → Terms 4.5(b): UK VAT is added only after this (HMRC check done)
 //   POST { action: 'create', email, note? }               → an existing BMS user becomes an approved partner
 //   POST { action: 'resend_invite', partnerId }          → a fresh account link for an approved applicant with no account
 //   GET  ?view=ledger[&status=]                           → { ledger }    (newest 200)
@@ -185,6 +186,7 @@ export default withLambda(async (event) => {
                 rates: periods.filter((p) => p.partnerId === r.id).map(shape),
                 invitePage: invitePageView(r),
                 endedAt: r.ended_at ?? null, endReason: r.end_reason ?? null,
+                vatNumber: r.vat_number ?? null, vatConfirmed: !!r.vat_registered,
                 activity: activityById.get(r.id) ?? null,
             })),
         });
@@ -301,6 +303,19 @@ export default withLambda(async (event) => {
             emailed = await sendApprovalEmail(db, partnerId).catch((err) => { console.error('[admin-partners] approval email failed', err); return null; });
         }
         return json(200, { ok: true, status: rule.to, emailed });
+    }
+
+    // ── Terms 4.5(b): an admin confirms a partner's UK VAT number (checked with HMRC) before VAT is added ─
+    if (body.action === 'confirm_vat') {
+        const partnerId = Number(body.partnerId);
+        const expected = typeof body.vatNumber === 'string' ? body.vatNumber : '';
+        // Conditional on the number the admin checked, so a partner edit in between can't be confirmed blind.
+        const done = (await db.execute(sql`
+            UPDATE partners SET vat_registered = TRUE, updated_at = now()
+             WHERE id = ${partnerId} AND vat_number = ${expected} AND vat_registered = FALSE RETURNING id`)) as unknown as Array<{ id: number }>;
+        if (!done.length) return json(409, { error: 'That VAT number has changed or is already confirmed. Reload to see the latest.' });
+        await audit('partner_decision', partnerId, { vatRegistered: false }, { vatRegistered: true, vatNumber: expected });
+        return json(200, { ok: true });
     }
 
     // ── Partner Terms 1.3 §7.5 Staying active: give notice / end once it has run out ─────────

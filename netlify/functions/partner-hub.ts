@@ -10,7 +10,7 @@
 //   POST { action: 'confirm_payout', token }  → { display }
 //   POST { action: 'cancel_payout_change' }
 //   GET  ?view=statement&batchId=N            → the self-billed statement (HTML) for one of their paid payouts (Terms 4.5)
-//   POST { action: 'vat_number', vatNumber }  → their VAT number; a UK one adds UK VAT to payouts (Terms 4.5)
+//   POST { action: 'vat_number', vatNumber }  → their VAT number; a UK one adds UK VAT to payouts once an admin confirms it (Terms 4.5)
 //   POST { action: 'accept_terms' }           → records acceptance of the current Partner Terms
 //   POST { action: 'onboarding', mark }       → 'link_copied' | 'dismissed' | 'reopened' (the first-week card,
 //                                               docs/partner-onboarding-plan.md §2)
@@ -150,7 +150,7 @@ export default withLambda(async (event) => {
                 customer: c.kind === 'invoice' && c.customer_no ? `Customer ${c.customer_no}` : null,
             })),
             // Terms 4.5: their VAT number (UK-registered = VAT added on top) and a statement per paid payout.
-            vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p) },
+            vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p), pendingCheck: !!p.vatNumber && !p.vatRegistered },
             payouts: await listPartnerPayouts(db, p.id),
             payout: {
                 method: p.payoutMethod, display: p.payoutDetailsConfirmedAt ? p.payoutDisplay : null, confirmedAt: p.payoutDetailsConfirmedAt,
@@ -172,8 +172,12 @@ export default withLambda(async (event) => {
         const raw = typeof body.vatNumber === 'string' ? body.vatNumber.trim() : '';
         const vat = raw ? normaliseVatNumber(raw) : null;
         if (raw && !vat) return json(400, { error: 'That doesn’t look like a VAT number — start with the country letters, e.g. GB123456789.' });
-        await db.update(partners).set({ vatNumber: vat, vatRegistered: !!vat, updatedAt: new Date() }).where(eq(partners.id, p.id));
-        return json(200, { ok: true, vat: { number: vat, ukRegistered: isUkVatRegistered({ vatRegistered: !!vat, vatNumber: vat }) } });
+        // Review of #823: saving never switches VAT on. vat_registered stays false until an admin has checked the
+        // number with HMRC and confirmed it (admin-partners.ts 'confirm_vat'); a change or removal resets it.
+        const same = vat !== null && vat === (p.vatNumber ?? null);
+        await db.update(partners).set({ vatNumber: vat, ...(same ? {} : { vatRegistered: false }), updatedAt: new Date() }).where(eq(partners.id, p.id));
+        const registered = same ? !!p.vatRegistered : false;
+        return json(200, { ok: true, vat: { number: vat, ukRegistered: isUkVatRegistered({ vatRegistered: registered, vatNumber: vat }), pendingCheck: !!vat && !registered } });
     }
 
     if (body.action === 'payout_details') {

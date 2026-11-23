@@ -403,6 +403,7 @@
     show('pt-payout-pending', !!p.pending);
     // Terms 4.5: VAT number and payout statements.
     document.getElementById('pt-vat').value = data.vat?.number || '';
+    if (data.vat?.pendingCheck) document.getElementById('pt-vat-note').textContent = 'We’re checking your VAT number with HMRC. Once it’s confirmed, UK VAT is added to your payouts (Partner Terms 4.5); until then payouts are commission only.';
     const paid = data.payouts || [];
     show('pt-statements-card', paid.length > 0);
     document.getElementById('pt-statements').innerHTML = paid.map((b) => `<li class="flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
@@ -626,7 +627,7 @@
     try {
       const d = await post({ action: 'vat_number', vatNumber: document.getElementById('pt-vat').value });
       data.vat = d.vat;
-      window.showToast?.(d.vat?.number ? (d.vat.ukRegistered ? 'VAT number saved — we’ll add UK VAT to your payouts.' : 'VAT number saved.') : 'VAT number removed.');
+      window.showToast?.(d.vat?.number ? (d.vat.ukRegistered ? 'VAT number saved — we add UK VAT to your payouts.' : d.vat.pendingCheck ? 'VAT number saved — we’ll check it with HMRC before adding VAT to your payouts.' : 'VAT number saved.') : 'VAT number removed.');
     } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
     finally { btn.disabled = false; }
   }

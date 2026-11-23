@@ -300,6 +300,17 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
  * days of it taking effect is treated as leaving (7.1) — ended with end_reason 'change_declined', which
  * keeps the 7.4(a) run-off. Partners who never accepted any version (terms_version NULL) are untouched.
  */
+/**
+ * Terms 8.1: the day a partner on an older version is treated as leaving — 60 days after the LATER of the version
+ * taking effect and the partner's latest approval (review of #823: a partner approved, re-approved or reinstated
+ * after the version date gets their own 60 days, never an ending on the night of approval).
+ */
+export function declinedChangeDeadline(effectiveIso: string, approvedAt: Date | null): Date {
+    const effective = new Date(`${effectiveIso}T00:00:00Z`);
+    const from = approvedAt && approvedAt.getTime() > effective.getTime() ? approvedAt : effective;
+    return new Date(from.getTime() + DECLINED_CHANGE_DAYS * DAY_MS);
+}
+
 export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promise<{ ended: number }> {
     // No effective date for the current version = someone bumped the version without dating it: do nothing.
     if (!PARTNER_TERMS_EFFECTIVE) {
@@ -316,6 +327,8 @@ export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promis
                decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
                inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
          WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
+           -- the partner's own 60 days from their latest approval (declinedChangeDeadline)
+           AND COALESCE(approved_at, decided_at, created_at) <= ${new Date(now.getTime() - DECLINED_CHANGE_DAYS * DAY_MS).toISOString()}::timestamp
          RETURNING id, terms_version`)) as Row[];
     for (const r of rows) {
         // A system decision: an audit row with no admin, and the partner is told (Terms 12.2 — notice by email).
