@@ -220,8 +220,8 @@ async function main() {
         });
 
         await check('annual plan: 12 monthly rows; a refund matched only by invoice id (Checkout, no PaymentIntent) reaches all 12 (review of #827)', async () => {
-            await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 206, 'p1')`);
-            const out = await recordPartnerPayment(db, { userId: 206, paymentRef: 'in_y1', paymentIntentId: null, netAmountPence: 82800, currency: 'gbp', paidAt: d('2026-11-10'), annual: true });
+            await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 260, 'p1')`);
+            const out = await recordPartnerPayment(db, { userId: 260, paymentRef: 'in_y1', paymentIntentId: null, netAmountPence: 82800, currency: 'gbp', paidAt: d('2026-11-10'), annual: true });
             assert.strictEqual(out.recorded, true);
             const slices = await sql.unsafe(`SELECT * FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%' ORDER BY service_period_start`);
             assert.strictEqual(slices.length, 12);
