@@ -19,15 +19,14 @@ import { and, eq, isNull, lt, notExists, sql } from 'drizzle-orm';
 import { partnerCommissions, partners } from '../../db/schema';
 import { deleteSecret } from './vault';
 import { payoutRefKey, pendingPayoutRefKey } from './partner-payouts';
-import { deletePhoto, type InviteProfile } from './partner-invite-profile';
+import { deleteAllPhotos } from './partner-invite-profile';
 
 type Db = any;   // the app db or a transaction
 
 export async function erasePartnerRow(db: Db, partnerId: number): Promise<void> {
     await deleteSecret(db, payoutRefKey(partnerId));
     await deleteSecret(db, pendingPayoutRefKey(partnerId));
-    const [ip] = await db.select({ live: partners.inviteProfile, pending: partners.inviteProfilePending }).from(partners).where(eq(partners.id, partnerId)).limit(1);
-    for (const k of [(ip?.live as InviteProfile | null)?.photoKey, (ip?.pending as InviteProfile | null)?.photoKey]) await deletePhoto(k);
+    await deleteAllPhotos(partnerId);   // their whole partner-photos/<id>/ folder, not just the photos the row points at
     await db.update(partners).set({
         status: 'suspended',
         applicantName: null, applicantEmail: null, application: { erased: true }, decisionNote: 'Personal data erased on request',

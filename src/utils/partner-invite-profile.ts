@@ -13,7 +13,7 @@
 // The text rules are pure; the R2 helpers never throw past the caller's catch.
 
 import { randomBytes } from 'node:crypto';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 export interface InviteProfile { headline: string; quote: string; photoKey: string | null; submittedAt: string }
 
@@ -119,6 +119,31 @@ export async function deletePhoto(key: string | null | undefined): Promise<void>
     if (!s) return;
     await s.client.send(new DeleteObjectCommand({ Bucket: s.bucket, Key: key }))
         .catch((err) => console.error('[partner-invite-profile] photo delete failed (non-blocking):', err));
+}
+
+/**
+ * Erasure: EVERY photo under partner-photos/<id>/, not only the two the row points at — an upload whose
+ * save then failed would otherwise stay in storage (review of #815). Never throws; returns how many went.
+ */
+export async function deleteAllPhotos(partnerId: number): Promise<number> {
+    const s = r2();
+    if (!s || !Number.isInteger(partnerId) || partnerId < 1) return 0;
+    let deleted = 0;
+    try {
+        let token: string | undefined;
+        do {
+            const page = await s.client.send(new ListObjectsV2Command({ Bucket: s.bucket, Prefix: `${PHOTO_PREFIX}${partnerId}/`, ContinuationToken: token }));
+            for (const o of page.Contents || []) {
+                if (!o.Key) continue;
+                await s.client.send(new DeleteObjectCommand({ Bucket: s.bucket, Key: o.Key }));
+                deleted++;
+            }
+            token = page.IsTruncated ? page.NextContinuationToken : undefined;
+        } while (token);
+    } catch (err) {
+        console.error('[partner-invite-profile] photo folder delete failed (non-blocking):', err);
+    }
+    return deleted;
 }
 
 /** Keys a profile change leaves unused: the old ones not kept by either remaining profile. */

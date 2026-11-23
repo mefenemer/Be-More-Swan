@@ -128,7 +128,8 @@ check('public page shows ONLY the approved version, only for an approved partner
     assert.ok(!lookup.includes('inviteProfilePending'), 'never the pending one');
     assert.ok(lookup.includes("eq(partners.status, 'approved')"));
     const page = read('invite.html');
-    assert.ok(page.includes('Paid partnership · ${who} is a Be More Swan partner and earns a commission if you join'));
+    assert.ok(page.includes('Paid partnership · ${d.firstName} is a Be More Swan partner and earns a commission if you join'));
+    assert.ok(page.includes("'Paid partnership · The person who shared this link is a Be More Swan partner"), 'no "They is" without a first name');
     assert.ok(page.includes("document.getElementById('inv-title').textContent = d.profile.headline"), 'their words as text, never HTML');
     assert.ok(!/innerHTML\s*=\s*[^;]*d\.profile/.test(page));
 });
@@ -175,7 +176,7 @@ check('assistant card only FILLS the form; the partner sends it', () => {
 check('erasure removes the invite page and its photos', () => {
     const er = read('src/utils/partner-erasure.ts');
     assert.ok(er.includes('inviteProfile: null, inviteProfilePending: null, inviteProfileNote: null'));
-    assert.ok(er.includes('await deletePhoto(k)'));
+    assert.ok(er.includes('await deleteAllPhotos(partnerId)'), 'the whole folder, not just the photos the row points at');
 });
 
 check('SQL and schema agree; partner kit only lists files under /partner-kit/', () => {

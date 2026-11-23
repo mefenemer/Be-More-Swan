@@ -105,8 +105,9 @@
     if (d.profile) {
       // Their words, as text (never HTML). Headline replaces the title; the label says they earn from it.
       document.getElementById('inv-title').textContent = d.profile.headline;
-      const who = d.firstName || 'They';
-      document.getElementById('inv-profile-label').textContent = `Paid partnership · ${who} is a Be More Swan partner and earns a commission if you join`;
+      document.getElementById('inv-profile-label').textContent = d.firstName
+        ? `Paid partnership · ${d.firstName} is a Be More Swan partner and earns a commission if you join`
+        : 'Paid partnership · The person who shared this link is a Be More Swan partner and earns a commission if you join';
       if (d.profile.quote) { const q = document.getElementById('inv-quote'); q.textContent = `“${d.profile.quote}”${d.firstName ? ' — ' + d.firstName : ''}`; q.classList.remove('hidden'); }
       if (d.profile.photoUrl) { const img = document.getElementById('inv-photo'); img.src = d.profile.photoUrl; img.alt = d.firstName ? `${d.firstName}` : 'Partner'; img.classList.remove('hidden'); }
       show('inv-profile');
