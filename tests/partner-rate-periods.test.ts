@@ -246,10 +246,9 @@ check('existing commissions and locked customers keep 0% — only an unlocked pr
 
 check('the Partner Terms state the same worked example the code computes', () => {
     const terms = readFileSync(join(root, 'partner-terms.html'), 'utf8');
-    assert.ok(terms.includes('Commission is worked out after costs.'));
-    assert.ok(terms.includes('The cost deduction is currently 20%.'));
-    // £69 since SWAN-15 (2026-11-02): the example used the retired £79 price.
-    assert.ok(terms.includes('pays £69 excluding VAT') && terms.includes('at a 25% rate you earn £13.80'));
+    // Terms 1.3 §3.2 (owner 2026-11-23): said plainly as 20% of each payment — the code's 25% after a 20% deduction.
+    assert.ok(terms.includes('<strong>20% of each Subscription Payment</strong>'));
+    assert.ok(terms.includes('if a customer pays £69 excluding VAT, you earn £13.80'));
     assert.strictEqual(commissionPence(6900, 2500, 2000), 1380);
 });
 

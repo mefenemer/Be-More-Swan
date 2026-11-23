@@ -34,8 +34,8 @@ const none = { termsAccepted: false, payoutSet: false, marks: {}, stats: { click
 
 console.log('rate and example');
 
-check('rate line states rate, cost deduction and length plainly', () => {
-    assert.strictEqual(rateLine(angela), '50% of what each customer you invite pays (excluding VAT), after a 20% cost deduction, for their first 12 months');
+check('rate line states the plain share of each plan payment and the length (Terms 1.3 §3.2: no cost deduction shown)', () => {
+    assert.strictEqual(rateLine(angela), '40% of each plan payment a customer you invite makes (excluding VAT), for their first 12 months');
     assert.ok(rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: null }).endsWith('for as long as they stay a customer'));
     assert.ok(!rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: 1 }).includes('cost deduction'));
     assert.ok(rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: 1 }).endsWith('first 1 month'));
@@ -75,7 +75,7 @@ console.log('greeting and starters');
 check('greeting: her name, her rate, an exact example, and her next three steps', () => {
     const g = welcomeGreeting({ firstName: 'Angela', businessName: 'Kudzu Collab', terms: angela, planPriceGbp: 79, steps: buildChecklist(none) });
     assert.ok(g.startsWith('Hi Angela, I’m your Partner Assistant.'));
-    assert.ok(g.includes('50% of what each customer you invite pays'));
+    assert.ok(g.includes('40% of each plan payment a customer you invite makes'));
     assert.ok(g.includes('£31.60'));
     assert.ok(g.includes('1. Accept the Partner Terms'));
     assert.ok(g.includes('2. Tell us where to pay you'));

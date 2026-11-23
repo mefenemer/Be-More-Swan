@@ -6699,6 +6699,16 @@ export const partners = pgTable("partners", {
   inviteProfilePending: jsonb("invite_profile_pending").$type<{ headline: string; quote: string; photoKey: string | null; submittedAt: string } | null>(),
   inviteProfileNote: text("invite_profile_note"),
   inviteProfileReviewedAt: timestamp("invite_profile_reviewed_at"),
+  // Partner Terms 1.3 §7.5 Staying active (db/z-partner-activity.sql; src/utils/partner-activity.ts).
+  approvedAt: timestamp("approved_at"),                      // most recent move to approved — the activity clock starts here
+  partnerSince: timestamp("partner_since"),                  // start of the CURRENT partnership — tenure, and §7.5(i) re-approval
+  endedAt: timestamp("ended_at"),
+  endReason: text("end_reason"),                             // inactivity | closure | left | breach | other — drives the run-off
+  activityPauseDays: integer("activity_pause_days").notNull().default(0),
+  activityPauseLastDay: date("activity_pause_last_day"),
+  activityPauseAnchor: timestamp("activity_pause_anchor"),    // the clock start the paused days count against
+  inactivityNoticeAt: timestamp("inactivity_notice_at"),
+  inactivityNoticeEnds: timestamp("inactivity_notice_ends"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -6746,6 +6756,8 @@ export const partnerReferrals = pgTable("partner_referrals", {
   rateBps: integer("rate_bps"),
   costDeductionBps: integer("cost_deduction_bps"),
   durationMonths: integer("duration_months"),
+  // Partner Terms 1.3 §7.5(b) (db/z-partner-activity.sql): first payment came while the partner was suspended — never a Qualifying Customer.
+  lockedWhileSuspended: boolean("locked_while_suspended").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("partner_referrals_partner_idx").on(t.partnerId, t.createdAt),

@@ -97,7 +97,8 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
         // Suspended and ended partners are still paid what they earned (Partner Terms 7.3).
         const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`
             // No contract, no payout: it waits (and rolls over) until they accept on their Partner page.
-            : !hasAcceptedCurrentTerms(r.terms_version) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
+            // An ENDED partner is paid under the terms they last accepted (7.3): a later version no longer binds them.
+            : !(hasAcceptedCurrentTerms(r.terms_version) || (r.status === 'ended' && r.terms_version)) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
             : !r.payout_details_confirmed_at || !r.payout_display ? 'No confirmed payout details'
             : underMinimumReason(amount, min, r.status, r.oldest_ready ? new Date(r.oldest_ready) : null);
         return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };

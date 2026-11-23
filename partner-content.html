@@ -70,6 +70,7 @@
         <div>
           <h2 class="font-semibold text-gray-800">Your invite link</h2>
           <p id="pt-terms" class="text-sm text-gray-600 mt-0.5"></p>
+          <p id="pt-activity" class="hidden text-sm mt-1"></p>
           <p id="pt-agreement" class="text-xs text-gray-600 mt-1"></p>
         </div>
         <span class="text-xs text-gray-500">Code <span id="pt-code" class="font-mono font-bold text-gray-800"></span></span>
@@ -317,18 +318,18 @@
     if (t) {
       const pct = Number(t.rateBps) / 100;
       const length = t.durationMonths == null ? 'for as long as they stay' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-      const costs = Number(t.costDeductionBps || 0) / 100;
-      const basis = costs > 0 ? `of what each new customer pays after costs (we take ${costs}% off their payment, excluding VAT, before your rate applies)` : 'of what each new customer pays, excluding VAT';
-      document.getElementById('pt-terms').innerHTML = `You earn <strong>${pct}%</strong> ${basis}, ${length}.` +
+      // Partner Terms 1.3 §3.2: said plainly as a share of each plan payment — the rate after the fixed cost deduction.
+      const effective = Math.round(pct * (100 - Number(t.costDeductionBps || 0) / 100)) / 100;
+      document.getElementById('pt-terms').innerHTML = `You earn <strong>${effective}%</strong> of each plan payment a new customer makes, excluding VAT, ${length}.` +
         (t.special ? ` <span class="text-pink-700 font-semibold">Special rate${t.specialUntil ? ' until ' + esc(day(t.specialUntil)) : ''}.</span>` : '') +
-        ' A customer keeps the rate in force when they first pay.' +
+        ' A customer keeps the commission in force when they first pay.' +
         ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Partner Terms</a>';
     }
     // Their agreement: partner since, and the renewal date = when the rate they're on now ends.
     const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>` : '';
     const renew = !t ? '' : t.renewsOn
-      ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special rate ends; customers who first paid before then keep it' : ' — when this rate ends'}`
-      : 'Renewal date: <strong>none set</strong> — your rate continues until we give you 30 days’ notice of a change (Partner Terms 3.3 and 8.1)';
+      ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special commission ends; customers who first paid before then keep it' : ' — when this commission ends'}`
+      : 'Renewal date: <strong>none set</strong> — your commission continues until we give you notice of a change: 30 days, or 60 days for a cut (Partner Terms 3.3 and 8.1)';
     document.getElementById('pt-agreement').innerHTML = [since, renew].filter(Boolean).join(' · ');
     document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
     document.getElementById('pt-signups').textContent = s.signups ?? 0;
@@ -341,9 +342,19 @@
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
       : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
-        : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
+        : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then, or is paid once it has waited 6 months and is at least £10.`);
+    // Partner Terms 1.3 §7.5(g): the date your Active Period ends, and any notice.
+    const act = data.activity;
+    const actEl = document.getElementById('pt-activity');
+    show('pt-activity', !!act?.activeUntil);
+    if (act?.activeUntil) {
+      actEl.className = `text-sm mt-1 ${act.notice ? 'text-amber-800 font-semibold' : 'text-gray-600'}`;
+      actEl.innerHTML = act.notice
+        ? `We’ve given you notice under section 7.5: it runs until <strong>${esc(day(act.notice.endsAt))}</strong>. A new customer who starts paying before then cancels it. <a href="/partner-terms.html#staying-active" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Staying active</a>`
+        : `Stay active by <strong>${esc(day(act.activeUntil))}</strong>: introduce a new paying customer before then to keep your partnership going. <a href="/partner-terms.html#staying-active" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Staying active</a>`;
+    }
     const rules = data.payoutRules || {};
-    document.getElementById('pt-info-payable-text').textContent = `Commission that has passed its ${rules.holdingDays ?? 30}-day holding period. It is paid in the next monthly payout once your balance reaches ${money(rules.minPayoutPence ?? 5000)}; below that it rolls over to the next month.`;
+    document.getElementById('pt-info-payable-text').textContent = `Commission that has passed its ${rules.holdingDays ?? 30}-day holding period. It is paid in the next monthly payout once your balance reaches ${money(rules.minPayoutPence ?? 5000)}; below that it rolls over, and is paid once it has waited 6 months and is at least £10.`;
     document.getElementById('pt-pending-note').textContent = s.next_release_at
       ? `Held ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund. Next amount is ready on ${day(s.next_release_at)}.`
       : `Commission waits ${data.payoutRules?.holdingDays ?? 30} days after each payment in case of a refund.`;

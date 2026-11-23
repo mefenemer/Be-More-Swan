@@ -77,6 +77,10 @@ async function main() {
 
         await check('a suspended partner earns nothing, and is still on the partner track (no token either)', async () => {
             assert.strictEqual((await pay(202, 'in_s1', 2900, d('2026-11-01'))).recorded, false);
+            // Terms 1.3 §7.5(b): the terms lock at this real first payment, flagged so it never counts as a Qualifying Customer.
+            const [locked] = await sql.unsafe(`SELECT subscribed_at IS NOT NULL AS locked, locked_while_suspended FROM partner_referrals pr JOIN user_referrals ur ON ur.id = pr.referral_id WHERE ur.referred_user_id = 202`);
+            assert.strictEqual(locked?.locked, true);
+            assert.strictEqual(locked?.locked_while_suspended, true);
             assert.strictEqual(await isPartnerReferrer(db, 101), true);
             assert.strictEqual(await isPartnerReferrer(db, 102), false);
         });

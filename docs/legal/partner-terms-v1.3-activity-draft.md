@@ -124,3 +124,21 @@ The contract-expert review found the standard deal is cheap for us at any realis
 | 5 | **60 days' notice** for any change that reduces commission (30 days for other changes). Customers referred during a notice reach their first paying month about 44 days later, so 60 days covers them. | 3.3, 8.1 |
 
 Not applied, owner's choice for later: state the commission as "20% of each Subscription Payment" instead of "25% after a 20% deduction"; a growth rate for active partners (3.6); payouts by the 15th of the following month; 50% off instead of the free first month; re-measuring cost per user.
+
+---
+
+## Deferred build: DONE (branch `feat/partner-activity-clause`, 23 November 2026)
+
+Needs **db/z-partner-activity.sql on BOTH databases before the code deploys**.
+
+- **Activity clock:** `approved_at` (latest approval), `partner_since` (current partnership), and paused days (one per night while suspended or while sign-ups are paused). Logic in `src/utils/partner-activity.ts`.
+- **"Stay active by" date** on the Partner page (`partner-hub.ts` → `pt-activity`); an open notice shows instead.
+- **Notices:** an admin sends one from Admin → Partners once the date has passed (1/2/3 months by tenure). It is emailed and appears in-app. The nightly sweep withdraws it on a Qualifying Customer and extends it for a sign-up still in their free period. "End (inactivity)" appears once a notice has run out; nothing ends automatically.
+- **Run-off in the ledger:** an ended partner earns only through §7.5(h) (≤12-month customers run to term, longer ones 3 months) or §7.2 closure (3 months). A plain "End" asks why: left, breach, closure or other. The Partner Ops chat can't end anyone for inactivity.
+- **Re-approval:** customers who first paid before `partner_since` earn nothing.
+- **Ended link:** earns no refer-a-friend tokens (`isPartnerReferrer` includes ended).
+- **Suspended partners:** terms now lock at a customer's real first payment (nothing is earned). This closes the review's M1 gap, where a renewal after suspension looked like a new customer.
+- **Review fix:** ended partners are paid under the terms they last accepted (7.3).
+- **3.2 said plainly:** "20% of each Subscription Payment". The 3.5 cap is now "32% of a Subscription Payment". Internally it is still 25% after a 20% fixed deduction (`effectiveShareBps`). The Partner page, application page, Partner Assistant and welcome greeting all show the plain share.
+
+Not built: the optional 5-month warning email.
