@@ -154,7 +154,12 @@ export async function cancelBatch(db: Db, batchId: number): Promise<{ ok: true }
  */
 export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
 export const WISE_EMAIL_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency'];
-export type ExportFormat = 'wise_bank' | 'wise_email' | 'paypal';
+// ⚠️ US bank (ACH) recipients, paid in USD from a GBP balance. Field names from Wise's documented USD
+// recipient requirements (abartn, accountNumber, accountType, address.*) — like the UK headers above, COMPARE
+// WITH A TEMPLATE DOWNLOADED FROM WISE before the first real run.
+export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
+    'abartn', 'accountNumber', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
+export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'paypal';
 
 const csvCell = (v: string) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 /** A spreadsheet treats a leading = + - @ as a formula; neutralise it (CSV injection). */
@@ -192,6 +197,10 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         if (!d || l.amountPence <= 0) continue;
         if (format === 'wise_bank' && d.method === 'bank') {
             rows.push([d.accountName, l.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+        } else if (format === 'wise_us' && d.method === 'us_bank') {
+            // The amount is the GBP commission; Wise converts it and the partner receives USD.
+            rows.push([d.accountName, l.email, ref, d.holderType === 'business' ? 'BUSINESS' : 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'USD',
+                d.routingNumber, d.accountNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
             rows.push([l.name, d.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {
@@ -200,7 +209,7 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         } else continue;
         total += l.amountPence;
     }
-    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : [];
+    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : [];
     const csv = [...header, ...rows].map((r) => r.map((v) => csvCell(safe(String(v)))).join(',')).join('\r\n') + '\r\n';
     return { csv, included: rows.length, skipped: lines.length - rows.length, totalPence: total };
 }
@@ -217,6 +226,7 @@ export async function listBatches(db: Db): Promise<Row[]> {
         SELECT b.id, b.status, b.total_pence, b.partner_count, b.created_at, b.exported_at, b.paid_at,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'bank')::int AS bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'wise')::int AS wise_partners,
+               COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'us_bank')::int AS us_bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id
