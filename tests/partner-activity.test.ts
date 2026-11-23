@@ -12,7 +12,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { activeUntil, extendedNoticeEnd, freePeriodEnd, noticeMonths, runOffAllows } from '../src/utils/partner-activity';
+import { activeUntil, extendedNoticeEnd, freePeriodEnd, noticeMonths, pauseDaysFor, runOffAllows } from '../src/utils/partner-activity';
 import { effectiveShareBps } from '../src/utils/partner-rate-periods';
 
 let passed = 0;
@@ -34,6 +34,12 @@ check('a later Qualifying Customer restarts it; an earlier one does not', () => 
 });
 check('paused days (suspended, sign-ups paused) push it back day for day', () => {
     assert.deepStrictEqual(activeUntil(d('2027-01-10'), null, 12), d('2027-07-22'));
+});
+
+check('paused days belong to the clock start they were counted for; a newer start resets them (review #820)', () => {
+    assert.strictEqual(pauseDaysFor(9, d('2027-01-10'), d('2027-01-10')), 9);
+    assert.strictEqual(pauseDaysFor(9, d('2027-01-10'), d('2027-03-05')), 0, 'a new Qualifying Customer restarts the clock');
+    assert.strictEqual(pauseDaysFor(9, null, d('2027-03-05')), 0);
 });
 
 console.log('notice (7.5(d), (e))');
@@ -93,7 +99,9 @@ check('an ended partner\'s link earns no refer-a-friend tokens (7.4)', () => {
 });
 check('admin decisions set the clock, partnership start and end reason; inactivity has its own two steps', () => {
     const a = read('netlify/functions/admin-partners.ts');
-    assert.ok(a.includes("approvedAt: now, ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {})"));
+    assert.ok(a.includes("? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,"), 'any approval restarts the clock and clears an old notice');
+    assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }"));
+    assert.ok(a.includes("rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null }"), 'suspending clears a notice');
     assert.ok(a.includes("['closure', 'left', 'breach', 'other'].includes(String(body.endReason))"), 'inactivity cannot be chosen on a plain end');
     assert.ok(a.includes("body.action === 'inactivity_notice' || body.action === 'end_inactivity'"));
     assert.ok(read('netlify/functions/admin-partners-chat.ts').includes('NEVER end a partner for inactivity here'));
@@ -115,13 +123,40 @@ check('the Partner page shows the date (7.5(g)) and both notice emails exist', (
 });
 check('the migration adds every column the code reads, and backfills partner_since EARLY (never cuts customers)', () => {
     const sqlText = read('db/z-partner-activity.sql');
-    for (const c of ['approved_at', 'partner_since', 'ended_at', 'end_reason', 'activity_pause_days', 'activity_pause_last_day', 'inactivity_notice_at', 'inactivity_notice_ends']) {
+    for (const c of ['approved_at', 'partner_since', 'ended_at', 'end_reason', 'activity_pause_days', 'activity_pause_last_day', 'activity_pause_anchor', 'inactivity_notice_at', 'inactivity_notice_ends']) {
         assert.ok(sqlText.includes(`ADD COLUMN IF NOT EXISTS ${c} `), c);
     }
     assert.ok(sqlText.includes('UPDATE partners SET partner_since = created_at'));
 });
 check('ended partners are paid under the terms they last accepted (7.3)', () => {
     assert.ok(read('src/utils/partner-payout-batches.ts').includes("(r.status === 'ended' && r.terms_version)"));
+});
+
+console.log('review #820 fixes');
+check('End is only possible once the active date has passed AND the notice has run out', () => {
+    const a = read('src/utils/partner-activity.ts');
+    assert.ok(a.includes("canEnd: p.status === 'approved' && !!notice && !qualifiedSinceNotice && pastDate && now.getTime() >= notice.endsAt.getTime(),"));
+    assert.ok(a.includes('sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null'), 'a notice from before the latest approval is ignored');
+});
+check('a Qualifying Customer\'s FIRST commission must be live and from the first payment (not a payment while suspended)', () => {
+    const a = read('src/utils/partner-activity.ts');
+    assert.ok(a.includes("SELECT c.status <> 'voided' AND c.created_at < pr.subscribed_at + interval '3 days'"));
+    assert.ok(a.includes('ORDER BY c.created_at ASC LIMIT 1) IS TRUE'));
+});
+check('End checks the free-period extension itself, not only the nightly sweep', () => {
+    const a = read('src/utils/partner-activity.ts');
+    const end = a.slice(a.indexOf('export async function endForInactivity'), a.indexOf('// ── The nightly sweep'));
+    assert.ok(end.includes('await extendForFreePeriods(db, partnerId,') && end.indexOf('extendForFreePeriods') < end.indexOf("SET status = 'ended'"));
+});
+check('the notice reports whether the EMAIL went, and the admin is warned if not (12.2)', () => {
+    assert.ok(read('src/utils/partner-activity.ts').includes('return !!sent;'));
+    assert.ok(read('netlify/functions/admin-partners.ts').includes('emailed: r.emailed });'));
+    assert.ok(read('admin.html').includes('but the email did NOT send'));
+});
+check('the Partner Assistant explains commission as a plain share, with no cost deduction', () => {
+    const a = read('netlify/functions/partner-assistant.ts');
+    assert.ok(a.includes('Commission is commissionForNewCustomers.sharePercent of each plan payment'));
+    assert.ok(!a.includes('costDeductionBps, 2000 = 20%'));
 });
 
 console.log('commission said plainly (3.2)');

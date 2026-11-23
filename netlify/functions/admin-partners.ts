@@ -283,8 +283,11 @@ export default withLambda(async (event) => {
         const now = new Date();
         const endReason = rule.to === 'ended' ? (['closure', 'left', 'breach', 'other'].includes(String(body.endReason)) ? String(body.endReason) : 'other') : null;
         const activity = rule.to === 'approved'
-            ? { approvedAt: now, ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }
-            : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
+            // Any approval restarts the 6 months: no old notice or paused days carry over (§7.5(c), (g)).
+            ? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,
+                ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }
+            : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null }
+            : rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
         const updated = await db.update(partners)
             .set({ status: rule.to, decidedBy: adminId, decidedAt: now, decisionNote: note, updatedAt: now, ...activity })
             .where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))
@@ -306,8 +309,8 @@ export default withLambda(async (event) => {
         if (body.action === 'inactivity_notice') {
             const r = await sendInactivityNotice(db, partnerId);
             if (!r.ok) return json(409, { error: r.error });
-            await audit('partner_decision', partnerId, undefined, { inactivityNotice: true, noticeEnds: r.endsAt.toISOString() });
-            return json(200, { ok: true, noticeEnds: r.endsAt.toISOString() });
+            await audit('partner_decision', partnerId, undefined, { inactivityNotice: true, noticeEnds: r.endsAt.toISOString(), emailed: r.emailed });
+            return json(200, { ok: true, noticeEnds: r.endsAt.toISOString(), emailed: r.emailed });
         }
         const r = await endForInactivity(db, partnerId, adminId);
         if (!r.ok) return json(409, { error: r.error });

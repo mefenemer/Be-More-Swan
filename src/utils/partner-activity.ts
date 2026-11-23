@@ -101,14 +101,21 @@ export interface PartnerActivity {
     canEnd: boolean;                   // a notice has run out with no Qualifying Customer
 }
 
-/** Latest Qualifying Customer's first payment in the current partnership. */
+/**
+ * Latest Qualifying Customer's first payment in the current partnership (§7.5(b)): the customer's
+ * FIRST commission is a not-voided invoice commission recorded at that first payment (within 3 days
+ * of subscribed_at). A first payment made while suspended locks the terms but earns nothing, so it
+ * has no commission of its own at that time and does not count.
+ */
 async function lastQualifying(db: Db, partnerId: number, since: Date): Promise<Date | null> {
     const rows = (await db.execute(sql`
         SELECT MAX(pr.subscribed_at)::text AS at
           FROM partner_referrals pr
          WHERE pr.partner_id = ${partnerId} AND pr.subscribed_at IS NOT NULL AND pr.subscribed_at >= ${since.toISOString()}::timestamp
-           AND EXISTS (SELECT 1 FROM partner_commissions c
-                        WHERE c.partner_referral_id = pr.id AND c.kind = 'invoice' AND c.status <> 'voided')`)) as Row[];
+           AND (SELECT c.status <> 'voided' AND c.created_at < pr.subscribed_at + interval '3 days'
+                  FROM partner_commissions c
+                 WHERE c.partner_referral_id = pr.id AND c.kind = 'invoice'
+                 ORDER BY c.created_at ASC LIMIT 1) IS TRUE`)) as Row[];
     const at = rows[0]?.at;
     return at ? new Date(`${String(at).replace(' ', 'T')}Z`) : null;
 }
@@ -120,9 +127,21 @@ function toDate(v: unknown): Date | null {
     return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
 }
 
+/** The clock's start (§7.5(c)): the later of the latest approval and the latest Qualifying Customer. */
+function clockStart(approvedAt: Date, last: Date | null): Date {
+    return last && last.getTime() > approvedAt.getTime() ? last : approvedAt;
+}
+
+/** Paused days count only against the start they were counted for; a newer start resets them. */
+export function pauseDaysFor(storedDays: number, storedAnchor: Date | null, start: Date): number {
+    if (!storedAnchor || storedAnchor.getTime() < start.getTime() - 1000) return 0;
+    return Math.max(0, storedDays);
+}
+
 export async function getPartnerActivity(db: Db, partnerId: number, now: Date = new Date()): Promise<PartnerActivity> {
     const rows = (await db.execute(sql`
         SELECT status, approved_at::text AS approved_at, partner_since::text AS partner_since, activity_pause_days,
+               activity_pause_anchor::text AS pause_anchor,
                inactivity_notice_at::text AS notice_at, inactivity_notice_ends::text AS notice_ends,
                decided_at::text AS decided_at, created_at::text AS created_at
           FROM partners WHERE id = ${partnerId}`)) as Row[];
@@ -132,16 +151,18 @@ export async function getPartnerActivity(db: Db, partnerId: number, now: Date = 
     const approvedAt = toDate(p.approved_at) ?? toDate(p.decided_at) ?? toDate(p.created_at)!;
     const since = toDate(p.partner_since) ?? approvedAt;
     const last = await lastQualifying(db, partnerId, since);
-    const pauseDays = Number(p.activity_pause_days) || 0;
+    const pauseDays = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), clockStart(approvedAt, last));
     const until = activeUntil(approvedAt, last, pauseDays);
     const sentAt = toDate(p.notice_at);
     const endsAt = toDate(p.notice_ends);
-    const notice = sentAt && endsAt ? { sentAt, endsAt } : null;
+    // A notice from before the latest approval is stale (approvals clear it; this is belt and braces).
+    const notice = sentAt && endsAt && sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null;
     const qualifiedSinceNotice = !!(notice && last && last.getTime() >= notice.sentAt.getTime());
+    const pastDate = now.getTime() >= until.getTime();
     return {
         activeUntil: until, lastQualifyingAt: last, pauseDays, notice, noticeMonths: noticeMonths(since, now),
-        canSendNotice: p.status === 'approved' && !notice && now.getTime() >= until.getTime(),
-        canEnd: p.status === 'approved' && !!notice && !qualifiedSinceNotice && now.getTime() >= notice.endsAt.getTime(),
+        canSendNotice: p.status === 'approved' && !notice && pastDate,
+        canEnd: p.status === 'approved' && !!notice && !qualifiedSinceNotice && pastDate && now.getTime() >= notice.endsAt.getTime(),
     };
 }
 
@@ -154,19 +175,22 @@ async function partnerContact(db: Db, partnerId: number): Promise<{ userId: numb
     return { userId: r.user_id ?? null, email: r.email ?? null, firstName: r.first_name ?? null };
 }
 
-async function tell(db: Db, partnerId: number, key: 'partner_inactivity_notice' | 'partner_inactivity_withdrawn', vars: Record<string, Record<string, string>>): Promise<void> {
+/** In-app + email. Returns whether the EMAIL went (§12.2: email is the notice channel). */
+async function tell(db: Db, partnerId: number, key: 'partner_inactivity_notice' | 'partner_inactivity_withdrawn', vars: Record<string, Record<string, string>>): Promise<boolean> {
+    const who = await partnerContact(db, partnerId).catch(() => ({ userId: null, email: null, firstName: null }));
+    if (who.userId) await createNotification(db, key, { userId: who.userId, context: vars, metadata: { action: 'partner_page' } }).catch(() => false);
+    if (!who.email) return false;
     try {
-        const who = await partnerContact(db, partnerId);
-        if (who.userId) await createNotification(db, key, { userId: who.userId, context: vars, metadata: { action: 'partner_page' } });
-        // §12.2: notice is given by email.
-        if (who.email) await sendTemplatedEmail({ triggerKey: key, to: who.email, vars: { ...vars, user: { first_name: who.firstName || '' }, link: { action_url: partnerPageUrl(), terms_url: termsUrl() } } });
+        const sent = await sendTemplatedEmail({ triggerKey: key, to: who.email, vars: { ...vars, user: { first_name: who.firstName || '' }, link: { action_url: partnerPageUrl(), terms_url: termsUrl() } } });
+        return !!sent;
     } catch (err) {
-        console.error(`[partner-activity] ${key} not sent (non-blocking):`, err);
+        console.error(`[partner-activity] ${key} email NOT sent:`, err);
+        return false;
     }
 }
 
 /** An admin gives the §7.5 notice. Refused before the Active Period has ended. */
-export async function sendInactivityNotice(db: Db, partnerId: number, now: Date = new Date()): Promise<{ ok: true; endsAt: Date } | { ok: false; error: string }> {
+export async function sendInactivityNotice(db: Db, partnerId: number, now: Date = new Date()): Promise<{ ok: true; endsAt: Date; emailed: boolean } | { ok: false; error: string }> {
     const a = await getPartnerActivity(db, partnerId, now);
     if (a.notice) return { ok: false, error: `A notice is already open until ${ukDate(a.notice.endsAt)}.` };
     if (!a.canSendNotice) {
@@ -177,8 +201,31 @@ export async function sendInactivityNotice(db: Db, partnerId: number, now: Date 
         UPDATE partners SET inactivity_notice_at = ${now.toISOString()}::timestamp, inactivity_notice_ends = ${endsAt.toISOString()}::timestamp, updated_at = now()
          WHERE id = ${partnerId} AND status = 'approved' AND inactivity_notice_at IS NULL RETURNING id`)) as Row[];
     if (!updated.length) return { ok: false, error: 'Someone else changed this partner a moment ago. Reload to see the latest.' };
-    await tell(db, partnerId, 'partner_inactivity_notice', { partner: { notice_ends: ukDate(endsAt), notice_months: String(a.noticeMonths) } });
-    return { ok: true, endsAt };
+    const emailed = await tell(db, partnerId, 'partner_inactivity_notice', { partner: { notice_ends: ukDate(endsAt), notice_months: String(a.noticeMonths) } });
+    return { ok: true, endsAt, emailed };
+}
+
+/**
+ * §7.5(e): extend an open notice for sign-ups (through their link or code, in this partnership,
+ * not yet paying) still in their free period when it would end. Returns the new end, or null.
+ */
+async function extendForFreePeriods(db: Db, partnerId: number, userId: number | null, since: Date, endsAt: Date): Promise<Date | null> {
+    if (!userId) return null;
+    const signUps = (await db.execute(sql`
+        SELECT ur.created_at::text AS at FROM user_referrals ur
+          LEFT JOIN partner_referrals pr ON pr.referral_id = ur.id
+         WHERE ur.referrer_id = ${userId} AND ur.created_at >= ${since.toISOString()}::timestamp
+           AND (pr.id IS NULL OR pr.subscribed_at IS NULL)`)) as Row[];
+    const ext = extendedNoticeEnd(endsAt, signUps.map((r) => toDate(r.at)!));
+    if (!ext) return null;
+    await db.execute(sql`UPDATE partners SET inactivity_notice_ends = ${ext.toISOString()}::timestamp, updated_at = now() WHERE id = ${partnerId} AND inactivity_notice_ends = ${endsAt.toISOString()}::timestamp`);
+    return ext;
+}
+
+async function partnerClockRow(db: Db, partnerId: number): Promise<Row | undefined> {
+    const rows = (await db.execute(sql`
+        SELECT id, user_id, COALESCE(partner_since, approved_at, decided_at, created_at)::text AS since FROM partners WHERE id = ${partnerId}`)) as Row[];
+    return rows[0];
 }
 
 /** An admin ends the partnership once a notice has run out with no Qualifying Customer. */
@@ -186,6 +233,12 @@ export async function endForInactivity(db: Db, partnerId: number, adminId: numbe
     const a = await getPartnerActivity(db, partnerId, now);
     if (!a.canEnd) {
         return { ok: false, error: a.notice ? `The notice runs until ${ukDate(a.notice.endsAt)}, or a new customer has withdrawn it.` : 'Give an inactivity notice first (Partner Terms 7.5).' };
+    }
+    // §7.5(e) checked NOW, not only by last night's sweep: a sign-up on the notice's last day extends it.
+    const row = await partnerClockRow(db, partnerId);
+    if (row && a.notice) {
+        const ext = await extendForFreePeriods(db, partnerId, row.user_id ?? null, toDate(row.since)!, a.notice.endsAt);
+        if (ext) return { ok: false, error: `Someone signed up through their link and is still in their free period, so the notice now runs until ${ukDate(ext)} (Partner Terms 7.5(e)).` };
     }
     const updated = (await db.execute(sql`
         UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'inactivity', decided_by = ${adminId}, decided_at = ${now.toISOString()}::timestamp,
@@ -197,47 +250,47 @@ export async function endForInactivity(db: Db, partnerId: number, adminId: numbe
 // ── The nightly sweep ────────────────────────────────────────────────────────────────────────
 
 /**
- * 1. §7.5(c) pause: one day per run for suspended partners, and for every approved partner while
- *    sign-ups are paused (the registration lock). Idempotent per calendar day.
+ * 1. §7.5(c) pause: paused days belong to the clock start they were counted for — a new start (an
+ *    approval, a new Qualifying Customer) resets them to 0. Then one day per run for suspended
+ *    partners, and for every approved partner while sign-ups are paused. Idempotent per day.
  * 2. §7.5(e) open notices: withdrawn on a Qualifying Customer since the notice; extended for a
  *    sign-up still in their free period when it would end.
  */
 export async function sweepPartnerActivity(db: Db, now: Date = new Date(), registrationLocked = false): Promise<{ paused: number; withdrawn: number; extended: number }> {
     const today = now.toISOString().slice(0, 10);
-    const pausedRows = (await db.execute(sql`
-        UPDATE partners SET activity_pause_days = activity_pause_days + 1, activity_pause_last_day = ${today}::date
-         WHERE (activity_pause_last_day IS NULL OR activity_pause_last_day < ${today}::date)
-           AND (status = 'suspended' OR (status = 'approved' AND ${registrationLocked}))
-         RETURNING id`)) as Row[];
-
+    let paused = 0;
     let withdrawn = 0;
     let extended = 0;
-    const open = (await db.execute(sql`
-        SELECT id, user_id, inactivity_notice_at::text AS notice_at, inactivity_notice_ends::text AS notice_ends,
-               COALESCE(partner_since, approved_at, decided_at, created_at)::text AS since
-          FROM partners WHERE status = 'approved' AND inactivity_notice_at IS NOT NULL`)) as Row[];
-    for (const p of open) {
+    const live = (await db.execute(sql`
+        SELECT id, user_id, status, activity_pause_days, activity_pause_anchor::text AS pause_anchor, activity_pause_last_day::text AS last_day,
+               COALESCE(approved_at, decided_at, created_at)::text AS approved_at,
+               COALESCE(partner_since, approved_at, decided_at, created_at)::text AS since,
+               inactivity_notice_at::text AS notice_at, inactivity_notice_ends::text AS notice_ends
+          FROM partners WHERE status IN ('approved', 'suspended')`)) as Row[];
+    for (const p of live) {
+        const since = toDate(p.since)!;
+        const last = await lastQualifying(db, p.id, since);
+        const start = clockStart(toDate(p.approved_at)!, last);
+        let days = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), start);
+        const pausedToday = p.status === 'suspended' || (p.status === 'approved' && registrationLocked);
+        const notCountedToday = !p.last_day || String(p.last_day).slice(0, 10) < today;
+        if (pausedToday && notCountedToday) { days += 1; paused++; }
+        await db.execute(sql`
+            UPDATE partners SET activity_pause_days = ${days}, activity_pause_anchor = ${start.toISOString()}::timestamp,
+                   activity_pause_last_day = ${pausedToday && notCountedToday ? today : (p.last_day ? String(p.last_day).slice(0, 10) : null)}::date
+             WHERE id = ${p.id}`);
+
+        if (p.status !== 'approved' || !p.notice_at) continue;
         const sentAt = toDate(p.notice_at)!;
         const endsAt = toDate(p.notice_ends)!;
-        const last = await lastQualifying(db, p.id, toDate(p.since)!);
         if (last && last.getTime() >= sentAt.getTime()) {
             await db.execute(sql`UPDATE partners SET inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now() WHERE id = ${p.id}`);
             await tell(db, p.id, 'partner_inactivity_withdrawn', { partner: { first_payment_on: ukDate(last) } });
             withdrawn++;
             continue;
         }
-        if (now.getTime() < endsAt.getTime() - 8 * DAY_MS || !p.user_id) continue;
-        // Sign-ups through their link or code since the notice that haven't paid yet.
-        const signUps = (await db.execute(sql`
-            SELECT ur.created_at::text AS at FROM user_referrals ur
-              LEFT JOIN partner_referrals pr ON pr.referral_id = ur.id
-             WHERE ur.referrer_id = ${p.user_id} AND ur.created_at >= ${toDate(p.since)!.toISOString()}::timestamp
-               AND (pr.id IS NULL OR pr.subscribed_at IS NULL)`)) as Row[];
-        const ext = extendedNoticeEnd(endsAt, signUps.map((r) => toDate(r.at)!));
-        if (ext) {
-            await db.execute(sql`UPDATE partners SET inactivity_notice_ends = ${ext.toISOString()}::timestamp, updated_at = now() WHERE id = ${p.id} AND inactivity_notice_ends = ${endsAt.toISOString()}::timestamp`);
-            extended++;
-        }
+        if (now.getTime() < endsAt.getTime() - 8 * DAY_MS) continue;
+        if (await extendForFreePeriods(db, p.id, p.user_id ?? null, since, endsAt)) extended++;
     }
-    return { paused: pausedRows.length, withdrawn, extended };
+    return { paused, withdrawn, extended };
 }

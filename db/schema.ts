@@ -6706,6 +6706,7 @@ export const partners = pgTable("partners", {
   endReason: text("end_reason"),                             // inactivity | closure | left | breach | other — drives the run-off
   activityPauseDays: integer("activity_pause_days").notNull().default(0),
   activityPauseLastDay: date("activity_pause_last_day"),
+  activityPauseAnchor: timestamp("activity_pause_anchor"),    // the clock start the paused days count against
   inactivityNoticeAt: timestamp("inactivity_notice_at"),
   inactivityNoticeEnds: timestamp("inactivity_notice_ends"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

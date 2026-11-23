@@ -12577,7 +12577,12 @@ async function partnerInactivity(id, action) {
   if (!ok) return;
   try {
     const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, partnerId: id }) });
-    window.showToast?.(action === 'inactivity_notice' ? `Notice sent — it runs until ${_pDate(d.noticeEnds)}.` : 'Partnership ended for inactivity.');
+    if (action === 'inactivity_notice' && !d.emailed) {
+      // Terms 12.2: email is the notice channel — say plainly when it didn't go.
+      window.showToast?.(`Notice recorded until ${_pDate(d.noticeEnds)}, but the email did NOT send. Email the partner yourself (Partner Terms 7.5 notice) before relying on it.`, { icon: '⚠️' });
+    } else {
+      window.showToast?.(action === 'inactivity_notice' ? `Notice sent and emailed — it runs until ${_pDate(d.noticeEnds)}.` : 'Partnership ended for inactivity.');
+    }
     loadPartners();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }

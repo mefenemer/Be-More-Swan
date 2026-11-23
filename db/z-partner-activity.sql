@@ -13,6 +13,7 @@
 --   ended_at, end_reason   when and why it ended: inactivity (§7.5) | closure (§7.2) | left (§7.1) | breach (§7.2) | other
 --   activity_pause_days    days that don't count towards the 6 months (suspended, or sign-ups paused) — §7.5(c)
 --   activity_pause_last_day  the last day counted into activity_pause_days (keeps the nightly tick idempotent)
+--   activity_pause_anchor    the clock start those paused days belong to; a new start (approval, new customer) resets them
 --   inactivity_notice_at / inactivity_notice_ends   an open §7.5 notice; cleared when withdrawn
 
 BEGIN;
@@ -23,6 +24,7 @@ ALTER TABLE partners ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS end_reason TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS activity_pause_days INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS activity_pause_last_day DATE;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS activity_pause_anchor TIMESTAMP;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS inactivity_notice_at TIMESTAMP;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS inactivity_notice_ends TIMESTAMP;
 
@@ -44,4 +46,4 @@ COMMIT;
 
 -- Check: SELECT column_name FROM information_schema.columns WHERE table_name = 'partners'
 --          AND column_name IN ('approved_at','partner_since','ended_at','end_reason','activity_pause_days',
---                              'activity_pause_last_day','inactivity_notice_at','inactivity_notice_ends');  → 8 rows
+--                              'activity_pause_last_day','activity_pause_anchor','inactivity_notice_at','inactivity_notice_ends');  → 9 rows
