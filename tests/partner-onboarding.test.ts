@@ -147,7 +147,7 @@ check('the playbook makes no product claims: no prices, networks or invented num
 check('rules mirror Partner Terms v1.2: label first, coupon sites, brand bidding, consent, self-referral, check AI drafts', () => {
     const r = PARTNER_PLAYBOOK.rules.advice.join(' ');
     for (const needle of ['at the start', 'coupon', 'negative keyword', 'PECR', 'CAN-SPAM', 'themselves', 'theirs to check']) assert.ok(r.includes(needle), needle);
-    assert.ok(read('src/config/partner-terms.ts').includes("'1.2'"), 'Terms version changed — update the rules topic and this test');
+    assert.ok(read('src/config/partner-terms.ts').includes("'1.3'"), 'Terms version changed — update the rules topic and this test');
 });
 
 console.log('wiring');

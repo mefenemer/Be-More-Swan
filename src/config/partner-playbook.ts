@@ -5,7 +5,7 @@
 //
 // ⚠️ This is ADVICE ABOUT PROMOTING, not facts about the product. It must never state a feature,
 // integration, result, price or offer — those come ONLY from `bms_facts` (memory public-copy-claims-vs-system).
-// The `rules` topic mirrors Partner Terms v1.2; if the Terms change, change it too. Owner decision D8:
+// The `rules` topic mirrors Partner Terms v1.3 (sections 3 and 5; 1.3 only changed 4.2, payouts); if the Terms change, change it too. Owner decision D8:
 // the owner reads this file, and the affiliate-legal-counsel agent checks `rules` and `channels`.
 
 export const PLAYBOOK_TOPICS = [
@@ -94,7 +94,7 @@ export const PARTNER_PLAYBOOK: Record<PlaybookTopic, { title: string; advice: st
         ],
     },
     rules: {
-        title: 'The rules (Partner Terms v1.2)',
+        title: 'The rules (Partner Terms v1.3)',
         advice: [
             '5.1 Label every promotion as an ad, at the start, where people see it before engaging (CAP Code, DMCCA 2024, FTC). Drafts from this assistant already do; keep the label if they edit.',
             '5.2 Be accurate: no invented features, results, prices, offers, testimonials or endorsements, and never imply they are Be More Swan or speak for us.',
