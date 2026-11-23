@@ -13,7 +13,8 @@
 export type DraftChannel = 'linkedin' | 'social' | 'email' | 'video_script' | 'dm' | 'other';
 export const DRAFT_CHANNELS: DraftChannel[] = ['linkedin', 'social', 'email', 'video_script', 'dm', 'other'];
 
-const DISCLOSURE_RE = /(^|[\s(\[])#ad\b|\bAd:|\(ad\)|\baffiliate link\b|\bI earn (a )?commission\b|\bpaid partnership\b/i;
+// "affiliate link" alone is not a full disclosure (Partner Terms 5.1: "#affiliate"/"#partner" alone are not enough) — legal review M5.
+const DISCLOSURE_RE = /(^|[\s(\[])#ad\b|\bAd:|\(ad\)|\bI earn (a )?commission\b|\bpaid partnership\b/i;
 
 export interface DraftContext { inviteUrl: string | null; partnerCode: string | null }
 
@@ -33,7 +34,7 @@ export function hasPartnerLink(text: string, ctx: DraftContext): boolean {
 export const AD_LABELS: Record<'post' | 'message' | 'video', string> = {
     post: '#ad — I earn a commission if you join through my link.',
     message: 'Ad: I’m a Be More Swan partner, so I earn a commission if you join through my link (at no extra cost to you).',
-    video: '[Say or show: “This is a paid partnership — I earn a commission if you join through my link.”]',
+    video: '[Say and show on screen: “This is a paid partnership — I earn a commission if you join through my link.”]',
 };
 const labelFor = (channel: DraftChannel) =>
     channel === 'email' || channel === 'dm' ? AD_LABELS.message : channel === 'video_script' ? AD_LABELS.video : AD_LABELS.post;
@@ -67,20 +68,21 @@ export function finaliseDraft(channel: DraftChannel, rawText: string, ctx: Draft
     return { text, addedLink, addedDisclosure };
 }
 
-export type HandoffTarget = 'social_media_manager' | 'newsletter_editor' | 'lead_qualifier';
+// No Lead Generator hand-off (legal review 2026-11-23, H1): Partner Terms 5.3(d) bans using contacts it finds to
+// promote Be More Swan in ANY way, and our own tool prompting it would be "instigating" unsolicited marketing (PECR
+// reg 22) / "procuring" it (CAN-SPAM).
+export type HandoffTarget = 'social_media_manager' | 'newsletter_editor';
 
 /**
  * The brief typed into one of the partner's own assistants. Those assistants don't run
  * finaliseDraft, so the rules travel with the brief: posts and emails open with the ad label and
- * keep the link; emails go only to people who agreed to hear from them; people the Lead Generator
- * finds are for personal contact, never a marketing list (PECR / CAN-SPAM — legal review H3).
+ * keep the link; emails go only to subscribers who opted in to hear from them (PECR / CAN-SPAM).
+ * There is deliberately no Lead Generator brief — see HandoffTarget.
  */
 export function handoffBrief(target: HandoffTarget, brief: string, ctx: DraftContext): string {
     const link = ctx.inviteUrl ? ` Include my partner link: ${ctx.inviteUrl}${ctx.partnerCode ? ` (or code ${ctx.partnerCode})` : ''}.` : '';
     const rules = target === 'social_media_manager'
         ? `This is a paid promotion of Be More Swan. Start every post with “${AD_LABELS.post}” — the label must come first, not at the end.${link}`
-        : target === 'newsletter_editor'
-            ? `This is a paid promotion of Be More Swan. Put “${AD_LABELS.message}” at the top of the email, before anything else.${link} Send it only to my own subscribers who agreed to hear from me.`
-            : 'This is to find people I can tell about Be More Swan personally, one to one. Don’t add them to an email list or send them marketing emails or bulk messages — they haven’t agreed to hear from me.';
+        : `This is a paid promotion of Be More Swan. Put “${AD_LABELS.message}” at the top of the email, before anything else.${link} Send it only to my own subscribers who agreed to hear from me — not people on my list only because they bought from me (the soft opt-in doesn't cover this).`;
     return `${brief.trim()}\n\n${rules}`;
 }
