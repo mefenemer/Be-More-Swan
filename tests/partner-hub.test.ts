@@ -34,7 +34,7 @@ check('PayPal and Wise take an email; a UK bank takes name, 6-digit sort code, 8
     assert.match((validatePayoutDetails({ method: 'wise', email: 'nope' }) as any).error, /Wise/);
     assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '1234', accountNumber: '12345678' }) as any).error, /sort code/);
     assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '123456', accountNumber: '123' }) as any).error, /8 digits/);
-    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise or a UK bank/);
+    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise, a UK bank account or a US bank account/);
 });
 
 check('only a masked summary is ever shown', () => {

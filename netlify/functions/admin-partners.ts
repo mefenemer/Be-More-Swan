@@ -19,7 +19,7 @@
 //   POST { action: 'resend_invite', partnerId }          → a fresh account link for an approved applicant with no account
 //   GET  ?view=ledger[&status=]                           → { ledger }    (newest 200)
 //   GET  ?view=payouts                                    → { preview, batches }
-//   GET  ?export=wise_bank|wise_email|paypal&batchId=N    → a payment file (CSV) — decrypts payout details, audited
+//   GET  ?export=wise_bank|wise_email|wise_us|paypal&batchId=N → a payment file (CSV) — decrypts payout details, audited
 //   POST { action: 'void', commissionId, reason } | { action: 'bonus', partnerId, amountPence, note }
 //   POST { action: 'create_batch' } | { action: 'mark_paid', batchId } | { action: 'cancel_batch', batchId }
 //   POST { action: 'partner_code', partnerId, code | null }  → a memorable partner code on / changed / off
@@ -141,7 +141,7 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET' && qp.export) {
         const format = String(qp.export) as ExportFormat;
         const batchId = Number(qp.batchId);
-        if (!['wise_bank', 'wise_email', 'paypal'].includes(format) || !Number.isInteger(batchId)) return json(400, { error: 'Invalid export.' });
+        if (!['wise_bank', 'wise_email', 'wise_us', 'paypal'].includes(format) || !Number.isInteger(batchId)) return json(400, { error: 'Invalid export.' });
         const [batch] = await listBatches(db).then((b) => b.filter((x) => x.id === batchId));
         if (!batch || batch.status === 'cancelled') return json(404, { error: 'That payout run does not exist.' });
         const lines = await batchLines(db, batchId);   // decrypts payout details from the vault

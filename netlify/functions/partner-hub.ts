@@ -4,7 +4,8 @@
 //
 //   GET → { partner: null }  (not a partner)
 //       | { partner: { status, ... }, link, terms, stats, commissions, payout, payoutRules }
-//   POST { action: 'payout_details', method, email? | accountName, sortCode, accountNumber }
+//   POST { action: 'payout_details', method, email? | accountName, sortCode, accountNumber
+//                                    | accountName, holderType, routingNumber, accountNumber, accountType, addressLine, city, state, zip (us_bank) }
 //        → { pending: { display }, sentTo }   — a change waits for the emailed confirmation
 //   POST { action: 'confirm_payout', token }  → { display }
 //   POST { action: 'cancel_payout_change' }
@@ -127,7 +128,11 @@ export default withLambda(async (event) => {
             terms: current ? {
                 rateBps: current.rateBps, costDeductionBps: current.costDeductionBps, durationMonths: current.durationMonths,
                 special: current.partnerId === p.id, specialUntil: current.partnerId === p.id ? current.endsAt : null,
+                // Their agreement's renewal date = when the rate they're on now ends (owner request 2026-11-23). The
+                // Partner Terms have no fixed term, so with no end date it runs until changed on 30 days' notice (8.1).
+                renewsOn: current.endsAt ?? null,
             } : null,
+            partnerSince: p.decidedAt ?? null,
             stats, commissions: commissions.map((c) => ({
                 id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps, costDeductionBps: c.cost_deduction_bps ?? 0,
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
