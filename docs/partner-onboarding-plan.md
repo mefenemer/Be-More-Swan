@@ -15,7 +15,14 @@ BOTH DBs before deploy** (partner-hub / partner-assistant select every `partners
 2026-11-23** (verified); prod not yet. Live test 2026-11-23 on staging (real handlers in-process, test partner #3
 temporarily approved then restored): greeting + list + sums correct, 403 before Terms, marks merge, a real first
 post (label first, workspace numbers in [brackets], link) and a playbook-based 30-day plan. Fixed from it: a reply
-that said "needed more steps" above a finished draft when the 21s budget ran out. Phases 2–3 not started.
+that said "needed more steps" above a finished draft when the 21s budget ran out. **Phase 2 built 2026-11-23** on branch `feat/partner-invite-page`: own invite page — `src/utils/partner-invite-profile.ts`
+(text rules, JPEG check, R2 photo helpers), `partner-photo.ts` (approved photo public, pending only to the partner
+or partner admins), partner-hub `invite_profile_submit` / `invite_profile_withdraw`, admin-partners `invite_page`
+(approve / changes / take down) + Partner Ops `propose_invite_page`, Partner Assistant `propose_invite_page` (fills the
+form only), invite.html "Paid partnership" block, first-week step 3, erasure; partner kit card reading
+`partner-kit/kit.json` (empty until the owner adds files). ⚠️ **NEW SQL `db/z-partner-invite-page.sql` — BOTH DBs
+before deploy** — applied to STAGING 2026-11-23; live-tested there in-process (submit, refusals, send back, resend,
+approve, public page, take down, withdraw; real R2 not tested — no R2 keys in local .env). ⚠️ privacy.html doesn't mention the invite-page photo yet — owner/legal wording. Phase 3 not started.
 
 Builds on the programme in [affiliate-partner-programme-plan.md](./affiliate-partner-programme-plan.md)
 (steps 1–9 live on prod since 2026-10-19/23). Nothing here changes how commission is worked out, held or

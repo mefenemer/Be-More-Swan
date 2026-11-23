@@ -1,0 +1,4 @@
+{
+  "_readme": "Partner kit (docs/partner-onboarding-plan.md §3.4). Put files in this folder and list them below; the card on the Partner page appears once there is at least one item. url must start with /partner-kit/. Example item: { \"title\": \"Logo (light)\", \"description\": \"PNG, for light backgrounds\", \"url\": \"/partner-kit/logo-light.png\" }",
+  "items": []
+}

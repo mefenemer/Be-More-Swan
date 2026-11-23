@@ -26,7 +26,8 @@ export type AdminPartnersRequest =
     | { action: 'mark_paid'; batchId: number }
     | { action: 'cancel_batch'; batchId: number }
     | { action: 'partner_code'; partnerId: number; code: string | null }
-    | { action: 'erase_application'; partnerId: number };
+    | { action: 'erase_application'; partnerId: number }
+    | { action: 'invite_page'; partnerId: number; decision: 'approve' | 'changes' | 'take_down'; note: string | null };
 
 export interface ActionCard { kind: string; title: string; summary: string; request: AdminPartnersRequest }
 export type ProposalResult = { card: ActionCard } | { error: string };
@@ -246,4 +247,30 @@ export function proposeEraseApplication(partners: PartnerLite[], input: { partne
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
     if (p.hasAccount || (p.status !== 'applied' && p.status !== 'rejected')) return { error: `${who(p)} has an account or is a partner — use GDPR erasure on their user instead.` };
     return { card: { kind: 'erase_application', title: `Erase ${who(p)}'s application`, summary: 'Their name, email and answers are deleted for good. This cannot be undone.', request: { action: 'erase_application', partnerId: p.id } } };
+}
+
+// ── Their own invite page (docs/partner-onboarding-plan.md §3.3) ─────────────────────────────
+
+export interface InvitePageLite { id: number; status: string; name: string | null; email: string | null; invitePageState: 'none' | 'waiting' | 'changes_requested' | 'live'; headline: string | null; hasLive?: boolean }
+
+export function proposeInvitePage(partners: InvitePageLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
+    const p = partners.find((x) => x.id === Number(input.partnerId));
+    if (!p) return { error: `There is no partner #${input.partnerId}.` };
+    const decision = String(input.decision);
+    const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 500) : null;
+    const name = p.name || p.email || `partner #${p.id}`;
+    if (decision === 'approve' || decision === 'changes') {
+        if (p.invitePageState !== 'waiting') return { error: `${name} has no invite page waiting for review (it is ${p.invitePageState.replace('_', ' ')}).` };
+        if (decision === 'approve' && p.status !== 'approved') return { error: `${name} is ${p.status}, so their invite page can't go live.` };
+        if (decision === 'changes' && !note) return { error: 'Say what to change — the partner sees the note.' };
+        return { card: decision === 'approve'
+            ? { kind: 'invite_page', title: `Put ${name}'s invite page live`, summary: `Their photo and words go on /invite/<their code>${p.headline ? ` — headline: “${p.headline}”` : ''}. They're told in-app.`, request: { action: 'invite_page', partnerId: p.id, decision: 'approve', note: null } }
+            : { kind: 'invite_page', title: `Ask ${name} to change their invite page`, summary: `It stays off the page until they resend it. Note shown to them: ${note}`, request: { action: 'invite_page', partnerId: p.id, decision: 'changes', note } } };
+    }
+    if (decision === 'take_down') {
+        // An edit can be waiting while nothing is live yet — the server refuses that, so the card isn't offered (review of #815).
+        if (!(p.hasLive ?? p.invitePageState === 'live')) return { error: `${name} has no live invite page to take down.` };
+        return { card: { kind: 'invite_page', title: `Take ${name}'s invite page down`, summary: `Their link goes back to the standard page straight away.${note ? ` Note shown to them: ${note}` : ''}`, request: { action: 'invite_page', partnerId: p.id, decision: 'take_down', note } } };
+    }
+    return { error: 'Decision must be approve, changes or take_down.' };
 }

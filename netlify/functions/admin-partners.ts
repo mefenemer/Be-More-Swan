@@ -22,6 +22,9 @@
 //   POST { action: 'create_batch' } | { action: 'mark_paid', batchId } | { action: 'cancel_batch', batchId }
 //   POST { action: 'partner_code', partnerId, code | null }  → a memorable partner code on / changed / off
 //   POST { action: 'erase_application', partnerId }      → delete an application with no account and no commission
+//   POST { action: 'invite_page', partnerId, decision: 'approve'|'changes'|'take_down', note? }
+//        → their own invite page (docs/partner-onboarding-plan.md §3.3): put the waiting version live, send it
+//          back with a note the partner sees, or take the live one down. The partner is told in-app.
 //
 // Cookie: aura_session; role must clear `manage_partners` (billing_admin and above). Every write is
 // in the admin audit log. Dates are UK calendar days: a period "from 1 December" starts at midnight
@@ -41,6 +44,8 @@ import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
 import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
 import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
+import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type InviteProfile } from '../../src/utils/partner-invite-profile';
+import { createNotification } from '../../src/utils/notify';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -172,6 +177,7 @@ export default withLambda(async (event) => {
                 referrals: r.referrals, paying: r.paying,
                 pendingPence: r.pending_pence, payablePence: r.payable_pence, paidPence: r.paid_pence,
                 rates: periods.filter((p) => p.partnerId === r.id).map(shape),
+                invitePage: invitePageView(r),
             })),
         });
     }
@@ -360,5 +366,49 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, id: inserted[0].id, emailed });
     }
 
+    // ── Their own invite page: approve / ask for changes / take down ─────────────────────────
+    if (body.action === 'invite_page') {
+        const partnerId = Number(body.partnerId);
+        const decision = String(body.decision);
+        if (!['approve', 'changes', 'take_down'].includes(decision)) return json(400, { error: 'Invalid decision.' });
+        const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+        const [p] = await db.select({ status: partners.status, userId: partners.userId, live: partners.inviteProfile, pending: partners.inviteProfilePending, note: partners.inviteProfileNote })
+            .from(partners).where(eq(partners.id, partnerId)).limit(1);
+        if (!p) return json(404, { error: 'That partner no longer exists.' });
+        const live = p.live as InviteProfile | null;
+        const pending = p.pending as InviteProfile | null;
+        let set: Record<string, unknown>;
+        let notice: 'partner_invite_page_live' | 'partner_invite_page_changes' | 'partner_invite_page_removed';
+        if (decision === 'approve') {
+            if (p.status !== 'approved') return json(409, { error: `This partner is ${p.status}, so their invite page can't go live.` });
+            if (!pending || p.note) return json(409, { error: 'There is nothing waiting for review. Reload to see the latest.' });
+            set = { inviteProfile: pending, inviteProfilePending: null, inviteProfileNote: null };
+            notice = 'partner_invite_page_live';
+        } else if (decision === 'changes') {
+            if (!pending || p.note) return json(409, { error: 'There is nothing waiting for review. Reload to see the latest.' });
+            if (!note) return json(400, { error: 'Say what to change — the partner sees this note.' });
+            set = { inviteProfileNote: note };   // kept as pending so they can edit and resend
+            notice = 'partner_invite_page_changes';
+        } else {
+            if (!live) return json(409, { error: 'Their invite page has nothing live to take down.' });
+            set = { inviteProfile: null, ...(note ? { inviteProfileNote: pending ? note : null } : {}) };
+            notice = 'partner_invite_page_removed';
+        }
+        // Conditional on what was read, so two admins (or the partner resending) can't cross over.
+        const updated = await db.update(partners).set({ ...set, inviteProfileReviewedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(partners.id, partnerId), sql`${partners.inviteProfilePending}::text IS NOT DISTINCT FROM ${pending ? JSON.stringify(pending) : null}::jsonb::text`))
+            .returning({ id: partners.id });
+        if (!updated.length) return json(409, { error: 'Their invite page changed a moment ago. Reload to see the latest.' });
+        const after = decision === 'approve' ? [pending?.photoKey] : decision === 'changes' ? [live?.photoKey, pending?.photoKey] : [pending?.photoKey];
+        for (const k of orphanedKeys([live?.photoKey, pending?.photoKey], after)) await deletePhoto(k);
+        await audit('partner_decision', partnerId, { invitePage: inviteProfileState({ inviteProfile: live, inviteProfilePending: pending, inviteProfileNote: p.note }) }, { invitePage: decision, note: note || null });
+        if (p.userId) {
+            await createNotification(db, notice, { userId: p.userId, context: { partner: { note: note || '' } }, metadata: { action: 'partner_page' } })
+                .catch((err) => console.error('[admin-partners] invite page notification failed (non-blocking):', err));
+        }
+        return json(200, { ok: true });
+    }
+
     return json(400, { error: 'Unknown action.' });
 });
+

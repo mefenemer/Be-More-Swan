@@ -13,11 +13,11 @@ export interface PartnerTermsNow { rateBps: number; costDeductionBps: number; du
 export interface OnboardingMarks { link_copied_at?: string; first_draft_at?: string; dismissed_at?: string; assistant_started_at?: string }
 export interface OnboardingStats { clicks_all?: number; signups?: number; paying?: number }
 
-export type StepKey = 'terms' | 'payout' | 'first_draft' | 'share' | 'first_visit' | 'first_signup' | 'first_paying';
+export type StepKey = 'terms' | 'payout' | 'invite_page' | 'first_draft' | 'share' | 'first_visit' | 'first_signup' | 'first_paying';
 export interface OnboardingStep { key: StepKey; label: string; done: boolean; automatic: boolean }
 
-/** Steps 1–4 are hers to do; 5–7 tick themselves as people respond. The card folds once 1–4 are done. */
-export const SETUP_STEPS: StepKey[] = ['terms', 'payout', 'first_draft', 'share'];
+/** Steps 1–5 are hers to do; 6–8 tick themselves as people respond. The card folds once 1–5 are done. */
+export const SETUP_STEPS: StepKey[] = ['terms', 'payout', 'invite_page', 'first_draft', 'share'];
 
 /** The marks the Partner page may record itself (partner-hub.ts `onboarding` action). */
 export const PAGE_MARKS = ['link_copied', 'dismissed', 'reopened'] as const;
@@ -49,11 +49,14 @@ export function exampleLine(t: PartnerTermsNow | null, planPriceGbp: number | nu
 
 export function buildChecklist(input: {
     termsAccepted: boolean; payoutSet: boolean; marks: OnboardingMarks; stats: OnboardingStats | null;
+    /** Their own invite page is approved and live (Phase 2, plan §3.3). */
+    invitePageLive?: boolean;
 }): OnboardingStep[] {
     const s = input.stats || {};
     return [
         { key: 'terms', label: 'Accept the Partner Terms', done: input.termsAccepted, automatic: false },
         { key: 'payout', label: 'Tell us where to pay you', done: input.payoutSet, automatic: false },
+        { key: 'invite_page', label: 'Make your invite page yours: your photo and a line in your own words', done: !!input.invitePageLive, automatic: false },
         { key: 'first_draft', label: 'Write your first post with your Partner Assistant', done: !!input.marks.first_draft_at, automatic: false },
         { key: 'share', label: 'Copy your link and send it personally to 5 people who’d benefit', done: !!input.marks.link_copied_at, automatic: false },
         { key: 'first_visit', label: 'Your first visit', done: Number(s.clicks_all || 0) > 0, automatic: true },
@@ -101,6 +104,7 @@ export function welcomeGreeting(input: {
     const done = (k: StepKey) => !!input.steps.find((s) => s.key === k)?.done;
     if (!done('terms')) todo.push('accept the Partner Terms (they include the rules for promoting us)');
     if (!done('payout')) todo.push('tell us where to pay you');
+    if (!done('invite_page')) todo.push('make your invite page yours, with your photo and a line in your own words');
     if (!done('first_draft')) todo.push(input.businessName ? `write your first post about how ${input.businessName} uses Be More Swan` : 'write your first post about why you recommend Be More Swan');
     if (!done('share')) todo.push('send your link personally to 5 people who’d benefit');
     const plan = todo.length

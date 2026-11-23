@@ -12272,7 +12272,7 @@ function _partnersRenderList() {
           ${p.name && p.email ? `<p class="text-[11px] text-gray-500">${_pEsc(p.email)}</p>` : ''}
         </button>
       </td>
-      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}</td>
+      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}${p.invitePage?.state === 'waiting' ? ' <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Their invite page is waiting for review — open Details">Invite page to review</span>' : ''}</td>
       <td class="py-2 px-2 text-right font-mono" title="Paying customers / everyone who signed up through them">${p.paying} / ${p.referrals}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.pendingPence)}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.payablePence)}</td>
@@ -12308,6 +12308,7 @@ function _partnersRenderList() {
         ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}
       </div>
       <div><h4 class="text-xs font-bold text-gray-700 uppercase mb-1">Application</h4>${appHtml}</div>
+      ${_partnerInvitePageHtml(p)}
       <div>
         <div class="flex items-center justify-between gap-3 mb-1">
           <h4 class="text-xs font-bold text-gray-700 uppercase">Special rates</h4>
@@ -12319,6 +12320,57 @@ function _partnersRenderList() {
     </td></tr>`;
     return main + detail;
   }).join('') || `<tr><td colspan="8" class="py-6 text-center text-gray-400">${all.length ? 'Nobody in this group.' : 'No partners yet. Add one, or wait for applications.'}</td></tr>`;
+}
+
+// Their own invite page (docs/partner-onboarding-plan.md §3.3): live only after we approve it, because it's
+// on our domain. Check: honest words, no links or handles, nothing official-looking or promising income
+// (Partner Terms 5.2–5.3), and a real photo of them.
+function _partnerInvitePageHtml(p) {
+  const ip = p.invitePage;
+  if (!ip || !['approved', 'suspended'].includes(p.status) && ip.state === 'none') return '';
+  const card = (x, label) => `<div class="border border-gray-200 rounded-lg p-3 bg-white flex gap-3 items-start">
+      ${x.photoUrl ? `<img src="${_pEsc(x.photoUrl)}" alt="Their photo" style="width:64px;height:64px;border-radius:9999px;object-fit:cover;flex-shrink:0">` : '<span class="text-[11px] text-gray-400" style="width:64px;flex-shrink:0">No photo</span>'}
+      <div class="min-w-0"><p class="text-[11px] font-bold text-gray-500 uppercase">${label}</p>
+        <p class="text-sm font-bold text-gray-900 break-words">${_pEsc(x.headline)}</p>
+        ${x.quote ? `<p class="text-sm text-gray-700 break-words">“${_pEsc(x.quote)}”</p>` : ''}</div></div>`;
+  const btn = (label, cls, decision) => `<button type="button" onclick="partnerInvitePage(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
+  const stateLine = { none: 'Not set up yet — their link shows the standard page.', waiting: '<span class="text-amber-700 font-semibold">Waiting for your review.</span> It goes live when you approve it.',
+    changes_requested: `Sent back for changes: <em>${_pEsc(ip.note || '')}</em>`, live: 'Live on their invite link.' }[ip.state] || '';
+  return `<div>
+      <h4 class="text-xs font-bold text-gray-700 uppercase mb-1">Invite page</h4>
+      <p class="text-xs text-gray-600 mb-2">${stateLine}</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        ${ip.pending ? card(ip.pending, ip.state === 'waiting' ? 'Waiting for review' : 'Sent back') : ''}
+        ${ip.live ? card(ip.live, 'Live now') : ''}
+      </div>
+      <div class="flex flex-wrap gap-2 mt-2">
+        ${ip.state === 'waiting' ? btn('Approve — put it live', 'btn-golive', 'approve') + btn('Ask for changes', 'btn-secondary', 'changes') : ''}
+        ${ip.live ? btn('Take it down', 'btn-destructive', 'take_down') : ''}
+      </div>
+    </div>`;
+}
+
+async function partnerInvitePage(id, decision) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const who = _pEsc(p.name || p.email || 'this partner');
+  let note = null;
+  if (decision === 'approve') {
+    const ok = await window.confirmModal(`Put <strong>${who}</strong>'s photo and words on their invite page? Everyone who opens their link will see them.`, { title: 'Approve invite page', confirmLabel: 'Put it live' });
+    if (!ok) return;
+  } else {
+    note = await window.promptModal(decision === 'changes'
+      ? `What should <strong>${who}</strong> change? They see this note on their Partner page.`
+      : `Take <strong>${who}</strong>'s invite page down? Their link shows the standard page straight away. Optional note for them:`,
+      { title: decision === 'changes' ? 'Ask for changes' : 'Take invite page down', confirmLabel: decision === 'changes' ? 'Send back' : 'Take it down', placeholder: decision === 'changes' ? 'e.g. Please use a photo of you rather than a logo.' : '' });
+    if (note === null) return;
+    if (decision === 'changes' && !note.trim()) { window.showToast?.('Say what to change — the partner sees this note.', { icon: '⚠️' }); return; }
+  }
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'invite_page', partnerId: id, decision, note }) });
+    window.showToast?.({ approve: 'Their invite page is live.', changes: 'Sent back with your note.', take_down: 'Their invite page is back to the standard version.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 function partnerSetFilter(val) { _partners.filter = val; _partnersRenderList(); }

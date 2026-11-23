@@ -127,7 +127,9 @@ check('partners.html never hard-codes a rate — it reads the live programme ter
 
 check('invite-lookup reveals only a first name and counts visits for approved partners only', () => {
     const lookup = read('netlify/functions/invite-lookup.ts');
-    assert.ok(lookup.includes('return json(200, { valid: true, code: invite.code, firstName: owner.firstName || null, offer: REFERRAL_OFFER_DISPLAY });'));
+    // + an approved partner's APPROVED invite page (2026-11-23, tests/partner-invite-page.test.ts) — still no surname or email.
+    assert.ok(lookup.includes('return json(200, { valid: true, code: invite.code, firstName: owner.firstName || null, offer: REFERRAL_OFFER_DISPLAY, ...(profile ? { profile } : {}) });'));
+    assert.ok(!/lastName|email/.test(lookup.slice(lookup.indexOf('let profile'))), 'the profile adds no surname or email');
     assert.ok(lookup.includes("eq(partners.status, 'approved')"));
     assert.ok(lookup.includes("checkRateLimit(db, 'invite_click'"));
 });

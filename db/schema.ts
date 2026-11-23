@@ -6693,6 +6693,12 @@ export const partners = pgTable("partners", {
   // "Your first week" steps no other column records (db/z-partner-onboarding.sql;
   // docs/partner-onboarding-plan.md): { link_copied_at?, first_draft_at?, dismissed_at? } as ISO strings.
   onboarding: jsonb().$type<{ link_copied_at?: string; first_draft_at?: string; dismissed_at?: string }>().notNull().default({}),
+  // Their own invite page (db/z-partner-invite-page.sql; src/utils/partner-invite-profile.ts). Live only once
+  // an admin approves it: invite_profile = approved (public), invite_profile_pending = submitted / sent back.
+  inviteProfile: jsonb("invite_profile").$type<{ headline: string; quote: string; photoKey: string | null; submittedAt: string } | null>(),
+  inviteProfilePending: jsonb("invite_profile_pending").$type<{ headline: string; quote: string; photoKey: string | null; submittedAt: string } | null>(),
+  inviteProfileNote: text("invite_profile_note"),
+  inviteProfileReviewedAt: timestamp("invite_profile_reviewed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
