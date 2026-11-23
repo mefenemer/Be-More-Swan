@@ -100,6 +100,7 @@ check('wired: SQL allows us_bank; admin can download the file; privacy says what
     assert.ok(read('privacy.html').includes('US bank account name, routing number, account number and type'));
     const page = read('partner-content.html');
     assert.ok(page.includes('value="us_bank"') && page.includes("routingNumber: v('pt-us-routing')"));
+    assert.ok(page.includes('<select id="pt-us-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="">Choose…</option>'), 'no silent default to business');
 });
 
 console.log('Partner page: ⓘ and renewal date');
@@ -129,6 +130,7 @@ check('renewal date = when the current rate ends; none set → 30 days’ notice
     const page = read('partner-content.html');
     assert.ok(page.includes('Renewal date <strong>'));
     assert.ok(page.includes('Renewal date: <strong>none set</strong>'));
+    assert.ok(page.includes('(Partner Terms 3.3 and 8.1)'), '3.3 = rates change for future customers, via section 8');
     assert.ok(read('partner-terms.html').includes('8.1'), 'the clause it points to exists');
 });
 

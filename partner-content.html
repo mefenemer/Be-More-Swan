@@ -230,7 +230,7 @@
         <!-- US bank account (ACH), paid via Wise in USD. Wise needs the holder's address for a US account. -->
         <div id="pt-f-us" class="hidden grid grid-cols-1 sm:grid-cols-6 gap-3" style="display:none">
           <div class="sm:col-span-4"><label for="pt-us-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-us-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
-          <div class="sm:col-span-2"><label for="pt-us-holder" class="text-xs font-bold text-gray-500 uppercase">Account belongs to</label><select id="pt-us-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="business">A business (e.g. LLC)</option><option value="person">Me personally</option></select></div>
+          <div class="sm:col-span-2"><label for="pt-us-holder" class="text-xs font-bold text-gray-500 uppercase">Account belongs to</label><select id="pt-us-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="">Choose…</option><option value="person">Me personally</option><option value="business">A business (e.g. LLC)</option></select></div>
           <div class="sm:col-span-2"><label for="pt-us-routing" class="text-xs font-bold text-gray-500 uppercase">Routing number</label><input id="pt-us-routing" inputmode="numeric" placeholder="9 digits" maxlength="11" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <div class="sm:col-span-2"><label for="pt-us-accno" class="text-xs font-bold text-gray-500 uppercase">Account number</label><input id="pt-us-accno" inputmode="numeric" placeholder="4–17 digits" maxlength="20" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <div class="sm:col-span-2"><label for="pt-us-type" class="text-xs font-bold text-gray-500 uppercase">Account type</label><select id="pt-us-type" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="checking">Checking</option><option value="savings">Savings</option></select></div>
@@ -327,7 +327,7 @@
     const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>` : '';
     const renew = !t ? '' : t.renewsOn
       ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special rate ends; customers who first paid before then keep it' : ' — when this rate ends'}`
-      : 'Renewal date: <strong>none set</strong> — your rate continues until we give you 30 days’ notice of a change (Partner Terms 8.1)';
+      : 'Renewal date: <strong>none set</strong> — your rate continues until we give you 30 days’ notice of a change (Partner Terms 3.3 and 8.1)';
     document.getElementById('pt-agreement').innerHTML = [since, renew].filter(Boolean).join(' · ');
     document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
     document.getElementById('pt-signups').textContent = s.signups ?? 0;

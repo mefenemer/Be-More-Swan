@@ -8,7 +8,9 @@
 -- ⚠️ Needs db/z-affiliate-partners.sql first. Without this, confirming US bank details fails the CHECK.
 --
 -- Only the method name is stored on the row; the details themselves are in the vault, as for every method.
--- The CHECK is replaced in place, in one transaction (a failure leaves the old one standing).
+-- NOT additive: the CHECK is replaced in place (wider), in one transaction (a failure leaves the old one standing).
+-- Every existing row already passes the wider rule. Run the check below after applying: if the constraint ever had
+-- another name, the DROP does nothing and confirming US bank details would still fail.
 
 BEGIN;
 
