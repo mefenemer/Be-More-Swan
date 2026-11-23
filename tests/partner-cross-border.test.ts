@@ -189,7 +189,8 @@ check('third review of #823: first annual payment carries a 12-month period; run
     const l = read('src/utils/partner-ledger.ts');
     assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
     assert.ok(l.includes('for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
-    assert.ok(l.includes("if (!run || !['draft', 'exported'].includes(run.status)) return;"), 'paid runs never change');
+    assert.ok(l.includes("if (!run || run.status !== 'draft') return;"), 'only draft runs change in place');
+    assert.ok(l.includes("inExportedRun = run?.status === 'exported';") && l.includes("&& !inExportedRun) {"), 'an exported run is treated like paid: adjustment, row untouched');
     assert.ok(isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2028-01-01T00:00:00Z')));
     assert.ok(!isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2027-03-01T00:00:00Z')), 'a 2-month proration invoice is not annual');
 });

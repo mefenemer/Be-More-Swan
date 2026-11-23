@@ -311,8 +311,14 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     const touchedRuns = new Map<string, { batchId: number; partnerId: number }>();
 
     for (const row of rows) {
+        // A row in a run whose file is already EXPORTED may already have been sent: treat it like a paid row (leave it,
+        // add a negative adjustment below) so the run, its statement and the 180-day clawback stay true. Only a DRAFT
+        // run is changed in place (review of #823).
+        let inExportedRun = false;
         if (row.payoutBatchId && (row.status === 'pending' || row.status === 'payable')) {
-            touchedRuns.set(`${row.payoutBatchId}:${row.partnerId}`, { batchId: row.payoutBatchId, partnerId: row.partnerId });
+            const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${row.payoutBatchId}`)) as unknown as Array<{ status: string }>;
+            inExportedRun = run?.status === 'exported';
+            if (run?.status === 'draft') touchedRuns.set(`${row.payoutBatchId}:${row.partnerId}`, { batchId: row.payoutBatchId, partnerId: row.partnerId });
         }
         // Partner Terms 4.3 (cross-border review): only a refund or dispute within 180 days of the payment
         // reduces commission. The row is written by the webhook at the payment, so its created_at is the
@@ -327,7 +333,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 
         if (row.status === 'voided') continue;
-        if (row.status === 'pending' || row.status === 'payable') {
+        if ((row.status === 'pending' || row.status === 'payable') && !inExportedRun) {
             if (target === 0) {
                 // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
                 await db.update(partnerCommissions)
@@ -343,7 +349,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
             continue;
         }
 
-        // Paid already: claw back the difference, net of any adjustment already made for this payment.
+        // Paid already (or in an exported run): claw back the difference, net of any adjustment already made for this payment.
         const [{ sum }] = await db.select({ sum: sql<number>`COALESCE(SUM(${partnerCommissions.commissionPence}), 0)::int` })
             .from(partnerCommissions)
             .where(and(eq(partnerCommissions.kind, 'adjustment'), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
@@ -369,12 +375,12 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
 }
 
 /**
- * A commission in an unpaid run (draft / exported) changed: recompute the partner's frozen VAT from what the run
+ * A commission in a DRAFT run changed: recompute the partner's frozen VAT from what the run
  * now pays them, and the run's total, so exports and statements stay consistent (review of #823). Paid runs never change.
  */
 async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number): Promise<void> {
     const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${batchId}`)) as unknown as Array<{ status: string }>;
-    if (!run || !['draft', 'exported'].includes(run.status)) return;
+    if (!run || run.status !== 'draft') return;
     const [{ amount }] = (await db.execute(sql`
         SELECT COALESCE(SUM(commission_pence), 0)::int AS amount FROM partner_commissions
          WHERE payout_batch_id = ${batchId} AND partner_id = ${partnerId}`)) as unknown as Array<{ amount: number }>;

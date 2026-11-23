@@ -112,7 +112,6 @@ async function _gbpNetPence(payment: PartnerPayment): Promise<number | null> {
     return Math.round((bt.amount * payment.netAmountPence) / charge.amount);
 }
 
-/** The subscription period an invoice pays for (its line items), for Terms 3.2 pro rata and 4.1 annual holding. */
 /** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */
 function annualPeriodFrom(paidAt: Date): { periodStart: Date; periodEnd: Date } {
     const end = new Date(paidAt.getTime());
@@ -120,6 +119,7 @@ function annualPeriodFrom(paidAt: Date): { periodStart: Date; periodEnd: Date } 
     return { periodStart: paidAt, periodEnd: end };
 }
 
+/** The subscription period an invoice pays for (its line items), for Terms 3.2 pro rata and 4.1 annual holding. */
 function getInvoicePaidPeriod(invoice: Stripe.Invoice): { periodStart: Date | null; periodEnd: Date | null } {
     const lines = (invoice.lines?.data ?? []).filter((l) => typeof l.period?.start === 'number' && typeof l.period?.end === 'number' && (l.amount ?? 0) > 0);
     if (!lines.length) return { periodStart: null, periodEnd: null };
