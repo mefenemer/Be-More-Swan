@@ -12,7 +12,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import {
-    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsCreateProblem,
+    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsAllowedInProduction, metaAdsCreateProblem,
 } from '../../src/utils/meta-ads-connection';
 import { META_ALLOWED_IMAGE_TYPES, metaErrorDetail, uploadMetaImage } from '../../src/utils/ad-networks/meta';
 import { safeFetchBinary } from '../../src/utils/safe-fetch';
@@ -37,8 +37,9 @@ export default withLambda(async (event) => {
     if (!await hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE)) {
         return json(403, { error: 'Paid advertising is not available on this plan.' });
     }
-    // The Meta adapter is development only; an asset for an advert that cannot be created is waste.
-    if (isProductionDeploy(event.headers as Record<string, string | undefined>)) {
+    // The Meta adapter is development only (plus META_ADS_PROD_ORG_IDS); an asset for an advert that
+    // cannot be created is waste.
+    if (isProductionDeploy(event.headers as Record<string, string | undefined>) && !metaAdsAllowedInProduction(orgId)) {
         return json(400, { error: 'Advertising is not available here yet.' });
     }
 

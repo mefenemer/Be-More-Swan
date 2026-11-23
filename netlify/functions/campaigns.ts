@@ -89,7 +89,7 @@ import { adapterForCampaign } from '../../src/utils/ad-networks/campaign-adapter
 import { linkedInErrorDetail } from '../../src/utils/ad-networks/linkedin';
 import { buildMetaTargeting, metaErrorDetail } from '../../src/utils/ad-networks/meta';
 import {
-    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsCreateProblem, metaAdsNeedsReconnect,
+    assessMetaAdsReadiness, getMetaAdsConnection, getMetaAdsToken, metaAdsAllowedInProduction, metaAdsCreateProblem, metaAdsNeedsReconnect,
 } from '../../src/utils/meta-ads-connection';
 import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { adsNeedsReconnect, adsScopeProblem, assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
@@ -427,7 +427,11 @@ export default withLambda(async (event) => {
         const devAdaptersAllowed = !isProductionDeploy(event.headers as Record<string, string | undefined>);
         const offeredNetworks: string[] = devAdaptersAllowed
             ? ['linkedin', 'meta']
-            : networkAvailability().filter((n) => n.available).map((n) => n.network);
+            : [...new Set([
+                ...networkAvailability().filter((n) => n.available).map((n) => n.network),
+                // The named production exception (META_ADS_PROD_ORG_IDS): reviewer and pilot workspaces.
+                ...(metaAdsAllowedInProduction(orgId) ? ['meta'] : []),
+            ])];
 
         const metaConnection = featureEnabled ? await getMetaAdsConnection(db, orgId) : null;
         const metaReadiness = featureEnabled ? assessMetaAdsReadiness(metaConnection) : null;
@@ -1505,7 +1509,9 @@ export default withLambda(async (event) => {
         try {
             const env = { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) };
             adapter = network === 'meta'
-                ? metaAdapter({ accessToken: token, accountId: metaAccountId!, pageId: metaPageId! }, env)
+                // Meta on production only for workspaces on META_ADS_PROD_ORG_IDS; LinkedIn never.
+                ? metaAdapter({ accessToken: token, accountId: metaAccountId!, pageId: metaPageId! },
+                    { isProduction: env.isProduction && !metaAdsAllowedInProduction(orgId) })
                 : linkedInAdapter({
                     accessToken: token,
                     accountUrn: linkedInAccountUrn!,
