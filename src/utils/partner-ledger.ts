@@ -33,6 +33,8 @@ import {
 import {
     addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
+import { applyCostRule, serviceSlices, sliceRef } from './partner-costs';
+import { termsIncludeActualCosts } from '../config/partner-terms';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -40,7 +42,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const PROGRAMME_CURRENCY = 'GBP';
 /** What a dispute writes, and what a WON dispute looks for to undo it (reinstateDisputedCommission). */
 export const DISPUTE_REASON = 'Payment disputed';
-const DISPUTE_WON_NOTE = 'Dispute won — commission returned';
+// Neutral wording: a WON dispute and an inquiry that closed without a chargeback ('warning_closed') both close it.
+// The old note still counts as a closure (deriveReconcileState) for any row written before this wording.
+const DISPUTE_WON_NOTE = 'Dispute closed in our favour — commission returned';
+const DISPUTE_CLOSED_NOTES = [DISPUTE_WON_NOTE, 'Dispute won — commission returned'];
 
 export interface PartnerPayment {
     /** The referred customer who paid. */
@@ -64,6 +69,8 @@ export interface PartnerPayment {
     periodEnd?: Date | null;
     /** True for an annual plan payment when the period isn't known (first payment via Checkout). */
     annual?: boolean;
+    /** The card / payment processing fee Stripe charged on this payment, in pence (actual costs, Terms 3.2). Null = unknown. */
+    cardFeePence?: number | null;
 }
 
 export type RecordOutcome =
@@ -165,8 +172,12 @@ async function lockedTermsFor(db: Db, referralId: number, partnerId: number, pai
     const period = resolvePeriodAt(await loadPeriods(db, partnerId), partnerId, paidAt);
     if (!period) return null;
     const terms = lockTerms(period);
+    // Which rule this customer follows is fixed now, with their terms: actual costs only if the partner had accepted the
+    // Terms version with that rule; otherwise the fixed deduction they were promised (review of #827).
+    const [partnerRow] = await db.select({ termsVersion: partners.termsVersion }).from(partners).where(eq(partners.id, partnerId)).limit(1);
+    const costBasis = termsIncludeActualCosts(partnerRow?.termsVersion) ? 'actual' : 'fixed';
     await db.update(partnerReferrals)
-        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths })
+        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths, costBasis })
         .where(and(eq(partnerReferrals.id, pr.id), isNull(partnerReferrals.subscribedAt)));
     const [locked] = await db.select().from(partnerReferrals).where(eq(partnerReferrals.id, pr.id)).limit(1);
     return locked ?? null;
@@ -216,33 +227,86 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     }
 
     // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
+    // Since actual costs (Terms 3.2, docs/partner-actual-costs-plan.md) this is the MINIMUM deduction.
     const costDeductionBps = terms.costDeductionBps ?? 0;
     // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
     const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
-    const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
-    const amount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
-    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
     const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
-    const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
-    const availableAt = new Date(payment.paidAt.getTime() + holdDays * DAY_MS);
-    const inserted = await db.insert(partnerCommissions).values({
-        partnerId: ref.partnerId,
-        partnerReferralId: terms.id,
-        kind: 'invoice',
-        stripeInvoiceId: payment.paymentRef,
-        stripeChargeId: payment.paymentIntentId,
-        netAmountPence: eligiblePence,
-        rateBps: terms.rateBps,
-        costDeductionBps,
-        commissionPence: amount,
-        currency: PROGRAMME_CURRENCY,
-        status: 'pending',
-        availableAt,
-    }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
+    const holdDaysFixed = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+
+    // A customer on the FIXED rule (locked before actual costs, or their partner hasn't accepted the Terms with it): one
+    // row, the fixed deduction, released after the holding period exactly as before — no month-end costs (review of #827).
+    if (terms.costBasis !== 'actual') {
+        const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
+        const fixedAmount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
+        const availableAtFixed = new Date(payment.paidAt.getTime() + holdDaysFixed * DAY_MS);
+        const ins = await db.insert(partnerCommissions).values({
+            partnerId: ref.partnerId, partnerReferralId: terms.id, kind: 'invoice',
+            stripeInvoiceId: payment.paymentRef, stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligiblePence, rateBps: terms.rateBps, costDeductionBps, commissionPence: fixedAmount,
+            currency: PROGRAMME_CURRENCY, status: 'pending', availableAt: availableAtFixed,
+        }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+        if (!ins.length) return { recorded: false, reason: 'duplicate' };
+        if (fixedAmount > 0) await notifyCommissionEarned(db, ref.partnerId, fixedAmount, availableAtFixed);
+        return { recorded: true, commissionPence: fixedAmount, partnerId: ref.partnerId };
+    }
+
+    const periodStart = payment.periodStart ?? (isAnnual ? payment.paidAt : null);
+    const periodEnd = payment.periodEnd ?? (isAnnual ? addMonthsUtc(payment.paidAt, 12) : null);
+    // Each month of service is its own row (an annual payment → 12), worked out against that month's actual costs at
+    // month end (partner-commission-sweep.ts trueUpCommissions). Recorded now provisionally at the minimum deduction,
+    // and not releasable until its month has been checked.
+    const slices = serviceSlices(netPence, periodStart, periodEnd, payment.paidAt)
+        .filter((sl) => !windowEnd || sl.periodStart.getTime() < windowEnd.getTime());
+    if (!slices.length) return { recorded: false, reason: 'outside_window' };
+    const holdDays = holdDaysFixed;
+    const holdUntil = payment.paidAt.getTime() + holdDays * DAY_MS;
+    const values = slices.map((sl, i) => {
+        // The month that straddles the end of the commission period earns only on its days inside it (pro rata).
+        const eligible = proRataPence(sl.netPence, sl.periodStart, sl.periodEnd, windowEnd);
+        return {
+            partnerId: ref.partnerId,
+            partnerReferralId: terms.id,
+            kind: 'invoice',
+            stripeInvoiceId: sliceRef(payment.paymentRef, sl, slices.length),
+            stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligible,
+            rateBps: terms.rateBps!,
+            costDeductionBps,
+            commissionPence: commissionPence(eligible, terms.rateBps!, costDeductionBps),
+            currency: PROGRAMME_CURRENCY,
+            status: 'pending',
+            servicePeriodStart: sl.periodStart,
+            servicePeriodEnd: sl.periodEnd,
+            // The whole payment's card fee belongs to its first month.
+            cardFeePence: i === 0 && typeof payment.cardFeePence === 'number' ? Math.max(0, Math.round(payment.cardFeePence)) : null,
+            availableAt: new Date(Math.max(holdUntil, sl.periodEnd.getTime())),
+        };
+    });
+    const inserted = await db.insert(partnerCommissions).values(values).onConflictDoNothing().returning({ ref: partnerCommissions.stripeInvoiceId });
     if (!inserted.length) return { recorded: false, reason: 'duplicate' };
-    // Tell the partner (in-app + email). Never throws; a redelivery never gets here (duplicate above).
-    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, availableAt);
+    // Only what was actually recorded now (a redelivery that finds some months already there adds — and announces — only the rest).
+    const insertedRefs = new Set(inserted.map((r) => r.ref));
+    const amount = values.filter((v) => insertedRefs.has(v.stripeInvoiceId)).reduce((n, v) => n + v.commissionPence, 0);
+    // Tell the partner (in-app + email): "up to" — the month-end costs can lower it. Never throws; a redelivery never gets here.
+    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
+}
+
+/**
+ * What a payment's commission row earns on `remainingNetPence` (after refunds): with its measured month-end costs once
+ * checked (the customer used the service, so costs stay), else at the minimum deduction. Used by refunds and disputes.
+ */
+export function commissionForRow(row: {
+    rateBps: number | null; costDeductionBps: number; costsCheckedAt?: Date | null;
+    costPence?: number | null; cardFeePence?: number | null; carryInPence?: number | null;
+}, remainingNetPence: number): number {
+    if (!row.costsCheckedAt) return commissionPence(remainingNetPence, row.rateBps ?? 0, row.costDeductionBps);
+    return applyCostRule({
+        paymentPence: remainingNetPence, minDeductionBps: row.costDeductionBps, costPence: row.costPence ?? 0,
+        cardFeePence: row.cardFeePence ?? 0, carryInPence: row.carryInPence ?? 0, rateBps: row.rateBps ?? 0,
+    }).commissionPence;
 }
 
 /** Terms 4.1: annual Subscription Payments are held at least this long. */
@@ -292,85 +356,197 @@ export interface ReversalInput {
 }
 
 /**
- * Reduce or void the commission on a refunded or disputed payment. Idempotent: the target is
- * recomputed from the TOTAL refunded so far, so a redelivered or second partial refund lands on
- * the same answer.
- *   - unpaid (pending / payable): commission reduced to what the remaining payment earns, or
- *     voided when nothing remains (always voided for a dispute);
- *   - already paid: a negative 'adjustment' for the difference not yet adjusted.
+ * What is left of a payment's net (excl. VAT, in sterling) after refunds: net × the charge's unrefunded share when
+ * the charge amount is known (any currency, VAT-inclusive refunds), else net − refunded. Never below 0.
+ */
+export function remainingNetPence(netPence: number, chargeAmountMinor: number, refundedMinor: number): number {
+    if (chargeAmountMinor > 0) return Math.max(0, Math.floor((netPence * Math.max(0, chargeAmountMinor - refundedMinor)) / chargeAmountMinor));
+    return Math.max(0, netPence - refundedMinor);
+}
+
+const DISPUTE_OFFSET_NOTE = 'Payment disputed — earlier adjustment offset';
+const REFUND_REASONS = ['Payment refunded', 'Payment partly refunded'];
+
+/**
+ * ONE RULE for refunds, disputes and won disputes (rewrite after the review of #824): everything recorded for a
+ * payment — its invoice row (unless voided) plus every adjustment and bonus linked to it — must add up to what the
+ * payment should earn now. The planner is pure so the tricky sequences are tested without a database
+ * (tests/partner-ledger-reconcile.test.ts).
+ *
+ *   rowEditable  the invoice row is unpaid and not in an exported or paid run — it can be changed in place;
+ *                otherwise (paid, or its file may already have been sent) only adjustments (−) / bonuses (+) are added.
+ *   others       the sum of adjustments and payment-linked bonuses already recorded.
+ * A dispute always voids an editable row with DISPUTE_REASON, so a later refund knows a dispute is open and a won
+ * dispute can find it; any earlier refund adjustment is offset so the total is exactly 0 while disputed.
+ */
+export interface ReconcileState {
+    rowStatus: 'pending' | 'payable' | 'paid' | 'voided';
+    rowCommission: number;
+    rowVoidReason: string | null;
+    rowEditable: boolean;
+    others: number;
+    disputeAdjustmentsOpen: boolean;   // a paid/exported row's dispute clawback not yet returned
+}
+export type ReconcileEvent = { kind: 'refund' | 'dispute'; desired: number; reason: string } | { kind: 'dispute_won'; desired: number };
+export interface ReconcilePlan {
+    row: null | { void: true; reason: string } | { void: false; amount: number };
+    extra: null | { pence: number; note: string };   // < 0 → 'adjustment', > 0 → 'bonus'
+    closeDispute?: true;                              // also write a £0 'Dispute won' row
+}
+
+export function planReconcile(st: ReconcileState, ev: ReconcileEvent): ReconcilePlan {
+    const none: ReconcilePlan = { row: null, extra: null };
+    // An admin's own cancellation (fraud, breach) is never touched by Stripe events.
+    if (st.rowStatus === 'voided' && st.rowVoidReason && st.rowVoidReason !== DISPUTE_REASON && !REFUND_REASONS.includes(st.rowVoidReason)) return none;
+    const disputeOpen = (st.rowStatus === 'voided' && st.rowVoidReason === DISPUTE_REASON) || st.disputeAdjustmentsOpen;
+    const rowCredited = st.rowStatus === 'voided' ? 0 : st.rowCommission;
+    const total = rowCredited + st.others;
+    const extraFor = (pence: number, note: string): ReconcilePlan['extra'] => (pence === 0 ? null : { pence, note });
+
+    if (ev.kind === 'refund') {
+        if (disputeOpen) return none;                     // the dispute decides; a won dispute applies refunds
+        if (st.rowEditable && st.rowStatus !== 'voided') {
+            const want = ev.desired - st.others;
+            if (want <= 0) return { row: { void: true, reason: ev.reason }, extra: extraFor(Math.min(0, want), `${ev.reason} after adjustment`) };
+            return want < st.rowCommission ? { row: { void: false, amount: want }, extra: null } : none;
+        }
+        const delta = ev.desired - total;
+        return delta < 0 ? { row: null, extra: extraFor(delta, `${ev.reason} after payout`) } : none;
+    }
+
+    if (ev.kind === 'dispute') {
+        if (disputeOpen) return none;                     // redelivered: already disputed
+        if (st.rowEditable && st.rowStatus !== 'voided') {
+            // Void (marks the dispute), then offset what's left so the total is 0.
+            return { row: { void: true, reason: DISPUTE_REASON }, extra: extraFor(-st.others, DISPUTE_OFFSET_NOTE) };
+        }
+        const delta = 0 - total;
+        return delta < 0 ? { row: null, extra: extraFor(delta, `${DISPUTE_REASON} after payout`) } : none;
+    }
+
+    // dispute_won: bring the total back to what the payment earns after any refunds.
+    if (!disputeOpen) return none;
+    if (st.disputeAdjustmentsOpen) {
+        // The dispute was clawed back by an adjustment (row was paid / in an exported run): close it with ONE
+        // 'Dispute won' bonus (even £0), so the dispute never stays "open" (review of #824).
+        const delta = ev.desired - total;
+        if (delta >= 0) return { row: null, extra: { pence: delta, note: DISPUTE_WON_NOTE } };
+        // Not expected, but if it happens the dispute must still close: a £0 'Dispute won' row AND the adjustment.
+        return { row: null, extra: { pence: delta, note: 'Payment refunded after payout' }, closeDispute: true };
+    }
+    // The row itself was voided as disputed: un-void it to what's earned, or record it as refunded.
+    const want = ev.desired - st.others;
+    if (want > 0) return { row: { void: false, amount: want }, extra: null };
+    return { row: { void: true, reason: 'Payment refunded' }, extra: extraFor(want, 'Payment refunded after adjustment') };
+}
+
+interface ReversalRunInfo { inExportedOrPaid: boolean; draftBatchId: number | null }
+
+async function runInfo(db: Db, row: typeof partnerCommissions.$inferSelect): Promise<ReversalRunInfo> {
+    if (row.status === 'paid') return { inExportedOrPaid: true, draftBatchId: null };
+    if (!row.payoutBatchId) return { inExportedOrPaid: false, draftBatchId: null };
+    const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${row.payoutBatchId}`)) as unknown as Array<{ status: string }>;
+    if (run?.status === 'draft') return { inExportedOrPaid: false, draftBatchId: row.payoutBatchId };
+    return { inExportedOrPaid: true, draftBatchId: null };
+}
+
+/**
+ * The planner's view of a payment, from its invoice row and the adjustment / bonus rows linked to it. Pure, and used by
+ * BOTH stateFor and tests/partner-ledger-reconcile.test.ts so the two can never drift (review of #824).
+ * Rows an admin has cancelled (status 'voided') don't count — neither towards the total nor the dispute open/closed check.
+ */
+export function deriveReconcileState(
+    row: { status: string; commissionPence: number; voidReason: string | null; payoutBatchId: number | null },
+    linked: Array<{ status: string; commissionPence: number; note: string | null }>,
+    inExportedOrPaid: boolean,
+): ReconcileState {
+    const live = linked.filter((a) => a.status !== 'voided');
+    const others = live.reduce((s, a) => s + a.commissionPence, 0);
+    // Open = more dispute clawbacks than 'Dispute won' closures (counts, not sums: a won dispute after a partial
+    // refund returns less than was clawed back, and must still close it).
+    const clawbacks = live.filter((a) => a.note === `${DISPUTE_REASON} after payout`).length;
+    const closures = live.filter((a) => DISPUTE_CLOSED_NOTES.includes(a.note ?? '')).length;
+    const status = row.status as ReconcileState['rowStatus'];
+    return {
+        rowStatus: status, rowCommission: row.commissionPence, rowVoidReason: row.voidReason ?? null,
+        rowEditable: !inExportedOrPaid && (status !== 'voided' || !row.payoutBatchId),
+        others, disputeAdjustmentsOpen: clawbacks > closures,
+    };
+}
+
+async function stateFor(db: Db, row: typeof partnerCommissions.$inferSelect, info: ReversalRunInfo): Promise<ReconcileState> {
+    const linked = await db.select().from(partnerCommissions).where(and(
+        inArray(partnerCommissions.kind, ['adjustment', 'bonus']), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
+    return deriveReconcileState(row, linked, info.inExportedOrPaid);
+}
+
+async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, plan: ReconcilePlan, at: Date, touched: Map<string, { batchId: number; partnerId: number }>, info: ReversalRunInfo): Promise<boolean> {
+    if (!plan.row && !plan.extra) return false;
+    // A £0 'Dispute won' bonus is written on purpose (it closes the dispute); other £0 extras never reach here.
+    if (info.draftBatchId) touched.set(`${info.draftBatchId}:${row.partnerId}`, { batchId: info.draftBatchId, partnerId: row.partnerId });
+    if (plan.row?.void) {
+        // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
+        await db.update(partnerCommissions).set({ status: 'voided', voidedAt: at, voidReason: plan.row.reason, payoutBatchId: null })
+            .where(eq(partnerCommissions.id, row.id));
+    } else if (plan.row) {
+        // A month not yet costed goes back to 'pending' even if its date has passed: the true-up must run before it can be
+        // released, or a won dispute would pay a heavy user's month at the provisional figure (review of #827).
+        const uncosted = !!row.servicePeriodEnd && !row.costsCheckedAt;
+        const status = row.status === 'voided' ? (!uncosted && row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
+        await db.update(partnerCommissions).set({
+            status, commissionPence: plan.row.amount, voidedAt: null, voidReason: null,
+            note: row.status === 'voided' ? `Dispute closed in our favour — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,
+        }).where(eq(partnerCommissions.id, row.id));
+    }
+    const insertExtra = (pence: number, note: string) => db.insert(partnerCommissions).values({
+        partnerId: row.partnerId, partnerReferralId: row.partnerReferralId,
+        kind: pence < 0 ? 'adjustment' : 'bonus',
+        stripeInvoiceId: row.stripeInvoiceId, stripeChargeId: row.stripeChargeId,
+        commissionPence: pence, currency: row.currency, status: 'payable', availableAt: at, note,
+    });
+    if (plan.extra) await insertExtra(plan.extra.pence, plan.extra.note);
+    if (plan.closeDispute) await insertExtra(0, DISPUTE_WON_NOTE);
+    return true;
+}
+
+/**
+ * An annual payment is 12 rows `<ref>#m1…#m12` (actual costs, partner-costs.ts sliceRef). A refund or dispute that
+ * carries only the invoice id (a first annual payment via Checkout is recorded without a PaymentIntent) must still find
+ * all 12 — review of #827. Stripe ids contain `_`, a LIKE wildcard, so it is escaped (backslash is Postgres's default
+ * LIKE escape); ids are letters, digits and `_` only, so nothing else needs escaping.
+ */
+export function sliceLikePattern(key: string): string {
+    return key.replace(/_/g, '\\_') + '#m%';
+}
+function sliceRefMatchers(keys: string[]) {
+    return keys.filter((k) => /^[A-Za-z0-9_]+$/.test(k)).map((k) => sql`${partnerCommissions.stripeInvoiceId} LIKE ${sliceLikePattern(k)}`);
+}
+
+/**
+ * A refund or dispute on a payment: bring its commission to what the remaining payment earns (0 for a dispute).
+ * Idempotent: targets come from the TOTAL refunded so far and the state already recorded. Partner Terms 4.3: a
+ * refund or dispute more than 180 days after the payment changes nothing.
  */
 export async function reversePartnerCommission(db: Db, input: ReversalInput): Promise<{ adjusted: number }> {
     const keys = [input.paymentIntentId, input.invoiceId].filter((k): k is string => !!k);
     if (!keys.length) return { adjusted: 0 };
     const rows = await db.select().from(partnerCommissions).where(and(
         eq(partnerCommissions.kind, 'invoice'),
-        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys)),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
     const at = input.at ?? new Date();
     let adjusted = 0;
-    const touchedRuns = new Map<string, { batchId: number; partnerId: number }>();
-
+    const touched = new Map<string, { batchId: number; partnerId: number }>();
     for (const row of rows) {
-        // A row in a run whose file is already EXPORTED may already have been sent: treat it like a paid row (leave it,
-        // add a negative adjustment below) so the run, its statement and the 180-day clawback stay true. Only a DRAFT
-        // run is changed in place (review of #823).
-        let inExportedRun = false;
-        if (row.payoutBatchId && (row.status === 'pending' || row.status === 'payable')) {
-            const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${row.payoutBatchId}`)) as unknown as Array<{ status: string }>;
-            inExportedRun = run?.status === 'exported';
-            if (run?.status === 'draft') touchedRuns.set(`${row.payoutBatchId}:${row.partnerId}`, { batchId: row.payoutBatchId, partnerId: row.partnerId });
-        }
-        // Partner Terms 4.3 (cross-border review): only a refund or dispute within 180 days of the payment
-        // reduces commission. The row is written by the webhook at the payment, so its created_at is the
-        // payment time (a commission entered late by hand gets a later created_at — in the partner's favour).
         if (isPastClawbackWindow(row.createdAt, at)) continue;
-        const net = row.netAmountPence ?? 0;
-        const charged = input.chargeAmountMinor ?? 0;
-        const remaining = input.kind === 'dispute' ? 0
-            : charged > 0 ? Math.max(0, Math.floor((net * Math.max(0, charged - input.amountRefundedPence)) / charged))
-            : Math.max(0, net - input.amountRefundedPence);
-        const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        const remaining = input.kind === 'dispute' ? 0 : remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence);
+        const desired = commissionForRow(row, remaining);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
-
-        if (row.status === 'voided') continue;
-        if ((row.status === 'pending' || row.status === 'payable') && !inExportedRun) {
-            if (target === 0) {
-                // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
-                await db.update(partnerCommissions)
-                    .set({ status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null })
-                    .where(eq(partnerCommissions.id, row.id));
-                adjusted++;
-            } else if (target < row.commissionPence) {
-                await db.update(partnerCommissions)
-                    .set({ commissionPence: target, note: `${reason}: was ${row.commissionPence}p` })
-                    .where(eq(partnerCommissions.id, row.id));
-                adjusted++;
-            }
-            continue;
-        }
-
-        // Paid already (or in an exported run): claw back the difference, net of any adjustment already made for this payment.
-        const [{ sum }] = await db.select({ sum: sql<number>`COALESCE(SUM(${partnerCommissions.commissionPence}), 0)::int` })
-            .from(partnerCommissions)
-            .where(and(eq(partnerCommissions.kind, 'adjustment'), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
-        const owedBack = row.commissionPence - target + Number(sum);   // sum is ≤ 0
-        if (owedBack > 0) {
-            await db.insert(partnerCommissions).values({
-                partnerId: row.partnerId,
-                partnerReferralId: row.partnerReferralId,
-                kind: 'adjustment',
-                stripeInvoiceId: row.stripeInvoiceId,
-                stripeChargeId: row.stripeChargeId,
-                commissionPence: -owedBack,
-                currency: row.currency,
-                status: 'payable',
-                availableAt: at,
-                note: `${reason} after payout`,
-            });
-            adjusted++;
-        }
+        const info = await runInfo(db, row);
+        const plan = planReconcile(await stateFor(db, row, info), { kind: input.kind, desired, reason });
+        if (await applyPlan(db, row, plan, at, touched, info)) adjusted++;
     }
-    for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);
+    for (const r of touched.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);
     return { adjusted };
 }
 
@@ -395,65 +571,51 @@ async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number)
 }
 
 /**
- * A dispute we WON (charge.dispute.closed, status 'won'): undo what reversePartnerCommission did
- * when it opened. Idempotent:
- *   - rows voided as 'Payment disputed' go back to pending (or payable, if their hold has ended) —
- *     unless a payout run or a refund has touched them since;
- *   - money clawed back after payout ('Payment disputed after payout') is returned as a 'bonus' row
- *     (adjustments must be negative — partner_commissions_sign_check), net of any already returned.
+ * A dispute closed in our favour (charge.dispute.closed, status 'won' or 'warning_closed'): bring the payment's commission back to what it earns after
+ * any refunds (same one rule as reversePartnerCommission). Idempotent: a second delivery finds the total already right.
  */
 export async function reinstateDisputedCommission(db: Db, input: {
     paymentIntentId: string | null; invoiceId?: string | null;
     /** Refunded on the charge so far (charge.amount_refunded) — that part stays unearned. */
     amountRefundedPence?: number; at?: Date;
+    /** The charge's own amount, in its currency: the refunded SHARE is used, like reversePartnerCommission. */
+    chargeAmountMinor?: number | null;
 }): Promise<{ reinstated: number }> {
     const keys = [input.paymentIntentId, input.invoiceId].filter((k): k is string => !!k);
     if (!keys.length) return { reinstated: 0 };
     const at = input.at ?? new Date();
-    const match = or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys));
-    let reinstated = 0;
-
-    const voided = await db.select().from(partnerCommissions).where(and(
-        eq(partnerCommissions.kind, 'invoice'), eq(partnerCommissions.status, 'voided'),
-        eq(partnerCommissions.voidReason, DISPUTE_REASON), isNull(partnerCommissions.payoutBatchId), match,
+    const rows = await db.select().from(partnerCommissions).where(and(
+        eq(partnerCommissions.kind, 'invoice'),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
-    for (const row of voided) {
-        const remaining = Math.max(0, (row.netAmountPence ?? 0) - (input.amountRefundedPence ?? 0));
-        const amount = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
-        if (amount <= 0) continue;   // refunded in full meanwhile: stays voided
-        const status = row.availableAt && row.availableAt <= at ? 'payable' : 'pending';
-        await db.update(partnerCommissions)
-            .set({ status, commissionPence: amount, voidedAt: null, voidReason: null, note: `Dispute won — reinstated ${at.toISOString().slice(0, 10)}` })
-            .where(and(eq(partnerCommissions.id, row.id), eq(partnerCommissions.status, 'voided')));
-        reinstated++;
+    let reinstated = 0;
+    const touched = new Map<string, { batchId: number; partnerId: number }>();
+    for (const row of rows) {
+        const st0 = await stateFor(db, row, await runInfo(db, row));
+        // Only act if a dispute is actually open on this payment (a stray 'won' event changes nothing).
+        if (!((st0.rowStatus === 'voided' && st0.rowVoidReason === DISPUTE_REASON) || st0.disputeAdjustmentsOpen)) continue;
+        const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);
+        const desired = commissionForRow(row, remaining);
+        const info = await runInfo(db, row);
+        const plan = planReconcile(st0, { kind: 'dispute_won', desired });
+        await applyPlan(db, row, plan, at, touched, info);
+        // "Reinstated" = money actually put back (a row un-voided, or a positive bonus), not a dispute merely closed.
+        if ((plan.row && !plan.row.void) || (plan.extra && plan.extra.pence > 0)) reinstated++;
     }
-
-    const adjustments = await db.select().from(partnerCommissions).where(and(inArray(partnerCommissions.kind, ['adjustment', 'bonus']), match));
-    const byPayment = new Map<string, { partnerId: number; partnerReferralId: number | null; stripeChargeId: string | null; currency: string; net: number }>();
-    for (const a of adjustments) {
-        if (a.note !== `${DISPUTE_REASON} after payout` && a.note !== DISPUTE_WON_NOTE) continue;
-        const key = a.stripeInvoiceId ?? '';
-        const cur = byPayment.get(key) ?? { partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, stripeChargeId: a.stripeChargeId, currency: a.currency, net: 0 };
-        cur.net += a.commissionPence;
-        byPayment.set(key, cur);
-    }
-    for (const [invoiceRef, a] of byPayment) {
-        if (a.net >= 0) continue;   // already returned
-        await db.insert(partnerCommissions).values({
-            partnerId: a.partnerId, partnerReferralId: a.partnerReferralId, kind: 'bonus',
-            stripeInvoiceId: invoiceRef || null, stripeChargeId: a.stripeChargeId,
-            commissionPence: -a.net, currency: a.currency, status: 'payable', availableAt: at, note: DISPUTE_WON_NOTE,
-        });
-        reinstated++;
-    }
+    for (const r of touched.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);
     return { reinstated };
 }
 
-/** Nightly: pending commissions whose holding period has ended become payable. */
+/**
+ * Nightly: pending commissions whose holding period has ended become payable — but only once their month's actual
+ * costs have been checked (trueUpCommissions, which runs first). Rows from before actual costs (no service period),
+ * bonuses and adjustments release as before.
+ */
 export async function releaseDueCommissions(db: Db, now: Date = new Date()): Promise<{ released: number }> {
     const released = await db.update(partnerCommissions)
         .set({ status: 'payable' })
-        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now)))
+        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now),
+            or(sql`${partnerCommissions.costsCheckedAt} IS NOT NULL`, sql`${partnerCommissions.servicePeriodEnd} IS NULL`, sql`${partnerCommissions.kind} <> 'invoice'`)))
         .returning({ id: partnerCommissions.id });
     return { released: released.length };
 }

@@ -34,16 +34,15 @@ const none = { termsAccepted: false, payoutSet: false, marks: {}, stats: { click
 
 console.log('rate and example');
 
-check('rate line states the plain share of each plan payment and the length (Terms 1.3 §3.2: no cost deduction shown)', () => {
-    assert.strictEqual(rateLine(angela), '40% of each plan payment a customer you invite makes (excluding VAT), for their first 12 months');
+check('rate line: the rate after costs, up to the share after the minimum, and the length (actual costs 2026-11-23)', () => {
+    assert.strictEqual(rateLine(angela), '50% of each plan payment a customer you invite makes after costs — up to 40% of each payment (excluding VAT), for their first 12 months');
     assert.ok(rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: null }).endsWith('for as long as they stay a customer'));
-    assert.ok(!rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: 1 }).includes('cost deduction'));
     assert.ok(rateLine({ rateBps: 2500, costDeductionBps: 0, durationMonths: 1 }).endsWith('first 1 month'));
 });
 
 check('example uses the ledger sum: £79 at 50% after 20% costs = £31.60 (the figure the assistants quote)', () => {
-    assert.strictEqual(exampleLine(angela, 79), 'every £79 a customer pays (excluding VAT) earns you £31.60');
-    assert.strictEqual(exampleLine(angela, 29), 'every £29 a customer pays (excluding VAT) earns you £11.60');
+    assert.strictEqual(exampleLine(angela, 79), 'every £79 a customer pays (excluding VAT) earns you up to £31.60');
+    assert.strictEqual(exampleLine(angela, 29), 'every £29 a customer pays (excluding VAT) earns you up to £11.60');
     assert.strictEqual(exampleLine(null, 79), null);
     assert.strictEqual(exampleLine(angela, null), null);
 });
@@ -75,7 +74,7 @@ console.log('greeting and starters');
 check('greeting: her name, her rate, an exact example, and her next three steps', () => {
     const g = welcomeGreeting({ firstName: 'Angela', businessName: 'Kudzu Collab', terms: angela, planPriceGbp: 79, steps: buildChecklist(none) });
     assert.ok(g.startsWith('Hi Angela, I’m your Partner Assistant.'));
-    assert.ok(g.includes('40% of each plan payment a customer you invite makes'));
+    assert.ok(g.includes('50% of each plan payment a customer you invite makes after costs — up to 40% of each payment'));
     assert.ok(g.includes('£31.60'));
     assert.ok(g.includes('1. Accept the Partner Terms'));
     assert.ok(g.includes('2. Tell us where to pay you'));

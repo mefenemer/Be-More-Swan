@@ -246,10 +246,12 @@ check('existing commissions and locked customers keep 0% — only an unlocked pr
 
 check('the Partner Terms state the same worked example the code computes', () => {
     const terms = readFileSync(join(root, 'partner-terms.html'), 'utf8');
-    // Terms 1.3 §3.2 (owner 2026-11-23): said plainly as 20% of each payment — the code's 25% after a 20% deduction.
-    assert.ok(terms.includes('<strong>20% of each Subscription Payment</strong>'));
-    assert.ok(terms.includes('if a customer pays £69 excluding VAT, you earn £13.80'));
+    // Terms §3.2 (actual costs, owner 2026-11-23): 25% after costs — £13.80 at the 20% minimum, £9.75 when costs are £30.
+    assert.ok(terms.includes('<strong>25% of each Subscription Payment after costs</strong>'));
+    assert.ok(terms.includes('that month’s costs are at the 20% minimum, you earn £13.80'));
+    assert.ok(terms.includes('Cost of Service that month is £30, you earn £9.75'));
     assert.strictEqual(commissionPence(6900, 2500, 2000), 1380);
+    assert.strictEqual(Math.floor((6900 - 3000) * 0.25), 975);
 });
 
 console.log(`\n${passed} passed`);

@@ -1630,8 +1630,8 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         name: 'Partner commission earned',
         category: 'Billing',
         type: 'referral_reward',
-        title: '💷 You earned {{partner.amount}}',
-        message: 'A customer you introduced just paid. Your {{partner.amount}} commission is ready to pay on {{partner.ready_on}}, once the refund window has passed.',
+        title: '💷 You earned up to {{partner.amount}}',
+        message: 'A customer you introduced just paid. Your commission of up to {{partner.amount}} is worked out after that month’s costs and is ready to pay from {{partner.ready_on}}, once the refund window has passed.',
         variables: [v('partner.amount', 'Commission', '£7.25'), v('partner.ready_on', 'Ready to pay on', '18 November 2026')],
     },
     {

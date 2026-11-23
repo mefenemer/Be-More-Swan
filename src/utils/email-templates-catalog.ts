@@ -581,11 +581,11 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         name: 'Partner — Commission Earned',
         category: 'Account',
         transactional: true,
-        subject: 'You earned {{partner.amount}} with Be More Swan',
+        subject: 'You earned up to {{partner.amount}} with Be More Swan',
         preheader: 'A customer you introduced just paid.',
         bodyHtml: greet +
-            p('Good news — a customer you introduced just paid, and you’ve earned <strong>{{partner.amount}}</strong> in commission.') +
-            p('It becomes ready to pay on <strong>{{partner.ready_on}}</strong>, once the refund window has passed, and goes out in the next monthly payout when you have at least the minimum.') +
+            p('Good news — a customer you introduced just paid, and you’ve earned up to <strong>{{partner.amount}}</strong> in commission.') +
+            p('The final figure is worked out at the end of each month of service, after that customer’s costs (Partner Terms 3.2) — your Partner page shows the breakdown. It becomes ready to pay from <strong>{{partner.ready_on}}</strong>, once the refund window has passed, and goes out in the next monthly payout when you have at least the minimum.') +
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {
