@@ -76,8 +76,9 @@ check("charge.dispute.closed with status 'won' or 'warning_closed' reinstates; r
     assert.ok(block.includes("if (dispute.status === 'won' || dispute.status === 'warning_closed') {"));
     // Review of #826: never reinstate while ANOTHER dispute on the same charge is open or lost; unknown = don't.
     assert.ok(block.includes('if (chargeId && await _otherDisputeBlocksReinstate(chargeId, dispute.id)) {'));
-    assert.ok(wh.includes("return list.data.some((d) => d.id !== disputeId && d.status !== 'won' && d.status !== 'warning_closed');"));
-    assert.ok(wh.includes("could not list disputes on the charge — not reinstating:', (e as any)?.message);\n        return true;"));
+    // The rule itself is tested for real in tests/partner-disputes.test.ts; here: it's wired, and a failed list retries.
+    assert.ok(wh.includes('return otherDisputeBlocksReinstate(list.data.map((d) => ({ id: d.id, status: d.status })), disputeId);'));
+    assert.ok(wh.includes('Stripe will retry the event:') && wh.includes('        throw e;'));
     assert.ok(block.includes("refunded = ch.amount_refunded ?? 0;") && block.includes("chargeAmount = ch.amount ?? null;"));
     assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });'));
 });
