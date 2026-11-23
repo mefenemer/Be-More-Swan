@@ -12316,7 +12316,10 @@ function _partnersRenderList() {
           : p.termsVersion
             ? `<span class="text-amber-700 font-semibold">only v${_pEsc(p.termsVersion)} accepted</span> — payouts continue; no Partner Assistant until they accept the current version (Terms 8.1)`
             : `<span class="text-amber-700 font-semibold">not accepted</span> — no payouts or Partner Assistant until they accept on their Partner page`}</span>` : ''}
-        ${p.vatNumber ? `<span>VAT number: ${_pEsc(p.vatNumber)} ${p.vatConfirmed ? '<span class="text-emerald-700 font-semibold">confirmed — UK VAT added to payouts</span>' : `<span class="text-amber-700 font-semibold">not checked</span> <button type="button" onclick="partnerConfirmVat(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Confirm after HMRC check</button>`}</span>` : ''}
+        ${p.vatNumber ? `<span>VAT number: ${_pEsc(p.vatNumber)} ${!/^(GB|XI)(\d{9}|\d{12})$/.test(p.vatNumber)
+          ? '<span class="text-gray-500">outside the UK — reverse charge, no VAT added (Terms 4.5(d))</span>'
+          : p.vatConfirmed ? '<span class="text-emerald-700 font-semibold">confirmed — UK VAT added to payouts</span>'
+          : `<span class="text-amber-700 font-semibold">not checked</span> <button type="button" onclick="partnerConfirmVat(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Confirm after HMRC check</button>`}</span>` : ''}
         <span>Payout details: ${p.hasPayoutDetails ? _pEsc(p.payoutDisplay || p.payoutMethod || 'set') : '<span class="text-amber-700 font-semibold">not set yet</span>'}</span>
         ${p.decisionNote ? `<span>Last decision note: <em>${_pEsc(p.decisionNote)}</em></span>` : ''}
         ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}

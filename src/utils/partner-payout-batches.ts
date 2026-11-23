@@ -128,12 +128,18 @@ export async function createBatch(db: Db, adminId: number): Promise<{ ok: true; 
             SELECT COALESCE(SUM(commission_pence), 0)::int AS total, COUNT(DISTINCT partner_id)::int AS count
               FROM partner_commissions WHERE payout_batch_id = ${batch.id}`)) as unknown as Array<{ total: number; count: number }>;
         // Terms 4.5: freeze each partner's VAT position for this run (statements and exports read it back).
-        for (const d of due) {
-            const [p] = (await tx.execute(sql`SELECT vat_registered, vat_number FROM partners WHERE id = ${d.partnerId}`)) as unknown as Row[];
-            const ukVat = isUkVatRegistered(p ?? {});
+        // VAT from the rows ACTUALLY locked into the run (a row the nightly release made payable a moment ago is
+        // included), and the VAT number from the same read (review of #823).
+        const locked = (await tx.execute(sql`
+            SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, p.vat_registered, p.vat_number
+              FROM partner_commissions c JOIN partners p ON p.id = c.partner_id
+             WHERE c.payout_batch_id = ${batch.id}
+             GROUP BY c.partner_id, p.vat_registered, p.vat_number`)) as unknown as Row[];
+        for (const r of locked) {
+            const ukVat = isUkVatRegistered(r);
             await tx.execute(sql`
                 INSERT INTO partner_payout_vat (batch_id, partner_id, vat_number, vat_pence)
-                VALUES (${batch.id}, ${d.partnerId}, ${ukVat ? p.vat_number : null}, ${vatPenceFor(d.amountPence, ukVat)})
+                VALUES (${batch.id}, ${r.partner_id}, ${ukVat ? r.vat_number : null}, ${vatPenceFor(Number(r.amount), ukVat)})
                 ON CONFLICT (batch_id, partner_id) DO NOTHING`);
         }
         await tx.update(partnerPayoutBatches).set({ totalPence: total, partnerCount: count }).where(eq(partnerPayoutBatches.id, batch.id));

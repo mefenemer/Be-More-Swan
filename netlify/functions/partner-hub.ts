@@ -193,7 +193,11 @@ export default withLambda(async (event) => {
         return r.ok ? json(200, { display: r.display }) : json(400, { error: r.error });
     }
     if (body.action === 'accept_terms') {
-        await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() }).where(eq(partners.id, p.id));
+        // A double click or retry: already on the current version — no second log row or copy email (review of #823).
+        if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        const moved = await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(partners.id, p.id), sql`${partners.termsVersion} IS DISTINCT FROM ${PARTNER_TERMS_VERSION}`)).returning({ id: partners.id });
+        if (!moved.length) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
         // Terms 1.2: keep the acceptance (append-only) and email a copy. Best-effort — the acceptance stands.
         const [me] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
         await recordTermsAcceptance(db, { partnerId: p.id, userId, channel: 'partner_page', email: me?.email ?? null, firstName: me?.firstName ?? null })

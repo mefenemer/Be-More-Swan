@@ -49,6 +49,7 @@ import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
 import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
 import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type InviteProfile } from '../../src/utils/partner-invite-profile';
 import { createNotification } from '../../src/utils/notify';
+import { isUkVatNumber } from '../../src/utils/partner-statements';
 import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
@@ -309,6 +310,8 @@ export default withLambda(async (event) => {
     if (body.action === 'confirm_vat') {
         const partnerId = Number(body.partnerId);
         const expected = typeof body.vatNumber === 'string' ? body.vatNumber : '';
+        // Only a UK number (GB / XI) can mean UK VAT on payouts; anything else is reverse charge (Terms 4.5(d)).
+        if (!isUkVatNumber(expected)) return json(400, { error: 'Only a UK VAT number (GB… or XI…) needs confirming — outside the UK we account for VAT under the reverse charge.' });
         // Conditional on the number the admin checked, so a partner edit in between can't be confirmed blind.
         const done = (await db.execute(sql`
             UPDATE partners SET vat_registered = TRUE, updated_at = now()

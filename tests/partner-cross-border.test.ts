@@ -180,7 +180,7 @@ check('review of #823: a partner-entered VAT number adds no VAT until an admin c
     const adm = read('netlify/functions/admin-partners.ts');
     assert.ok(adm.includes("body.action === 'confirm_vat'") && adm.includes('WHERE id = ${partnerId} AND vat_number = ${expected} AND vat_registered = FALSE'));
     assert.ok(read('admin.html').includes('Confirm after HMRC check'));
-    assert.ok(read('src/utils/partner-payout-batches.ts').includes('${vatPenceFor(d.amountPence, ukVat)})'), 'VAT amount and number frozen from the same read');
+    assert.ok(read('src/utils/partner-payout-batches.ts').includes('${vatPenceFor(Number(r.amount), ukVat)})'), 'VAT from the rows actually locked, number from the same read');
 });
 
 check('third review of #823: first annual payment carries a 12-month period; runs refresh VAT after a refund; annual = 200+ days', () => {
@@ -193,6 +193,14 @@ check('third review of #823: first annual payment carries a 12-month period; run
     assert.ok(l.includes("inExportedRun = run?.status === 'exported';") && l.includes("&& !inExportedRun) {"), 'an exported run is treated like paid: adjustment, row untouched');
     assert.ok(isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2028-01-01T00:00:00Z')));
     assert.ok(!isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2027-03-01T00:00:00Z')), 'a 2-month proration invoice is not annual');
+});
+
+check('fifth review of #823: idempotent accept, UK-only VAT confirmation, honest banner', () => {
+    const hub = read('netlify/functions/partner-hub.ts');
+    assert.ok(hub.includes('if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });'));
+    assert.ok(read('netlify/functions/admin-partners.ts').includes('if (!isUkVatNumber(expected)) return json(400'));
+    assert.ok(read('admin.html').includes('outside the UK — reverse charge, no VAT added'));
+    assert.ok(read('partner-content.html').includes('If you accepted an earlier version, your commission is still paid (Partner Terms 8.1)'));
 });
 
 console.log(`\n${passed} passed`);
