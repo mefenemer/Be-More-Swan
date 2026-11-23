@@ -327,6 +327,7 @@ export type ReconcileEvent = { kind: 'refund' | 'dispute'; desired: number; reas
 export interface ReconcilePlan {
     row: null | { void: true; reason: string } | { void: false; amount: number };
     extra: null | { pence: number; note: string };   // < 0 → 'adjustment', > 0 → 'bonus'
+    closeDispute?: true;                              // also write a £0 'Dispute won' row
 }
 
 export function planReconcile(st: ReconcileState, ev: ReconcileEvent): ReconcilePlan {
@@ -366,7 +367,8 @@ export function planReconcile(st: ReconcileState, ev: ReconcileEvent): Reconcile
         // 'Dispute won' bonus (even £0), so the dispute never stays "open" (review of #824).
         const delta = ev.desired - total;
         if (delta >= 0) return { row: null, extra: { pence: delta, note: DISPUTE_WON_NOTE } };
-        return { row: null, extra: { pence: delta, note: 'Payment refunded after payout' } };   // not expected; keeps the total right
+        // Not expected, but if it happens the dispute must still close: a £0 'Dispute won' row AND the adjustment.
+        return { row: null, extra: { pence: delta, note: 'Payment refunded after payout' }, closeDispute: true };
     }
     // The row itself was voided as disputed: un-void it to what's earned, or record it as refunded.
     const want = ev.desired - st.others;
@@ -384,20 +386,34 @@ async function runInfo(db: Db, row: typeof partnerCommissions.$inferSelect): Pro
     return { inExportedOrPaid: true, draftBatchId: null };
 }
 
-async function stateFor(db: Db, row: typeof partnerCommissions.$inferSelect, info: ReversalRunInfo): Promise<ReconcileState> {
-    const linked = await db.select().from(partnerCommissions).where(and(
-        inArray(partnerCommissions.kind, ['adjustment', 'bonus']), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
-    const others = linked.reduce((s, a) => s + a.commissionPence, 0);
+/**
+ * The planner's view of a payment, from its invoice row and the adjustment / bonus rows linked to it. Pure, and used by
+ * BOTH stateFor and tests/partner-ledger-reconcile.test.ts so the two can never drift (review of #824).
+ * Rows an admin has cancelled (status 'voided') don't count — neither towards the total nor the dispute open/closed check.
+ */
+export function deriveReconcileState(
+    row: { status: string; commissionPence: number; voidReason: string | null; payoutBatchId: number | null },
+    linked: Array<{ status: string; commissionPence: number; note: string | null }>,
+    inExportedOrPaid: boolean,
+): ReconcileState {
+    const live = linked.filter((a) => a.status !== 'voided');
+    const others = live.reduce((s, a) => s + a.commissionPence, 0);
     // Open = more dispute clawbacks than 'Dispute won' closures (counts, not sums: a won dispute after a partial
     // refund returns less than was clawed back, and must still close it).
-    const clawbacks = linked.filter((a) => a.note === `${DISPUTE_REASON} after payout`).length;
-    const closures = linked.filter((a) => a.note === DISPUTE_WON_NOTE).length;
+    const clawbacks = live.filter((a) => a.note === `${DISPUTE_REASON} after payout`).length;
+    const closures = live.filter((a) => a.note === DISPUTE_WON_NOTE).length;
     const status = row.status as ReconcileState['rowStatus'];
     return {
         rowStatus: status, rowCommission: row.commissionPence, rowVoidReason: row.voidReason ?? null,
-        rowEditable: !info.inExportedOrPaid && (status !== 'voided' || !row.payoutBatchId),
+        rowEditable: !inExportedOrPaid && (status !== 'voided' || !row.payoutBatchId),
         others, disputeAdjustmentsOpen: clawbacks > closures,
     };
+}
+
+async function stateFor(db: Db, row: typeof partnerCommissions.$inferSelect, info: ReversalRunInfo): Promise<ReconcileState> {
+    const linked = await db.select().from(partnerCommissions).where(and(
+        inArray(partnerCommissions.kind, ['adjustment', 'bonus']), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
+    return deriveReconcileState(row, linked, info.inExportedOrPaid);
 }
 
 async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, plan: ReconcilePlan, at: Date, touched: Map<string, { batchId: number; partnerId: number }>, info: ReversalRunInfo): Promise<boolean> {
@@ -415,14 +431,14 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
             note: row.status === 'voided' ? `Dispute won — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,
         }).where(eq(partnerCommissions.id, row.id));
     }
-    if (plan.extra) {
-        await db.insert(partnerCommissions).values({
-            partnerId: row.partnerId, partnerReferralId: row.partnerReferralId,
-            kind: plan.extra.pence < 0 ? 'adjustment' : 'bonus',
-            stripeInvoiceId: row.stripeInvoiceId, stripeChargeId: row.stripeChargeId,
-            commissionPence: plan.extra.pence, currency: row.currency, status: 'payable', availableAt: at, note: plan.extra.note,
-        });
-    }
+    const insertExtra = (pence: number, note: string) => db.insert(partnerCommissions).values({
+        partnerId: row.partnerId, partnerReferralId: row.partnerReferralId,
+        kind: pence < 0 ? 'adjustment' : 'bonus',
+        stripeInvoiceId: row.stripeInvoiceId, stripeChargeId: row.stripeChargeId,
+        commissionPence: pence, currency: row.currency, status: 'payable', availableAt: at, note,
+    });
+    if (plan.extra) await insertExtra(plan.extra.pence, plan.extra.note);
+    if (plan.closeDispute) await insertExtra(0, DISPUTE_WON_NOTE);
     return true;
 }
 

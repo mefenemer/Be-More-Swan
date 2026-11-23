@@ -10,7 +10,7 @@
 // Run:  npx tsx tests/partner-ledger-reconcile.test.ts
 
 import assert from 'node:assert';
-import { planReconcile, DISPUTE_REASON, type ReconcileEvent, type ReconcileState } from '../src/utils/partner-ledger';
+import { deriveReconcileState, planReconcile, DISPUTE_REASON, type ReconcileEvent, type ReconcileState } from '../src/utils/partner-ledger';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -25,24 +25,24 @@ class Payment {
     commission: number;
     voidReason: string | null = null;
     run: Run = null;
-    linked: Array<{ pence: number; note: string }> = [];
+    linked: Array<{ pence: number; note: string; status: string }> = [];
     constructor(commission: number) { this.commission = commission; }
     state(): ReconcileState {
+        // The SAME derivation production uses (deriveReconcileState), so this can't drift from stateFor.
         const inExportedOrPaid = this.status === 'paid' || this.run === 'exported' || this.run === 'paid';
-        return {
-            rowStatus: this.status, rowCommission: this.commission, rowVoidReason: this.voidReason,
-            rowEditable: !inExportedOrPaid && (this.status !== 'voided' || !this.run),
-            others: this.linked.reduce((s, a) => s + a.pence, 0),
-            disputeAdjustmentsOpen: this.linked.filter((a) => a.note === `${DISPUTE_REASON} after payout`).length > this.linked.filter((a) => a.note === WON_NOTE).length,
-        };
+        return deriveReconcileState(
+            { status: this.status, commissionPence: this.commission, voidReason: this.voidReason, payoutBatchId: this.run ? 1 : null },
+            this.linked.map((a) => ({ status: a.status, commissionPence: a.pence, note: a.note })),
+            inExportedOrPaid);
     }
     apply(ev: ReconcileEvent): void {
         const plan = planReconcile(this.state(), ev);
         if (plan.row?.void) { this.status = 'voided'; this.voidReason = plan.row.reason; this.run = null; }
         else if (plan.row) { if (this.status === 'voided') this.status = 'payable'; this.commission = plan.row.amount; this.voidReason = null; }
-        if (plan.extra) this.linked.push({ pence: plan.extra.pence, note: plan.extra.note });
+        if (plan.extra) this.linked.push({ pence: plan.extra.pence, note: plan.extra.note, status: 'payable' });
+        if (plan.closeDispute) this.linked.push({ pence: 0, note: WON_NOTE, status: 'payable' });
     }
-    total(): number { return (this.status === 'voided' ? 0 : this.commission) + this.linked.reduce((s, a) => s + a.pence, 0); }
+    total(): number { return (this.status === 'voided' ? 0 : this.commission) + this.linked.filter((a) => a.status !== 'voided').reduce((s, a) => s + a.pence, 0); }
     refund(desired: number) { this.apply({ kind: 'refund', desired, reason: desired === 0 ? 'Payment refunded' : 'Payment partly refunded' }); }
     dispute() { this.apply({ kind: 'dispute', desired: 0, reason: DISPUTE_REASON }); }
     won(desired: number) { this.apply({ kind: 'dispute_won', desired }); }
@@ -118,6 +118,19 @@ check('draft run: refund edits the row in place and it leaves the run when voide
     const p = new Payment(C); p.run = 'draft';
     p.refund(400); assert.strictEqual(p.total(), 400); assert.strictEqual(p.run, 'draft');
     p.refund(0); assert.strictEqual(p.total(), 0); assert.strictEqual(p.run, null);
+});
+
+console.log('second review of #824');
+check('an adjustment an admin cancelled no longer counts: goodwill-cancelled clawback + won dispute pays once', () => {
+    const p = new Payment(C); p.markPaid();
+    p.dispute(); assert.strictEqual(p.total(), 0);
+    p.linked[0].status = 'voided';               // admin cancels the clawback as goodwill → partner keeps C
+    assert.strictEqual(p.total(), C);
+    p.won(C); assert.strictEqual(p.total(), C, 'no second +C');
+});
+check('the unexpected negative won branch still closes the dispute, so later refunds act', () => {
+    const plan = planReconcile({ rowStatus: 'paid', rowCommission: C, rowVoidReason: null, rowEditable: false, others: 500 - C + 900, disputeAdjustmentsOpen: true }, { kind: 'dispute_won', desired: 500 });
+    assert.ok(plan.extra && plan.extra.pence < 0 && plan.closeDispute === true);
 });
 
 console.log(`\n${passed} passed`);
