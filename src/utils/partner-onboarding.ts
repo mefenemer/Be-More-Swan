@@ -63,7 +63,8 @@ export function buildChecklist(input: {
         { key: 'payout', label: 'Tell us where to pay you', done: input.payoutSet, automatic: false },
         { key: 'invite_page', label: 'Make your invite page yours: your photo and a line in your own words', done: !!input.invitePageLive, automatic: false },
         { key: 'first_draft', label: 'Write your first post with your Partner Assistant', done: !!input.marks.first_draft_at, automatic: false },
-        { key: 'share', label: 'Copy your link and send it personally to 5 people who’d benefit', done: !!input.marks.link_copied_at, automatic: false },
+        // Consent: knowing someone is not permission to message them (PECR / ePrivacy; legal review 2026-11-23, H2).
+        { key: 'share', label: 'Copy your link and tell 5 people who’d benefit — in conversation, or by message if they’ve agreed to hear from you', done: !!input.marks.link_copied_at, automatic: false },
         { key: 'first_visit', label: 'Your first visit', done: Number(s.clicks_all || 0) > 0, automatic: true },
         { key: 'first_signup', label: 'Your first sign-up', done: Number(s.signups || 0) > 0, automatic: true },
         { key: 'first_paying', label: 'Your first paying customer', done: Number(s.paying || 0) > 0, automatic: true },
@@ -111,7 +112,7 @@ export function welcomeGreeting(input: {
     if (!done('payout')) todo.push('tell us where to pay you');
     if (!done('invite_page')) todo.push('make your invite page yours, with your photo and a line in your own words');
     if (!done('first_draft')) todo.push(input.businessName ? `write your first post about how ${input.businessName} uses Be More Swan` : 'write your first post about why you recommend Be More Swan');
-    if (!done('share')) todo.push('send your link personally to 5 people who’d benefit');
+    if (!done('share')) todo.push('tell 5 people who’d benefit — in conversation, or by message if they’ve agreed to hear from you');
     const plan = todo.length
         ? `Here’s your plan for this week:\n${todo.slice(0, 3).map((t, i) => `${i + 1}. ${t[0].toUpperCase()}${t.slice(1)}`).join('\n')}`
         : 'Your setup is done. Ask me for a 30-day plan, a post, an email to your list or a demo script — or what to do next from your numbers.';

@@ -217,4 +217,15 @@ check('speed: context loaded up front, card-only rounds end the turn, replies sh
     assert.ok(src.includes('at most about 100 words'));
 });
 
+check('legal review 2026-11-23 applied: consent, no Lead Generator, activity-not-results, honest objections, Terms 1.3 rules', () => {
+    const all = JSON.stringify(PARTNER_PLAYBOOK);
+    assert.ok(all.includes('Knowing someone, or having them as a client or group member, is not consent'), 'H2 consent');
+    assert.ok(all.includes('never use people the Lead Generator (or any similar tool) finds to promote Be More Swan'), 'H1/H3 Terms 5.3(d)');
+    assert.ok(all.includes('counts of activity, with the time period'), 'H5 workspace numbers as activity');
+    assert.ok(!all.includes('approve everything') || all.includes('don’t say they approve \\"everything\\"'), 'H4 no "approve everything" claim');
+    for (const clause of ['5.5 Never present AI-written', '5.6 No reviews', '5.7 We may check', '6.1 They are an independent partner', '6.2 Our name', '9.3 Their contacts']) assert.ok(all.includes(clause), clause);
+    const invite = read('invite.html');
+    assert.ok(invite.includes('id="inv-profile-label" class="text-sm font-semibold text-gray-800'), 'M3 the Paid partnership label is clear, not tiny grey');
+});
+
 console.log(`\n${passed} passed`);
