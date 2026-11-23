@@ -28,7 +28,7 @@ function isLocal(url: string | undefined): url is string {
     catch { return false; }
 }
 
-const TABLES = ['users', 'partners', 'partner_commissions', 'partner_payout_batches', 'partner_programme_settings', 'vault_secrets'];
+const TABLES = ['users', 'partners', 'partner_commissions', 'partner_payout_batches', 'partner_payout_vat', 'partner_programme_settings', 'vault_secrets'];
 
 async function main() {
     console.log('Ledger actions and payout runs (real Postgres + vault)');
