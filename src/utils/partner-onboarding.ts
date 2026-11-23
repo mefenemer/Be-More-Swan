@@ -7,7 +7,7 @@
 // a model call, so it is free, instant, doesn't use one of their messages, and its numbers are exact.
 // Every tick comes from something that happened — never from a "mark as done" click.
 
-import { commissionPence } from './partner-rate-periods';
+import { commissionPence, effectiveShareBps } from './partner-rate-periods';
 
 export interface PartnerTermsNow { rateBps: number; costDeductionBps: number; durationMonths: number | null }
 export interface OnboardingMarks {
@@ -32,13 +32,12 @@ const pct = (bps: number) => {
     return Number.isInteger(n) ? String(n) : n.toFixed(1);
 };
 
-/** One plain line: "50% of what each customer you invite pays, after a 20% cost deduction, for their first 12 months". */
+/** One plain line (Terms 1.3 §3.2): "40% of each plan payment a customer you invite makes (excluding VAT), for their first 12 months". */
 export function rateLine(t: PartnerTermsNow | null): string {
     if (!t) return 'a share of what each customer you invite pays';
-    const costs = t.costDeductionBps > 0 ? `, after a ${pct(t.costDeductionBps)}% cost deduction` : '';
     const length = t.durationMonths == null ? ', for as long as they stay a customer'
         : `, for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-    return `${pct(t.rateBps)}% of what each customer you invite pays (excluding VAT)${costs}${length}`;
+    return `${pct(effectiveShareBps(t.rateBps, t.costDeductionBps))}% of each plan payment a customer you invite makes (excluding VAT)${length}`;
 }
 
 /** "every £29 a customer pays earns you £11.60" — from a real plan price, with the ledger's own sum. */

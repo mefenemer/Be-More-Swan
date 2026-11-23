@@ -30,6 +30,7 @@ import { resolvePeriodAt } from '../../src/utils/partner-rate-periods';
 import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
+import { getPartnerActivity } from '../../src/utils/partner-activity';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { PAGE_MARKS, buildChecklist, checklistFolded, startersFor, welcomeGreeting, type OnboardingMarks, type PageMark } from '../../src/utils/partner-onboarding';
 import {
@@ -113,6 +114,11 @@ export default withLambda(async (event) => {
             partner: { id: p.id, status: p.status, since: p.decidedAt ?? p.createdAt, accountEmail: u?.email ?? null, firstName: u?.firstName ?? null },
             // Partner Terms (partner-terms.html): has this partner accepted the CURRENT version?
             partnerTerms: { accepted: termsAccepted, version: PARTNER_TERMS_VERSION, updated: PARTNER_TERMS_UPDATED },
+            // Partner Terms 1.3 §7.5(g): the page always shows the date the Active Period ends.
+            activity: (p.status === 'approved' || p.status === 'suspended') ? await (async () => {
+                const a = await getPartnerActivity(db, p.id);
+                return a.activeUntil ? { activeUntil: a.activeUntil, notice: a.notice } : null;
+            })() : null,
             link: code ? {
                 code, inviteUrl: `${baseUrl()}/invite/${code}`, signupUrl: `${baseUrl()}/register.html?ref=${code}`,
                 // A memorable partner code, if an admin has set one (invite-codes.ts) — works like the link.

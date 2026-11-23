@@ -601,6 +601,31 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {
+        triggerKey: 'partner_inactivity_notice',
+        name: 'Partner — Inactivity Notice (Terms 7.5)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Notice about your Be More Swan partnership',
+        preheader: 'A new paying customer before {{partner.notice_ends}} cancels this notice.',
+        bodyHtml: greet +
+            p('It’s been 6 months since a customer you introduced started paying, so under section 7.5 of the Partner Terms (Staying active) we are giving you notice that we may end your partnership after <strong>{{partner.notice_ends}}</strong>.') +
+            p('<strong>You can cancel this notice:</strong> if a new customer you introduce starts paying before that date, the notice is withdrawn automatically. If someone signs up through your link or code and is still in their free period on that date, the notice is extended until 7 days after their free period ends.') +
+            p('If your partnership does end, customers on the standard 12-month commission period keep earning you commission until their period ends. Any special period longer than 12 months earns for 3 more months. Commission you’ve already earned is always paid.') +
+            p('<a href="{{link.terms_url}}">Read section 7.5 of the Partner Terms</a>.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_inactivity_withdrawn',
+        name: 'Partner — Inactivity Notice Withdrawn',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your Be More Swan partner notice is cancelled',
+        preheader: 'A customer you introduced started paying.',
+        bodyHtml: greet +
+            p('Good news — a customer you introduced started paying on <strong>{{partner.first_payment_on}}</strong>, so the notice we gave you under section 7.5 of the Partner Terms is withdrawn. Your partnership carries on as normal.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
         triggerKey: 'data_export_ready',
         name: 'Data Export Ready',
         category: 'Compliance',

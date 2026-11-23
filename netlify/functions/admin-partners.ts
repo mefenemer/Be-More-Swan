@@ -12,7 +12,9 @@
 //        All changes are checked together (partner-rate-periods.ts validatePeriodChanges) and saved
 //        in one transaction, so "end the current rate and start a new one" is a single edit.
 //   POST { action: 'settings', holdingDays, minPayoutPence }
-//   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate', note? }
+//   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate'|'end', note?, endReason? }
+//        endReason (end only) = 'closure'|'left'|'breach'|'other' — decides the run-off (Terms 1.3 §7.2 / §7.4)
+//   POST { action: 'inactivity_notice', partnerId } | { action: 'end_inactivity', partnerId }   → Terms 1.3 §7.5
 //   POST { action: 'create', email, note? }               → an existing BMS user becomes an approved partner
 //   POST { action: 'resend_invite', partnerId }          → a fresh account link for an approved applicant with no account
 //   GET  ?view=ledger[&status=]                           → { ledger }    (newest 200)
@@ -46,6 +48,7 @@ import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
 import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
 import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type InviteProfile } from '../../src/utils/partner-invite-profile';
 import { createNotification } from '../../src/utils/notify';
+import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -157,6 +160,9 @@ export default withLambda(async (event) => {
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         const periods = await db.select().from(partnerRatePeriods).orderBy(asc(partnerRatePeriods.startsAt));
         const rows = await listPartnersWithNumbers(db);   // shared with the Partner Ops chat
+        // Terms 1.3 §7.5: the activity clock for approved / suspended partners (a few queries each; partners are few).
+        const activityById = new Map<number, Awaited<ReturnType<typeof getPartnerActivity>>>();
+        for (const r of rows) if (r.status === 'approved' || r.status === 'suspended') activityById.set(r.id, await getPartnerActivity(db, r.id));
         const shape = (p: typeof periods[number]) => ({
             id: p.id, partnerId: p.partnerId, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths,
             startsAt: p.startsAt, endsAt: p.endsAt, label: p.label,
@@ -178,6 +184,8 @@ export default withLambda(async (event) => {
                 pendingPence: r.pending_pence, payablePence: r.payable_pence, paidPence: r.paid_pence,
                 rates: periods.filter((p) => p.partnerId === r.id).map(shape),
                 invitePage: invitePageView(r),
+                endedAt: r.ended_at ?? null, endReason: r.end_reason ?? null,
+                activity: activityById.get(r.id) ?? null,
             })),
         });
     }
@@ -269,12 +277,20 @@ export default withLambda(async (event) => {
             return json(409, { error: `This partner is ${before.status}, so they cannot be ${rule.label}. Reload to see the latest.` });
         }
         // Conditional on the status read above, so two admins deciding at once cannot both win.
+        // Partner Terms 1.3 §7.5 (partner-activity.ts): approving starts the activity clock; a first
+        // approval or a re-approval after ending starts a new partnership (§7.5(i)); ending records
+        // why, which decides the run-off (§7.2 closure, §7.4). Inactivity endings use 'end_inactivity'.
+        const now = new Date();
+        const endReason = rule.to === 'ended' ? (['closure', 'left', 'breach', 'other'].includes(String(body.endReason)) ? String(body.endReason) : 'other') : null;
+        const activity = rule.to === 'approved'
+            ? { approvedAt: now, ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }
+            : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
         const updated = await db.update(partners)
-            .set({ status: rule.to, decidedBy: adminId, decidedAt: new Date(), decisionNote: note, updatedAt: new Date() })
+            .set({ status: rule.to, decidedBy: adminId, decidedAt: now, decisionNote: note, updatedAt: now, ...activity })
             .where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
-        await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note });
+        await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
         // Approving tells them: a welcome if they have an account, a private account link if not.
         // Best-effort — the approval stands, and "Resend account link" is there if the email failed.
         let emailed: Awaited<ReturnType<typeof sendApprovalEmail>> | null = null;
@@ -282,6 +298,21 @@ export default withLambda(async (event) => {
             emailed = await sendApprovalEmail(db, partnerId).catch((err) => { console.error('[admin-partners] approval email failed', err); return null; });
         }
         return json(200, { ok: true, status: rule.to, emailed });
+    }
+
+    // ── Partner Terms 1.3 §7.5 Staying active: give notice / end once it has run out ─────────
+    if (body.action === 'inactivity_notice' || body.action === 'end_inactivity') {
+        const partnerId = Number(body.partnerId);
+        if (body.action === 'inactivity_notice') {
+            const r = await sendInactivityNotice(db, partnerId);
+            if (!r.ok) return json(409, { error: r.error });
+            await audit('partner_decision', partnerId, undefined, { inactivityNotice: true, noticeEnds: r.endsAt.toISOString() });
+            return json(200, { ok: true, noticeEnds: r.endsAt.toISOString() });
+        }
+        const r = await endForInactivity(db, partnerId, adminId);
+        if (!r.ok) return json(409, { error: r.error });
+        await audit('partner_decision', partnerId, { status: 'approved' }, { status: 'ended', endReason: 'inactivity' });
+        return json(200, { ok: true, status: 'ended' });
     }
 
     // ── Erase an application (no account, never earned) — a privacy request, or tidying up ────
@@ -357,7 +388,7 @@ export default withLambda(async (event) => {
         if (!user) return json(404, { error: 'No Be More Swan account uses that email address. They need an account first.' });
         const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) || null : null;
         const inserted = await db.insert(partners)
-            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), decisionNote: note, application: { addedByAdmin: true } })
+            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), approvedAt: new Date(), partnerSince: new Date(), decisionNote: note, application: { addedByAdmin: true } })
             .onConflictDoNothing()
             .returning({ id: partners.id });
         if (!inserted.length) return json(409, { error: 'That person is already on the partner list.' });

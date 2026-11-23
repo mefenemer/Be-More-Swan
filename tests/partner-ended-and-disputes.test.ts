@@ -52,8 +52,10 @@ check('Partner Ops chat can propose it too (GUI and chat parity)', () => {
 check('ended partners are still paid what they earned (7.3), and earn nothing new', () => {
     const runs = read('src/utils/partner-payout-batches.ts');
     assert.ok(runs.includes("const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`"));
-    // New commission needs an APPROVED partner — ended is left out by the same check as suspended.
-    assert.ok(read('src/utils/partner-ledger.ts').includes("eq(partners.status, 'approved')"));
+    // Terms 1.3: an ended partner earns only through the §7.2 / §7.5(h) run-off, and never on a customer who first pays after the end.
+    const ledger = read('src/utils/partner-ledger.ts');
+    assert.ok(ledger.includes("if (!existing?.subscribedAt || !ref.endedAt || existing.subscribedAt.getTime() >= ref.endedAt.getTime()) return { recorded: false, reason: 'ended' };"));
+    assert.ok(ledger.includes("if (!runOffAllows(ref.endReason, ref.endedAt, existing.durationMonths, payment.paidAt)) return { recorded: false, reason: 'ended' };"));
 });
 
 check('their Partner page keeps earnings and payout details, without the link or the assistant', () => {

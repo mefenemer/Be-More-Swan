@@ -98,6 +98,14 @@ export function isWithinCommissionWindow(subscribedAt: Date, durationMonths: num
 }
 
 /**
+ * Partner Terms 1.3 §3.2: what partners are told — commission as a plain share of each Subscription
+ * Payment. Internally a period still holds a rate and a fixed cost deduction; 25% after 20% = 20%.
+ */
+export function effectiveShareBps(rateBps: number, costDeductionBps = 0): number {
+    return Math.round((rateBps * (MAX_RATE_BPS - Math.max(0, costDeductionBps))) / MAX_RATE_BPS);
+}
+
+/**
  * Commission on a payment excluding VAT, after costs: the cost deduction comes off the payment
  * first, then the rate applies to what is left. One rounding, DOWN to the penny.
  * £79 net, 20% costs, 50% rate → floor(7900 × 0.8 × 0.5) = 3160p.

@@ -75,7 +75,7 @@ function checkRates(periods: RatePeriod[], partnerId: number | null, changes: Ar
     return validatePeriodChanges(scope, parsed, now);
 }
 
-export function proposeDecision(partners: PartnerLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
+export function proposeDecision(partners: PartnerLite[], input: { partnerId: unknown; decision: unknown; note?: unknown; endReason?: unknown }): ProposalResult {
     const p = partners.find((x) => x.id === Number(input.partnerId));
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
     const decision = String(input.decision) as 'approve' | 'reject' | 'suspend' | 'reinstate' | 'end';
@@ -88,10 +88,12 @@ export function proposeDecision(partners: PartnerLite[], input: { partnerId: unk
         reject: 'Their application is turned down. They can be approved later.',
         suspend: 'They stop earning on new payments straight away. Commission already earned is kept.',
         reinstate: 'They start earning again on new payments.',
-        end: 'They left, or we are ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite (free months, not cash). Commission they earned before today is still paid. They can be approved again later.',
+        end: 'They left, or we are ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier — except after a programme closure, when they keep earning for 3 months. Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (7.4). Commission they earned before today is still paid. They can be approved again later, and then earn only on customers who first pay after that.',
     }[decision];
-    return { card: { kind: 'decision', title: `${verb} ${who(p)}`, summary: effect + (note ? ` Reason: ${note}` : ''),
-        request: { action: 'decide', partnerId: p.id, decision, note } } };
+    // Terms 1.3: the reason decides the run-off. Inactivity is NOT ended here — it has its own §7.5 steps on the Partners screen.
+    const endReason = decision === 'end' ? (['closure', 'left', 'breach', 'other'].includes(String(input.endReason)) ? String(input.endReason) : 'other') : undefined;
+    return { card: { kind: 'decision', title: `${verb} ${who(p)}`, summary: effect + (endReason ? ` Why: ${endReason}.` : '') + (note ? ` Reason: ${note}` : ''),
+        request: { action: 'decide', partnerId: p.id, decision, note, ...(endReason ? { endReason } : {}) } } };
 }
 
 export function proposeProgrammeRate(periods: RatePeriod[], input: { ratePercent: unknown; costDeductionPercent?: unknown; durationMonths: unknown; startsOn: unknown }, now = new Date()): ProposalResult {

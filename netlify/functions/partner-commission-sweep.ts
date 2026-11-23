@@ -11,14 +11,18 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { releaseDueCommissions } from '../../src/utils/partner-ledger';
 import { purgeDeclinedApplications } from '../../src/utils/partner-erasure';
+import { sweepPartnerActivity } from '../../src/utils/partner-activity';
+import { isRegistrationLocked } from '../../src/utils/platform-config';
 
-export async function sweepPartnerCommissions(): Promise<{ released: number; declinedApplicationsDeleted: number }> {
+export async function sweepPartnerCommissions(): Promise<{ released: number; declinedApplicationsDeleted: number; activity: { paused: number; withdrawn: number; extended: number } }> {
     const db = getDb();
     const now = new Date();
     const { released } = await releaseDueCommissions(db, now);
     // privacy.html §9: declined applications without an account are deleted 12 months after the decision.
     const { deleted } = await purgeDeclinedApplications(db, now);
-    return { released, declinedApplicationsDeleted: deleted };
+    // Partner Terms 1.3 §7.5: pause the activity clock (suspended / sign-ups paused), withdraw or extend notices.
+    const activity = await sweepPartnerActivity(db, now, await isRegistrationLocked().catch(() => false));
+    return { released, declinedApplicationsDeleted: deleted, activity };
 }
 
 export default withLambda(async () => {
