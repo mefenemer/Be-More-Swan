@@ -28,7 +28,8 @@ check('SWAN-15: Partner Terms describe today\'s refer-a-friend reward and a curr
     assert.ok(!terms.includes('referral tokens'));
     assert.match(terms, /earns free months of Be More Swan, not commission/);
     // Terms 1.3 §3.2 (2026-11-23): the same £13.80, said plainly as 20% of each payment.
-    assert.match(terms, /if a customer pays £69 excluding VAT, you earn £13\.80/);
+    // Actual costs (2026-11-23): the same £13.80 when that month's costs are at the 20% minimum.
+    assert.match(terms, /if a customer pays £69 excluding VAT in a month and that month’s costs are at the 20% minimum, you earn £13\.80/);
 });
 
 check('SWAN-15: the arithmetic in the worked example is right', () => {

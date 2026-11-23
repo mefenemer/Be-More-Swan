@@ -33,6 +33,7 @@ import {
 import {
     addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
+import { applyCostRule, serviceSlices, sliceRef } from './partner-costs';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -64,6 +65,8 @@ export interface PartnerPayment {
     periodEnd?: Date | null;
     /** True for an annual plan payment when the period isn't known (first payment via Checkout). */
     annual?: boolean;
+    /** The card / payment processing fee Stripe charged on this payment, in pence (actual costs, Terms 3.2). Null = unknown. */
+    cardFeePence?: number | null;
 }
 
 export type RecordOutcome =
@@ -216,33 +219,65 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     }
 
     // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
+    // Since actual costs (Terms 3.2, docs/partner-actual-costs-plan.md) this is the MINIMUM deduction.
     const costDeductionBps = terms.costDeductionBps ?? 0;
     // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
     const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
-    const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
-    const amount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
-    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
     const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
+    const periodStart = payment.periodStart ?? (isAnnual ? payment.paidAt : null);
+    const periodEnd = payment.periodEnd ?? (isAnnual ? addMonthsUtc(payment.paidAt, 12) : null);
+    // Each month of service is its own row (an annual payment → 12), worked out against that month's actual costs at
+    // month end (partner-commission-sweep.ts trueUpCommissions). Recorded now provisionally at the minimum deduction,
+    // and not releasable until its month has been checked.
+    const slices = serviceSlices(netPence, periodStart, periodEnd, payment.paidAt)
+        .filter((sl) => !windowEnd || sl.periodStart.getTime() < windowEnd.getTime());
+    if (!slices.length) return { recorded: false, reason: 'outside_window' };
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
     const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
-    const availableAt = new Date(payment.paidAt.getTime() + holdDays * DAY_MS);
-    const inserted = await db.insert(partnerCommissions).values({
-        partnerId: ref.partnerId,
-        partnerReferralId: terms.id,
-        kind: 'invoice',
-        stripeInvoiceId: payment.paymentRef,
-        stripeChargeId: payment.paymentIntentId,
-        netAmountPence: eligiblePence,
-        rateBps: terms.rateBps,
-        costDeductionBps,
-        commissionPence: amount,
-        currency: PROGRAMME_CURRENCY,
-        status: 'pending',
-        availableAt,
-    }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+    const holdUntil = payment.paidAt.getTime() + holdDays * DAY_MS;
+    const values = slices.map((sl, i) => {
+        // The month that straddles the end of the commission period earns only on its days inside it (pro rata).
+        const eligible = proRataPence(sl.netPence, sl.periodStart, sl.periodEnd, windowEnd);
+        return {
+            partnerId: ref.partnerId,
+            partnerReferralId: terms.id,
+            kind: 'invoice',
+            stripeInvoiceId: sliceRef(payment.paymentRef, sl, slices.length),
+            stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligible,
+            rateBps: terms.rateBps!,
+            costDeductionBps,
+            commissionPence: commissionPence(eligible, terms.rateBps!, costDeductionBps),
+            currency: PROGRAMME_CURRENCY,
+            status: 'pending',
+            servicePeriodStart: sl.periodStart,
+            servicePeriodEnd: sl.periodEnd,
+            // The whole payment's card fee belongs to its first month.
+            cardFeePence: i === 0 && typeof payment.cardFeePence === 'number' ? Math.max(0, Math.round(payment.cardFeePence)) : null,
+            availableAt: new Date(Math.max(holdUntil, sl.periodEnd.getTime())),
+        };
+    });
+    const inserted = await db.insert(partnerCommissions).values(values).onConflictDoNothing().returning({ id: partnerCommissions.id });
     if (!inserted.length) return { recorded: false, reason: 'duplicate' };
-    // Tell the partner (in-app + email). Never throws; a redelivery never gets here (duplicate above).
-    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, availableAt);
+    const amount = values.reduce((n, v) => n + v.commissionPence, 0);
+    // Tell the partner (in-app + email): "up to" — the month-end costs can lower it. Never throws; a redelivery never gets here.
+    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
+}
+
+/**
+ * What a payment's commission row earns on `remainingNetPence` (after refunds): with its measured month-end costs once
+ * checked (the customer used the service, so costs stay), else at the minimum deduction. Used by refunds and disputes.
+ */
+export function commissionForRow(row: {
+    rateBps: number | null; costDeductionBps: number; costsCheckedAt?: Date | null;
+    costPence?: number | null; cardFeePence?: number | null; carryInPence?: number | null;
+}, remainingNetPence: number): number {
+    if (!row.costsCheckedAt) return commissionPence(remainingNetPence, row.rateBps ?? 0, row.costDeductionBps);
+    return applyCostRule({
+        paymentPence: remainingNetPence, minDeductionBps: row.costDeductionBps, costPence: row.costPence ?? 0,
+        cardFeePence: row.cardFeePence ?? 0, carryInPence: row.carryInPence ?? 0, rateBps: row.rateBps ?? 0,
+    }).commissionPence;
 }
 
 /** Terms 4.1: annual Subscription Payments are held at least this long. */
@@ -460,7 +495,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     for (const row of rows) {
         if (isPastClawbackWindow(row.createdAt, at)) continue;
         const remaining = input.kind === 'dispute' ? 0 : remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence);
-        const desired = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        const desired = commissionForRow(row, remaining);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
         const info = await runInfo(db, row);
         const plan = planReconcile(await stateFor(db, row, info), { kind: input.kind, desired, reason });
@@ -515,7 +550,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
         // Only act if a dispute is actually open on this payment (a stray 'won' event changes nothing).
         if (!((st0.rowStatus === 'voided' && st0.rowVoidReason === DISPUTE_REASON) || st0.disputeAdjustmentsOpen)) continue;
         const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);
-        const desired = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        const desired = commissionForRow(row, remaining);
         const info = await runInfo(db, row);
         const plan = planReconcile(st0, { kind: 'dispute_won', desired });
         await applyPlan(db, row, plan, at, touched, info);
@@ -526,11 +561,16 @@ export async function reinstateDisputedCommission(db: Db, input: {
     return { reinstated };
 }
 
-/** Nightly: pending commissions whose holding period has ended become payable. */
+/**
+ * Nightly: pending commissions whose holding period has ended become payable — but only once their month's actual
+ * costs have been checked (trueUpCommissions, which runs first). Rows from before actual costs (no service period),
+ * bonuses and adjustments release as before.
+ */
 export async function releaseDueCommissions(db: Db, now: Date = new Date()): Promise<{ released: number }> {
     const released = await db.update(partnerCommissions)
         .set({ status: 'payable' })
-        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now)))
+        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now),
+            or(sql`${partnerCommissions.costsCheckedAt} IS NOT NULL`, sql`${partnerCommissions.servicePeriodEnd} IS NULL`, sql`${partnerCommissions.kind} <> 'invoice'`)))
         .returning({ id: partnerCommissions.id });
     return { released: released.length };
 }

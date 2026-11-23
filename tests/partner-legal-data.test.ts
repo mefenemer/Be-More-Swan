@@ -40,7 +40,7 @@ check('the page states the version and date the code records, and is unlisted (n
 });
 
 check('it says what we decided: ad labels, no voucher sites, rates fixed per customer, holding period, minimum, forfeit on fraud', () => {
-    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the commission on customers who have already paid', '20% of each Subscription Payment',
+    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the commission on customers who have already paid', '25% of each Subscription Payment after costs',
         'holding period', 'currently £50', 'forfeited', 'excluding VAT', 'England and Wales']) {
         assert.ok(terms.includes(phrase), `missing: ${phrase}`);
     }
@@ -123,7 +123,7 @@ check('commission earned and payout sent — in-app (opening the Partner page) a
 
 check('earned is sent once per commission (after a successful insert); paid is sent when a run is marked paid', () => {
     const led = read('src/utils/partner-ledger.ts');
-    assert.ok(led.indexOf("if (!inserted.length) return { recorded: false, reason: 'duplicate' };") < led.indexOf('await notifyCommissionEarned(db, ref.partnerId, amount, availableAt);'));
+    assert.ok(led.indexOf("if (!inserted.length) return { recorded: false, reason: 'duplicate' };") < led.indexOf('await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);'));
     assert.ok(read('netlify/functions/admin-partners.ts').includes("const notified = body.action === 'mark_paid' ? await notifyPayoutSent(db, batchId) : 0;"));
     assert.ok(/catch \(err\) \{\s*console\.error\('\[partner-notify\]/.test(read('src/utils/partner-notify.ts')), 'never throws');
 });

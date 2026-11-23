@@ -299,6 +299,8 @@ export async function listLedger(db: Db, status: string | null, limit = 200): Pr
     return (await db.execute(sql`
         SELECT c.id, c.partner_id, c.kind, c.status, c.commission_pence, c.net_amount_pence, c.rate_bps, c.cost_deduction_bps, c.stripe_invoice_id,
                c.available_at, c.created_at, c.paid_at, c.void_reason, c.note, c.payout_batch_id,
+               -- Actual costs (docs/partner-actual-costs-plan.md): which deduction applied, and any shortfall carried.
+               c.deduction_pence, c.deduction_basis, c.carry_in_pence, c.carry_out_pence, c.costs_checked_at, c.service_period_end,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
           FROM partner_commissions c JOIN partners p ON p.id = c.partner_id LEFT JOIN users u ON u.id = p.user_id

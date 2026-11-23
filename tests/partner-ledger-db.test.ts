@@ -22,6 +22,7 @@ import {
     isPartnerReferrer, recordPartnerPayment, reinstateDisputedCommission, releaseDueCommissions, reversePartnerCommission,
 } from '../src/utils/partner-ledger';
 import { qualifyPendingReferral } from '../src/utils/referral-offer';
+import { trueUpCommissions } from '../src/utils/partner-costs-db';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -39,7 +40,9 @@ function isLocal(url: string | undefined): url is string {
     catch { return false; }
 }
 
-const TABLES = ['users', 'user_referrals', 'partners', 'partner_rate_periods', 'partner_referrals', 'partner_programme_settings', 'partner_commissions'];
+// fx_rates / user_organisations / ai_usage_log: the month-end actual-costs check (docs/partner-actual-costs-plan.md).
+const TABLES = ['users', 'user_referrals', 'partners', 'partner_rate_periods', 'partner_referrals', 'partner_programme_settings', 'partner_commissions',
+    'fx_rates', 'user_organisations', 'ai_usage_log'];
 const d = (s: string) => new Date(`${s}T12:00:00Z`);
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -188,7 +191,17 @@ async function main() {
             assert.strictEqual((await commissions('in_v1'))[0].status, 'voided');
         });
 
-        await check('the nightly sweep releases only commissions past their holding period', async () => {
+        await check('the nightly sweep releases only commissions past their holding period — after their month is costed', async () => {
+            // Actual costs (2026-11-23): a month isn't releasable until checked. Nothing logged for these customers →
+            // the 20% minimum applies and the commission is unchanged; the check needs an ECB rate on file.
+            assert.strictEqual((await releaseDueCommissions(db, d('2026-12-06'))).released, 0, 'not released before its costs are checked');
+            await sql.unsafe(`INSERT INTO fx_rates (day, usd_gbp) VALUES ('2026-11-01', 0.79) ON CONFLICT DO NOTHING`);
+            const before = (await commissions('in_a1'))[0].commission_pence;
+            const { checked } = await trueUpCommissions(db, d('2026-12-06'));
+            assert.ok(checked >= 1);
+            const a1 = (await commissions('in_a1'))[0];
+            assert.strictEqual(a1.deduction_basis, 'minimum');
+            assert.strictEqual(a1.commission_pence, before, 'no logged costs → the minimum → same figure');
             const { released } = await releaseDueCommissions(db, d('2026-12-06'));   // in_a1 due 2026-12-05
             assert.strictEqual(released, 1);
             assert.strictEqual((await commissions('in_a1'))[0].status, 'payable');

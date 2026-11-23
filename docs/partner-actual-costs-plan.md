@@ -4,8 +4,11 @@ Owner, 2026-11-23: "the 20% cost deduction is only an estimate and is subject to
 of Angela's referrals are heavy users, Be More Swan cannot be negatively impacted … If costs exceed what users pay,
 we will have to consider increasing the monthly price — how do we protect the company?"
 
-**Status:** plan; decisions D1–D4 taken by the owner (2026-11-23); **D5–D6 need the owner's OK** before building.
-Nothing built yet. Builds on the partner programme (`docs/affiliate-partner-programme-plan.md`) and Partner Terms
+**Status:** all decisions taken (D1–D4 and D5–D6 OK'd by the owner, 2026-11-23). **Built** on branch
+`feat/partner-actual-costs`: `partner-costs.ts` (rule, slices, ECB), `partner-costs-db.ts` (costs, rate, true-up),
+ledger + sweep + webhook card fee, Terms 3.2 (and the frozen v1.3 copy), Partner page breakdown, assistant, admin ledger.
+⚠️ NEW SQL `db/z-partner-actual-costs.sql` — both DBs before deploy. Cost-logging audit (§5) still to do: providers that
+don't write to `ai_usage_log` aren't counted yet (the 20% minimum still applies to them). Builds on the partner programme (`docs/affiliate-partner-programme-plan.md`) and Partner Terms
 v1.3 (not on prod yet — nobody has accepted it, so the contract can still change without anyone's consent).
 
 ## 1. Decisions
@@ -16,8 +19,8 @@ v1.3 (not on prod yet — nobody has accepted it, so the contract can still chan
 | D2 | What counts as costs | **AI model usage, image / video / voice generation, the meeting note-taker bot, email sending — and card processing fees.** |
 | D3 | When a month's costs exceed what the customer paid | **Carry the shortfall forward** against that customer's next commissionable payments (never charged to the partner). |
 | D4 | Angela | **50% after costs on this basis, for the first 12 months of each customer, for customers who first pay 27 Oct 2026 – 26 Oct 2027**, in a director-signed agreement that overrides Terms 3.5. Draft: `docs/legal/angela-special-commission-agreement-draft.md`. |
-| D5 ⚠️ | **Annual plans** — a year paid up front, costs arrive over 12 months | **Proposed:** treat an annual payment as 12 monthly slices; each month's commission is worked out (and released) once that month's costs are known. Same rule as monthly plans, no guessing. Alternative: one commission at the end of the 60-day hold using costs so far ×6 — simpler but an estimate. |
-| D6 ⚠️ | **Dollars → pounds** for costs logged in USD | **Proposed:** the European Central Bank's daily USD/GBP rate, saved each day; the rate used is stored on each commission row. Alternative: a rate the admin sets each month. |
+| D5 ✅ | **Annual plans** — a year paid up front, costs arrive over 12 months | **Proposed:** treat an annual payment as 12 monthly slices; each month's commission is worked out (and released) once that month's costs are known. Same rule as monthly plans, no guessing. Alternative: one commission at the end of the 60-day hold using costs so far ×6 — simpler but an estimate. |
+| D6 ✅ | **Dollars → pounds** for costs logged in USD | **Proposed:** the European Central Bank's daily USD/GBP rate, saved each day; the rate used is stored on each commission row. Alternative: a rate the admin sets each month. |
 
 ## 2. The rule (per customer, per month of service)
 

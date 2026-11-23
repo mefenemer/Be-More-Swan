@@ -12716,7 +12716,11 @@ async function loadLedger() {
     }).join('');
     tbody.innerHTML = _ledger.rows.map((r) => {
       const what = r.kind === 'invoice'
-        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}${r.cost_deduction_bps ? ` less ${_pPct(r.cost_deduction_bps)} costs` : ''}`
+        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}` + (r.costs_checked_at
+            // Actual costs: the costs taken off, flagged when the customer's real costs beat the minimum (heavy user).
+            ? ` less ${_pMoney(r.deduction_pence)} costs${r.deduction_basis === 'actual' ? ' <span class="inline-block px-1.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">actual costs</span>' : ` (${_pPct(r.cost_deduction_bps)} minimum)`}`
+              + (r.carry_in_pence > 0 ? ` · ${_pMoney(r.carry_in_pence)} carried in` : '') + (r.carry_out_pence > 0 ? ` · <span class="text-amber-700">${_pMoney(r.carry_out_pence)} carried forward</span>` : '')
+            : (r.service_period_end ? ` · <span class="text-gray-400">costs checked at month end (provisional at ${_pPct(r.cost_deduction_bps)} minimum)</span>` : (r.cost_deduction_bps ? ` less ${_pPct(r.cost_deduction_bps)} costs` : '')))
         : `${_lgKind[r.kind] || r.kind}${r.note ? ' · ' + _pEsc(r.note) : ''}`;
       const status = r.status === 'pending' ? `Waiting until ${_pDate(r.available_at)}`
         : r.status === 'voided' ? `Cancelled${r.void_reason ? ' — ' + _pEsc(r.void_reason) : ''}`

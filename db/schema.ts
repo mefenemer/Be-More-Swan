@@ -6752,6 +6752,8 @@ export const partnerReferrals = pgTable("partner_referrals", {
   partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "restrict" }),
   source: text().notNull().default("link"),                  // link | promo_code | manual
   subscribedAt: timestamp("subscribed_at"),
+  // The running shortfall: this customer's costs above what they paid, taken off their next months (z-partner-actual-costs.sql).
+  costCarryPence: integer("cost_carry_pence").notNull().default(0),
   ratePeriodId: integer("rate_period_id").references(() => partnerRatePeriods.id, { onDelete: "set null" }),
   rateBps: integer("rate_bps"),
   costDeductionBps: integer("cost_deduction_bps"),
@@ -6795,6 +6797,18 @@ export const partnerCommissions = pgTable("partner_commissions", {
   netAmountPence: integer("net_amount_pence"),               // customer payment excl. VAT
   rateBps: integer("rate_bps"),                              // snapshot of the rate used
   costDeductionBps: integer("cost_deduction_bps").notNull().default(0), // snapshot of the cost deduction used
+  // Actual costs (db/z-partner-actual-costs.sql; docs/partner-actual-costs-plan.md): cost_deduction_bps is the MINIMUM;
+  // the month-end true-up records what was measured and which deduction applied. costs_checked_at NULL = provisional.
+  servicePeriodStart: timestamp("service_period_start"),
+  servicePeriodEnd: timestamp("service_period_end"),
+  costPence: integer("cost_pence"),
+  cardFeePence: integer("card_fee_pence"),
+  deductionPence: integer("deduction_pence"),
+  deductionBasis: text("deduction_basis"),                  // 'minimum' | 'actual'
+  carryInPence: integer("carry_in_pence"),
+  carryOutPence: integer("carry_out_pence"),
+  usdGbpRate: decimal("usd_gbp_rate", { precision: 12, scale: 6 }),
+  costsCheckedAt: timestamp("costs_checked_at"),
   commissionPence: integer("commission_pence").notNull(),
   currency: text().notNull().default("GBP"),
   status: text().notNull().default("pending"),               // pending | payable | paid | voided
@@ -7596,3 +7610,12 @@ export const meetingPickupState = pgTable("meeting_pickup_state", {
   uniqueIndex("meeting_pickup_state_org_platform_uq").on(t.organisationId, t.platform),
   check("meeting_pickup_state_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
 ]);
+
+// The European Central Bank's daily USD→GBP reference rate (db/z-partner-actual-costs.sql), saved by the nightly partner
+// sweep; partner commission converts costs logged in USD with the rate for the day.
+export const fxRates = pgTable("fx_rates", {
+  day: date("day").primaryKey(),
+  usdGbp: decimal("usd_gbp", { precision: 12, scale: 6 }).notNull(),
+  source: text().notNull().default("ECB"),
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+});

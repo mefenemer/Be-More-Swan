@@ -162,7 +162,9 @@ check('review of #823: VAT is frozen per payout run — statements, exports and 
 });
 check('review of #823: non-GBP Stripe lookups only for partner referrals', () => {
     const w = read('netlify/functions/stripe-webhook.ts');
-    assert.ok(w.includes("payment.gbpNetAmountPence == null && await hasPartnerReferral(db, payment.userId))"));
+    // Since actual costs (2026-11-23) the same lookup also fetches the card fee — still only for partner referrals.
+    assert.ok(w.includes("if (await hasPartnerReferral(db, payment.userId)) {"));
+    assert.ok(w.includes("payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null ? st?.gbpNetPence ?? null"));
 });
 
 check('review of #823: a declined change counts 60 days from the LATER of the version date and the latest approval', () => {

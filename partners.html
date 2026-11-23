@@ -205,10 +205,11 @@
     try {
       const t = await (await fetch('/.netlify/functions/partner-programme-public')).json();
       if (t.rateBps == null) return;
-      // Partner Terms 1.3 §3.2: a plain share of each plan payment (the rate after the fixed cost deduction).
+      // Partner Terms §3.2 (actual costs, 2026-11-23): the rate after costs — the higher of the minimum or that customer's
+      // actual costs that month — so "up to" the rate after the minimum.
       const pct = (Math.round(Number(t.rateBps) * (10000 - Number(t.costDeductionBps || 0)) / 10000) / 100).toString();
       const length = t.durationMonths == null ? 'for as long as they stay a customer' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-      document.getElementById('partner-term-rate').innerHTML = `<strong>${pct}% commission</strong> on each plan payment every customer you introduce makes (excluding VAT), ${length}.`;
+      document.getElementById('partner-term-rate').innerHTML = `<strong>Up to ${pct}% commission</strong> on each plan payment every customer you introduce makes (excluding VAT), ${length} — ${Number(t.rateBps) / 100}% of what they pay after our costs for that customer (Partner Terms 3.2).`;
       if (t.minPayoutPence != null && t.holdingDays != null) {
         document.getElementById('partner-term-payout').innerHTML =
           `<strong>Paid monthly</strong> once a payment is ${t.holdingDays} days old (so refunds can settle), when you have £${Math.round(t.minPayoutPence / 100)} or more to come.`;
