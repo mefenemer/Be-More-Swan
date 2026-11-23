@@ -187,10 +187,10 @@ check('third review of #823: first annual payment carries a 12-month period; run
     const w = read('netlify/functions/stripe-webhook.ts');
     assert.strictEqual((w.match(/\.\.\.\(billingCycle === 'annual' \? annualPeriodFrom\(new Date\(stripeEvent\.created \* 1000\)\) : \{\}\)/g) || []).length, 2, 'both first-payment paths');
     const l = read('src/utils/partner-ledger.ts');
-    assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
-    assert.ok(l.includes('for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
+    assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: plan.row.reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
+    assert.ok(l.includes('for (const r of touched.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
     assert.ok(l.includes("if (!run || run.status !== 'draft') return;"), 'only draft runs change in place');
-    assert.ok(l.includes("inExportedRun = run?.status === 'exported';") && l.includes("&& !inExportedRun) {"), 'an exported run is treated like paid: adjustment, row untouched');
+    assert.ok(l.includes("if (run?.status === 'draft') return { inExportedOrPaid: false, draftBatchId: row.payoutBatchId };") && l.includes('rowEditable: !info.inExportedOrPaid'), 'an exported run is treated like paid: adjustment, row untouched');
     assert.ok(isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2028-01-01T00:00:00Z')));
     assert.ok(!isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2027-03-01T00:00:00Z')), 'a 2-month proration invoice is not annual');
 });
@@ -211,7 +211,7 @@ check('final review of #823: proportional won-dispute reinstatement, no double c
     assert.strictEqual(remainingNetPence(5750, 0, 1000), 4750, 'charge unknown: net minus refunded');
     const l = read('src/utils/partner-ledger.ts');
     assert.ok(l.includes('const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);'), 'won disputes use the same proportion');
-    assert.ok(l.includes('const rowTarget = Math.max(0, target - Number(adj));'), 'unpaid rows count existing adjustments');
+    assert.ok(l.includes('export function planReconcile(') && l.includes('const want = ev.desired - st.others;'), 'one rule: row + adjustments + bonuses = what the payment earns (sequences in partner-ledger-reconcile.test.ts)');
     assert.ok(read('netlify/functions/stripe-webhook.ts').includes("'dispute_won', new Date(stripeEvent.created * 1000), chargeAmount);"));
     assert.ok(read('src/utils/partner-statements.ts').includes('SELECT v.vat_pence FROM partner_payout_vat v WHERE v.batch_id = b.id'));
     assert.ok(read('partner-content.html').includes("${b.vatPence > 0 ? ' + ' + money(b.vatPence) + ' VAT' : ''}"));
