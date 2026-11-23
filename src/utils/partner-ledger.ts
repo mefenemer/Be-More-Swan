@@ -40,7 +40,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const PROGRAMME_CURRENCY = 'GBP';
 /** What a dispute writes, and what a WON dispute looks for to undo it (reinstateDisputedCommission). */
 export const DISPUTE_REASON = 'Payment disputed';
-const DISPUTE_WON_NOTE = 'Dispute won — commission returned';
+// Neutral wording: a WON dispute and an inquiry that closed without a chargeback ('warning_closed') both close it.
+// The old note still counts as a closure (deriveReconcileState) for any row written before this wording.
+const DISPUTE_WON_NOTE = 'Dispute closed in our favour — commission returned';
+const DISPUTE_CLOSED_NOTES = [DISPUTE_WON_NOTE, 'Dispute won — commission returned'];
 
 export interface PartnerPayment {
     /** The referred customer who paid. */
@@ -401,7 +404,7 @@ export function deriveReconcileState(
     // Open = more dispute clawbacks than 'Dispute won' closures (counts, not sums: a won dispute after a partial
     // refund returns less than was clawed back, and must still close it).
     const clawbacks = live.filter((a) => a.note === `${DISPUTE_REASON} after payout`).length;
-    const closures = live.filter((a) => a.note === DISPUTE_WON_NOTE).length;
+    const closures = live.filter((a) => DISPUTE_CLOSED_NOTES.includes(a.note ?? '')).length;
     const status = row.status as ReconcileState['rowStatus'];
     return {
         rowStatus: status, rowCommission: row.commissionPence, rowVoidReason: row.voidReason ?? null,
@@ -428,7 +431,7 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
         const status = row.status === 'voided' ? (row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
         await db.update(partnerCommissions).set({
             status, commissionPence: plan.row.amount, voidedAt: null, voidReason: null,
-            note: row.status === 'voided' ? `Dispute won — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,
+            note: row.status === 'voided' ? `Dispute closed in our favour — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,
         }).where(eq(partnerCommissions.id, row.id));
     }
     const insertExtra = (pence: number, note: string) => db.insert(partnerCommissions).values({
@@ -491,7 +494,7 @@ async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number)
 }
 
 /**
- * A dispute we WON (charge.dispute.closed, status 'won'): bring the payment's commission back to what it earns after
+ * A dispute closed in our favour (charge.dispute.closed, status 'won' or 'warning_closed'): bring the payment's commission back to what it earns after
  * any refunds (same one rule as reversePartnerCommission). Idempotent: a second delivery finds the total already right.
  */
 export async function reinstateDisputedCommission(db: Db, input: {

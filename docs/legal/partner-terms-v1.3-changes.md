@@ -15,3 +15,8 @@ This note covers only the payment-method sentence. The same 1.3 also changes 4.2
 **For a solicitor, when there is one:**
 - US partners and tax forms. We don't collect W-9 / W-8BEN(-E). 4.5 already says partners give us tax forms we reasonably ask for.
 - Wise's FX margin and fees on the USD leg: 4.2 puts them on the partner. Confirm that's acceptable for US recipients.
+
+
+## Also in v1.3 (23 November 2026, before publication)
+
+- **4.3:** "A commission cancelled because of a dispute is reinstated if we win the dispute, **or if it closes without the payment being taken back.**" This covers a card issuer's inquiry that closes as `warning_closed` (owner decision). The webhook only reinstates when no other dispute on the same charge is still open or was lost.
