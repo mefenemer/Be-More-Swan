@@ -218,7 +218,7 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         if (format === 'wise_bank' && d.method === 'bank') {
             rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
         } else if (format === 'wise_eur' && d.method === 'eu_bank') {
-            // The amount is the GBP commission; Wise converts it and the partner receives EUR. 11 empty US/UK columns, then IBAN, BIC.
+            // The amount is the GBP commission; Wise converts it and the partner receives EUR. 10 empty US/UK columns, then IBAN, BIC.
             rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'EUR',
                 ...Array(WISE_US_HEADERS.length - 9).fill(''), d.iban, d.bic || '']);
         } else if (format === 'wise_us' && d.method === 'us_bank') {

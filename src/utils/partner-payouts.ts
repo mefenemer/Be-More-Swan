@@ -42,6 +42,13 @@ export function isValidIban(raw: unknown): boolean {
     }
     return rem === 1;
 }
+/**
+ * Countries whose bank accounts hold euros: the euro area plus the microstates that use the euro. The Wise · euro file
+ * always sends EUR, so an IBAN from a non-euro country (GB, CH, PL, SE…) would be refused or converted with fees
+ * (review of #821) — UK partners use "UK bank account" instead.
+ */
+export const EURO_IBAN_COUNTRIES = ['AT','BE','HR','CY','EE','FI','FR','DE','GR','IE','IT','LV','LT','LU','MT','NL','PT','SK','SI','ES','AD','MC','SM','VA'] as const;
+
 /** A BIC / SWIFT code: 4 bank letters, 2 country letters, 2 location characters, optional 3-character branch. */
 export function isValidBic(raw: unknown): boolean { return /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(String(raw || '').replace(/\s+/g, '').toUpperCase()); }
 
@@ -126,6 +133,8 @@ export function validatePayoutDetails(raw: Record<string, unknown>): { ok: true;
         if (!accountName) return { ok: false, error: 'Enter the name on the bank account.' };
         if (!holderType) return { ok: false, error: 'Say whether the account belongs to you personally or to a business.' };
         if (!isValidIban(iban)) return { ok: false, error: 'That IBAN doesn’t look right — check it against your bank statement or app (it starts with 2 letters, e.g. DE89 3704…).' };
+        if (iban.startsWith('GB')) return { ok: false, error: 'That’s a UK IBAN — choose “UK bank account” and enter your sort code and account number instead.' };
+        if (!(EURO_IBAN_COUNTRIES as readonly string[]).includes(iban.slice(0, 2))) return { ok: false, error: 'We can only pay euros into an account in a euro-area country. For another country, choose PayPal or Wise.' };
         if (bicRaw && !isValidBic(bicRaw)) return { ok: false, error: 'That BIC (SWIFT code) doesn’t look right — it is 8 or 11 letters and numbers, e.g. COBADEFFXXX. You can leave it blank.' };
         return { ok: true, value: { method, accountName, holderType, iban, bic: bicRaw || null } };
     }

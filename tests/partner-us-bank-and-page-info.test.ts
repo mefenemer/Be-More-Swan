@@ -144,6 +144,8 @@ check('a euro account is accepted and tidied; bad IBAN / BIC / missing holder ge
     assert.match(err({ iban: 'DE00370400440532013000' }), /IBAN/);
     assert.match(err({ bic: 'NOPE' }), /BIC/);
     assert.match(err({ holderType: '' }), /personally or to a business/);
+    assert.match(err({ iban: 'GB82WEST12345698765432' }), /UK IBAN/, 'UK accounts use the UK bank option');
+    assert.match(err({ iban: 'CH9300762011623852957' }), /euro-area/, 'a valid Swiss IBAN holds francs, not euros');
     assert.ok(PAYOUT_METHODS.includes('eu_bank' as any));
 });
 
