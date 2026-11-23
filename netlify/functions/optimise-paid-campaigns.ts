@@ -121,11 +121,12 @@ export async function runPaidOptimiserSweep(headers?: Record<string, string | un
                 continue;
             }
 
-            const resolved = await adapterForCampaign(db, c.organisationId, c.adNetwork, { isProduction: isProductionDeploy(headers) });
+            // 'control': the optimiser only reads and pauses, so a Meta campaign live on production can
+            // always be stopped, whatever META_ADS_PROD_ORG_IDS says now.
+            const resolved = await adapterForCampaign(db, c.organisationId, c.adNetwork, { isProduction: isProductionDeploy(headers) }, 'control');
             if (!resolved.ok && resolved.noAdapter) {
-                // Production: these adapters are development only. There should be no live paid
-                // campaigns here at all, so this is logged and skipped rather than treated as a halt —
-                // a halt would need a network call we cannot make either.
+                // Production LinkedIn only (development-only, never launched there), so there is no
+                // live campaign to stop: logged and skipped rather than halted without an adapter.
                 console.warn('[optimise-paid] no adapter available; skipping', { campaignId: c.id });
                 continue;
             }

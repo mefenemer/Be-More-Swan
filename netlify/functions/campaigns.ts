@@ -427,11 +427,11 @@ export default withLambda(async (event) => {
         const devAdaptersAllowed = !isProductionDeploy(event.headers as Record<string, string | undefined>);
         const offeredNetworks: string[] = devAdaptersAllowed
             ? ['linkedin', 'meta']
-            : [
+            : [...new Set([
                 ...networkAvailability().filter((n) => n.available).map((n) => n.network),
                 // The named production exception (META_ADS_PROD_ORG_IDS): reviewer and pilot workspaces.
                 ...(metaAdsAllowedInProduction(orgId) ? ['meta'] : []),
-            ];
+            ])];
 
         const metaConnection = featureEnabled ? await getMetaAdsConnection(db, orgId) : null;
         const metaReadiness = featureEnabled ? assessMetaAdsReadiness(metaConnection) : null;

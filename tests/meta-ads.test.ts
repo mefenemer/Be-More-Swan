@@ -294,13 +294,18 @@ check('only workspaces listed in META_ADS_PROD_ORG_IDS may use Meta ads on produ
 
 check('every production gate for Meta uses the exception; LinkedIn has none', () => {
     const ca = code(read('src/utils/ad-networks/campaign-adapter.ts'));
-    assert.ok(ca.includes('if (env.isProduction && !metaAdsAllowedInProduction(organisationId))'));
+    assert.ok(ca.includes("if (env.isProduction && purpose === 'launch' && !metaAdsAllowedInProduction(organisationId))"));
+    // The optimiser asks for 'control', so a live Meta campaign can always be paused.
+    assert.ok(code(read('netlify/functions/optimise-paid-campaigns.ts')).includes("{ isProduction: isProductionDeploy(headers) }, 'control');"), 'optimiser cannot stop a live Meta campaign');
+    // approve_launch keeps the default ('launch').
+    assert.ok(!code(read('netlify/functions/campaigns.ts')).includes("'control')"), 'approve_launch must not bypass the list');
     // LinkedIn's own production refusal stays, unconditional.
     const raw = read('src/utils/ad-networks/campaign-adapter.ts');
     const li = raw.slice(raw.indexOf('// LinkedIn —'));
     assert.ok(/if \(env\.isProduction\) \{\s*\n\s*return \{ ok: false, label, noAdapter: true/.test(li));
     const camp = code(read('netlify/functions/campaigns.ts'));
     assert.ok(camp.includes("...(metaAdsAllowedInProduction(orgId) ? ['meta'] : []),"));
+    assert.ok(camp.includes(': [...new Set(['), 'offeredNetworks can repeat meta');
     assert.ok(camp.includes('{ isProduction: env.isProduction && !metaAdsAllowedInProduction(orgId) })'));
     const media = code(read('netlify/functions/meta-ads-media.ts'));
     assert.ok(media.includes('&& !metaAdsAllowedInProduction(orgId)'));

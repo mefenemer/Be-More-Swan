@@ -23,6 +23,13 @@ export async function adapterForCampaign(
     organisationId: number,
     network: string | null | undefined,
     env: { isProduction: boolean },
+    /**
+     * 'launch' = about to START spend (approve_launch): Meta on production only for workspaces on
+     * META_ADS_PROD_ORG_IDS. 'control' = read / pause an already-staged campaign (the optimiser):
+     * Meta always resolves, so spend can always be STOPPED — even after a workspace is taken off the
+     * list (review on 5ecf0583: unsetting the list must never leave a live campaign unwatchable).
+     */
+    purpose: 'launch' | 'control' = 'launch',
 ): Promise<CampaignAdapterResult> {
     const label = networkLabel(network);
     // ⚠️ `noAdapter` means ONE thing: this environment refuses dev-only adapters (production), so
@@ -31,7 +38,7 @@ export async function adapterForCampaign(
     // (review on e4fb6828).
     if (network === 'meta') {
         // Production refuses Meta too, EXCEPT for workspaces on META_ADS_PROD_ORG_IDS (reviewer, pilots).
-        if (env.isProduction && !metaAdsAllowedInProduction(organisationId)) {
+        if (env.isProduction && purpose === 'launch' && !metaAdsAllowedInProduction(organisationId)) {
             return { ok: false, label, noAdapter: true, reason: 'Advertising is not available here yet.' };
         }
         const readiness = assessMetaAdsReadiness(await getMetaAdsConnection(db, organisationId));
