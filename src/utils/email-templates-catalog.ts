@@ -521,6 +521,22 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Meet your Partner Assistant', 'link.action_url') + signoff,
     },
     {
+        // The Monday summary from their Partner Assistant (partner-weekly-nudge.ts; docs/partner-onboarding-plan.md §3.5).
+        // Not transactional: it carries the unsubscribe link, and the Partner page has a one-click off switch.
+        triggerKey: 'partner_weekly_summary',
+        name: 'Partner — weekly summary',
+        category: 'Account',
+        transactional: false,
+        subject: '{{partner.title | "Your week as a Be More Swan partner"}}',
+        preheader: 'Your numbers, and one thing to try this week.',
+        bodyHtml: greet +
+            p('{{partner.summary}}') +
+            p('<strong>This week:</strong> {{partner.action}}') +
+            button('Ask your Partner Assistant', 'link.action_url') +
+            p('<span style="color:#6b7280;font-size:14px;">Your Partner Assistant sends this on Mondays in your first 8 weeks, and after that only in weeks something happened. You can turn it off on your Partner page.</span>') +
+            signoff,
+    },
+    {
         triggerKey: 'partner_approved_create_account',
         name: 'Partner Application — Approved (create account)',
         category: 'Account',

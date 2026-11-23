@@ -10,8 +10,12 @@
 import { commissionPence } from './partner-rate-periods';
 
 export interface PartnerTermsNow { rateBps: number; costDeductionBps: number; durationMonths: number | null }
-export interface OnboardingMarks { link_copied_at?: string; first_draft_at?: string; dismissed_at?: string; assistant_started_at?: string }
-export interface OnboardingStats { clicks_all?: number; signups?: number; paying?: number }
+export interface OnboardingMarks {
+    link_copied_at?: string; first_draft_at?: string; dismissed_at?: string; assistant_started_at?: string;
+    // The Monday summary (partner-weekly-nudge.ts): turned off, first sent, last week sent.
+    weekly_nudge_off_at?: string; nudge_started_at?: string; last_nudge_week?: string;
+}
+export interface OnboardingStats { clicks_all?: number; signups?: number; paying?: number; in_trial?: number }
 
 export type StepKey = 'terms' | 'payout' | 'invite_page' | 'first_draft' | 'share' | 'first_visit' | 'first_signup' | 'first_paying';
 export interface OnboardingStep { key: StepKey; label: string; done: boolean; automatic: boolean }
@@ -83,7 +87,7 @@ export function startersFor(steps: OnboardingStep[], stats: OnboardingStats | nu
     const out: Starter[] = [];
     if (!done('first_draft') || !Number(s.clicks_all || 0)) out.push({ label: 'Write my first post', prompt: 'Help me write my first post about how I use Be More Swan, in my own voice.' });
     else if (!Number(s.signups || 0)) out.push({ label: 'Why no sign-ups yet?', prompt: 'People are visiting my link but nobody has signed up yet. What should I change?' });
-    else if (!Number(s.paying || 0)) out.push({ label: 'My sign-ups are in trial', prompt: 'I have sign-ups but nobody paying yet — they are probably in the free trial. What can I do now?' });
+    else if (!Number(s.paying || 0) || Number(s.in_trial || 0) > 0) out.push({ label: 'My sign-ups are in trial', prompt: 'I have people in their free trial right now. What can I do to help them get going?' });
     else out.push({ label: 'What should I do next?', prompt: 'Looking at my numbers, what should I do next to get more paying customers?' });
     out.push({ label: 'Who should I tell first?', prompt: 'Who should I tell about Be More Swan first, and how do I pick my first 20 people?' });
     out.push({ label: 'Give me a 30-day plan', prompt: 'Give me a simple 30-day plan to launch my partnership.' });

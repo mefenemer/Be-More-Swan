@@ -181,11 +181,30 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 6)::int AS clicks_7d,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 29)::int AS clicks_30d,
+          -- The Monday summary's visits: the last 7 FULL UK days (yesterday back 7), so each Monday covers
+          -- Monday–Sunday with no day missed or counted twice (review of #816).
+          (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
+             AND day >= (now() AT TIME ZONE 'Europe/London')::date - 7
+             AND day <  (now() AT TIME ZONE 'Europe/London')::date)::int AS clicks_last_week,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id})::int AS clicks_all,
           (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
              WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
                AND ur.created_at >= COALESCE(p.decided_at, p.created_at))::int AS signups,
           (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at IS NOT NULL)::int AS paying,
+          -- Phase 3 (docs/partner-onboarding-plan.md §3.5–3.6): who is in the free trial right now, and the last 7 days.
+          -- A COUNT only — partners never see who (customers are numbered, never named).
+          -- DISTINCT: trials is one row per WORKSPACE, so one invitee with two open trials counts once (review of #816).
+          (SELECT COUNT(DISTINCT ur.referred_user_id) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             JOIN trials t ON t.user_id = ur.referred_user_id
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= COALESCE(p.decided_at, p.created_at)
+               AND t.ended_at IS NULL AND t.converted_at IS NULL AND t.ends_at > now())::int AS in_trial,
+          (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= GREATEST(COALESCE(p.decided_at, p.created_at), now() - interval '7 days'))::int AS signups_7d,
+          (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at >= now() - interval '7 days')::int AS paying_7d,
+          (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id}
+             AND status <> 'voided' AND created_at >= now() - interval '7 days')::int AS earned_7d_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending')::int AS pending_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'payable')::int AS payable_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'paid')::int AS paid_pence,

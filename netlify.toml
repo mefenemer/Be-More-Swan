@@ -1132,6 +1132,12 @@ node_bundler = "esbuild"
 [functions.partner-commission-sweep]
   schedule = "35 2 * * *"
 
+# The Monday summary from each partner's Partner Assistant (docs/partner-onboarding-plan.md §3.5):
+# 08:10 UTC Mondays (09:10 UK in winter), off the :00 batch. Once per partner per ISO week (claimed first).
+# Staging is poked via run-partner-weekly-nudge (staging-crons.yml, weekly).
+[functions.partner-weekly-nudge]
+  schedule = "10 8 * * 1"
+
 # US-SALES-1.1 Part 4: Nightly lead identification — 03:00 UTC every day
 [functions.identify-leads]
   schedule = "0 3 * * *"

@@ -22,7 +22,12 @@ or partner admins), partner-hub `invite_profile_submit` / `invite_profile_withdr
 form only), invite.html "Paid partnership" block, first-week step 3, erasure; partner kit card reading
 `partner-kit/kit.json` (empty until the owner adds files). ⚠️ **NEW SQL `db/z-partner-invite-page.sql` — BOTH DBs
 before deploy** — applied to STAGING 2026-11-23; live-tested there in-process (submit, refusals, send back, resend,
-approve, public page, take down, withdraw; real R2 not tested — no R2 keys in local .env). ⚠️ privacy.html doesn't mention the invite-page photo yet — owner/legal wording. Phase 3 not started.
+approve, public page, take down, withdraw; real R2 not tested — no R2 keys in local .env). ⚠️ privacy.html doesn't mention the invite-page photo yet — owner/legal wording. **Phase 3 built 2026-11-23** on branch `feat/partner-weekly-nudge` (no new SQL): `src/utils/partner-weekly-nudge.ts`
+(who gets one, the words, one action), scheduled `partner-weekly-nudge.ts` Mondays 08:10 UTC (claims the ISO week
+before sending) + `run-partner-weekly-nudge` for staging-crons (weekly), bell + email (`partner_weekly_summary`,
+non-transactional), one-click off on the Partner page (partner-hub `weekly_nudge`), `?view=partner&ask=<key>` types a
+whitelisted question into the assistant, "In free trial" tile + `in_trial` / 7-day counts in partnerHubSummary.
+Live-tested on staging in-process (sent once; same week skipped; off skipped; on sent; emails simulated). ⚠️ Known limit: the run handles partners one by one in one ~30s call — move to a background function or batches once there are a few dozen approved partners.
 
 Builds on the programme in [affiliate-partner-programme-plan.md](./affiliate-partner-programme-plan.md)
 (steps 1–9 live on prod since 2026-10-19/23). Nothing here changes how commission is worked out, held or

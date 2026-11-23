@@ -61,7 +61,7 @@ const tool = (name: string, description: string, properties: Record<string, unkn
 });
 
 export const PARTNER_ASSISTANT_TOOLS: Anthropic.Beta.BetaTool[] = [
-    tool('my_partner_summary', 'Their partner numbers: invite link and partner code, the rate their new customers get, visits, sign-ups, paying customers, pending / ready-to-pay / paid commission (pence), when the next amount clears, the minimum payout, recent commission (customers are numbered, never named), and whether payout details are set.'),
+    tool('my_partner_summary', 'Their partner numbers: invite link and partner code, the rate their new customers get, visits, sign-ups, how many are in the free trial right now (in_trial) and the last 7 days (signups_7d, paying_7d, earned_7d_pence), paying customers, pending / ready-to-pay / paid commission (pence), when the next amount clears, the minimum payout, recent commission (customers are numbered, never named), and whether payout details are set.'),
     tool('bms_facts', 'The facts you may state about Be More Swan when drafting: what it is, the plans and prices, the trial and the invite offer. Use ONLY these.'),
     tool('my_business', "The partner's own business, if they have a Be More Swan workspace: name, industry, website, their products, and which assistants they have (for hand-offs)."),
     tool('partner_playbook', 'How to recommend Be More Swan well: who to tell first, a 30-day launch plan, leading with their own story, answering common worries, demo and workshop scripts, personal messages and follow-up, helping people in the trial, what works on each channel, and the Partner Terms rules. Use it whenever they ask how to promote, what to do next, or for a plan. Advice only — product facts still come only from bms_facts.', {

@@ -14,6 +14,7 @@
 //   POST { action: 'invite_profile_submit', headline, quote, photo: <base64 JPEG> | 'keep' | null }
 //                                             → their own invite page, sent for review (plan §3.3)
 //   POST { action: 'invite_profile_withdraw' } → take back what's waiting for review
+//   POST { action: 'weekly_nudge', on: boolean } → the Monday summary from their assistant on / off (plan §3.5)
 //
 // Reads are the signed-in user's own partner row only. Writes are blocked during admin
 // impersonation (an admin must never change where someone else is paid). Customers are never named
@@ -35,6 +36,7 @@ import {
     checkJpeg, deletePhoto, inviteProfileState, newPhotoKey, orphanedKeys, photoUrl, putPhoto, validateInviteText, type InviteProfile,
 } from '../../src/utils/partner-invite-profile';
 import { sendEmail } from '../../src/utils/email';
+import { ASK_PROMPTS } from '../../src/utils/partner-weekly-nudge';
 import {
     PAYOUT_REQUEST_LIMIT, cancelPayoutChange, confirmPayoutChange, requestPayoutChange, validatePayoutDetails,
 } from '../../src/utils/partner-payouts';
@@ -90,6 +92,8 @@ export default withLambda(async (event) => {
                 .orderBy(asc(userOrganisations.organisationId)).limit(1);   // their OWN business, never one they only work in
             onboarding = {
                 steps, folded: checklistFolded(steps, marks), starters: startersFor(steps, stats),
+                // The Monday summary: on unless they turned it off; the questions its link may open the chat with.
+                weeklyNudge: !marks.weekly_nudge_off_at, askPrompts: ASK_PROMPTS,
                 greeting: welcomeGreeting({
                     firstName: u?.firstName ?? null, businessName: org?.name ?? null, steps,
                     terms: current ? { rateBps: current.rateBps, costDeductionBps: current.costDeductionBps, durationMonths: current.durationMonths } : null,
@@ -167,6 +171,13 @@ export default withLambda(async (event) => {
             await db.update(partners).set({ onboarding: sql`${partners.onboarding} - 'dismissed_at'` }).where(eq(partners.id, p.id));
         }
         return json(200, { ok: true });
+    }
+    if (body.action === 'weekly_nudge') {
+        const on = body.on === true;
+        await db.update(partners).set({ onboarding: on
+            ? sql`${partners.onboarding} - 'weekly_nudge_off_at'`
+            : sql`${partners.onboarding} || jsonb_build_object('weekly_nudge_off_at', ${new Date().toISOString()}::text)` }).where(eq(partners.id, p.id));
+        return json(200, { ok: true, on });
     }
     if (body.action === 'invite_profile_submit' || body.action === 'invite_profile_withdraw') {
         if (p.status !== 'approved') return json(403, { error: 'Your invite page can be changed while your partnership is active.' });

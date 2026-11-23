@@ -219,7 +219,7 @@ async function loadTemplateSource(triggerKey: string): Promise<{ src: TemplateSo
 export async function renderTemplate(
     triggerKey: string,
     vars: MergeContext = {},
-    opts: { overrideSubject?: string; overrideBody?: string; overrideText?: string; transactional?: boolean } = {},
+    opts: { overrideSubject?: string; overrideBody?: string; overrideText?: string; transactional?: boolean; unsubscribeUrl?: string } = {},
 ): Promise<RenderedTemplate | null> {
     const { src, usedFallback } = await loadTemplateSource(triggerKey);
     if (!src && opts.overrideBody === undefined) return null;
@@ -232,7 +232,7 @@ export async function renderTemplate(
         { subject: subjectRaw, bodyHtml: bodyRaw, bodyText: opts.overrideText ?? src?.bodyText ?? null, preheader: src?.preheader },
         vars,
     );
-    const html = renderMasterTemplate(body, { preheader: preheader || undefined, transactional });
+    const html = renderMasterTemplate(body, { preheader: preheader || undefined, transactional, unsubscribeUrl: opts.unsubscribeUrl });
 
     return { subject, html, text, isActive: src?.isActive ?? true, usedFallback };
 }
@@ -242,6 +242,9 @@ export interface SendTemplatedParams {
     to: string;
     /** Nested merge context, e.g. { user: { first_name: 'Jane' }, billing: { amount: '£49' } }. */
     vars?: MergeContext;
+    /** Where the footer's Unsubscribe link goes, when the switch for THIS email lives somewhere other than
+     *  Settings (e.g. the partner's Monday summary → their Partner page). Ignored for transactional mail. */
+    unsubscribeUrl?: string;
 }
 
 /**
@@ -249,8 +252,8 @@ export interface SendTemplatedParams {
  * is missing entirely or has been deactivated by an admin (non-critical mail only — critical
  * triggers are `locked` and can't be deactivated, AC3.2.2).
  */
-export async function sendTemplatedEmail({ triggerKey, to, vars = {} }: SendTemplatedParams) {
-    const rendered = await renderTemplate(triggerKey, vars);
+export async function sendTemplatedEmail({ triggerKey, to, vars = {}, unsubscribeUrl }: SendTemplatedParams) {
+    const rendered = await renderTemplate(triggerKey, vars, unsubscribeUrl ? { unsubscribeUrl } : {});
     if (!rendered) {
         console.error(`[email] No template found for trigger "${triggerKey}" — email NOT sent to ${to}.`);
         return null;

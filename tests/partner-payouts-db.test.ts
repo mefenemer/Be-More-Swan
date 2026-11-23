@@ -36,7 +36,7 @@ function recorder() {
     return { sent, send: (async (p: any) => { sent.push(p); return null; }) as any };
 }
 
-const TABLES = ['users', 'partners', 'vault_secrets', 'email_templates', 'user_referrals', 'partner_referrals', 'partner_commissions', 'partner_link_stats'];
+const TABLES = ['users', 'partners', 'vault_secrets', 'email_templates', 'user_referrals', 'partner_referrals', 'partner_commissions', 'partner_link_stats', 'trials'];   // trials: "In free trial" (2026-11-23)
 
 async function main() {
     console.log('Partner payout details and Partner page numbers (real Postgres + vault)');
@@ -116,6 +116,20 @@ async function main() {
             assert.ok(stats.next_release_at, 'when the next pending amount is ready');
             assert.strictEqual(commissions.length, 3);
             assert.ok(commissions.every((c: any) => c.customer_no === 1), 'customers are numbered, never named');
+
+            // Phase 3 (docs/partner-onboarding-plan.md §3.5–3.6): who is in a free trial NOW — one person with two
+            // open workspace trials counts once; an ended or converted trial doesn't — and the Monday summary's week.
+            await sql.unsafe(`INSERT INTO trials (organisation_id, user_id, started_at, ends_at, ended_at, converted_at) VALUES
+                (901, 202, now() - make_interval(days => 3), now() + make_interval(days => 11), NULL, NULL),
+                (902, 202, now() - make_interval(days => 2), now() + make_interval(days => 12), NULL, NULL),
+                (903, 201, now() - make_interval(days => 20), now() - make_interval(days => 6), NULL, now() - make_interval(days => 6)),
+                (904, 71,  now() - make_interval(days => 1), now() + make_interval(days => 13), NULL, NULL)`);   // 71 isn't theirs
+            await sql.unsafe(`INSERT INTO partner_link_stats (partner_id, day, clicks) VALUES (${p.id}, (now() AT TIME ZONE 'Europe/London')::date - 1, 4)`);
+            const week = (await partnerHubSummary(db, p.id)).stats;
+            assert.deepStrictEqual(
+                { inTrial: week.in_trial, lastWeek: week.clicks_last_week, signups7: week.signups_7d, paying7: week.paying_7d, earned7: week.earned_7d_pence },
+                { inTrial: 1, lastWeek: 4, signups7: 2, paying7: 1, earned7: 1450 },
+                'today’s 5 visits wait for next week; the voided 725 is not earned');
         });
     } finally {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});
