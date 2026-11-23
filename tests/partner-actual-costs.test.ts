@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyCostRule, parseEcbUsdGbp, serviceSlices, sliceRef, usdToPence } from '../src/utils/partner-costs';
-import { commissionForRow } from '../src/utils/partner-ledger';
+import { commissionForRow, sliceLikePattern } from '../src/utils/partner-ledger';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -158,6 +158,42 @@ check('SQL and schema agree', () => {
     for (const c of ['service_period_start', 'cost_pence', 'card_fee_pence', 'deduction_basis', 'carry_out_pence', 'costs_checked_at', 'cost_carry_pence', 'CREATE TABLE IF NOT EXISTS fx_rates']) assert.ok(sql.includes(c), c);
     const schema = read('db/schema.ts');
     for (const c of ['costsCheckedAt: timestamp("costs_checked_at")', 'costCarryPence: integer("cost_carry_pence")', 'export const fxRates = pgTable("fx_rates"']) assert.ok(schema.includes(c), c);
+});
+
+console.log('review of #827');
+
+check('H1: a refund or dispute with only the invoice id still finds all 12 annual slices', () => {
+    assert.strictEqual(sliceLikePattern('in_1AbC'), 'in\\_1AbC#m%', '"_" escaped: it is a LIKE wildcard');
+    const led = read('src/utils/partner-ledger.ts');
+    const matchers = (led.match(/inArray\(partnerCommissions\.stripeInvoiceId, keys\), \.\.\.sliceRefMatchers\(keys\)/g) || []).length;
+    assert.strictEqual(matchers, 2, 'both reversePartnerCommission and reinstateDisputedCommission');
+    // Every slice ref the ledger writes matches the pattern for its payment.
+    const slices = serviceSlices(12000, new Date('2026-12-01Z'), new Date('2027-12-01Z'), new Date('2026-12-01Z'));
+    const like = new RegExp('^' + sliceLikePattern('in_1AbC').replace(/\\_/g, '_').replace('#m%', '#m.*') + '$');
+    for (const sl of slices) assert.ok(like.test(sliceRef('in_1AbC', sl, slices.length)));
+    assert.ok(read('netlify/functions/stripe-webhook.ts').includes('paymentIntentId: payment.paymentIntentId ?? st?.paymentIntentId ?? null'), 'the PaymentIntent found is stored');
+});
+
+check('M2: overlapping months (a mid-month plan change) never count the same days twice', () => {
+    const db = read('src/utils/partner-costs-db.ts');
+    assert.ok(db.includes('const countFrom = await costsCountedUntil(db, refId, row.id, row.servicePeriodStart!);'));
+    assert.ok(db.includes('await customerCostUsd(db, Number(userId), countFrom, row.servicePeriodEnd!) : 0;'));
+    assert.ok(db.includes("AND kind = 'invoice' AND id <> ${rowId} AND costs_checked_at IS NOT NULL"));
+});
+
+check('L3: the true-up never raises a row (a refund or a dispute-won-after-refund stays applied)', () => {
+    assert.ok(read('src/utils/partner-costs-db.ts').includes('const commission = Math.min(row.commissionPence, r.commissionPence);'));
+    // …and that is always safe: the rule never gives more than the provisional figure at the minimum.
+    for (const c of [0, 500, 1380, 3000, 9000]) for (const carry of [0, 600]) {
+        const r = applyCostRule({ paymentPence: 6900, minDeductionBps: 2000, costPence: c, cardFeePence: 0, carryInPence: carry, rateBps: 5000 });
+        assert.ok(r.commissionPence <= 2760);
+    }
+});
+
+check('L4 / L5: only inserted months are announced; the ECB fetch times out', () => {
+    const led = read('src/utils/partner-ledger.ts');
+    assert.ok(led.includes('values.filter((v) => insertedRefs.has(v.stripeInvoiceId))'));
+    assert.ok(read('src/utils/partner-costs.ts').includes('signal: AbortSignal.timeout(8_000)'));
 });
 
 console.log(`\n${passed} passed`);

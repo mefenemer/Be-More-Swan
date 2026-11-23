@@ -257,9 +257,11 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
             availableAt: new Date(Math.max(holdUntil, sl.periodEnd.getTime())),
         };
     });
-    const inserted = await db.insert(partnerCommissions).values(values).onConflictDoNothing().returning({ id: partnerCommissions.id });
+    const inserted = await db.insert(partnerCommissions).values(values).onConflictDoNothing().returning({ ref: partnerCommissions.stripeInvoiceId });
     if (!inserted.length) return { recorded: false, reason: 'duplicate' };
-    const amount = values.reduce((n, v) => n + v.commissionPence, 0);
+    // Only what was actually recorded now (a redelivery that finds some months already there adds — and announces — only the rest).
+    const insertedRefs = new Set(inserted.map((r) => r.ref));
+    const amount = values.filter((v) => insertedRefs.has(v.stripeInvoiceId)).reduce((n, v) => n + v.commissionPence, 0);
     // Tell the partner (in-app + email): "up to" — the month-end costs can lower it. Never throws; a redelivery never gets here.
     if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
@@ -478,6 +480,19 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
 }
 
 /**
+ * An annual payment is 12 rows `<ref>#m1…#m12` (actual costs, partner-costs.ts sliceRef). A refund or dispute that
+ * carries only the invoice id (a first annual payment via Checkout is recorded without a PaymentIntent) must still find
+ * all 12 — review of #827. Stripe ids contain `_`, a LIKE wildcard, so it is escaped (backslash is Postgres's default
+ * LIKE escape); ids are letters, digits and `_` only, so nothing else needs escaping.
+ */
+export function sliceLikePattern(key: string): string {
+    return key.replace(/_/g, '\\_') + '#m%';
+}
+function sliceRefMatchers(keys: string[]) {
+    return keys.filter((k) => /^[A-Za-z0-9_]+$/.test(k)).map((k) => sql`${partnerCommissions.stripeInvoiceId} LIKE ${sliceLikePattern(k)}`);
+}
+
+/**
  * A refund or dispute on a payment: bring its commission to what the remaining payment earns (0 for a dispute).
  * Idempotent: targets come from the TOTAL refunded so far and the state already recorded. Partner Terms 4.3: a
  * refund or dispute more than 180 days after the payment changes nothing.
@@ -487,7 +502,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     if (!keys.length) return { adjusted: 0 };
     const rows = await db.select().from(partnerCommissions).where(and(
         eq(partnerCommissions.kind, 'invoice'),
-        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys)),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
     const at = input.at ?? new Date();
     let adjusted = 0;
@@ -541,7 +556,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
     const at = input.at ?? new Date();
     const rows = await db.select().from(partnerCommissions).where(and(
         eq(partnerCommissions.kind, 'invoice'),
-        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys)),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
     let reinstated = 0;
     const touched = new Map<string, { batchId: number; partnerId: number }>();

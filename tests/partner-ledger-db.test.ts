@@ -219,6 +219,20 @@ async function main() {
             assert.deepStrictEqual(rows.map((r: any) => [r.kind, r.commission_pence]), [['invoice', paid], ['adjustment', -paid], ['bonus', paid]]);
         });
 
+        await check('annual plan: 12 monthly rows; a refund matched only by invoice id (Checkout, no PaymentIntent) reaches all 12 (review of #827)', async () => {
+            await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 206, 'p1')`);
+            const out = await recordPartnerPayment(db, { userId: 206, paymentRef: 'in_y1', paymentIntentId: null, netAmountPence: 82800, currency: 'gbp', paidAt: d('2026-11-10'), annual: true });
+            assert.strictEqual(out.recorded, true);
+            const slices = await sql.unsafe(`SELECT * FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%' ORDER BY service_period_start`);
+            assert.strictEqual(slices.length, 12);
+            assert.strictEqual(slices.reduce((n: number, r: any) => n + r.net_amount_pence, 0), 82800);
+            assert.ok(slices.every((r: any) => r.costs_checked_at === null && r.stripe_charge_id === null));
+            const { adjusted } = await reversePartnerCommission(db, { paymentIntentId: null, invoiceId: 'in_y1', amountRefundedPence: 82800, chargeAmountMinor: 82800, kind: 'refund', at: d('2026-11-20') });
+            assert.strictEqual(adjusted, 12, 'every month adjusted');
+            const after = await sql.unsafe(`SELECT status FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%'`);
+            assert.ok(after.every((r: any) => r.status === 'voided'), 'fully refunded → every month voided');
+        });
+
         await check("a partner's referral qualifies as 'partner', never as a token", async () => {
             await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 205, 'p1')`);
             assert.strictEqual(await qualifyPendingReferral(db, 205), false);

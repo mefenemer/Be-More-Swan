@@ -88,6 +88,8 @@ async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: P
                 ...payment,
                 gbpNetAmountPence: payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null ? st?.gbpNetPence ?? null : payment.gbpNetAmountPence,
                 cardFeePence: payment.cardFeePence ?? st?.feePence ?? null,
+                // Keep the PaymentIntent the lookup found: refunds and disputes match on it (review of #827).
+                paymentIntentId: payment.paymentIntentId ?? st?.paymentIntentId ?? null,
             };
         }
         const out = await recordPartnerPayment(db, payment);
@@ -104,7 +106,7 @@ async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: P
  * part (amount × net ÷ charge amount — proportional, so zero-decimal currencies and VAT both come out right), and the
  * fee Stripe charged (GBP pence). Null when there is no charge or it didn't settle in GBP.
  */
-async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: number; feePence: number } | null> {
+async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: number; feePence: number; paymentIntentId: string } | null> {
     let piId = payment.paymentIntentId;
     if (!piId && payment.paymentRef.startsWith('in_')) {
         const inv = await stripe.invoices.retrieve(payment.paymentRef, { expand: ['payments'] });
@@ -115,7 +117,7 @@ async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: numb
     const charge = pi.latest_charge && typeof pi.latest_charge !== 'string' ? pi.latest_charge : null;
     const bt = charge?.balance_transaction && typeof charge.balance_transaction !== 'string' ? charge.balance_transaction : null;
     if (!charge || !bt || bt.currency !== 'gbp' || !(charge.amount > 0)) return null;
-    return { gbpNetPence: Math.round((bt.amount * payment.netAmountPence) / charge.amount), feePence: Math.max(0, bt.fee ?? 0) };
+    return { gbpNetPence: Math.round((bt.amount * payment.netAmountPence) / charge.amount), feePence: Math.max(0, bt.fee ?? 0), paymentIntentId: piId };
 }
 
 /** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */

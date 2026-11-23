@@ -49,6 +49,15 @@ export async function customerCostUsd(db: Db, userId: number, from: Date, to: Da
     return Number(r?.usd) || 0;
 }
 
+/** Where this customer's costs have already been counted up to: the latest end of their other checked months, if later than `start`. */
+export async function costsCountedUntil(db: Db, referralId: number, rowId: number, start: Date): Promise<Date> {
+    const [r] = (await db.execute(sql`
+        SELECT MAX(service_period_end) AS until FROM partner_commissions
+         WHERE partner_referral_id = ${referralId} AND kind = 'invoice' AND id <> ${rowId} AND costs_checked_at IS NOT NULL`)) as unknown as Array<{ until: Date | string | null }>;
+    const until = r?.until ? new Date(r.until) : null;
+    return until && until.getTime() > start.getTime() ? until : start;
+}
+
 export async function trueUpCommissions(db: Db, now: Date = new Date()): Promise<{ checked: number; waiting: number }> {
     const due = await db.select({
         row: partnerCommissions, carry: partnerReferrals.costCarryPence,
@@ -68,7 +77,11 @@ export async function trueUpCommissions(db: Db, now: Date = new Date()): Promise
         if (blocked.has(refId)) { waiting++; continue; }
         const rate = await usdGbpOn(db, row.servicePeriodEnd!);
         if (!rate || !userId) { blocked.add(refId); waiting++; continue; }
-        const usd = await customerCostUsd(db, Number(userId), row.servicePeriodStart!, row.servicePeriodEnd!);
+        // Never count the same days twice: a plan change mid-month (or monthly → annual) gives rows whose months overlap.
+        // Costs are counted from where this customer's already-checked months end (review of #827).
+        const countFrom = await costsCountedUntil(db, refId, row.id, row.servicePeriodStart!);
+        const usd = countFrom.getTime() < row.servicePeriodEnd!.getTime()
+            ? await customerCostUsd(db, Number(userId), countFrom, row.servicePeriodEnd!) : 0;
         const costPence = usdToPence(usd, rate);
         await db.transaction(async (tx) => {
             // Re-read the carry inside the transaction: it is what earlier months of this customer left.
@@ -78,8 +91,10 @@ export async function trueUpCommissions(db: Db, now: Date = new Date()): Promise
                 paymentPence: row.netAmountPence ?? 0, minDeductionBps: row.costDeductionBps, costPence,
                 cardFeePence: row.cardFeePence ?? 0, carryInPence: carryIn, rateBps: row.rateBps ?? 0,
             });
-            // A refund that already lowered this row while it waited stays applied: take the lower of the two.
-            const commission = row.note?.startsWith('Adjusted:') ? Math.min(row.commissionPence, r.commissionPence) : r.commissionPence;
+            // Never raise a row: it was recorded at the minimum deduction (the most the rule can give), so anything that has
+            // lowered it since — a refund, a dispute won after a partial refund — stays applied (review of #827). The
+            // carried-out shortfall is worked out on the full payment, which can only favour the partner after a refund.
+            const commission = Math.min(row.commissionPence, r.commissionPence);
             const updated = await tx.update(partnerCommissions).set({
                 commissionPence: commission, costPence, deductionPence: r.deductionPence, deductionBasis: r.basis,
                 carryInPence: carryIn, carryOutPence: r.carryOutPence, usdGbpRate: String(rate), costsCheckedAt: now,

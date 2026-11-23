@@ -102,7 +102,8 @@ export function parseEcbUsdGbp(xml: string): { day: string; usdGbp: number } | n
 export const ECB_DAILY_URL = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml';
 
 export async function fetchEcbUsdGbp(fetchFn: typeof fetch = fetch): Promise<{ day: string; usdGbp: number } | null> {
-    const res = await fetchFn(ECB_DAILY_URL, { headers: { accept: 'application/xml' } });
+    // A hanging ECB server must not stop the nightly sweep before it releases anything (review of #827).
+    const res = await fetchFn(ECB_DAILY_URL, { headers: { accept: 'application/xml' }, signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return null;
     return parseEcbUsdGbp(await res.text());
 }
