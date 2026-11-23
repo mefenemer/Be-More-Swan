@@ -12,8 +12,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isValidRoutingNumber, maskPayoutDetails, validatePayoutDetails, US_STATES, PAYOUT_METHODS } from '../src/utils/partner-payouts';
-import { WISE_US_HEADERS, buildExport } from '../src/utils/partner-payout-batches';
+import { isValidBic, isValidIban, isValidRoutingNumber, maskPayoutDetails, validatePayoutDetails, US_STATES, PAYOUT_METHODS } from '../src/utils/partner-payouts';
+import { WISE_BANK_HEADERS, WISE_EUR_HEADERS, WISE_US_HEADERS, buildExport } from '../src/utils/partner-payout-batches';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -106,8 +106,8 @@ check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an 
 
 check('wired: SQL allows us_bank; admin can download the file; privacy says what we hold', () => {
     assert.ok(read('db/z-partner-us-bank.sql').includes("CHECK (payout_method IN ('wise', 'paypal', 'bank', 'us_bank'))"));
-    assert.ok(read('db/schema.ts').includes("IN ('wise','paypal','bank','us_bank')"));
-    assert.ok(read('netlify/functions/admin-partners.ts').includes("['wise_bank', 'wise_email', 'wise_us', 'paypal'].includes(format)"));
+    assert.ok(read('db/schema.ts').includes("IN ('wise','paypal','bank','us_bank'"));
+    assert.ok(read('netlify/functions/admin-partners.ts').includes("['wise_bank', 'wise_email', 'wise_us', 'wise_eur', 'paypal'].includes(format)"));
     assert.ok(read('admin.html').includes("['wise_us', 'Wise · US bank', b.us_bank_partners || 0]"));
     assert.ok(read('privacy.html').includes('US bank account name, routing number, account number and type'));
     const page = read('partner-content.html');
@@ -117,10 +117,75 @@ check('wired: SQL allows us_bank; admin can download the file; privacy says what
 
 check('Partner Terms 1.3: 4.2 names US bank via Wise in USD; everyone re-accepts', () => {
     const terms = read('partner-terms.html');
-    assert.ok(terms.includes('or transfer to a US bank account through Wise'));
-    assert.ok(terms.includes('Wise converts the sterling amount to US dollars'));
+    assert.ok(terms.includes('or transfer through Wise to a US bank account or a euro bank account (by IBAN)'));
+    assert.ok(terms.includes('Wise converts the sterling amount to US dollars or euros'));
     assert.ok(terms.includes('Version 1.3 &middot; Last updated: 23 November 2026'));
     assert.ok(read('src/config/partner-terms.ts').includes("PARTNER_TERMS_VERSION = '1.3'"), 'bumped, so the Partner page asks again');
+});
+
+console.log('Euro bank accounts (IBAN) — owner, 2026-11-23: "Yes, add EUR"');
+
+// Published example IBANs (ECB / bank documentation); not anyone's account.
+const eur = { method: 'eu_bank', accountName: 'Example GmbH', holderType: 'business', iban: 'de89 3704 0044 0532 0130 00', bic: 'cobadeffxxx' };
+
+check('IBAN check digits (mod 97) catch typos; BIC format checked, optional', () => {
+    for (const ok of ['DE89370400440532013000', 'FR1420041010050500013M02606', 'NL91ABNA0417164300', 'IE29AIBK93115212345678']) assert.ok(isValidIban(ok), ok);
+    assert.ok(!isValidIban('DE89370400440532013001'), 'one digit off');
+    assert.ok(!isValidIban('DE8937040044'), 'too short');
+    assert.ok(isValidBic('COBADEFFXXX') && isValidBic('COBADEFF') && !isValidBic('COBA-DE'));
+});
+
+check('a euro account is accepted and tidied; bad IBAN / BIC / missing holder get plain errors', () => {
+    const r = validatePayoutDetails(eur);
+    assert.ok(r.ok && r.value.method === 'eu_bank' && r.value.iban === 'DE89370400440532013000' && r.value.bic === 'COBADEFFXXX');
+    const noBic = validatePayoutDetails({ ...eur, bic: '' });
+    assert.ok(noBic.ok && noBic.value.method === 'eu_bank' && noBic.value.bic === null, 'BIC can be blank');
+    const err = (patch: Record<string, unknown>) => { const x = validatePayoutDetails({ ...eur, ...patch }); return x.ok ? '' : x.error; };
+    assert.match(err({ iban: 'DE00370400440532013000' }), /IBAN/);
+    assert.match(err({ bic: 'NOPE' }), /BIC/);
+    assert.match(err({ holderType: '' }), /personally or to a business/);
+    assert.ok(PAYOUT_METHODS.includes('eu_bank' as any));
+});
+
+check('masked: country and last 4 only', () => {
+    const r = validatePayoutDetails(eur); assert.ok(r.ok);
+    if (r.ok) { const m = maskPayoutDetails(r.value); assert.strictEqual(m, 'Euro bank · Example GmbH · DE** ****3000'); assert.ok(!m.includes('37040044')); }
+});
+
+check('Wise · euro bank file: Wise’s header + IBAN, BIC; GBP → EUR; only IBAN/BIC filled', () => {
+    const r = validatePayoutDetails(eur); assert.ok(r.ok);
+    const f = buildExport('wise_eur', 9, [{ partnerId: 1, name: 'E', email: 'e@example.com', amountPence: 4200, details: r.ok ? r.value : null }]);
+    const [head, row] = f.csv.trim().split('\r\n');
+    // Exactly the header of Wise's template with EUR rows (downloaded 2026-11-23).
+    assert.strictEqual(head, 'name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber,type,abartn,accountType,addressCountryCode,addressFirstLine,addressCity,addressState,addressPostCode,IBAN,BIC');
+    const cells = row.split(','); const at = (h: string) => cells[WISE_EUR_HEADERS.indexOf(h)];
+    assert.strictEqual(cells.length, WISE_EUR_HEADERS.length);
+    assert.deepStrictEqual([at('receiverType'), at('amountCurrency'), at('amount'), at('sourceCurrency'), at('targetCurrency'), at('IBAN'), at('BIC')], ['INSTITUTION', 'source', '42.00', 'GBP', 'EUR', 'DE89370400440532013000', 'COBADEFFXXX']);
+    for (const h of ['sortCode', 'accountNumber', 'type', 'abartn', 'accountType', 'addressCountryCode', 'addressFirstLine']) assert.strictEqual(at(h), '', h);
+});
+
+check('UK bank asks personal or business → PERSON / INSTITUTION; older saved details default to PERSON', () => {
+    const base = { method: 'bank', accountName: 'Ann Ltd', sortCode: '11-22-33', accountNumber: '01234567' };
+    assert.ok(!validatePayoutDetails(base).ok, 'must choose');
+    const biz = validatePayoutDetails({ ...base, holderType: 'business' }); assert.ok(biz.ok);
+    const old = { method: 'bank' as const, accountName: 'Old', sortCode: '112233', accountNumber: '01234567' };   // saved before holderType existed
+    const f = buildExport('wise_bank', 1, [
+        { partnerId: 1, name: 'A', email: 'a@x.com', amountPence: 100, details: biz.ok ? biz.value : null },
+        { partnerId: 2, name: 'O', email: 'o@x.com', amountPence: 100, details: old },
+    ]).csv.trim().split('\r\n');
+    const rt = WISE_BANK_HEADERS.indexOf('receiverType');
+    assert.strictEqual(f[1].split(',')[rt], 'INSTITUTION');
+    assert.strictEqual(f[2].split(',')[rt], 'PERSON');
+});
+
+check('wired: SQL allows eu_bank; admin can download; privacy + form', () => {
+    assert.ok(read('db/z-partner-eu-bank.sql').includes("CHECK (payout_method IN ('wise', 'paypal', 'bank', 'us_bank', 'eu_bank'))"));
+    assert.ok(read('db/schema.ts').includes("IN ('wise','paypal','bank','us_bank','eu_bank')"));
+    assert.ok(read('netlify/functions/admin-partners.ts').includes("'wise_eur'"));
+    assert.ok(read('admin.html').includes("['wise_eur', 'Wise · euro bank', b.eu_bank_partners || 0]"));
+    assert.ok(read('privacy.html').includes('a euro bank account name, IBAN and (optionally) BIC'));
+    const page = read('partner-content.html');
+    assert.ok(page.includes('value="eu_bank"') && page.includes("iban: v('pt-eu-iban')") && page.includes("holderType: v('pt-uk-holder')"));
 });
 
 console.log('Partner page: ⓘ and renewal date');

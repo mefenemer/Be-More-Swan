@@ -217,6 +217,7 @@
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="wise" onchange="window.partnerPage.syncMethod()"> Wise</label>
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="bank" onchange="window.partnerPage.syncMethod()"> UK bank account</label>
           <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="us_bank" onchange="window.partnerPage.syncMethod()"> US bank account</label>
+          <label class="flex items-center gap-2"><input type="radio" name="pt-method" value="eu_bank" onchange="window.partnerPage.syncMethod()"> Euro bank account (IBAN)</label>
         </fieldset>
         <div id="pt-f-email">
           <label for="pt-email" class="text-xs font-bold text-gray-500 uppercase"><span id="pt-email-label">PayPal</span> email</label>
@@ -224,6 +225,7 @@
         </div>
         <div id="pt-f-bank" class="hidden grid grid-cols-1 sm:grid-cols-3 gap-3" style="display:none">
           <div class="sm:col-span-3"><label for="pt-acc-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-acc-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-3"><label for="pt-uk-holder" class="text-xs font-bold text-gray-500 uppercase">Account belongs to</label><select id="pt-uk-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="">Choose…</option><option value="person">Me personally</option><option value="business">A business (e.g. a limited company)</option></select></div>
           <div><label for="pt-sort" class="text-xs font-bold text-gray-500 uppercase">Sort code</label><input id="pt-sort" inputmode="numeric" placeholder="12-34-56" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <div class="sm:col-span-2"><label for="pt-accno" class="text-xs font-bold text-gray-500 uppercase">Account number</label><input id="pt-accno" inputmode="numeric" placeholder="8 digits" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
         </div>
@@ -239,6 +241,14 @@
           <div class="sm:col-span-1"><label for="pt-us-state" class="text-xs font-bold text-gray-500 uppercase">State</label><input id="pt-us-state" maxlength="2" placeholder="NY" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase"></div>
           <div class="sm:col-span-2"><label for="pt-us-zip" class="text-xs font-bold text-gray-500 uppercase">ZIP code</label><input id="pt-us-zip" inputmode="numeric" maxlength="10" placeholder="10001" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
           <p class="sm:col-span-6 text-[11px] text-gray-500">We pay through Wise. Your commission is worked out in pounds and arrives in US dollars at Wise’s exchange rate on the day.</p>
+        </div>
+        <!-- Euro bank account (IBAN), paid via Wise in EUR. BIC optional (Wise's EUR template leaves it blank). -->
+        <div id="pt-f-eu" class="hidden grid grid-cols-1 sm:grid-cols-6 gap-3" style="display:none">
+          <div class="sm:col-span-4"><label for="pt-eu-name" class="text-xs font-bold text-gray-500 uppercase">Name on the account</label><input id="pt-eu-name" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="sm:col-span-2"><label for="pt-eu-holder" class="text-xs font-bold text-gray-500 uppercase">Account belongs to</label><select id="pt-eu-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="">Choose…</option><option value="person">Me personally</option><option value="business">A business</option></select></div>
+          <div class="sm:col-span-4"><label for="pt-eu-iban" class="text-xs font-bold text-gray-500 uppercase">IBAN</label><input id="pt-eu-iban" placeholder="e.g. DE89 3704 0044 0532 0130 00" maxlength="42" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase"></div>
+          <div class="sm:col-span-2"><label for="pt-eu-bic" class="text-xs font-bold text-gray-500 uppercase">BIC / SWIFT <span class="font-normal normal-case">(optional)</span></label><input id="pt-eu-bic" placeholder="e.g. COBADEFFXXX" maxlength="11" autocomplete="off" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase"></div>
+          <p class="sm:col-span-6 text-[11px] text-gray-500">We pay through Wise. Your commission is worked out in pounds and arrives in euros at Wise’s exchange rate on the day.</p>
         </div>
         <div id="pt-payout-error" class="hidden text-sm text-red-600"></div>
         <button id="pt-payout-save" type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save payout details</button>
@@ -562,6 +572,7 @@
     show('pt-f-email', m === 'paypal' || m === 'wise');
     show('pt-f-bank', m === 'bank');
     show('pt-f-us', m === 'us_bank');
+    show('pt-f-eu', m === 'eu_bank');
     document.getElementById('pt-email-label').textContent = m === 'wise' ? 'Wise' : 'PayPal';
   }
 
@@ -578,7 +589,9 @@
     const btn = document.getElementById('pt-payout-save');
     const v = (id) => document.getElementById(id).value;
     const body = m === 'bank'
-      ? { action: 'payout_details', method: m, accountName: v('pt-acc-name'), sortCode: v('pt-sort'), accountNumber: v('pt-accno') }
+      ? { action: 'payout_details', method: m, accountName: v('pt-acc-name'), holderType: v('pt-uk-holder'), sortCode: v('pt-sort'), accountNumber: v('pt-accno') }
+      : m === 'eu_bank'
+      ? { action: 'payout_details', method: m, accountName: v('pt-eu-name'), holderType: v('pt-eu-holder'), iban: v('pt-eu-iban'), bic: v('pt-eu-bic') }
       : m === 'us_bank'
       ? { action: 'payout_details', method: m, accountName: v('pt-us-name'), holderType: v('pt-us-holder'), routingNumber: v('pt-us-routing'), accountNumber: v('pt-us-accno'),
           accountType: v('pt-us-type'), addressLine: v('pt-us-addr'), city: v('pt-us-city'), state: v('pt-us-state'), zip: v('pt-us-zip') }
@@ -586,7 +599,7 @@
     err.classList.add('hidden'); btn.disabled = true;
     try {
       const d = await post(body);
-      ['pt-email', 'pt-acc-name', 'pt-sort', 'pt-accno', 'pt-us-name', 'pt-us-routing', 'pt-us-accno', 'pt-us-addr', 'pt-us-city', 'pt-us-state', 'pt-us-zip'].forEach((id) => { document.getElementById(id).value = ''; });
+      ['pt-email', 'pt-acc-name', 'pt-sort', 'pt-accno', 'pt-us-name', 'pt-us-routing', 'pt-us-accno', 'pt-us-addr', 'pt-us-city', 'pt-us-state', 'pt-us-zip', 'pt-eu-name', 'pt-eu-iban', 'pt-eu-bic'].forEach((id) => { document.getElementById(id).value = ''; });
       window.showToast?.(`Check ${d.sentTo || 'your email'} — confirm the change there and it takes effect.`);
       await load();
     } catch (e) {

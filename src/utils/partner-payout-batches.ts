@@ -156,7 +156,11 @@ export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'r
     'sortCode', 'accountNumber', 'type', 'abartn', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
 /** Wise's `type` for a US routing-number (ABA) account — from its template. */
 export const WISE_US_ACCOUNT_TYPE = 'Aba';
-export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'paypal';
+// ✅ Euro bank accounts (IBAN), paid in EUR from a GBP balance — from Wise's template with GBP → EUR rows, business and
+// personal, inside and outside the EU (downloaded by the owner 2026-11-23). Those rows fill only IBAN and BIC (BIC may be
+// blank); the address columns stay empty. The template's header is the full combined one, so it is used here as is.
+export const WISE_EUR_HEADERS = [...WISE_US_HEADERS, 'IBAN', 'BIC'];
+export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'wise_eur' | 'paypal';
 
 const csvCell = (v: string) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 /** A spreadsheet treats a leading = + - @ as a formula; neutralise it (CSV injection). */
@@ -193,7 +197,11 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         const d = l.details;
         if (!d || l.amountPence <= 0) continue;
         if (format === 'wise_bank' && d.method === 'bank') {
-            rows.push([d.accountName, l.email, ref, '', WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+        } else if (format === 'wise_eur' && d.method === 'eu_bank') {
+            // The amount is the GBP commission; Wise converts it and the partner receives EUR. 11 empty US/UK columns, then IBAN, BIC.
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'EUR',
+                ...Array(WISE_US_HEADERS.length - 9).fill(''), d.iban, d.bic || '']);
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
             rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'USD',
@@ -206,7 +214,7 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         } else continue;
         total += l.amountPence;
     }
-    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : [];
+    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : format === 'wise_eur' ? [WISE_EUR_HEADERS] : [];
     const csv = [...header, ...rows].map((r) => r.map((v) => csvCell(safe(String(v)))).join(',')).join('\r\n') + '\r\n';
     return { csv, included: rows.length, skipped: lines.length - rows.length, totalPence: total };
 }
@@ -224,6 +232,7 @@ export async function listBatches(db: Db): Promise<Row[]> {
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'bank')::int AS bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'wise')::int AS wise_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'us_bank')::int AS us_bank_partners,
+               COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'eu_bank')::int AS eu_bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id
