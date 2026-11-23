@@ -210,4 +210,12 @@ check('out of time after a draft → the draft is presented, not "needed more st
     assert.ok(src.includes("if (!cards.length) reply = 'That took too long"));
 });
 
+check('speed: context loaded up front, card-only rounds end the turn, replies short (staging timed out, 2026-11-23)', () => {
+    const src = read('netlify/functions/partner-assistant.ts');
+    assert.ok(src.includes("safe(runTool('my_partner_summary', {})), safe(runTool('bms_facts', {})), safe(runTool('my_business', {})), safe(runTool('my_results', {}))"), 'loaded in parallel');
+    assert.ok(src.includes("<context>${sanitizeForModel(context).replace(/</g, '\\\\u003c')}</context>"), 'a stray </context> in their data cannot close the block');
+    assert.ok(src.includes("if (cardOnly && cards.length - cardsBefore === toolUses.length) { reply = text; break; }"), 'no second round after a card');
+    assert.ok(src.includes('at most about 100 words'));
+});
+
 console.log(`\n${passed} passed`);
