@@ -65,7 +65,7 @@ export function renderMyAccount(a: MyAccountInput, aiAssistantId: number, roleKe
     const mine = PREF_CATEGORIES.filter((c) => c.scope === 'assistant' && assistantCategoryAppliesToRole(c.key, roleKey)).map((c) => row(c, true));
 
     return `THE USER'S OWN ACCOUNT SETTINGS (My Account) — what they have set right now. You can READ these but never change them: when they ask to change one, tell them exactly where it is (below) and that it saves as soon as they switch it. Never say you have changed one.
-Profile (My Account ▸ Profile Information): name ${name}; email ${a.email || '(not set)'}; timezone ${a.timezone || 'Europe/London'}; hourly rate ${rate} (only used to work out time saved in £). "Show it as one post" (Profile Information ▸ Posts on several platforms): ${onOff(p.combineCrossPosts !== false)}.
+Profile (My Account ▸ Profile Information): name ${name}; email ${a.email || '(not set)'}; timezone ${a.timezone || 'Europe/London'}; hourly rate ${rate} (only used to work out time saved in £). "Show it as one post" (Profile Information ▸ Posts on several platforms): ${onOff(p.combineCrossPosts !== false)} (only how a post on several platforms is listed in notifications and activity; it never changes what an edit saves).
 Sounds (My Account ▸ Sounds): ${SOUND_LABELS.map(([k, l]) => `"${l}" ${onOff(p[k] !== false)}`).join('; ')}.
 Notifications about their account (My Account ▸ Notification Preferences):
 ${account.join('\n')}

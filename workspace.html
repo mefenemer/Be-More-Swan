@@ -20058,7 +20058,10 @@ async function rqReviewToggleDisclosure(included) {
     }
 }
 
-async function rqReviewSaveAmend() {
+// opts.onlyThis: save to the open platform only, whatever "Apply to all platforms" says. A chat card's caption
+// is written for ONE platform (its forPostId / platforms), so it must never fan out to the group (#83).
+async function rqReviewSaveAmend(opts) {
+    const onlyThis = !!(opts && opts.onlyThis === true);
     const id = _rqReviewPostId;
     if (!id) return;
     const caption = document.getElementById('post-review-caption').value;
@@ -20076,7 +20079,7 @@ async function rqReviewSaveAmend() {
     }
     const ctaText = (document.getElementById('post-review-cta')?.value || '').replace(/\s+/g, ' ').trim();
     // "Apply to all platforms" (shared base) vs this platform only (per-platform override).
-    const applyAll = _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;
+    const applyAll = !onlyThis && _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;
     const targetIds = applyAll ? _rqReviewGroupIds.slice() : [id];
     try {
         for (const tid of targetIds) {
@@ -21911,9 +21914,12 @@ async function _pceAskSwanCaption() {
  * Write a caption the assistant offered in chat into the post being edited.
  *
  * Goes through the inspector's own fields and rqReviewSaveAmend rather than PATCHing directly, so
- * this is the same single write path as typing the caption yourself — including "apply to all
- * platforms" on a cross-post, the cache update and the re-render. Throws on failure so the card can
- * say so and offer a retry.
+ * this is the same single write path as typing the caption yourself — the cache update and the
+ * re-render. Throws on failure so the card can say so and offer a retry.
+ *
+ * Saved to THIS platform only, never "apply to all platforms": the card was written for one platform
+ * (its forPostId and label say so), and that box is ticked by default. Fix pipeline #83: a LinkedIn-only
+ * ending landed on Facebook and Instagram too.
  */
 async function _pceApplyChatCaption({ caption, hashtags, forPostId }) {
     // Written for one platform of a cross-post, and they have since moved to another tab: go back to
@@ -21928,7 +21934,7 @@ async function _pceApplyChatCaption({ caption, hashtags, forPostId }) {
     // Only overwrite hashtags when the assistant actually supplied some — a caption-only suggestion
     // must not silently wipe the ones already on the post.
     if (tags && hashtags) tags.value = hashtags;
-    await rqReviewSaveAmend();
+    await rqReviewSaveAmend({ onlyThis: true });
     // rqReviewSaveAmend reports its own failures in the panel rather than throwing, so confirm the
     // write landed by asking the cache — the card must never claim success for a save that didn't.
     //
