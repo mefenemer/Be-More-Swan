@@ -16,7 +16,7 @@ import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/relea
 import { restoreAfterNewPlan } from '../../src/utils/restore-after-new-plan';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
-import { invoiceNetPence, isSubscriptionPaymentInvoice, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
+import { hasPartnerReferral, invoiceNetPence, isSubscriptionPaymentInvoice, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
 import { takesASeat } from '../../src/utils/assistant-capacity';
@@ -80,7 +80,8 @@ async function _isUntrackedSubscription(db: ReturnType<typeof getDb>, userId: nu
 async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: PartnerPayment): Promise<void> {
     try {
         // Partner Terms 3.2: a payment in another currency counts at the sterling amount Stripe settled it into.
-        if (payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null) {
+        // Only look up a sterling amount for a customer a partner actually introduced (review of #823).
+        if (payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null && await hasPartnerReferral(db, payment.userId)) {
             payment = { ...payment, gbpNetAmountPence: await _gbpNetPence(payment).catch((e) => { console.error('[stripe-webhook] sterling amount lookup failed:', e?.message); return null; }) };
         }
         const out = await recordPartnerPayment(db, payment);

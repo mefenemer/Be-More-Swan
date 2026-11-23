@@ -6819,6 +6819,15 @@ export const partnerCommissions = pgTable("partner_commissions", {
   check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
 ]);
 
+// Terms 4.5(b)/(c) (db/z-partner-terms-cross-border.sql): each partner's VAT in a payout run, frozen at creation so
+// statements and exports never follow a later VAT-number edit.
+export const partnerPayoutVat = pgTable("partner_payout_vat", {
+  batchId: integer("batch_id").notNull().references(() => partnerPayoutBatches.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  vatNumber: text("vat_number"),
+  vatPence: integer("vat_pence").notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.batchId, t.partnerId] })]);
+
 // Partner Terms 1.2 (cross-border review 2026-11-23; db/z-partner-terms-cross-border.sql): an append-only record of
 // every acceptance — partners.terms_version says what is current, this keeps the history and the channel.
 export const partnerTermsAcceptances = pgTable("partner_terms_acceptances", {

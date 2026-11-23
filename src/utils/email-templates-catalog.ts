@@ -627,6 +627,19 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {
+        triggerKey: 'partner_ended_change_declined',
+        name: 'Partner — Ended: New Terms Not Accepted (8.1)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your Be More Swan partnership has ended',
+        preheader: 'Your existing customers keep earning you commission to the end of their period.',
+        bodyHtml: greet +
+            p('We asked you to accept version {{partner.version}} of the Partner Terms, and it hasn’t been accepted within {{partner.days}} days of taking effect. Under section 8.1 you are treated as leaving the programme.') +
+            p('Customers on the standard 12-month commission period keep earning you commission until their period ends (any special period longer than 12 months earns for 3 more months), and everything you have already earned is paid, even under the minimum. Your invite link and partner code no longer earn.') +
+            p('If this is a mistake, reply to this email and you can apply again.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
         triggerKey: 'partner_inactivity_withdrawn',
         name: 'Partner — Inactivity Notice Withdrawn',
         category: 'Account',

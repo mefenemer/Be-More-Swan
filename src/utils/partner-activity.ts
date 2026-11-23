@@ -301,14 +301,41 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
  * keeps the 7.4(a) run-off. Partners who never accepted any version (terms_version NULL) are untouched.
  */
 export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promise<{ ended: number }> {
+    // No effective date for the current version = someone bumped the version without dating it: do nothing.
+    if (!PARTNER_TERMS_EFFECTIVE) {
+        console.error(`[partner-activity] Partner Terms v${PARTNER_TERMS_VERSION} has no date in PARTNER_TERMS_EFFECTIVE_DATES — declined-change sweep skipped`);
+        return { ended: 0 };
+    }
     const deadline = new Date(new Date(`${PARTNER_TERMS_EFFECTIVE}T00:00:00Z`).getTime() + DECLINED_CHANGE_DAYS * DAY_MS);
     if (now.getTime() < deadline.getTime()) return { ended: 0 };
+    // Approved partners only: a suspended partner is under investigation, and ending them here would give them a
+    // run-off a breach ending (7.4(b)) would not — an admin decides their case.
     const rows = (await db.execute(sql`
         UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
                decided_at = ${now.toISOString()}::timestamp,
                decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
                inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
-         WHERE status IN ('approved', 'suspended') AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
-         RETURNING id`)) as Row[];
+         WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
+         RETURNING id, terms_version`)) as Row[];
+    for (const r of rows) {
+        // A system decision: an audit row with no admin, and the partner is told (Terms 12.2 — notice by email).
+        await db.execute(sql`
+            INSERT INTO admin_audit_log (admin_id, action, target_type, target_id, previous_state, new_state)
+            VALUES (NULL, 'partner_decision', 'partner', ${String(r.id)},
+                    ${JSON.stringify({ status: 'approved', termsVersion: r.terms_version })}::jsonb,
+                    ${JSON.stringify({ status: 'ended', endReason: 'change_declined', by: 'nightly sweep', version: PARTNER_TERMS_VERSION })}::jsonb)`)
+            .catch((err: unknown) => console.error('[partner-activity] audit row for change_declined failed', err));
+        await tellEnded(db, r.id);
+    }
     return { ended: rows.length };
+}
+
+async function tellEnded(db: Db, partnerId: number): Promise<void> {
+    const who = await partnerContact(db, partnerId).catch(() => ({ userId: null, email: null, firstName: null }));
+    const vars = { partner: { version: PARTNER_TERMS_VERSION, days: String(DECLINED_CHANGE_DAYS) } };
+    if (who.userId) await createNotification(db, 'partner_ended_change_declined', { userId: who.userId, context: vars, metadata: { action: 'partner_page' } }).catch(() => false);
+    if (who.email) {
+        await sendTemplatedEmail({ triggerKey: 'partner_ended_change_declined', to: who.email, vars: { ...vars, user: { first_name: who.firstName || '' }, link: { action_url: partnerPageUrl(), terms_url: termsUrl() } } })
+            .catch((err: unknown) => console.error('[partner-activity] change_declined email NOT sent', err));
+    }
 }

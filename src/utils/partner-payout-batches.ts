@@ -127,6 +127,15 @@ export async function createBatch(db: Db, adminId: number): Promise<{ ok: true; 
         const [{ total, count }] = (await tx.execute(sql`
             SELECT COALESCE(SUM(commission_pence), 0)::int AS total, COUNT(DISTINCT partner_id)::int AS count
               FROM partner_commissions WHERE payout_batch_id = ${batch.id}`)) as unknown as Array<{ total: number; count: number }>;
+        // Terms 4.5: freeze each partner's VAT position for this run (statements and exports read it back).
+        for (const d of due) {
+            const [p] = (await tx.execute(sql`SELECT vat_registered, vat_number FROM partners WHERE id = ${d.partnerId}`)) as unknown as Row[];
+            const ukVat = isUkVatRegistered(p ?? {});
+            await tx.execute(sql`
+                INSERT INTO partner_payout_vat (batch_id, partner_id, vat_number, vat_pence)
+                VALUES (${batch.id}, ${d.partnerId}, ${ukVat ? p.vat_number : null}, ${ukVat ? d.vatPence : 0})
+                ON CONFLICT (batch_id, partner_id) DO NOTHING`);
+        }
         await tx.update(partnerPayoutBatches).set({ totalPence: total, partnerCount: count }).where(eq(partnerPayoutBatches.id, batch.id));
         return { ok: true as const, batchId: batch.id, totalPence: total, partnerCount: count };
     });
@@ -202,17 +211,18 @@ export interface BatchLine { partnerId: number; name: string; email: string; amo
 /** Each partner in the batch, with their decrypted payout details. Server-side only. */
 export async function batchLines(db: Db, batchId: number): Promise<BatchLine[]> {
     const rows = (await db.execute(sql`
-        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, p.vat_registered, p.vat_number,
+        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, COALESCE(MAX(v.vat_pence), 0)::int AS vat_pence,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
           FROM partner_commissions c JOIN partners p ON p.id = c.partner_id LEFT JOIN users u ON u.id = p.user_id
+          LEFT JOIN partner_payout_vat v ON v.batch_id = c.payout_batch_id AND v.partner_id = c.partner_id
          WHERE c.payout_batch_id = ${batchId}
-         GROUP BY c.partner_id, u.email, u.first_name, u.last_name, p.applicant_email, p.applicant_name, p.vat_registered, p.vat_number
+         GROUP BY c.partner_id, u.email, u.first_name, u.last_name, p.applicant_email, p.applicant_name
          ORDER BY c.partner_id`)) as unknown as Row[];
     const out: BatchLine[] = [];
     for (const r of rows) {
         const amount = Number(r.amount);
-        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: amount, vatPence: vatPenceFor(amount, isUkVatRegistered(r)), details: await getPayoutDetails(db, r.partner_id) });
+        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: amount, vatPence: Number(r.vat_pence) || 0, details: await getPayoutDetails(db, r.partner_id) }); // frozen at createBatch
     }
     return out;
 }
@@ -266,7 +276,10 @@ export async function listBatches(db: Db): Promise<Row[]> {
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'eu_bank')::int AS eu_bank_partners,
                -- What the Wise files in this run pay out, in GBP: the owner pays from a GBP balance in Wise (decision
                -- 2026-11-23) and tops it up from EUR first, so the Payouts screen says how much.
-               COALESCE(SUM(c.commission_pence) FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence,
+               -- Plus the UK VAT frozen for those partners (Terms 4.5(b)): the files send commission + VAT.
+               (COALESCE(SUM(c.commission_pence) FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)
+                + COALESCE((SELECT SUM(v.vat_pence) FROM partner_payout_vat v JOIN partners pv ON pv.id = v.partner_id
+                             WHERE v.batch_id = b.id AND pv.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0))::int AS wise_total_pence,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id

@@ -113,6 +113,11 @@ async function findPartnerReferral(db: Db, referredUserId: number) {
     return row ?? null;
 }
 
+/** Cheap pre-check (review of #823): is this customer a partner referral at all? Saves Stripe lookups. */
+export async function hasPartnerReferral(db: Db, referredUserId: number): Promise<boolean> {
+    return !!(await findPartnerReferral(db, referredUserId));
+}
+
 /**
  * True when this referrer is on the partner track — approved, suspended or ENDED. Their referrals
  * never earn a token; referral-offer.ts marks them 'partner' instead of 'qualified'. Ended is here

@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS partner_terms_acceptances (
 );
 CREATE INDEX IF NOT EXISTS partner_terms_acceptances_partner_idx ON partner_terms_acceptances (partner_id, accepted_at);
 
+-- Terms 4.5(b)/(c): the VAT position of each partner in each payout run, frozen when the run is created, so a
+-- self-billed statement or export never changes if the partner later edits their VAT number (review of #823).
+CREATE TABLE IF NOT EXISTS partner_payout_vat (
+    batch_id    INTEGER NOT NULL REFERENCES partner_payout_batches(id) ON DELETE CASCADE,
+    partner_id  INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+    vat_number  TEXT,
+    vat_pence   INTEGER NOT NULL DEFAULT 0 CHECK (vat_pence >= 0),
+    PRIMARY KEY (batch_id, partner_id)
+);
+
 -- Existing acceptances (staging test partners) become the first history row, once.
 INSERT INTO partner_terms_acceptances (partner_id, user_id, version, channel, accepted_at)
 SELECT p.id, p.user_id, p.terms_version, 'partner_page', p.terms_accepted_at

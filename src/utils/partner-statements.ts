@@ -66,11 +66,14 @@ export interface StatementData {
 /** A partner's statement for one of THEIR paid batches, or null (not theirs / not paid). */
 export async function loadStatement(db: Db, partnerId: number, batchId: number): Promise<StatementData | null> {
     const head = (await db.execute(sql`
-        SELECT b.paid_at::text AS paid_at, p.vat_registered, p.vat_number,
+        SELECT b.paid_at::text AS paid_at, v.vat_number AS frozen_vat_number, COALESCE(v.vat_pence, 0)::int AS frozen_vat_pence,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
-          FROM partner_payout_batches b, partners p LEFT JOIN users u ON u.id = p.user_id
-         WHERE b.id = ${batchId} AND b.status = 'paid' AND p.id = ${partnerId}`)) as Row[];
+          FROM partner_payout_batches b
+          JOIN partners p ON p.id = ${partnerId}
+          LEFT JOIN users u ON u.id = p.user_id
+          LEFT JOIN partner_payout_vat v ON v.batch_id = b.id AND v.partner_id = p.id
+         WHERE b.id = ${batchId} AND b.status = 'paid'`)) as Row[];
     if (!head.length) return null;
     const rows = (await db.execute(sql`
         SELECT c.kind, c.created_at::text AS created_at, c.net_amount_pence, c.commission_pence, c.note,
@@ -80,7 +83,8 @@ export async function loadStatement(db: Db, partnerId: number, batchId: number):
          ORDER BY c.created_at`)) as Row[];
     if (!rows.length) return null;
     const h = head[0];
-    const ukVat = isUkVatRegistered(h);
+    // Review of #823: the VAT position frozen when the run was created, never the partner's current VAT number.
+    const ukVat = !!h.frozen_vat_number;
     const lines = rows.map((r) => ({
         date: String(r.created_at).slice(0, 10),
         label: r.kind === 'invoice' ? `Commission — Customer ${r.customer_no}` : r.kind === 'bonus' ? `Bonus${r.note ? ` — ${r.note}` : ''}` : `Adjustment${r.note ? ` — ${r.note}` : ''}`,
@@ -88,10 +92,10 @@ export async function loadStatement(db: Db, partnerId: number, batchId: number):
         commissionPence: Number(r.commission_pence),
     }));
     const subtotal = lines.reduce((s, l) => s + l.commissionPence, 0);
-    const vat = vatPenceFor(subtotal, ukVat);
+    const vat = Number(h.frozen_vat_pence) || 0;
     return {
         number: statementNumber(batchId, partnerId), date: String(h.paid_at).slice(0, 10),
-        partnerName: h.name || h.email || `Partner ${partnerId}`, partnerEmail: h.email ?? null, vatNumber: h.vat_number ?? null, ukVat,
+        partnerName: h.name || h.email || `Partner ${partnerId}`, partnerEmail: h.email ?? null, vatNumber: h.frozen_vat_number ?? null, ukVat,
         lines, subtotalPence: subtotal, vatPence: vat, totalPence: subtotal + vat,
     };
 }

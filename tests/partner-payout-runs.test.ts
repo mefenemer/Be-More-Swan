@@ -141,7 +141,9 @@ check('Payouts screen: Wise is paid from the GBP balance, and each open run says
     assert.ok(adm.includes('together their Wise files need'), 'several open runs → the combined amount');
     assert.ok(adm.includes('partners are paid from your Wise <strong>GBP balance</strong>'));
     const src = fs.readFileSync(path.join(root, 'src/utils/partner-payout-batches.ts'), 'utf8');
-    assert.ok(src.includes("FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence"), 'PayPal is not in the Wise total');
+    assert.ok(src.includes("FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)"), 'PayPal is not in the Wise total');
+    // Terms 4.5(b): the frozen UK VAT for Wise-paid partners is added, because the files send commission + VAT.
+    assert.ok(src.includes("WHERE v.batch_id = b.id AND pv.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0))::int AS wise_total_pence"));
 });
 
 console.log(`\n${passed} passed`);

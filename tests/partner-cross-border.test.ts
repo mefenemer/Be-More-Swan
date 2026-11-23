@@ -39,12 +39,17 @@ check('payouts wait only for a partner who never accepted any version (8.1: earn
     assert.ok(!b.includes('hasAcceptedCurrentTerms'));
 });
 check('a declined change ends the partnership 60 days after the version took effect, as change_declined', () => {
-    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(PARTNER_TERMS_EFFECTIVE));
+    assert.ok(PARTNER_TERMS_EFFECTIVE && /^\d{4}-\d{2}-\d{2}$/.test(PARTNER_TERMS_EFFECTIVE), 'the CURRENT version must have an effective date in PARTNER_TERMS_EFFECTIVE_DATES');
     assert.strictEqual(DECLINED_CHANGE_DAYS, 60);
     const a = read('src/utils/partner-activity.ts');
     const fn = a.slice(a.indexOf('export async function endDeclinedChanges'));
     assert.ok(fn.includes("end_reason = 'change_declined'"));
-    assert.ok(fn.includes('terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}'), 'never-accepted partners are untouched');
+    assert.ok(fn.includes("WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}"), 'approved only; never-accepted partners are untouched');
+    // Review of #823: an undated version skips the sweep; each ending is audited and the partner told.
+    assert.ok(fn.includes('if (!PARTNER_TERMS_EFFECTIVE) {') && fn.indexOf('if (!PARTNER_TERMS_EFFECTIVE)') < fn.indexOf('UPDATE partners'));
+    assert.ok(fn.includes("INSERT INTO admin_audit_log") && fn.includes('await tellEnded(db, r.id);'));
+    assert.ok(read('src/utils/email-templates-catalog.ts').includes("triggerKey: 'partner_ended_change_declined'"));
+    assert.ok(read('src/utils/notification-templates-catalog.ts').includes("templateKey: 'partner_ended_change_declined'"));
     assert.ok(read('netlify/functions/partner-commission-sweep.ts').includes('await endDeclinedChanges(db, now)'));
     assert.ok(read('db/z-partner-terms-cross-border.sql').includes("'inactivity', 'closure', 'left', 'change_declined', 'breach', 'other'"));
 });
@@ -139,11 +144,25 @@ check('the Partner page lists statements and takes a VAT number; the hub only se
     assert.ok(page.includes('id="pt-statements"') && page.includes('?view=statement&batchId=') && page.includes("action: 'vat_number'"));
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.includes("event.queryStringParameters?.view === 'statement'") && hub.includes('await loadStatement(db, p.id, batchId)'));
-    assert.ok(read('src/utils/partner-statements.ts').includes("WHERE b.id = ${batchId} AND b.status = 'paid' AND p.id = ${partnerId}"));
+    assert.ok(read('src/utils/partner-statements.ts').includes("JOIN partners p ON p.id = ${partnerId}") && read('src/utils/partner-statements.ts').includes("WHERE b.id = ${batchId} AND b.status = 'paid'") && read('src/utils/partner-statements.ts').includes('if (!rows.length) return null;'));
 });
 check('admin is reminded to check sanctions lists before approving and paying', () => {
     const a = read('admin.html');
     assert.ok((a.match(/Check the partner against the UK Sanctions List and OFAC SDN before approving\/paying/g) || []).length >= 3);
+});
+
+check('review of #823: VAT is frozen per payout run — statements, exports and the Wise top-up read the frozen value', () => {
+    const b = read('src/utils/partner-payout-batches.ts');
+    assert.ok(b.includes('INSERT INTO partner_payout_vat (batch_id, partner_id, vat_number, vat_pence)'));
+    assert.ok(b.includes('vatPence: Number(r.vat_pence) || 0'), 'batch lines use the frozen VAT');
+    assert.ok(b.includes('SELECT SUM(v.vat_pence) FROM partner_payout_vat v'), 'the Wise top-up total includes VAT');
+    const st = read('src/utils/partner-statements.ts');
+    assert.ok(st.includes('const ukVat = !!h.frozen_vat_number;') && st.includes('const vat = Number(h.frozen_vat_pence) || 0;'));
+    assert.ok(read('db/z-partner-terms-cross-border.sql').includes('CREATE TABLE IF NOT EXISTS partner_payout_vat ('));
+});
+check('review of #823: non-GBP Stripe lookups only for partner referrals', () => {
+    const w = read('netlify/functions/stripe-webhook.ts');
+    assert.ok(w.includes("payment.gbpNetAmountPence == null && await hasPartnerReferral(db, payment.userId))"));
 });
 
 console.log(`\n${passed} passed`);
