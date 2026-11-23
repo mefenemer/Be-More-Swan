@@ -22,6 +22,7 @@ import { createNotification } from './notify';
 import { resolvePeriodAt } from './partner-rate-periods';
 import { rateLine } from './partner-onboarding';
 import { PARTNER_TERMS_VERSION } from '../config/partner-terms';
+import { recordTermsAcceptance } from './partner-terms-acceptance';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -50,8 +51,54 @@ export function newInviteToken(now = new Date()): { token: string; hash: string;
     return { token, hash: hashInviteToken(token), expiresAt: new Date(now.getTime() + INVITE_TTL_DAYS * 86_400_000) };
 }
 
+/**
+ * Terms 2.1 / 4.5 / 4.6 (cross-border review 2026-11-23): where the partner is based and whether they join as
+ * an individual (sole trader / freelancer) or a business — needed for VAT, sanctions checks and which
+ * country's rules apply. The form's <select> (partners.html) must list exactly these codes.
+ */
+export const PARTNER_COUNTRIES: Record<string, string> = {
+    GB: 'United Kingdom',
+    US: 'United States',
+    CA: 'Canada',
+    AU: 'Australia',
+    NZ: 'New Zealand',
+    IE: 'Ireland',
+    AT: 'Austria',
+    BE: 'Belgium',
+    BG: 'Bulgaria',
+    HR: 'Croatia',
+    CY: 'Cyprus',
+    CZ: 'Czechia',
+    DK: 'Denmark',
+    EE: 'Estonia',
+    FI: 'Finland',
+    FR: 'France',
+    DE: 'Germany',
+    GR: 'Greece',
+    HU: 'Hungary',
+    IT: 'Italy',
+    LV: 'Latvia',
+    LT: 'Lithuania',
+    LU: 'Luxembourg',
+    MT: 'Malta',
+    NL: 'Netherlands',
+    PL: 'Poland',
+    PT: 'Portugal',
+    RO: 'Romania',
+    SK: 'Slovakia',
+    SI: 'Slovenia',
+    ES: 'Spain',
+    SE: 'Sweden',
+    CH: 'Switzerland',
+    NO: 'Norway',
+    IS: 'Iceland',
+    OTHER: 'Somewhere else',
+};
+export const JOINING_AS = { individual: 'An individual (sole trader or freelancer)', business: 'A business' } as const;
+
 export interface ApplicationInput {
     name: string; email: string; channels: string[]; audience: string; links: string; message: string;
+    country: string; joiningAs: keyof typeof JOINING_AS;
 }
 
 /** Tidy and check what the form sent. Errors are written for the applicant. */
@@ -61,10 +108,14 @@ export function validateApplication(raw: Record<string, unknown>): { ok: true; v
     const email = str(raw.email, 254).toLowerCase();
     const channels = (Array.isArray(raw.channels) ? raw.channels : [])
         .map(String).filter((c) => (PROMOTION_CHANNELS as readonly string[]).includes(c)).slice(0, PROMOTION_CHANNELS.length);
-    const value = { name, email, channels: [...new Set(channels)], audience: str(raw.audience, 200), links: str(raw.links, 1000), message: str(raw.message, 2000) };
+    const country = str(raw.country, 8).toUpperCase();
+    const joiningAs = str(raw.joiningAs, 16) as keyof typeof JOINING_AS;
+    const value = { name, email, channels: [...new Set(channels)], audience: str(raw.audience, 200), links: str(raw.links, 1000), message: str(raw.message, 2000), country, joiningAs };
     if (!name) return { ok: false, error: 'Please tell us your name.' };
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, error: 'Please enter a valid email address.' };
     if (!value.channels.length) return { ok: false, error: 'Please tell us how you would promote Be More Swan.' };
+    if (!PARTNER_COUNTRIES[country]) return { ok: false, error: 'Please choose the country where you’re based.' };
+    if (!(joiningAs in JOINING_AS)) return { ok: false, error: 'Please tell us whether you’re joining as an individual or a business.' };
     if (raw.consent !== true) return { ok: false, error: 'Please tick the box so we can contact you about your application.' };
     if (raw.acceptTerms !== true) return { ok: false, error: 'Please read and accept the Partner Terms.' };
     return { ok: true, value };
@@ -72,7 +123,11 @@ export function validateApplication(raw: Record<string, unknown>): { ok: true; v
 
 /** The answers as the admin screen and the Partner Ops chat show them. */
 export function applicationAnswers(v: ApplicationInput): Record<string, string> {
-    const out: Record<string, string> = { 'How they will promote': v.channels.map((c) => CHANNEL_LABELS[c] || c).join(', ') };
+    const out: Record<string, string> = {
+        'Based in': PARTNER_COUNTRIES[v.country] || v.country,
+        'Joining as': JOINING_AS[v.joiningAs] || v.joiningAs,
+        'How they will promote': v.channels.map((c) => CHANNEL_LABELS[c] || c).join(', '),
+    };
     if (v.audience) out['Audience'] = v.audience;
     if (v.links) out['Links'] = v.links;
     if (v.message) out['Message'] = v.message;
@@ -104,7 +159,11 @@ export async function recordApplication(db: Db, v: ApplicationInput): Promise<{ 
         userId, status: 'applied', applicantName: v.name, applicantEmail: v.email, application: applicationAnswers(v),
         termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(),
     }).onConflictDoNothing().returning({ id: partners.id });
-    return inserted.length ? { outcome: 'created', partnerId: inserted[0].id } : { outcome: 'duplicate', partnerId: null };
+    if (!inserted.length) return { outcome: 'duplicate', partnerId: null };
+    // Terms 1.2: keep the acceptance and email them a copy. Best-effort — the application stands.
+    await recordTermsAcceptance(db, { partnerId: inserted[0].id, userId, applicantEmail: v.email, channel: 'application', email: v.email, firstName: v.name.split(/\s+/)[0] })
+        .catch((err) => console.error('[partner-applications] acceptance record failed:', err));
+    return { outcome: 'created', partnerId: inserted[0].id };
 }
 
 /** The applicant's "we've got it" email and the founder's heads-up. Both best-effort. */

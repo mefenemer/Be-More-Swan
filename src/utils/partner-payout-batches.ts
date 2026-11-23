@@ -20,7 +20,8 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { partnerCommissions, partnerPayoutBatches, partnerProgrammeSettings, partners } from '../../db/schema';
 import { getPayoutDetails, type PayoutDetails } from './partner-payouts';
-import { PARTNER_TERMS_VERSION, hasAcceptedCurrentTerms } from '../config/partner-terms';
+import { PARTNER_TERMS_VERSION } from '../config/partner-terms';
+import { isUkVatRegistered, vatPenceFor } from './partner-statements';
 
 type Db = ReturnType<typeof getDb>;
 type Row = Record<string, any>;
@@ -73,15 +74,19 @@ export function underMinimumReason(amountPence: number, minPence: number, status
 
 export interface PayoutPreviewLine {
     partnerId: number; name: string | null; email: string | null; method: string | null; payoutDisplay: string | null;
-    amountPence: number; due: boolean; reason: string | null;
+    /** Commission (excl. VAT). The minimum is checked against this. */
+    amountPence: number;
+    /** Terms 4.5(b): UK VAT added for a UK-VAT-registered partner; paid on top of amountPence. */
+    vatPence: number;
+    due: boolean; reason: string | null;
 }
 
 /** Who is due, and who isn't (and why). Ready-to-pay rows not already in a batch. */
-export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; lines: PayoutPreviewLine[]; totalDuePence: number }> {
+export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; lines: PayoutPreviewLine[]; totalDuePence: number; totalVatPence: number }> {
     const [settings] = await db.select({ min: partnerProgrammeSettings.minPayoutPence }).from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
     const min = settings?.min ?? 5000;
     const rows = (await db.execute(sql`
-        SELECT p.id, p.status, p.terms_version, p.payout_method, p.payout_display, p.payout_details_confirmed_at,
+        SELECT p.id, p.status, p.terms_version, p.payout_method, p.payout_display, p.payout_details_confirmed_at, p.vat_registered, p.vat_number,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
                SUM(c.commission_pence)::int AS amount,
@@ -97,13 +102,16 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
         // Suspended and ended partners are still paid what they earned (Partner Terms 7.3).
         const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`
             // No contract, no payout: it waits (and rolls over) until they accept on their Partner page.
-            // An ENDED partner is paid under the terms they last accepted (7.3): a later version no longer binds them.
-            : !(hasAcceptedCurrentTerms(r.terms_version) || (r.status === 'ended' && r.terms_version)) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
+            // Terms 8.1: earned commission is never held back to get a newer version accepted — any accepted
+            // version is a contract. Only a partner who has never accepted any version waits (no contract, no payout).
+            : !r.terms_version ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
             : !r.payout_details_confirmed_at || !r.payout_display ? 'No confirmed payout details'
             : underMinimumReason(amount, min, r.status, r.oldest_ready ? new Date(r.oldest_ready) : null);
-        return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };
+        return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, vatPence: vatPenceFor(amount, isUkVatRegistered(r)), due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };
     });
-    return { minPayoutPence: min, lines, totalDuePence: lines.filter((l) => l.due).reduce((s, l) => s + l.amountPence, 0) };
+    const due = lines.filter((l) => l.due);
+    // totalDuePence = commission; UK VAT for VAT-registered partners is paid on top (Terms 4.5(b)).
+    return { minPayoutPence: min, lines, totalDuePence: due.reduce((s, l) => s + l.amountPence, 0), totalVatPence: due.reduce((s, l) => s + l.vatPence, 0) };
 }
 
 /** Lock everyone due into a draft batch. Refuses if nobody is due. */
@@ -119,6 +127,21 @@ export async function createBatch(db: Db, adminId: number): Promise<{ ok: true; 
         const [{ total, count }] = (await tx.execute(sql`
             SELECT COALESCE(SUM(commission_pence), 0)::int AS total, COUNT(DISTINCT partner_id)::int AS count
               FROM partner_commissions WHERE payout_batch_id = ${batch.id}`)) as unknown as Array<{ total: number; count: number }>;
+        // Terms 4.5: freeze each partner's VAT position for this run (statements and exports read it back).
+        // VAT from the rows ACTUALLY locked into the run (a row the nightly release made payable a moment ago is
+        // included), and the VAT number from the same read (review of #823).
+        const locked = (await tx.execute(sql`
+            SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, p.vat_registered, p.vat_number
+              FROM partner_commissions c JOIN partners p ON p.id = c.partner_id
+             WHERE c.payout_batch_id = ${batch.id}
+             GROUP BY c.partner_id, p.vat_registered, p.vat_number`)) as unknown as Row[];
+        for (const r of locked) {
+            const ukVat = isUkVatRegistered(r);
+            await tx.execute(sql`
+                INSERT INTO partner_payout_vat (batch_id, partner_id, vat_number, vat_pence)
+                VALUES (${batch.id}, ${r.partner_id}, ${ukVat ? r.vat_number : null}, ${vatPenceFor(Number(r.amount), ukVat)})
+                ON CONFLICT (batch_id, partner_id) DO NOTHING`);
+        }
         await tx.update(partnerPayoutBatches).set({ totalPence: total, partnerCount: count }).where(eq(partnerPayoutBatches.id, batch.id));
         return { ok: true as const, batchId: batch.id, totalPence: total, partnerCount: count };
     });
@@ -188,21 +211,24 @@ const pounds = (p: number) => (p / 100).toFixed(2);
 /** UK Faster Payments references are 18 characters. */
 export const paymentReference = (batchId: number) => `BMS PARTNER ${batchId}`.slice(0, 18);
 
-export interface BatchLine { partnerId: number; name: string; email: string; amountPence: number; details: PayoutDetails | null }
+/** amountPence = commission (excl. VAT); vatPence = UK VAT paid on top for a UK-VAT-registered partner (Terms 4.5(b)). */
+export interface BatchLine { partnerId: number; name: string; email: string; amountPence: number; vatPence?: number; details: PayoutDetails | null }
 
 /** Each partner in the batch, with their decrypted payout details. Server-side only. */
 export async function batchLines(db: Db, batchId: number): Promise<BatchLine[]> {
     const rows = (await db.execute(sql`
-        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount,
+        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, COALESCE(MAX(v.vat_pence), 0)::int AS vat_pence,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
           FROM partner_commissions c JOIN partners p ON p.id = c.partner_id LEFT JOIN users u ON u.id = p.user_id
+          LEFT JOIN partner_payout_vat v ON v.batch_id = c.payout_batch_id AND v.partner_id = c.partner_id
          WHERE c.payout_batch_id = ${batchId}
          GROUP BY c.partner_id, u.email, u.first_name, u.last_name, p.applicant_email, p.applicant_name
          ORDER BY c.partner_id`)) as unknown as Row[];
     const out: BatchLine[] = [];
     for (const r of rows) {
-        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: Number(r.amount), details: await getPayoutDetails(db, r.partner_id) });
+        const amount = Number(r.amount);
+        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: amount, vatPence: Number(r.vat_pence) || 0, details: await getPayoutDetails(db, r.partner_id) }); // frozen at createBatch
     }
     return out;
 }
@@ -215,23 +241,25 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
     for (const l of lines) {
         const d = l.details;
         if (!d || l.amountPence <= 0) continue;
+        // Terms 4.5(b): what is sent = commission + any UK VAT.
+        const pay = l.amountPence + (l.vatPence ?? 0);
         if (format === 'wise_bank' && d.method === 'bank') {
-            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
         } else if (format === 'wise_eur' && d.method === 'eu_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives EUR. 10 empty US/UK columns, then IBAN, BIC.
-            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'EUR',
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'EUR',
                 ...Array(WISE_US_HEADERS.length - 9).fill(''), d.iban, d.bic || '']);
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
-            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'USD',
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'USD',
                 '', d.accountNumber, WISE_US_ACCOUNT_TYPE, d.routingNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
-            rows.push([l.name, d.email, ref, WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP']);
+            rows.push([l.name, d.email, ref, WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {
             // PayPal Payouts upload: no header row; email, amount, currency, customer id, note, wallet.
-            rows.push([d.email, pounds(l.amountPence), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
+            rows.push([d.email, pounds(pay), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
         } else continue;
-        total += l.amountPence;
+        total += pay;
     }
     const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : format === 'wise_eur' ? [WISE_EUR_HEADERS] : [];
     const csv = [...header, ...rows].map((r) => r.map((v) => csvCell(safe(String(v)))).join(',')).join('\r\n') + '\r\n';
@@ -254,7 +282,10 @@ export async function listBatches(db: Db): Promise<Row[]> {
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'eu_bank')::int AS eu_bank_partners,
                -- What the Wise files in this run pay out, in GBP: the owner pays from a GBP balance in Wise (decision
                -- 2026-11-23) and tops it up from EUR first, so the Payouts screen says how much.
-               COALESCE(SUM(c.commission_pence) FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence,
+               -- Plus the UK VAT frozen for those partners (Terms 4.5(b)): the files send commission + VAT.
+               (COALESCE(SUM(c.commission_pence) FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)
+                + COALESCE((SELECT SUM(v.vat_pence) FROM partner_payout_vat v JOIN partners pv ON pv.id = v.partner_id
+                             WHERE v.batch_id = b.id AND pv.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0))::int AS wise_total_pence,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id

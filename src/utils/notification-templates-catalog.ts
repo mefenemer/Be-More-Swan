@@ -1653,6 +1653,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('partner.notice_ends', 'Notice ends', '23 January 2027'), v('partner.notice_months', 'Notice length (months)', '1')],
     },
     {
+        templateKey: 'partner_ended_change_declined',
+        name: 'Partnership ended — new Terms not accepted (8.1)',
+        category: 'Billing',
+        type: 'referral_reward',
+        title: 'Your partnership has ended',
+        message: 'You did not accept Partner Terms v{{partner.version}} within {{partner.days}} days, so you are treated as leaving (Partner Terms 8.1). Customers on the standard commission period keep earning you commission until it ends, and everything you have earned is paid.',
+        variables: [v('partner.version', 'Terms version', '1.4'), v('partner.days', 'Days', '60')],
+    },
+    {
         templateKey: 'partner_inactivity_withdrawn',
         name: 'Partner inactivity notice withdrawn',
         category: 'Billing',

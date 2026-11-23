@@ -9,6 +9,8 @@
 //        → { pending: { display }, sentTo }   — a change waits for the emailed confirmation
 //   POST { action: 'confirm_payout', token }  → { display }
 //   POST { action: 'cancel_payout_change' }
+//   GET  ?view=statement&batchId=N            → the self-billed statement (HTML) for one of their paid payouts (Terms 4.5)
+//   POST { action: 'vat_number', vatNumber }  → their VAT number; a UK one adds UK VAT to payouts once an admin confirms it (Terms 4.5)
 //   POST { action: 'accept_terms' }           → records acceptance of the current Partner Terms
 //   POST { action: 'onboarding', mark }       → 'link_copied' | 'dismissed' | 'reopened' (the first-week card,
 //                                               docs/partner-onboarding-plan.md §2)
@@ -32,6 +34,8 @@ import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { getPartnerActivity } from '../../src/utils/partner-activity';
+import { recordTermsAcceptance } from '../../src/utils/partner-terms-acceptance';
+import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml, isUkVatNumber } from '../../src/utils/partner-statements';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { PAGE_MARKS, buildChecklist, checklistFolded, startersFor, welcomeGreeting, type OnboardingMarks, type PageMark } from '../../src/utils/partner-onboarding';
 import {
@@ -67,6 +71,13 @@ export default withLambda(async (event) => {
 
     if (event.httpMethod === 'GET') {
         if (!p || p.status === 'rejected') return json(200, { partner: null, impersonating });
+        // Terms 4.5: a self-billed statement for one of THEIR paid payouts, as a printable page.
+        if (event.queryStringParameters?.view === 'statement') {
+            const batchId = Number(event.queryStringParameters?.batchId);
+            const st = Number.isInteger(batchId) && batchId > 0 ? await loadStatement(db, p.id, batchId) : null;
+            if (!st) return { statusCode: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: 'No statement for that payout.' };
+            return { statusCode: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store', 'X-Robots-Tag': 'noindex' }, body: statementHtml(st) };
+        }
         // 'ended' (Terms 7.1/7.2) still sees what it earned and where it's paid, but no invite link.
         const live = p.status === 'approved' || p.status === 'suspended' || p.status === 'ended';
         // Never mint a code while impersonating: a GET must stay a read.
@@ -138,6 +149,9 @@ export default withLambda(async (event) => {
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
                 customer: c.kind === 'invoice' && c.customer_no ? `Customer ${c.customer_no}` : null,
             })),
+            // Terms 4.5: their VAT number (UK-registered = VAT added on top) and a statement per paid payout.
+            vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p), pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered },
+            payouts: await listPartnerPayouts(db, p.id),
             payout: {
                 method: p.payoutMethod, display: p.payoutDetailsConfirmedAt ? p.payoutDisplay : null, confirmedAt: p.payoutDetailsConfirmedAt,
                 pending: p.payoutPendingTokenHash && p.payoutPendingExpiresAt && p.payoutPendingExpiresAt > now
@@ -153,6 +167,19 @@ export default withLambda(async (event) => {
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request.' }); }
 
+    // Terms 4.5: their VAT number. A UK one (GB…/XI…) means UK VAT is added to each payout; clearing it stops that.
+    if (body.action === 'vat_number') {
+        const raw = typeof body.vatNumber === 'string' ? body.vatNumber.trim() : '';
+        const vat = raw ? normaliseVatNumber(raw) : null;
+        if (raw && !vat) return json(400, { error: 'That doesn’t look like a VAT number — start with the country letters, e.g. GB123456789.' });
+        // Review of #823: saving never switches VAT on. vat_registered stays false until an admin has checked the
+        // number with HMRC and confirmed it (admin-partners.ts 'confirm_vat'); a change or removal resets it.
+        const same = vat !== null && vat === (p.vatNumber ?? null);
+        await db.update(partners).set({ vatNumber: vat, ...(same ? {} : { vatRegistered: false }), updatedAt: new Date() }).where(eq(partners.id, p.id));
+        const registered = same ? !!p.vatRegistered : false;
+        return json(200, { ok: true, vat: { number: vat, ukRegistered: isUkVatRegistered({ vatRegistered: registered, vatNumber: vat }), pendingCheck: isUkVatNumber(vat) && !registered } });
+    }
+
     if (body.action === 'payout_details') {
         const checked = validatePayoutDetails(body);
         if (!checked.ok) return json(400, { error: checked.error });
@@ -166,7 +193,15 @@ export default withLambda(async (event) => {
         return r.ok ? json(200, { display: r.display }) : json(400, { error: r.error });
     }
     if (body.action === 'accept_terms') {
-        await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() }).where(eq(partners.id, p.id));
+        // A double click or retry: already on the current version — no second log row or copy email (review of #823).
+        if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        const moved = await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(partners.id, p.id), sql`${partners.termsVersion} IS DISTINCT FROM ${PARTNER_TERMS_VERSION}`)).returning({ id: partners.id });
+        if (!moved.length) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        // Terms 1.2: keep the acceptance (append-only) and email a copy. Best-effort — the acceptance stands.
+        const [me] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
+        await recordTermsAcceptance(db, { partnerId: p.id, userId, channel: 'partner_page', email: me?.email ?? null, firstName: me?.firstName ?? null })
+            .catch((err) => console.error('[partner-hub] acceptance record failed:', err));
         return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
     }
     if (body.action === 'onboarding') {

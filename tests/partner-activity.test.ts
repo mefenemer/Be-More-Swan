@@ -73,12 +73,15 @@ check('inactivity: a longer or lifetime period earns for 3 months only', () => {
     assert.ok(!runOffAllows('inactivity', ended, 24, d('2027-11-01')));
     assert.ok(!runOffAllows('inactivity', ended, null, d('2027-11-02')));
 });
-check('closure: 3 months for everyone', () => {
-    assert.ok(runOffAllows('closure', ended, 12, d('2027-10-31')));
-    assert.ok(!runOffAllows('closure', ended, 12, d('2027-11-01')));
+check('Terms 7.4(a) (cross-border review): leaving, declining a change and closure get the same run-off as inactivity', () => {
+    for (const r of ['left', 'change_declined', 'closure']) {
+        assert.ok(runOffAllows(r, ended, 12, d('2028-06-01')), `${r}: ≤12-month to term`);
+        assert.ok(runOffAllows(r, ended, 24, d('2027-10-31')), `${r}: longer, inside 3 months`);
+        assert.ok(!runOffAllows(r, ended, 24, d('2027-11-01')), `${r}: longer, after 3 months`);
+    }
 });
-check('left, breach, other (or no end date): nothing after the end', () => {
-    for (const r of ['left', 'breach', 'other', null]) assert.ok(!runOffAllows(r, ended, 12, d('2027-08-02')), String(r));
+check('7.4(b): breach, other (or no end date): nothing after the end', () => {
+    for (const r of ['breach', 'other', null]) assert.ok(!runOffAllows(r, ended, 12, d('2027-08-02')), String(r));
     assert.ok(!runOffAllows('inactivity', null, 12, d('2027-08-02')));
 });
 
@@ -128,8 +131,10 @@ check('the migration adds every column the code reads, and backfills partner_sin
     }
     assert.ok(sqlText.includes('UPDATE partners SET partner_since = created_at'));
 });
-check('ended partners are paid under the terms they last accepted (7.3)', () => {
-    assert.ok(read('src/utils/partner-payout-batches.ts').includes("(r.status === 'ended' && r.terms_version)"));
+check('earned commission is never held back for a newer version (8.1): any accepted version pays; none = no contract', () => {
+    const b = read('src/utils/partner-payout-batches.ts');
+    assert.ok(b.includes(": !r.terms_version ? `Hasn’t accepted the Partner Terms"));
+    assert.ok(!b.includes('hasAcceptedCurrentTerms('));
 });
 
 console.log('review #820 fixes');

@@ -6703,7 +6703,7 @@ export const partners = pgTable("partners", {
   approvedAt: timestamp("approved_at"),                      // most recent move to approved — the activity clock starts here
   partnerSince: timestamp("partner_since"),                  // start of the CURRENT partnership — tenure, and §7.5(i) re-approval
   endedAt: timestamp("ended_at"),
-  endReason: text("end_reason"),                             // inactivity | closure | left | breach | other — drives the run-off
+  endReason: text("end_reason"),                             // inactivity | closure | left | change_declined | breach | other — drives the run-off (Terms 7.4)
   activityPauseDays: integer("activity_pause_days").notNull().default(0),
   activityPauseLastDay: date("activity_pause_last_day"),
   activityPauseAnchor: timestamp("activity_pause_anchor"),    // the clock start the paused days count against
@@ -6817,6 +6817,30 @@ export const partnerCommissions = pgTable("partner_commissions", {
   check("partner_commissions_invoice_check", sql`${t.kind} <> 'invoice' OR (${t.stripeInvoiceId} IS NOT NULL AND ${t.netAmountPence} IS NOT NULL AND ${t.rateBps} IS NOT NULL AND ${t.commissionPence} >= 0)`),
   check("partner_commissions_cost_deduction_bps_check", sql`${t.costDeductionBps} BETWEEN 0 AND 10000`),
   check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
+]);
+
+// Terms 4.5(b)/(c) (db/z-partner-terms-cross-border.sql): each partner's VAT in a payout run, frozen at creation so
+// statements and exports never follow a later VAT-number edit.
+export const partnerPayoutVat = pgTable("partner_payout_vat", {
+  batchId: integer("batch_id").notNull().references(() => partnerPayoutBatches.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  vatNumber: text("vat_number"),
+  vatPence: integer("vat_pence").notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.batchId, t.partnerId] })]);
+
+// Partner Terms 1.2 (cross-border review 2026-11-23; db/z-partner-terms-cross-border.sql): an append-only record of
+// every acceptance — partners.terms_version says what is current, this keeps the history and the channel.
+export const partnerTermsAcceptances = pgTable("partner_terms_acceptances", {
+  id: serial().primaryKey(),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  applicantEmail: text("applicant_email"),
+  version: text().notNull(),
+  channel: text().notNull(),                                 // application | partner_page
+  acceptedAt: timestamp("accepted_at").notNull().defaultNow(),
+}, (t) => [
+  index("partner_terms_acceptances_partner_idx").on(t.partnerId, t.acceptedAt),
+  check("partner_terms_acceptances_channel_check", sql`${t.channel} IN ('application','partner_page')`),
 ]);
 
 // /invite/<code> clicks per partner per day — no IP, nothing on the visitor's device.

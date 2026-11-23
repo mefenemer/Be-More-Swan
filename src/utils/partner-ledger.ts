@@ -24,13 +24,14 @@
 
 import { notifyCommissionEarned } from './partner-notify';
 import { runOffAllows } from './partner-activity';
+import { UK_VAT_RATE_BPS } from './partner-statements';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     partnerCommissions, partnerProgrammeSettings, partnerRatePeriods, partnerReferrals, partners, userReferrals,
 } from '../../db/schema';
 import {
-    commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
+    addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
 
 type Db = ReturnType<typeof getDb>;
@@ -48,10 +49,21 @@ export interface PartnerPayment {
     paymentRef: string;
     /** pi_… — what refunds and disputes are matched on. */
     paymentIntentId: string | null;
-    /** What the customer actually paid, excluding VAT, in pence. */
+    /** What the customer actually paid, excluding VAT, in pence (in `currency`'s minor units when not GBP). */
     netAmountPence: number;
     currency: string;
     paidAt: Date;
+    /**
+     * Partner Terms 3.2 (cross-border review): a payment in another currency counts at the sterling amount our
+     * provider converted it into. The webhook works this out from Stripe's balance transaction; null when
+     * it couldn't — then nothing is recorded and the webhook logs it for recording by hand.
+     */
+    gbpNetAmountPence?: number | null;
+    /** The period this payment covers (invoice line), for the pro-rata and annual-holding rules (Terms 3.2, 4.1). */
+    periodStart?: Date | null;
+    periodEnd?: Date | null;
+    /** True for an annual plan payment when the period isn't known (first payment via Checkout). */
+    annual?: boolean;
 }
 
 export type RecordOutcome =
@@ -100,6 +112,11 @@ async function findPartnerReferral(db: Db, referredUserId: number) {
         .where(and(eq(userReferrals.referredUserId, referredUserId), inArray(partners.status, ['approved', 'suspended', 'ended'])))
         .limit(1);
     return row ?? null;
+}
+
+/** Cheap pre-check (review of #823): is this customer a partner referral at all? Saves Stripe lookups. */
+export async function hasPartnerReferral(db: Db, referredUserId: number): Promise<boolean> {
+    return !!(await findPartnerReferral(db, referredUserId));
 }
 
 /**
@@ -160,9 +177,14 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     if (!(payment.netAmountPence > 0)) return { recorded: false, reason: 'no_amount' };
     const ref = await findPartnerReferral(db, payment.userId);
     if (!ref) return { recorded: false, reason: 'not_a_partner_referral' };
+    // Terms 3.2: another currency counts at the sterling amount our provider converted it into.
+    let netPence = payment.netAmountPence;
     if (payment.currency.toUpperCase() !== PROGRAMME_CURRENCY) {
-        console.error('[partner-ledger] payment in an unsupported currency — no commission recorded', payment);
-        return { recorded: false, reason: 'currency' };
+        if (!(typeof payment.gbpNetAmountPence === 'number' && payment.gbpNetAmountPence > 0)) {
+            console.error('[partner-ledger] payment in another currency with no sterling amount — NOT recorded, record it by hand', payment);
+            return { recorded: false, reason: 'currency' };
+        }
+        netPence = payment.gbpNetAmountPence;
     }
 
     // Ended: a customer who never paid before the end earns nothing, and nothing is locked for them (§7.4).
@@ -195,15 +217,21 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
 
     // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
     const costDeductionBps = terms.costDeductionBps ?? 0;
-    const amount = commissionPence(payment.netAmountPence, terms.rateBps, costDeductionBps);
-    const availableAt = new Date(payment.paidAt.getTime() + (await holdingDays(db)) * DAY_MS);
+    // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
+    const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
+    const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
+    const amount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
+    const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
+    const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+    const availableAt = new Date(payment.paidAt.getTime() + holdDays * DAY_MS);
     const inserted = await db.insert(partnerCommissions).values({
         partnerId: ref.partnerId,
         partnerReferralId: terms.id,
         kind: 'invoice',
         stripeInvoiceId: payment.paymentRef,
         stripeChargeId: payment.paymentIntentId,
-        netAmountPence: payment.netAmountPence,
+        netAmountPence: eligiblePence,
         rateBps: terms.rateBps,
         costDeductionBps,
         commissionPence: amount,
@@ -217,6 +245,35 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
 }
 
+/** Terms 4.1: annual Subscription Payments are held at least this long. */
+export const ANNUAL_HOLDING_DAYS = 60;
+
+/**
+ * An annual plan payment covers ~365 days. 200 days, not 40: a monthly invoice with a proration line plus the next
+ * month can span ~60 days and must not be held 60 days as if annual (review of #823).
+ */
+export function isAnnualPeriod(start: Date | null, end: Date | null): boolean {
+    return !!(start && end && end.getTime() - start.getTime() > 200 * DAY_MS);
+}
+
+/**
+ * Terms 3.2 pro rata: the part of a payment for the months inside the commission period. Full amount when
+ * the period is unknown, has no end beyond the window, or the window is lifetime (null). Rounds down.
+ */
+export function proRataPence(netPence: number, periodStart: Date | null, periodEnd: Date | null, windowEnd: Date | null): number {
+    if (!windowEnd || !periodStart || !periodEnd) return netPence;
+    const span = periodEnd.getTime() - periodStart.getTime();
+    if (span <= 0 || periodEnd.getTime() <= windowEnd.getTime()) return netPence;
+    const inside = Math.max(0, windowEnd.getTime() - periodStart.getTime());
+    return Math.floor((netPence * inside) / span);
+}
+
+/** Partner Terms 4.3: refunds and disputes more than 180 days after the payment don't touch commission. */
+export const CLAWBACK_WINDOW_DAYS = 180;
+export function isPastClawbackWindow(paidAt: Date, eventAt: Date): boolean {
+    return eventAt.getTime() - paidAt.getTime() > CLAWBACK_WINDOW_DAYS * DAY_MS;
+}
+
 export interface ReversalInput {
     /** pi_… from the refund's or dispute's charge. */
     paymentIntentId: string | null;
@@ -226,6 +283,12 @@ export interface ReversalInput {
     amountRefundedPence: number;
     kind: 'refund' | 'dispute';
     at?: Date;
+    /**
+     * The charge's full amount (charge.amount), same currency as amountRefundedPence. When given, a refund
+     * reduces commission by the refunded SHARE of the payment — right for any currency (a non-GBP payment's
+     * row holds its sterling net, which a foreign-currency refund amount can't be subtracted from).
+     */
+    chargeAmountMinor?: number | null;
 }
 
 /**
@@ -245,18 +308,36 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     ));
     const at = input.at ?? new Date();
     let adjusted = 0;
+    const touchedRuns = new Map<string, { batchId: number; partnerId: number }>();
 
     for (const row of rows) {
+        // A row in a run whose file is already EXPORTED may already have been sent: treat it like a paid row (leave it,
+        // add a negative adjustment below) so the run, its statement and the 180-day clawback stay true. Only a DRAFT
+        // run is changed in place (review of #823).
+        let inExportedRun = false;
+        if (row.payoutBatchId && (row.status === 'pending' || row.status === 'payable')) {
+            const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${row.payoutBatchId}`)) as unknown as Array<{ status: string }>;
+            inExportedRun = run?.status === 'exported';
+            if (run?.status === 'draft') touchedRuns.set(`${row.payoutBatchId}:${row.partnerId}`, { batchId: row.payoutBatchId, partnerId: row.partnerId });
+        }
+        // Partner Terms 4.3 (cross-border review): only a refund or dispute within 180 days of the payment
+        // reduces commission. The row is written by the webhook at the payment, so its created_at is the
+        // payment time (a commission entered late by hand gets a later created_at — in the partner's favour).
+        if (isPastClawbackWindow(row.createdAt, at)) continue;
         const net = row.netAmountPence ?? 0;
-        const remaining = input.kind === 'dispute' ? 0 : Math.max(0, net - input.amountRefundedPence);
+        const charged = input.chargeAmountMinor ?? 0;
+        const remaining = input.kind === 'dispute' ? 0
+            : charged > 0 ? Math.max(0, Math.floor((net * Math.max(0, charged - input.amountRefundedPence)) / charged))
+            : Math.max(0, net - input.amountRefundedPence);
         const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 
         if (row.status === 'voided') continue;
-        if (row.status === 'pending' || row.status === 'payable') {
+        if ((row.status === 'pending' || row.status === 'payable') && !inExportedRun) {
             if (target === 0) {
+                // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
                 await db.update(partnerCommissions)
-                    .set({ status: 'voided', voidedAt: at, voidReason: reason })
+                    .set({ status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null })
                     .where(eq(partnerCommissions.id, row.id));
                 adjusted++;
             } else if (target < row.commissionPence) {
@@ -268,7 +349,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
             continue;
         }
 
-        // Paid already: claw back the difference, net of any adjustment already made for this payment.
+        // Paid already (or in an exported run): claw back the difference, net of any adjustment already made for this payment.
         const [{ sum }] = await db.select({ sum: sql<number>`COALESCE(SUM(${partnerCommissions.commissionPence}), 0)::int` })
             .from(partnerCommissions)
             .where(and(eq(partnerCommissions.kind, 'adjustment'), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
@@ -289,7 +370,28 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
             adjusted++;
         }
     }
+    for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);
     return { adjusted };
+}
+
+/**
+ * A commission in a DRAFT run changed: recompute the partner's frozen VAT from what the run
+ * now pays them, and the run's total, so exports and statements stay consistent (review of #823). Paid runs never change.
+ */
+async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number): Promise<void> {
+    const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${batchId}`)) as unknown as Array<{ status: string }>;
+    if (!run || run.status !== 'draft') return;
+    const [{ amount }] = (await db.execute(sql`
+        SELECT COALESCE(SUM(commission_pence), 0)::int AS amount FROM partner_commissions
+         WHERE payout_batch_id = ${batchId} AND partner_id = ${partnerId}`)) as unknown as Array<{ amount: number }>;
+    await db.execute(sql`
+        UPDATE partner_payout_vat SET vat_pence = CASE WHEN vat_number IS NULL OR ${Number(amount)} <= 0 THEN 0
+                                                       ELSE ROUND(${Number(amount)} * ${UK_VAT_RATE_BPS}::numeric / 10000)::int END
+         WHERE batch_id = ${batchId} AND partner_id = ${partnerId}`);
+    await db.execute(sql`
+        UPDATE partner_payout_batches SET total_pence = (SELECT COALESCE(SUM(commission_pence), 0)::int FROM partner_commissions WHERE payout_batch_id = ${batchId}),
+               partner_count = (SELECT COUNT(DISTINCT partner_id)::int FROM partner_commissions WHERE payout_batch_id = ${batchId})
+         WHERE id = ${batchId}`);
 }
 
 /**

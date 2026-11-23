@@ -19,6 +19,7 @@ import { addMonthsUtc } from './partner-rate-periods';
 import { TRIAL_DAYS } from './trial';
 import { createNotification } from './notify';
 import { sendTemplatedEmail } from './email';
+import { DECLINED_CHANGE_DAYS, PARTNER_TERMS_EFFECTIVE, PARTNER_TERMS_VERSION } from '../config/partner-terms';
 
 type Db = any;
 type Row = Record<string, any>;
@@ -30,8 +31,8 @@ export const FREE_MONTHS_AFTER_TRIAL = 1;
 export const NOTICE_EXTENSION_DAYS = 7;
 const DAY_MS = 86_400_000;
 
-export type EndReason = 'inactivity' | 'closure' | 'left' | 'breach' | 'other';
-export const END_REASONS: EndReason[] = ['inactivity', 'closure', 'left', 'breach', 'other'];
+export type EndReason = 'inactivity' | 'closure' | 'left' | 'change_declined' | 'breach' | 'other';
+export const END_REASONS: EndReason[] = ['inactivity', 'closure', 'left', 'change_declined', 'breach', 'other'];
 
 const ukDate = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' });
 const partnerPageUrl = () => `${(process.env.BASE_URL || 'https://bemoreswan.com').replace(/\/$/, '')}/workspace.html?view=partner`;
@@ -73,20 +74,19 @@ export function extendedNoticeEnd(noticeEnds: Date, signUps: Date[]): Date | nul
     return latest && latest.getTime() > noticeEnds.getTime() ? latest : null;
 }
 
+/** Terms 7.4(a): endings that keep the run-off — leaving (7.1), declining a change (8.1), inactivity (7.5), closure (7.2). */
+export const RUN_OFF_REASONS = ['left', 'change_declined', 'inactivity', 'closure'] as const;
+
 /**
  * Does an ENDED partner still earn on this payment? (The commission window is checked separately.)
- * §7.5(h) inactivity: ≤12-month periods run to term; longer (or lifetime) ones for 3 months after ending.
- * §7.2 closure: 3 months after closure. Anything else: nothing after the end date (§7.4).
+ * Terms 7.4(a): after leaving, declining a change, inactivity or closure, ≤12-month periods run to
+ * term and longer (or lifetime) ones earn for 3 months after ending. 7.4(b): an ending for breach,
+ * fraud or the law ('breach', 'other') earns nothing after the end date.
  */
 export function runOffAllows(endReason: string | null, endedAt: Date | null, durationMonths: number | null, paidAt: Date): boolean {
-    if (!endedAt) return false;
-    const threeMonths = paidAt.getTime() < addMonthsUtc(endedAt, RUN_OFF_MONTHS).getTime();
-    if (endReason === 'inactivity') {
-        if (durationMonths !== null && durationMonths <= STANDARD_PERIOD_MONTHS) return true;
-        return threeMonths;
-    }
-    if (endReason === 'closure') return threeMonths;
-    return false;
+    if (!endedAt || !(RUN_OFF_REASONS as readonly string[]).includes(String(endReason))) return false;
+    if (durationMonths !== null && durationMonths <= STANDARD_PERIOD_MONTHS) return true;
+    return paidAt.getTime() < addMonthsUtc(endedAt, RUN_OFF_MONTHS).getTime();
 }
 
 // ── Reading the clock ────────────────────────────────────────────────────────────────────────
@@ -293,4 +293,62 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
         if (await extendForFreePeriods(db, p.id, p.user_id ?? null, since, endsAt)) extended++;
     }
     return { paused, withdrawn, extended };
+}
+
+/**
+ * Terms 8.1: a partner who accepted an earlier version but has not accepted the current one within 60
+ * days of it taking effect is treated as leaving (7.1) — ended with end_reason 'change_declined', which
+ * keeps the 7.4(a) run-off. Partners who never accepted any version (terms_version NULL) are untouched.
+ */
+/**
+ * Terms 8.1: the day a partner on an older version is treated as leaving — 60 days after the LATER of the version
+ * taking effect and the partner's latest approval (review of #823: a partner approved, re-approved or reinstated
+ * after the version date gets their own 60 days, never an ending on the night of approval).
+ */
+export function declinedChangeDeadline(effectiveIso: string, approvedAt: Date | null): Date {
+    const effective = new Date(`${effectiveIso}T00:00:00Z`);
+    const from = approvedAt && approvedAt.getTime() > effective.getTime() ? approvedAt : effective;
+    return new Date(from.getTime() + DECLINED_CHANGE_DAYS * DAY_MS);
+}
+
+export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promise<{ ended: number }> {
+    // No effective date for the current version = someone bumped the version without dating it: do nothing.
+    if (!PARTNER_TERMS_EFFECTIVE) {
+        console.error(`[partner-activity] Partner Terms v${PARTNER_TERMS_VERSION} has no date in PARTNER_TERMS_EFFECTIVE_DATES — declined-change sweep skipped`);
+        return { ended: 0 };
+    }
+    const deadline = new Date(new Date(`${PARTNER_TERMS_EFFECTIVE}T00:00:00Z`).getTime() + DECLINED_CHANGE_DAYS * DAY_MS);
+    if (now.getTime() < deadline.getTime()) return { ended: 0 };
+    // Approved partners only: a suspended partner is under investigation, and ending them here would give them a
+    // run-off a breach ending (7.4(b)) would not — an admin decides their case.
+    const rows = (await db.execute(sql`
+        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
+               decided_at = ${now.toISOString()}::timestamp,
+               decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
+               inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
+         WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
+           -- the partner's own 60 days from their latest approval (declinedChangeDeadline)
+           AND COALESCE(approved_at, decided_at, created_at) <= ${new Date(now.getTime() - DECLINED_CHANGE_DAYS * DAY_MS).toISOString()}::timestamp
+         RETURNING id, terms_version`)) as Row[];
+    for (const r of rows) {
+        // A system decision: an audit row with no admin, and the partner is told (Terms 12.2 — notice by email).
+        await db.execute(sql`
+            INSERT INTO admin_audit_log (admin_id, action, target_type, target_id, previous_state, new_state)
+            VALUES (NULL, 'partner_decision', 'partner', ${String(r.id)},
+                    ${JSON.stringify({ status: 'approved', termsVersion: r.terms_version })}::jsonb,
+                    ${JSON.stringify({ status: 'ended', endReason: 'change_declined', by: 'nightly sweep', version: PARTNER_TERMS_VERSION })}::jsonb)`)
+            .catch((err: unknown) => console.error('[partner-activity] audit row for change_declined failed', err));
+        await tellEnded(db, r.id);
+    }
+    return { ended: rows.length };
+}
+
+async function tellEnded(db: Db, partnerId: number): Promise<void> {
+    const who = await partnerContact(db, partnerId).catch(() => ({ userId: null, email: null, firstName: null }));
+    const vars = { partner: { version: PARTNER_TERMS_VERSION, days: String(DECLINED_CHANGE_DAYS) } };
+    if (who.userId) await createNotification(db, 'partner_ended_change_declined', { userId: who.userId, context: vars, metadata: { action: 'partner_page' } }).catch(() => false);
+    if (who.email) {
+        await sendTemplatedEmail({ triggerKey: 'partner_ended_change_declined', to: who.email, vars: { ...vars, user: { first_name: who.firstName || '' }, link: { action_url: partnerPageUrl(), terms_url: termsUrl() } } })
+            .catch((err: unknown) => console.error('[partner-activity] change_declined email NOT sent', err));
+    }
 }
