@@ -111,7 +111,7 @@ async function main() {
         await check('the files come from the vault: Ann in the bank file, Pam and Sue in PayPal', async () => {
             const lines = await runs.batchLines(db, batchId);
             const bank = runs.buildExport('wise_bank', batchId, lines);
-            assert.ok(bank.csv.includes(`Ann Bank,ann@example.com,BMS PARTNER ${batchId},PRIVATE,GBP,75.00,GBP,GBP,112233,01234567`), bank.csv);
+            assert.ok(bank.csv.includes(`Ann Bank,ann@example.com,BMS PARTNER ${batchId},,PERSON,source,75.00,GBP,GBP,112233,01234567`), bank.csv);
             const pp = runs.buildExport('paypal', batchId, lines);
             assert.deepStrictEqual([pp.included, pp.totalPence], [2, 13025]);
             await runs.markExported(db, batchId);
