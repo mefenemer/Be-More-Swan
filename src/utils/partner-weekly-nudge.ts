@@ -13,7 +13,7 @@ import type { OnboardingStep, OnboardingStats } from './partner-onboarding';
 
 export interface NudgeMarks { weekly_nudge_off_at?: string; nudge_started_at?: string; last_nudge_week?: string }
 export interface WeekStats extends OnboardingStats {
-    clicks_7d?: number; signups_7d?: number; paying_7d?: number; earned_7d_pence?: number;
+    clicks_7d?: number; clicks_last_week?: number; signups_7d?: number; paying_7d?: number; earned_7d_pence?: number;
 }
 
 export const NUDGE_WEEKS = 8;
@@ -29,7 +29,7 @@ export function isoWeek(d: Date): string {
 }
 
 export function hadActivity(s: WeekStats): boolean {
-    return Number(s.clicks_7d || 0) > 0 || Number(s.signups_7d || 0) > 0 || Number(s.paying_7d || 0) > 0 || Number(s.earned_7d_pence || 0) > 0;
+    return Number(s.clicks_last_week ?? s.clicks_7d ?? 0) > 0 || Number(s.signups_7d || 0) > 0 || Number(s.paying_7d || 0) > 0 || Number(s.earned_7d_pence || 0) > 0;
 }
 
 export type SkipReason = 'not_approved' | 'no_account' | 'turned_off' | 'already_sent' | 'quiet_after_first_weeks';
@@ -74,7 +74,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** The summary's words — the same for the bell and the email. */
 export function buildNudge(input: { firstName: string | null; stats: WeekStats; steps: OnboardingStep[] }) {
     const s = input.stats;
-    const visits = Number(s.clicks_7d || 0), signups = Number(s.signups_7d || 0), trial = Number(s.in_trial || 0), paying = Number(s.paying_7d || 0);
+    const visits = Number(s.clicks_last_week ?? s.clicks_7d ?? 0), signups = Number(s.signups_7d || 0), trial = Number(s.in_trial || 0), paying = Number(s.paying_7d || 0);
     const earned = Number(s.earned_7d_pence || 0);
     const summary = `Last 7 days: ${plural(visits, 'visit', 'visits')}, ${plural(signups, 'sign-up', 'sign-ups')}, ${trial} in a free trial now, ${plural(paying, 'new paying customer', 'new paying customers')}`
         + (earned > 0 ? `, and £${(earned / 100).toFixed(2)} earned.` : '.');

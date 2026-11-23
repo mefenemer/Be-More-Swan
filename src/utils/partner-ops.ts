@@ -181,6 +181,11 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 6)::int AS clicks_7d,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 29)::int AS clicks_30d,
+          -- The Monday summary's visits: the last 7 FULL UK days (yesterday back 7), so each Monday covers
+          -- Monday–Sunday with no day missed or counted twice (review of #816).
+          (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
+             AND day >= (now() AT TIME ZONE 'Europe/London')::date - 7
+             AND day <  (now() AT TIME ZONE 'Europe/London')::date)::int AS clicks_last_week,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id})::int AS clicks_all,
           (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
              WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')

@@ -63,6 +63,7 @@ check('the numbers, plainly, with earnings only when there are some', () => {
     const steps = buildChecklist({ termsAccepted: true, payoutSet: true, invitePageLive: true, marks: { first_draft_at: 'x', link_copied_at: 'y' }, stats: { clicks_all: 20, signups: 3, paying: 1 } });
     const n = buildNudge({ firstName: 'Angela', steps, stats: { clicks_7d: 12, signups_7d: 2, in_trial: 1, paying_7d: 1, earned_7d_pence: 3160, clicks_all: 20, signups: 3, paying: 1 } });
     assert.strictEqual(n.summary, 'Last 7 days: 12 visits, 2 sign-ups, 1 in a free trial now, 1 new paying customer, and £31.60 earned.');
+    assert.ok(buildNudge({ firstName: null, steps, stats: { clicks_last_week: 5, clicks_7d: 99 } }).summary.startsWith('Last 7 days: 5 visits'), 'visits = last 7 full UK days');
     assert.strictEqual(n.title, 'Your week as a partner: 12 visits, 2 sign-ups');
     const q = buildNudge({ firstName: null, steps, stats: { ...quiet, in_trial: 0 } });
     assert.ok(q.summary.endsWith('0 new paying customers.') && !q.summary.includes('earned'));
@@ -92,6 +93,9 @@ check('the run claims the week BEFORE sending (overlapping runs send once)', () 
     const claim = fn.indexOf("jsonb_build_object('last_nudge_week'");
     assert.ok(claim > 0 && claim < fn.indexOf("createNotification(db, 'partner_weekly_summary'"));
     assert.ok(fn.includes("IS DISTINCT FROM ${week}"));
+    assert.ok(fn.includes("AND (${partners.onboarding}->>'weekly_nudge_off_at') IS NULL"), 'turned off mid-run → not sent');
+    assert.ok(fn.includes("unsubscribeUrl: `${baseUrl()}/workspace.html?view=partner`"), 'Unsubscribe goes where the switch is');
+    assert.ok(fn.includes('if (notified || emailed) sent++;'), 'sent means delivered');
     assert.ok(fn.includes("COALESCE(${partners.onboarding}->>'nudge_started_at'"), 'the 8 weeks start at the first summary, once');
     assert.ok(!/anthropic|messages\.create/i.test(fn), 'no model call');
 });
@@ -126,6 +130,7 @@ check('?ask= only fills a whitelisted question from the server — never text fr
 
 check('"In free trial" is a count of their own invitees in an open trial, never names', () => {
     const ops = read('src/utils/partner-ops.ts');
+    assert.ok(ops.includes("AND day <  (now() AT TIME ZONE 'Europe/London')::date)::int AS clicks_last_week"), 'Mon–Sun, no gap or overlap');
     const q = ops.slice(ops.indexOf('who is in the free trial right now'), ops.indexOf('AS in_trial'));
     assert.ok(q.includes('JOIN trials t ON t.user_id = ur.referred_user_id'));
     assert.ok(q.includes('t.ended_at IS NULL AND t.converted_at IS NULL AND t.ends_at > now()'));
