@@ -48,6 +48,7 @@ const TOML = readFileSync(join(root, 'netlify.toml'), 'utf8');
 const PUBLIC_DIRS: Record<string, string> = {
     components: 'footer.html and friends are fetched at runtime by the marketing pages',
     favicon: 'icons referenced from every page head',
+    'partner-kit': 'logo, screenshots and demo video partners download to promote us (kit.json lists them; docs/partner-onboarding-plan.md §3.4)',
     images: 'site imagery',
     locales: 'i18n bundles fetched by src/i18n.js',
     'site-fonts': 'open-licence fonts for Website Assistant sites, loaded by the editor\'s preview (site-render.ts FONT_PAIRS); live sites serve their own copy from sites-host/public',
