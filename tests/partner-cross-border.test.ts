@@ -201,6 +201,7 @@ check('fifth review of #823: idempotent accept, UK-only VAT confirmation, honest
     assert.ok(read('netlify/functions/admin-partners.ts').includes('if (!isUkVatNumber(expected)) return json(400'));
     assert.ok(read('admin.html').includes('outside the UK — reverse charge, no VAT added'));
     assert.ok(read('partner-content.html').includes('If you accepted an earlier version, your commission is still paid (Partner Terms 8.1)'));
+    assert.ok(hub.includes('pendingCheck: isUkVatNumber(vat) && !registered') && hub.includes('pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered'), 'only UK numbers wait for an HMRC check');
 });
 
 console.log(`\n${passed} passed`);

@@ -404,6 +404,7 @@
     // Terms 4.5: VAT number and payout statements.
     document.getElementById('pt-vat').value = data.vat?.number || '';
     if (data.vat?.pendingCheck) document.getElementById('pt-vat-note').textContent = 'We’re checking your VAT number with HMRC. Once it’s confirmed, UK VAT is added to your payouts (Partner Terms 4.5); until then payouts are commission only.';
+    else if (data.vat?.number && !data.vat?.ukRegistered) document.getElementById('pt-vat-note').textContent = 'Your VAT number is from outside the UK, so we add no VAT: we account for any UK VAT under the reverse charge (Partner Terms 4.5(d)).';
     const paid = data.payouts || [];
     show('pt-statements-card', paid.length > 0);
     document.getElementById('pt-statements').innerHTML = paid.map((b) => `<li class="flex items-center justify-between gap-3 border-t border-gray-100 pt-1">

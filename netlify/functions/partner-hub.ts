@@ -35,7 +35,7 @@ import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { getPartnerActivity } from '../../src/utils/partner-activity';
 import { recordTermsAcceptance } from '../../src/utils/partner-terms-acceptance';
-import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml } from '../../src/utils/partner-statements';
+import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml, isUkVatNumber } from '../../src/utils/partner-statements';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { PAGE_MARKS, buildChecklist, checklistFolded, startersFor, welcomeGreeting, type OnboardingMarks, type PageMark } from '../../src/utils/partner-onboarding';
 import {
@@ -150,7 +150,7 @@ export default withLambda(async (event) => {
                 customer: c.kind === 'invoice' && c.customer_no ? `Customer ${c.customer_no}` : null,
             })),
             // Terms 4.5: their VAT number (UK-registered = VAT added on top) and a statement per paid payout.
-            vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p), pendingCheck: !!p.vatNumber && !p.vatRegistered },
+            vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p), pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered },
             payouts: await listPartnerPayouts(db, p.id),
             payout: {
                 method: p.payoutMethod, display: p.payoutDetailsConfirmedAt ? p.payoutDisplay : null, confirmedAt: p.payoutDetailsConfirmedAt,
@@ -177,7 +177,7 @@ export default withLambda(async (event) => {
         const same = vat !== null && vat === (p.vatNumber ?? null);
         await db.update(partners).set({ vatNumber: vat, ...(same ? {} : { vatRegistered: false }), updatedAt: new Date() }).where(eq(partners.id, p.id));
         const registered = same ? !!p.vatRegistered : false;
-        return json(200, { ok: true, vat: { number: vat, ukRegistered: isUkVatRegistered({ vatRegistered: registered, vatNumber: vat }), pendingCheck: !!vat && !registered } });
+        return json(200, { ok: true, vat: { number: vat, ukRegistered: isUkVatRegistered({ vatRegistered: registered, vatNumber: vat }), pendingCheck: isUkVatNumber(vat) && !registered } });
     }
 
     if (body.action === 'payout_details') {
