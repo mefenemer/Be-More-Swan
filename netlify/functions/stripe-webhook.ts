@@ -16,6 +16,7 @@ import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/relea
 import { restoreAfterNewPlan } from '../../src/utils/restore-after-new-plan';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
+import { otherDisputeBlocksReinstate } from '../../src/utils/partner-disputes';
 import { hasPartnerReferral, invoiceNetPence, isSubscriptionPaymentInvoice, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
@@ -122,14 +123,16 @@ async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: numb
 
 /** Is any OTHER dispute on this charge still open, or lost? Then a won / warning_closed one must not reinstate. */
 async function _otherDisputeBlocksReinstate(chargeId: string, disputeId: string): Promise<boolean> {
+    // If Stripe can't be asked, THROW (review of #826): the handler releases the idempotency claim and returns 5xx, so
+    // Stripe retries the event later — instead of the commission silently staying voided with only a warning.
+    let list: Stripe.ApiList<Stripe.Dispute>;
     try {
-        const list = await stripe.disputes.list({ charge: chargeId, limit: 20 });
-        return list.data.some((d) => d.id !== disputeId && d.status !== 'won' && d.status !== 'warning_closed');
+        list = await stripe.disputes.list({ charge: chargeId, limit: 20 });
     } catch (e) {
-        // Can't tell: be safe for the business — leave it voided; the next close event (or an admin) can reinstate.
-        console.warn('[stripe-webhook] dispute.closed: could not list disputes on the charge — not reinstating:', (e as any)?.message);
-        return true;
+        console.error('[stripe-webhook] dispute.closed: could not list disputes on the charge — Stripe will retry the event:', { chargeId, disputeId, err: (e as any)?.message });
+        throw e;
     }
+    return otherDisputeBlocksReinstate(list.data.map((d) => ({ id: d.id, status: d.status })), disputeId);
 }
 
 /** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */
