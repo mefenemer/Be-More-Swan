@@ -1079,10 +1079,11 @@ export default withLambda(async (event) => {
 
     // ── charge.dispute.closed — won: the partner's commission comes back ─
     // ⚠️ Needs charge.dispute.closed enabled on the Stripe webhook endpoint (both environments).
-    // 'won' only: lost / warning_closed leave it voided. Refunds on the charge since stay unearned.
+    // 'won', and 'warning_closed' (an inquiry / early fraud warning that closed without a chargeback — we kept the
+    // money; owner 2026-11-23): commission comes back. 'lost' leaves it voided. Refunds on the charge since stay unearned.
     if (stripeEvent.type === 'charge.dispute.closed') {
         const dispute = stripeEvent.data.object as Stripe.Dispute;
-        if (dispute.status === 'won') {
+        if (dispute.status === 'won' || dispute.status === 'warning_closed') {
             let refunded = 0;
             let chargeAmount: number | null = null;
             try {

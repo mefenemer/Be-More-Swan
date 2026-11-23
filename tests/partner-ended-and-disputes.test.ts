@@ -68,11 +68,12 @@ check('their Partner page keeps earnings and payout details, without the link or
 
 console.log('won disputes');
 
-check("charge.dispute.closed with status 'won' reinstates; refunds on the charge stay unearned", () => {
+check("charge.dispute.closed with status 'won' or 'warning_closed' reinstates; refunds on the charge stay unearned", () => {
     const wh = read('netlify/functions/stripe-webhook.ts');
     const block = wh.slice(wh.indexOf("if (stripeEvent.type === 'charge.dispute.closed') {"));
     assert.ok(block.length > 100, 'handler exists');
-    assert.ok(block.includes("if (dispute.status === 'won') {"));
+    // Owner 2026-11-23: an inquiry / early fraud warning that closes without a chargeback restores commission too.
+    assert.ok(block.includes("if (dispute.status === 'won' || dispute.status === 'warning_closed') {"));
     assert.ok(block.includes("refunded = ch.amount_refunded ?? 0;") && block.includes("chargeAmount = ch.amount ?? null;"));
     assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });'));
 });
