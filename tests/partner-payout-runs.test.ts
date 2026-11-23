@@ -42,7 +42,7 @@ check('Wise bank file: header, then one row per bank partner, pounds with 2dp, G
     assert.strictEqual(rows[0], WISE_BANK_HEADERS.join(','));
     // Column order and values from Wise's own template (downloaded 2026-11-23): referenceNumber blank, amountCurrency "source".
     assert.strictEqual(rows[0], 'name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber');
-    assert.strictEqual(rows[1], 'Ann Bank,ann@example.com,BMS PARTNER 12,,PRIVATE,source,125.50,GBP,GBP,112233,01234567');
+    assert.strictEqual(rows[1], 'Ann Bank,ann@example.com,BMS PARTNER 12,,PERSON,source,125.50,GBP,GBP,112233,01234567');
     assert.deepStrictEqual([f.included, f.skipped, f.totalPence], [2, 3, 18550]);
 });
 
@@ -53,7 +53,7 @@ check('a cell starting with = + - @ is neutralised (CSV formula injection), and 
 
 check('Wise email file pays Wise users by email; PayPal file has NO header and PayPal\'s documented columns', () => {
     const w = buildExport('wise_email', 12, LINES).csv.trim().split('\r\n');
-    assert.strictEqual(w[1], 'Wil Wise,wil.wise@example.com,BMS PARTNER 12,PRIVATE,source,50.00,GBP,GBP');
+    assert.strictEqual(w[1], 'Wil Wise,wil.wise@example.com,BMS PARTNER 12,PERSON,source,50.00,GBP,GBP');
     const pp = buildExport('paypal', 12, LINES).csv.trim().split('\r\n');
     assert.deepStrictEqual(pp, ['pam.pay@example.com,75.25,GBP,P3-B12,Be More Swan partner commission,PAYPAL']);
 });

@@ -136,15 +136,17 @@ export async function cancelBatch(db: Db, batchId: number): Promise<{ ok: true }
  *      "e.g. Batch Payment Recipient", …, "INSTITUTION","source","0.00","GBP","GBP",,
  *    So: referenceNumber is a column (optional, left blank); amountCurrency is "source" (the amount is what we
  *    send, in GBP — NOT the currency code); a business recipient is "INSTITUTION".
- * ⚠️ Not yet checked: the value for a person (PRIVATE assumed) and the email template. US columns: see below.
+ *    A personal account is "PERSON" (template rows added 2026-11-23).
+ * ⚠️ Not yet checked: the email template ("Send by email"). US columns: see below.
  *    Download those from wise.com/batch/templates and change them HERE if they differ.
  */
 export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
 /** amountCurrency: "source" = the amount is in the source currency (GBP), what we pay out. From Wise's template. */
 export const WISE_AMOUNT_IN_SOURCE = 'source';
-/** receiverType for a business ("INSTITUTION", from Wise's template) and, unconfirmed, for a person. */
+/** receiverType: "INSTITUTION" for a business, "PERSON" for a personal account — both from Wise's template
+ *  (owner added a personal GBP and USD row, 2026-11-23). NOT "PRIVATE", which we had assumed. */
 export const WISE_RECEIVER_BUSINESS = 'INSTITUTION';
-export const WISE_RECEIVER_PERSON = 'PRIVATE';
+export const WISE_RECEIVER_PERSON = 'PERSON';
 export const WISE_EMAIL_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency'];
 // ✅ US bank (ACH) recipients, paid in USD from a GBP balance — CHECKED 2026-11-23 against Wise's "Send to bank
 // accounts" template with a GBP → USD, US bank account, business row (downloaded by the owner). Wise's header, exactly:

@@ -98,6 +98,10 @@ check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an 
     assert.strictEqual(at('addressState'), 'NY');
     assert.strictEqual(at('addressCountryCode'), 'US');
     assert.strictEqual(f.included, 1); assert.strictEqual(f.skipped, 1);
+    const personal = validatePayoutDetails({ ...good, holderType: 'person' });
+    assert.ok(personal.ok);
+    const p = buildExport('wise_us', 7, [{ partnerId: 3, name: 'C', email: 'c@example.com', amountPence: 100, details: personal.ok ? personal.value : null }]).csv.trim().split('\r\n')[1].split(',');
+    assert.strictEqual(p[WISE_US_HEADERS.indexOf('receiverType')], 'PERSON', 'Wise’s word for a personal account (its template, 2026-11-23) — not PRIVATE');
 });
 
 check('wired: SQL allows us_bank; admin can download the file; privacy says what we hold', () => {
