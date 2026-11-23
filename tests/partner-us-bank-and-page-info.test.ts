@@ -83,9 +83,10 @@ check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an 
     assert.strictEqual(head, WISE_US_HEADERS.join(','));
     const cells = row.split(',');
     const at = (h: string) => cells[WISE_US_HEADERS.indexOf(h)];
-    assert.strictEqual(at('receiverType'), 'BUSINESS');
+    assert.strictEqual(at('receiverType'), 'INSTITUTION', 'Wise’s word for a business recipient (its template, 2026-11-23)');
     assert.strictEqual(at('amount'), '123.45');
-    assert.strictEqual(at('amountCurrency'), 'GBP');
+    assert.strictEqual(at('amountCurrency'), 'source', 'the amount is in the source currency — Wise’s template value');
+    assert.strictEqual(at('referenceNumber'), '');
     assert.strictEqual(at('targetCurrency'), 'USD');
     assert.strictEqual(at('abartn'), '021000021');
     assert.strictEqual(at('accountType'), 'CHECKING');

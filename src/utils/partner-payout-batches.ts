@@ -129,17 +129,27 @@ export async function cancelBatch(db: Db, batchId: number): Promise<{ ok: true }
 // ── Export files ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Wise batch-file headers. ⚠️ Taken from the field names Wise documents (sourceCurrency,
- * targetCurrency, amountCurrency, amount, name, recipientEmail, paymentReference, receiverType) —
- * Wise's templates vary by type, so compare these once with the template downloaded from Wise
- * (Batch payments → template) before the first real payout, and change them HERE if they differ.
+ * Wise batch-file headers.
+ * ✅ UK bank — CHECKED 2026-11-23 against Wise's "Send to bank accounts" template (GBP → GBP, local bank account,
+ *    business), downloaded by the owner:
+ *      name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber
+ *      "e.g. Batch Payment Recipient", …, "INSTITUTION","source","0.00","GBP","GBP",,
+ *    So: referenceNumber is a column (optional, left blank); amountCurrency is "source" (the amount is what we
+ *    send, in GBP — NOT the currency code); a business recipient is "INSTITUTION".
+ * ⚠️ Not yet checked: the value for a person (PRIVATE assumed), the US (USD) columns, and the email template.
+ *    Download those from wise.com/batch/templates and change them HERE if they differ.
  */
-export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
+export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
+/** amountCurrency: "source" = the amount is in the source currency (GBP), what we pay out. From Wise's template. */
+export const WISE_AMOUNT_IN_SOURCE = 'source';
+/** receiverType for a business ("INSTITUTION", from Wise's template) and, unconfirmed, for a person. */
+export const WISE_RECEIVER_BUSINESS = 'INSTITUTION';
+export const WISE_RECEIVER_PERSON = 'PRIVATE';
 export const WISE_EMAIL_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency'];
 // ⚠️ US bank (ACH) recipients, paid in USD from a GBP balance. Field names from Wise's documented USD
 // recipient requirements (abartn, accountNumber, accountType, address.*) — like the UK headers above, COMPARE
 // WITH A TEMPLATE DOWNLOADED FROM WISE before the first real run.
-export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
+export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
     'abartn', 'accountNumber', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
 export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'paypal';
 
@@ -178,13 +188,13 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         const d = l.details;
         if (!d || l.amountPence <= 0) continue;
         if (format === 'wise_bank' && d.method === 'bank') {
-            rows.push([d.accountName, l.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+            rows.push([d.accountName, l.email, ref, '', WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
-            rows.push([d.accountName, l.email, ref, d.holderType === 'business' ? 'BUSINESS' : 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'USD',
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'USD',
                 d.routingNumber, d.accountNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
-            rows.push([l.name, d.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP']);
+            rows.push([l.name, d.email, ref, WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {
             // PayPal Payouts upload: no header row; email, amount, currency, customer id, note, wallet.
             rows.push([d.email, pounds(l.amountPence), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
