@@ -183,4 +183,15 @@ check('review of #823: a partner-entered VAT number adds no VAT until an admin c
     assert.ok(read('src/utils/partner-payout-batches.ts').includes('${vatPenceFor(d.amountPence, ukVat)})'), 'VAT amount and number frozen from the same read');
 });
 
+check('third review of #823: first annual payment carries a 12-month period; runs refresh VAT after a refund; annual = 200+ days', () => {
+    const w = read('netlify/functions/stripe-webhook.ts');
+    assert.strictEqual((w.match(/\.\.\.\(billingCycle === 'annual' \? annualPeriodFrom\(new Date\(stripeEvent\.created \* 1000\)\) : \{\}\)/g) || []).length, 2, 'both first-payment paths');
+    const l = read('src/utils/partner-ledger.ts');
+    assert.ok(l.includes("status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null"), 'a voided row leaves an unpaid run');
+    assert.ok(l.includes('for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);'));
+    assert.ok(l.includes("if (!run || !['draft', 'exported'].includes(run.status)) return;"), 'paid runs never change');
+    assert.ok(isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2028-01-01T00:00:00Z')));
+    assert.ok(!isAnnualPeriod(new Date('2027-01-01T00:00:00Z'), new Date('2027-03-01T00:00:00Z')), 'a 2-month proration invoice is not annual');
+});
+
 console.log(`\n${passed} passed`);

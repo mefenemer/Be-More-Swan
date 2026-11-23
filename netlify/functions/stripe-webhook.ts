@@ -113,6 +113,13 @@ async function _gbpNetPence(payment: PartnerPayment): Promise<number | null> {
 }
 
 /** The subscription period an invoice pays for (its line items), for Terms 3.2 pro rata and 4.1 annual holding. */
+/** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */
+function annualPeriodFrom(paidAt: Date): { periodStart: Date; periodEnd: Date } {
+    const end = new Date(paidAt.getTime());
+    end.setUTCFullYear(end.getUTCFullYear() + 1);
+    return { periodStart: paidAt, periodEnd: end };
+}
+
 function getInvoicePaidPeriod(invoice: Stripe.Invoice): { periodStart: Date | null; periodEnd: Date | null } {
     const lines = (invoice.lines?.data ?? []).filter((l) => typeof l.period?.start === 'number' && typeof l.period?.end === 'number' && (l.amount ?? 0) > 0);
     if (!lines.length) return { periodStart: null, periodEnd: null };
@@ -364,6 +371,8 @@ export default withLambda(async (event) => {
                 currency:        session.currency || 'gbp',
                 paidAt:          new Date(stripeEvent.created * 1000),
                 annual:          billingCycle === 'annual',   // Terms 4.1: 60-day hold
+                // Terms 3.2: a first annual payment covers 12 months, so a shorter commission period is pro-rated (review of #823).
+                ...(billingCycle === 'annual' ? annualPeriodFrom(new Date(stripeEvent.created * 1000)) : {}),
             });
         }
 
@@ -562,6 +571,7 @@ export default withLambda(async (event) => {
             currency:        pi.currency || 'gbp',
             paidAt:          new Date(stripeEvent.created * 1000),
             annual:          billingCycle === 'annual',   // Terms 4.1: 60-day hold
+            ...(billingCycle === 'annual' ? annualPeriodFrom(new Date(stripeEvent.created * 1000)) : {}),
         });
 
         // ── Founder alert — a new subscriber just paid ────────────────

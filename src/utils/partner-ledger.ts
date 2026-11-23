@@ -24,6 +24,7 @@
 
 import { notifyCommissionEarned } from './partner-notify';
 import { runOffAllows } from './partner-activity';
+import { UK_VAT_RATE_BPS } from './partner-statements';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
@@ -247,9 +248,12 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
 /** Terms 4.1: annual Subscription Payments are held at least this long. */
 export const ANNUAL_HOLDING_DAYS = 60;
 
-/** A payment period longer than ~40 days is an annual (or other long) plan payment. */
+/**
+ * An annual plan payment covers ~365 days. 200 days, not 40: a monthly invoice with a proration line plus the next
+ * month can span ~60 days and must not be held 60 days as if annual (review of #823).
+ */
 export function isAnnualPeriod(start: Date | null, end: Date | null): boolean {
-    return !!(start && end && end.getTime() - start.getTime() > 40 * DAY_MS);
+    return !!(start && end && end.getTime() - start.getTime() > 200 * DAY_MS);
 }
 
 /**
@@ -304,8 +308,12 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     ));
     const at = input.at ?? new Date();
     let adjusted = 0;
+    const touchedRuns = new Map<string, { batchId: number; partnerId: number }>();
 
     for (const row of rows) {
+        if (row.payoutBatchId && (row.status === 'pending' || row.status === 'payable')) {
+            touchedRuns.set(`${row.payoutBatchId}:${row.partnerId}`, { batchId: row.payoutBatchId, partnerId: row.partnerId });
+        }
         // Partner Terms 4.3 (cross-border review): only a refund or dispute within 180 days of the payment
         // reduces commission. The row is written by the webhook at the payment, so its created_at is the
         // payment time (a commission entered late by hand gets a later created_at — in the partner's favour).
@@ -321,8 +329,9 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
         if (row.status === 'voided') continue;
         if (row.status === 'pending' || row.status === 'payable') {
             if (target === 0) {
+                // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
                 await db.update(partnerCommissions)
-                    .set({ status: 'voided', voidedAt: at, voidReason: reason })
+                    .set({ status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null })
                     .where(eq(partnerCommissions.id, row.id));
                 adjusted++;
             } else if (target < row.commissionPence) {
@@ -355,7 +364,28 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
             adjusted++;
         }
     }
+    for (const r of touchedRuns.values()) await refreshRunAfterChange(db, r.batchId, r.partnerId);
     return { adjusted };
+}
+
+/**
+ * A commission in an unpaid run (draft / exported) changed: recompute the partner's frozen VAT from what the run
+ * now pays them, and the run's total, so exports and statements stay consistent (review of #823). Paid runs never change.
+ */
+async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number): Promise<void> {
+    const [run] = (await db.execute(sql`SELECT status FROM partner_payout_batches WHERE id = ${batchId}`)) as unknown as Array<{ status: string }>;
+    if (!run || !['draft', 'exported'].includes(run.status)) return;
+    const [{ amount }] = (await db.execute(sql`
+        SELECT COALESCE(SUM(commission_pence), 0)::int AS amount FROM partner_commissions
+         WHERE payout_batch_id = ${batchId} AND partner_id = ${partnerId}`)) as unknown as Array<{ amount: number }>;
+    await db.execute(sql`
+        UPDATE partner_payout_vat SET vat_pence = CASE WHEN vat_number IS NULL OR ${Number(amount)} <= 0 THEN 0
+                                                       ELSE ROUND(${Number(amount)} * ${UK_VAT_RATE_BPS}::numeric / 10000)::int END
+         WHERE batch_id = ${batchId} AND partner_id = ${partnerId}`);
+    await db.execute(sql`
+        UPDATE partner_payout_batches SET total_pence = (SELECT COALESCE(SUM(commission_pence), 0)::int FROM partner_commissions WHERE payout_batch_id = ${batchId}),
+               partner_count = (SELECT COUNT(DISTINCT partner_id)::int FROM partner_commissions WHERE payout_batch_id = ${batchId})
+         WHERE id = ${batchId}`);
 }
 
 /**
