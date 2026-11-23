@@ -1543,7 +1543,8 @@
               <tbody id="payout-batches-tbody"></tbody>
             </table>
           </div>
-          <p class="text-[11px] text-gray-400 mt-2">Wise files: check the column names once against the template you download from Wise before your first run. Payment reference on bank transfers: <span class="font-mono">BMS PARTNER &lt;run&gt;</span>.</p>
+          <p class="text-[11px] text-gray-500 mt-2"><strong>Paying from Wise:</strong> partners are paid from your Wise <strong>GBP balance</strong>. Before uploading a run's Wise files, convert enough EUR to GBP in Wise to cover the amount shown on the run (decision 2026-11-23). Wise converts to USD / EUR for partners paid in those currencies.</p>
+          <p class="text-[11px] text-gray-400 mt-1">Wise files follow the columns of Wise's own template (checked 2026-11-23); the first time, upload one to Wise and check it shows no errors before you confirm. Payment reference on bank transfers: <span class="font-mono">BMS PARTNER &lt;run&gt;</span>.</p>
         </div>
 
         <!-- Commission ledger: every commission, refund adjustment and bonus. -->
@@ -12774,13 +12775,15 @@ async function loadPayouts() {
       const files = [['wise_bank', 'Wise · UK bank', b.bank_partners], ['wise_us', 'Wise · US bank', b.us_bank_partners || 0], ['wise_eur', 'Wise · euro bank', b.eu_bank_partners || 0], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
         .filter(([, , n]) => n > 0)
         .map(([f, label, n]) => `<button type="button" onclick="payoutDownload(${b.id}, '${f}')" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${label} (${n})</button>`).join(' ');
+      // Paying from the Wise GBP balance: say how much it must hold for this run's Wise files (owner decision 2026-11-23).
+      const topUp = open && b.wise_total_pence > 0 ? `<p class="text-[11px] text-amber-700 font-semibold mt-1">Wise: top up your GBP balance to at least ${_pMoney(b.wise_total_pence)} first</p>` : '';
       const statusLabel = { draft: 'Ready to export', exported: 'Exported — awaiting payment', paid: `Paid ${_pDate(b.paid_at)}`, cancelled: 'Cancelled' }[b.status] || b.status;
       return `<tr class="border-t border-gray-100">
         <td class="py-2 px-2 whitespace-nowrap text-gray-700">#${b.id} · ${_pDate(b.created_at)}</td>
         <td class="py-2 px-2 text-gray-600">${statusLabel}</td>
         <td class="py-2 px-2 text-right font-mono">${_pMoney(b.total_pence)}</td>
         <td class="py-2 px-2 text-right">${b.partner_count}</td>
-        <td class="py-2 px-2 text-right whitespace-nowrap">${b.status !== 'cancelled' ? files : ''}
+        <td class="py-2 px-2 text-right whitespace-nowrap">${b.status !== 'cancelled' ? files + topUp : ''}
           ${open ? `<button type="button" onclick="payoutMarkPaid(${b.id})" class="btn-golive px-2.5 py-1 text-xs font-bold rounded-lg border">Mark paid</button>
                     <button type="button" onclick="payoutCancel(${b.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Cancel run</button>` : ''}</td>
       </tr>`;
