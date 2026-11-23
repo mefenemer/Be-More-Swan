@@ -10,7 +10,7 @@
 
 Everything else in 4.2 is unchanged: conversion and fees are the partner's, and non-GBP customer payments use the sterling amount received.
 
-**Notice (8.1):** this adds a way to be paid and reduces no one's earnings, so the 30-day notice for cuts doesn't apply. Partners are asked to accept on their next visit to the Partner page.
+**Notice (8.1):** 8.1 promises at least 30 days' notice of ANY change to these terms, and lets us hold payouts until the new version is accepted. v1.3 only adds a way to be paid and reduces no one's earnings. But bumping the version holds payouts and the Partner Assistant straight away until a partner accepts on their Partner page. That has no effect today, because no partners are approved on prod. Once there are live partners, a change like this should be emailed with 30 days' notice before the version goes live (or published without a version bump if it only adds an option, so nobody is blocked).
 
 **For a solicitor, when there is one:**
 - US partners and tax forms. We don't collect W-9 / W-8BEN(-E). 4.5 already says partners give us tax forms we reasonably ask for.
