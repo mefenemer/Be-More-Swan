@@ -176,7 +176,7 @@ check('first draft ticks the list; page marks are whitelisted and only touch her
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.includes("if (!(PAGE_MARKS as readonly string[]).includes(mark)) return json(400"));
     assert.ok(hub.includes("if (impersonating) return json(403"), 'an admin impersonating can’t tick her list');
-    const marks = hub.slice(hub.indexOf("body.action === 'onboarding'"), hub.indexOf("body.action === 'invite_profile_submit'"));
+    const marks = hub.slice(hub.indexOf("body.action === 'onboarding'"), hub.indexOf("body.action === 'weekly_nudge'"));
     assert.strictEqual((marks.match(/\.where\(eq\(partners\.id, p\.id\)\)/g) || []).length, 3);
 });
 

@@ -186,6 +186,19 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
              WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
                AND ur.created_at >= COALESCE(p.decided_at, p.created_at))::int AS signups,
           (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at IS NOT NULL)::int AS paying,
+          -- Phase 3 (docs/partner-onboarding-plan.md §3.5–3.6): who is in the free trial right now, and the last 7 days.
+          -- A COUNT only — partners never see who (customers are numbered, never named).
+          (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             JOIN trials t ON t.user_id = ur.referred_user_id
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= COALESCE(p.decided_at, p.created_at)
+               AND t.ended_at IS NULL AND t.converted_at IS NULL AND t.ends_at > now())::int AS in_trial,
+          (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= GREATEST(COALESCE(p.decided_at, p.created_at), now() - interval '7 days'))::int AS signups_7d,
+          (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at >= now() - interval '7 days')::int AS paying_7d,
+          (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id}
+             AND status <> 'voided' AND created_at >= now() - interval '7 days')::int AS earned_7d_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending')::int AS pending_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'payable')::int AS payable_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'paid')::int AS paid_pence,

@@ -1617,6 +1617,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('partner.note', 'Why', 'Please update the headline to match the Partner Terms.')],
     },
     {
+        templateKey: 'partner_weekly_summary',
+        name: 'Partner weekly summary',
+        category: 'Billing',
+        type: 'referral_reward',
+        title: '📈 {{partner.title}}',
+        message: '{{partner.summary}} This week: {{partner.action}}',
+        variables: [v('partner.title', 'Title', 'Your week as a partner: 12 visits, 2 sign-ups'), v('partner.summary', 'Numbers', 'Last 7 days: 12 visits, 2 sign-ups, 1 in a free trial now, 0 new paying customers.'), v('partner.action', 'This week', 'Offer to help the person in their free trial get going.')],
+    },
+    {
         templateKey: 'partner_commission_earned',
         name: 'Partner commission earned',
         category: 'Billing',

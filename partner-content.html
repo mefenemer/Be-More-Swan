@@ -144,6 +144,10 @@
         </div>
         <button type="button" onclick="window.partnerPage.chatClear()" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">New conversation</button>
       </div>
+      <label id="pa-weekly" class="hidden flex items-center gap-2 text-xs text-gray-600 mb-3" style="display:none">
+        <input id="pa-weekly-box" type="checkbox" onchange="window.partnerPage.setWeekly(this)">
+        <span>Send me a short summary on Mondays — my numbers and one thing to try (first 8 weeks, then only in weeks something happened)</span>
+      </label>
       <div id="pa-log" class="space-y-3 overflow-y-auto mb-3" style="max-height:28rem"></div>
       <div id="pa-starters" class="flex flex-wrap gap-1.5 mb-3">
         <button type="button" onclick="window.partnerPage.ask('Write a personal LinkedIn post about how I use Be More Swan, inviting my network to try it.')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-full border">LinkedIn post</button>
@@ -161,9 +165,10 @@
     </div>
 
     <!-- Numbers -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Visits · 30 days</p><p id="pt-visits" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
       <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Sign-ups</p><p id="pt-signups" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
+      <div class="bg-white border border-gray-200 rounded-xl p-4" title="People you invited who are in their 14-day free trial right now. Commission starts when they first pay."><p class="text-xs font-bold text-gray-500 uppercase">In free trial</p><p id="pt-trial" class="text-2xl font-extrabold text-gray-900">0</p></div>
       <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paying customers</p><p id="pt-paying" class="text-2xl font-extrabold text-gray-900 mt-1">0</p></div>
       <div class="bg-white border border-gray-200 rounded-xl p-4"><p class="text-xs font-bold text-gray-500 uppercase">Paid to you</p><p id="pt-paid" class="text-2xl font-extrabold text-gray-900 mt-1">£0.00</p></div>
     </div>
@@ -304,6 +309,7 @@
     document.getElementById('pt-visits').textContent = s.clicks_30d ?? 0;
     document.getElementById('pt-signups').textContent = s.signups ?? 0;
     document.getElementById('pt-paying').textContent = s.paying ?? 0;
+    document.getElementById('pt-trial').textContent = s.in_trial ?? 0;
     document.getElementById('pt-paid').textContent = money(s.paid_pence);
     document.getElementById('pt-payable').textContent = money(s.payable_pence);
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
@@ -339,6 +345,21 @@
     renderWelcome();
     renderInvitePage();
     chatRender();
+    // The Monday summary switch, and its button's question (?ask=…, whitelisted keys only — the words come from the server).
+    show('pa-weekly', !!data.onboarding && data.partner.status !== 'ended');
+    if (data.onboarding) document.getElementById('pa-weekly-box').checked = data.onboarding.weeklyNudge !== false;
+    const askKey = window._partnerAsk; window._partnerAsk = null;
+    const askText = askKey && data.onboarding?.askPrompts?.[askKey];
+    if (askText && !(data.partnerTerms && !data.partnerTerms.accepted && askKey !== 'terms')) {
+      const input = document.getElementById('pa-input');
+      if (!input.disabled) { input.value = askText; document.getElementById('pt-assistant-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); input.focus(); }
+    }
+  }
+  async function setWeekly(box) {
+    try {
+      await post({ action: 'weekly_nudge', on: box.checked });
+      window.showToast?.(box.checked ? 'Your Monday summary is on.' : 'Your Monday summary is off. You can turn it back on here any time.');
+    } catch (e) { box.checked = !box.checked; window.showToast?.(e.message, { icon: '⚠️' }); }
   }
 
   // ── Their own invite page ───────────────────────────────────────────────────
@@ -683,7 +704,7 @@
   function useInviteCard(i, j) { const c = chat.turns[i]?.cards?.[j]; if (c) fillInvitePage(c.headline, c.quote); }
 
   window.partnerPage = { savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList,
-    pickInvitePhoto, removeInvitePhoto, submitInvitePage, withdrawInvitePage, countInvite, fillInvitePage, useInviteCard };
+    pickInvitePhoto, removeInvitePhoto, submitInvitePage, withdrawInvitePage, countInvite, fillInvitePage, useInviteCard, setWeekly };
   load();
 })();
 </script>

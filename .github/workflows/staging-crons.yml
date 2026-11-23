@@ -150,6 +150,8 @@ jobs:
           # each job is claimed atomically. NOT `process-scenario-jobs` itself: scheduled, so a URL call is a 403.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
+          # `run-partner-weekly-nudge` (7d) sends each partner their assistant's weekly summary
+          # (partner-weekly-nudge.ts). Idempotent: one per partner per ISO week, claimed before sending.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
           # check, and the staleness watchdog.
           #
@@ -188,6 +190,7 @@ jobs:
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-partner-sweep         86400   120
+          run-partner-weekly-nudge  604800  300
           run-strategy-agent        604800  300
           "
 

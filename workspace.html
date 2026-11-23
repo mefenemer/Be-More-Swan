@@ -4269,6 +4269,10 @@ function formatCurrency(amount, currency) {
       // asks the signed-in partner to press Confirm (src/utils/partner-payouts.ts).
       const payoutTokenParam = qs.get('payoutToken');
       if (viewParam === 'partner' && payoutTokenParam && /^[A-Za-z0-9_-]{20,100}$/.test(payoutTokenParam)) window._partnerPayoutToken = payoutTokenParam;
+      // ?view=partner&ask=trial — the Monday summary's button: the Partner page types that question into the
+      // assistant (a whitelisted key; the page looks the words up, nothing from the URL is shown or sent).
+      const askParam = qs.get('ask');
+      if (viewParam === 'partner' && askParam && /^[a-z_]{2,20}$/.test(askParam)) window._partnerAsk = askParam;
       history.replaceState(null, '', window.location.pathname);
       await loadView(viewParam);
     }
