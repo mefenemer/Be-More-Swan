@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildExport, paymentReference, WISE_BANK_HEADERS, type BatchLine } from '../src/utils/partner-payout-batches';
+import { buildExport, paymentReference, underMinimumReason, WISE_BANK_HEADERS, type BatchLine } from '../src/utils/partner-payout-batches';
 import { proposeBatchStatus, proposeBonus, proposeCreateBatch, proposeVoidCommission } from '../src/utils/partner-ops-proposals';
 
 let passed = 0;
@@ -119,6 +119,15 @@ check('the bonus modal sits outside every .admin-view', () => {
     const at = html.indexOf('<div id="ledger-bonus-modal"');
     const before = html.slice(0, at);
     assert.ok(at > 0 && (before.match(/<\/section>/g) || []).length >= (before.match(/<section id="view-/g) || []).length);
+});
+
+check('Partner Terms 1.3 4.2 / 7.3: small balances are paid after 6 months (if £10+) or when the partnership ends', () => {
+    const now = new Date('2027-06-15T00:00:00Z');
+    assert.strictEqual(underMinimumReason(6000, 5000, 'approved', new Date('2027-06-01T00:00:00Z'), now), null, 'at or over the minimum');
+    assert.match(underMinimumReason(2000, 5000, 'approved', new Date('2027-01-01T00:00:00Z'), now)!, /rolls over/, 'under 6 months');
+    assert.strictEqual(underMinimumReason(2000, 5000, 'approved', new Date('2026-12-15T00:00:00Z'), now), null, 'exactly 6 months');
+    assert.match(underMinimumReason(900, 5000, 'approved', new Date('2026-01-01T00:00:00Z'), now)!, /rolls over/, 'under £10 waits');
+    assert.strictEqual(underMinimumReason(300, 5000, 'ended', new Date('2027-06-14T00:00:00Z'), now), null, 'ended: any balance');
 });
 
 console.log(`\n${passed} passed`);

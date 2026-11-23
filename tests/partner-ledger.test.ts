@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { invoiceNetPence, sessionNetPence } from '../src/utils/partner-ledger';
+import { invoiceNetPence, isSubscriptionPaymentInvoice, sessionNetPence } from '../src/utils/partner-ledger';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -110,6 +110,16 @@ check('the release query uses query-builder operators, never a Date bound into r
     const fn = ledger.slice(ledger.indexOf('export async function releaseDueCommissions'));
     assert.ok(fn.includes('lte(partnerCommissions.availableAt, now)'));
     assert.ok(!/sql`[^`]*\$\{now\}/.test(fn));
+});
+
+check('Partner Terms 1.3 §3.2: only plan renewals and plan changes earn commission on invoice.paid', () => {
+    assert.ok(isSubscriptionPaymentInvoice('subscription_cycle'));
+    assert.ok(isSubscriptionPaymentInvoice('subscription_update'));
+    for (const r of ['manual', 'subscription_threshold', 'subscription', 'upcoming', 'quote_accept', '', null, undefined]) {
+        assert.ok(!isSubscriptionPaymentInvoice(r as string | null | undefined), String(r));
+    }
+    const block = eventBlock(read('netlify/functions/stripe-webhook.ts'), 'invoice.paid');
+    assert.ok(block.includes('if (isSubscriptionPaymentInvoice(billingReason)) await _recordPartnerCommission(db, {'), 'invoice.paid commission must be gated to Subscription Payments');
 });
 
 console.log(`\n${passed} passed`);
