@@ -48,13 +48,15 @@ export function vatPenceFor(commissionPence: number, ukVat: boolean): number {
 export const statementNumber = (batchId: number, partnerId: number) => `BMS-SB-${batchId}-${partnerId}`;
 
 /** The partner's paid payouts, newest first — each has a statement. */
-export async function listPartnerPayouts(db: Db, partnerId: number): Promise<Array<{ batchId: number; paidAt: string; commissionPence: number }>> {
+export async function listPartnerPayouts(db: Db, partnerId: number): Promise<Array<{ batchId: number; paidAt: string; commissionPence: number; vatPence: number }>> {
+    // vat_pence = the VAT frozen for that run, never the partner's current VAT status (review of #823).
     const rows = (await db.execute(sql`
-        SELECT b.id AS batch_id, b.paid_at::text AS paid_at, SUM(c.commission_pence)::int AS amount
+        SELECT b.id AS batch_id, b.paid_at::text AS paid_at, SUM(c.commission_pence)::int AS amount,
+               COALESCE((SELECT v.vat_pence FROM partner_payout_vat v WHERE v.batch_id = b.id AND v.partner_id = ${partnerId}), 0)::int AS vat_pence
           FROM partner_commissions c JOIN partner_payout_batches b ON b.id = c.payout_batch_id
          WHERE c.partner_id = ${partnerId} AND b.status = 'paid'
          GROUP BY b.id, b.paid_at ORDER BY b.paid_at DESC LIMIT 60`)) as Row[];
-    return rows.map((r) => ({ batchId: Number(r.batch_id), paidAt: String(r.paid_at), commissionPence: Number(r.amount) }));
+    return rows.map((r) => ({ batchId: Number(r.batch_id), paidAt: String(r.paid_at), commissionPence: Number(r.amount), vatPence: Number(r.vat_pence) || 0 }));
 }
 
 export interface StatementData {
