@@ -37,7 +37,8 @@ export function rateLine(t: PartnerTermsNow | null): string {
     if (!t) return 'a share of what each customer you invite pays';
     const length = t.durationMonths == null ? ', for as long as they stay a customer'
         : `, for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-    return `${pct(effectiveShareBps(t.rateBps, t.costDeductionBps))}% of each plan payment a customer you invite makes (excluding VAT)${length}`;
+    // Actual costs (Terms 3.2, 2026-11-23): the rate applies after costs, so the share of each payment is "up to".
+    return `${pct(t.rateBps)}% of each plan payment a customer you invite makes after costs — up to ${pct(effectiveShareBps(t.rateBps, t.costDeductionBps))}% of each payment (excluding VAT)${length}`;
 }
 
 /** "every £29 a customer pays earns you £11.60" — from a real plan price, with the ledger's own sum. */
@@ -47,7 +48,8 @@ export function exampleLine(t: PartnerTermsNow | null, planPriceGbp: number | nu
     const earn = commissionPence(pricePence, t.rateBps, t.costDeductionBps);
     if (earn <= 0) return null;
     const money = (p: number) => `£${(p / 100).toFixed(2).replace(/\.00$/, '')}`;
-    return `every ${money(pricePence)} a customer pays (excluding VAT) earns you £${(earn / 100).toFixed(2)}`;
+    // "up to": actual costs above the minimum lower it (Terms 3.2, actual costs 2026-11-23).
+    return `every ${money(pricePence)} a customer pays (excluding VAT) earns you up to £${(earn / 100).toFixed(2)}`;
 }
 
 export function buildChecklist(input: {

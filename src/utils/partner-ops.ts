@@ -211,6 +211,9 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
           (SELECT MIN(available_at) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending') AS next_release_at`);
     const commissions = await rows(db, sql`
         SELECT c.id, c.kind, c.status, c.commission_pence, c.rate_bps, c.cost_deduction_bps, c.available_at, c.created_at, c.paid_at, c.void_reason,
+               -- Actual costs (Terms 3.2): the month, what the customer paid, the costs taken off and the shortfall carried.
+               c.net_amount_pence, c.service_period_start, c.service_period_end, c.cost_pence, c.card_fee_pence, c.deduction_pence,
+               c.deduction_basis, c.carry_in_pence, c.carry_out_pence, c.costs_checked_at,
                (SELECT COUNT(*) FROM partner_referrals x WHERE x.partner_id = ${id} AND x.id <= c.partner_referral_id)::int AS customer_no
           FROM partner_commissions c
          WHERE c.partner_id = ${id}

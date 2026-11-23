@@ -163,9 +163,12 @@ check('the notice reports whether the EMAIL went, and the admin is warned if not
     assert.ok(read('netlify/functions/admin-partners.ts').includes('emailed: r.emailed });'));
     assert.ok(read('admin.html').includes('but the email did NOT send'));
 });
-check('the Partner Assistant explains commission as a plain share, with no cost deduction', () => {
+// Owner decision 2026-11-23 (docs/partner-actual-costs-plan.md) replaced the "plain fixed share": commission is the rate
+// AFTER COSTS — the higher of the 20% minimum or that customer's actual costs that month.
+check('the Partner Assistant explains commission after actual costs (owner 2026-11-23)', () => {
     const a = read('netlify/functions/partner-assistant.ts');
-    assert.ok(a.includes('Commission is commissionForNewCustomers.sharePercent of each plan payment'));
+    assert.ok(a.includes('Commission (Partner Terms 3.2) is commissionForNewCustomers.ratePercent of each plan payment AFTER COSTS'));
+    assert.ok(a.includes("the higher of minimumCostPercent of the payment or that customer's actual costs that month"));
     assert.ok(!a.includes('costDeductionBps, 2000 = 20%'));
 });
 
@@ -175,11 +178,12 @@ check('25% after a 20% deduction is told as 20% of each payment; 40% after 20% a
     assert.strictEqual(effectiveShareBps(4000, 2000), 3200);
     assert.strictEqual(effectiveShareBps(2500, 0), 2500);
 });
-check('the Terms state 20% of each Subscription Payment and no rate/deduction mechanics', () => {
+check('the Terms state the actual-costs rule (owner 2026-11-23) and keep the 32% cap', () => {
     const t = read('partner-terms.html');
-    assert.ok(t.includes('20% of each Subscription Payment'));
+    assert.ok(t.includes('<strong>25% of each Subscription Payment after costs</strong>'));
+    assert.ok(t.includes('<strong>the higher of</strong> (a) a minimum share'));
+    assert.ok(t.includes('Commission is never less than zero, you never owe us anything because of costs'));
     assert.ok(t.includes('no commission is higher than 32% of a Subscription Payment'));
-    assert.ok(!t.includes('cost deduction'), 'the Terms no longer explain a cost deduction');
 });
 
 console.log(`\n${passed} passed`);

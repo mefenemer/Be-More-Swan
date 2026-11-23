@@ -148,6 +148,12 @@ export default withLambda(async (event) => {
                 id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps, costDeductionBps: c.cost_deduction_bps ?? 0,
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
                 customer: c.kind === 'invoice' && c.customer_no ? `Customer ${c.customer_no}` : null,
+                // Actual costs (Terms 3.2): totals only — never what the customer used.
+                paymentPence: c.net_amount_pence ?? null, month: c.service_period_start ?? null,
+                costs: c.costs_checked_at ? {
+                    deductionPence: c.deduction_pence, basis: c.deduction_basis, carryInPence: c.carry_in_pence ?? 0, carryOutPence: c.carry_out_pence ?? 0,
+                } : null,
+                provisional: c.kind === 'invoice' && !c.costs_checked_at && !!c.service_period_end,
             })),
             // Terms 4.5: their VAT number (UK-registered = VAT added on top) and a statement per paid payout.
             vat: { number: p.vatNumber ?? null, ukRegistered: isUkVatRegistered(p), pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered },

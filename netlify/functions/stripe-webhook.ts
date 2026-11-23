@@ -79,10 +79,18 @@ async function _isUntrackedSubscription(db: ReturnType<typeof getDb>, userId: nu
 // insert short-circuits a redelivery as a duplicate before this line.
 async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: PartnerPayment): Promise<void> {
     try {
-        // Partner Terms 3.2: a payment in another currency counts at the sterling amount Stripe settled it into.
-        // Only look up a sterling amount for a customer a partner actually introduced (review of #823).
-        if (payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null && await hasPartnerReferral(db, payment.userId)) {
-            payment = { ...payment, gbpNetAmountPence: await _gbpNetPence(payment).catch((e) => { console.error('[stripe-webhook] sterling amount lookup failed:', e?.message); return null; }) };
+        // Partner Terms 3.2: a payment in another currency counts at the sterling amount Stripe settled it into, and the
+        // card fee is part of the actual costs taken off. Both come from the charge's balance transaction, looked up only
+        // for a customer a partner actually introduced (review of #823).
+        if (await hasPartnerReferral(db, payment.userId)) {
+            const st = await _settlement(payment).catch((e) => { console.error('[stripe-webhook] settlement lookup failed:', e?.message); return null; });
+            payment = {
+                ...payment,
+                gbpNetAmountPence: payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null ? st?.gbpNetPence ?? null : payment.gbpNetAmountPence,
+                cardFeePence: payment.cardFeePence ?? st?.feePence ?? null,
+                // Keep the PaymentIntent the lookup found: refunds and disputes match on it (review of #827).
+                paymentIntentId: payment.paymentIntentId ?? st?.paymentIntentId ?? null,
+            };
         }
         const out = await recordPartnerPayment(db, payment);
         if (out.recorded) console.log(`[stripe-webhook] partner ${out.partnerId} earned ${out.commissionPence}p on ${payment.paymentRef}`);
@@ -94,11 +102,11 @@ async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: P
 }
 
 /**
- * The sterling amount Stripe settled a non-GBP payment into, for its tax-exclusive part: the charge's
- * balance transaction amount (GBP pence) × net ÷ charge amount. Proportional, so zero-decimal currencies
- * and VAT both come out right. Null when there is no charge or it didn't settle in GBP.
+ * From the charge's balance transaction: the sterling amount Stripe settled the payment into, for its tax-exclusive
+ * part (amount × net ÷ charge amount — proportional, so zero-decimal currencies and VAT both come out right), and the
+ * fee Stripe charged (GBP pence). Null when there is no charge or it didn't settle in GBP.
  */
-async function _gbpNetPence(payment: PartnerPayment): Promise<number | null> {
+async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: number; feePence: number; paymentIntentId: string } | null> {
     let piId = payment.paymentIntentId;
     if (!piId && payment.paymentRef.startsWith('in_')) {
         const inv = await stripe.invoices.retrieve(payment.paymentRef, { expand: ['payments'] });
@@ -109,7 +117,7 @@ async function _gbpNetPence(payment: PartnerPayment): Promise<number | null> {
     const charge = pi.latest_charge && typeof pi.latest_charge !== 'string' ? pi.latest_charge : null;
     const bt = charge?.balance_transaction && typeof charge.balance_transaction !== 'string' ? charge.balance_transaction : null;
     if (!charge || !bt || bt.currency !== 'gbp' || !(charge.amount > 0)) return null;
-    return Math.round((bt.amount * payment.netAmountPence) / charge.amount);
+    return { gbpNetPence: Math.round((bt.amount * payment.netAmountPence) / charge.amount), feePence: Math.max(0, bt.fee ?? 0), paymentIntentId: piId };
 }
 
 /** Is any OTHER dispute on this charge still open, or lost? Then a won / warning_closed one must not reinstate. */

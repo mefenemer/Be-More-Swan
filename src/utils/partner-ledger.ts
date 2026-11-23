@@ -33,6 +33,8 @@ import {
 import {
     addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
+import { applyCostRule, serviceSlices, sliceRef } from './partner-costs';
+import { termsIncludeActualCosts } from '../config/partner-terms';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -67,6 +69,8 @@ export interface PartnerPayment {
     periodEnd?: Date | null;
     /** True for an annual plan payment when the period isn't known (first payment via Checkout). */
     annual?: boolean;
+    /** The card / payment processing fee Stripe charged on this payment, in pence (actual costs, Terms 3.2). Null = unknown. */
+    cardFeePence?: number | null;
 }
 
 export type RecordOutcome =
@@ -168,8 +172,12 @@ async function lockedTermsFor(db: Db, referralId: number, partnerId: number, pai
     const period = resolvePeriodAt(await loadPeriods(db, partnerId), partnerId, paidAt);
     if (!period) return null;
     const terms = lockTerms(period);
+    // Which rule this customer follows is fixed now, with their terms: actual costs only if the partner had accepted the
+    // Terms version with that rule; otherwise the fixed deduction they were promised (review of #827).
+    const [partnerRow] = await db.select({ termsVersion: partners.termsVersion }).from(partners).where(eq(partners.id, partnerId)).limit(1);
+    const costBasis = termsIncludeActualCosts(partnerRow?.termsVersion) ? 'actual' : 'fixed';
     await db.update(partnerReferrals)
-        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths })
+        .set({ subscribedAt: paidAt, ratePeriodId: terms.ratePeriodId, rateBps: terms.rateBps, costDeductionBps: terms.costDeductionBps, durationMonths: terms.durationMonths, costBasis })
         .where(and(eq(partnerReferrals.id, pr.id), isNull(partnerReferrals.subscribedAt)));
     const [locked] = await db.select().from(partnerReferrals).where(eq(partnerReferrals.id, pr.id)).limit(1);
     return locked ?? null;
@@ -219,33 +227,86 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     }
 
     // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
+    // Since actual costs (Terms 3.2, docs/partner-actual-costs-plan.md) this is the MINIMUM deduction.
     const costDeductionBps = terms.costDeductionBps ?? 0;
     // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
     const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
-    const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
-    const amount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
-    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
     const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
-    const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
-    const availableAt = new Date(payment.paidAt.getTime() + holdDays * DAY_MS);
-    const inserted = await db.insert(partnerCommissions).values({
-        partnerId: ref.partnerId,
-        partnerReferralId: terms.id,
-        kind: 'invoice',
-        stripeInvoiceId: payment.paymentRef,
-        stripeChargeId: payment.paymentIntentId,
-        netAmountPence: eligiblePence,
-        rateBps: terms.rateBps,
-        costDeductionBps,
-        commissionPence: amount,
-        currency: PROGRAMME_CURRENCY,
-        status: 'pending',
-        availableAt,
-    }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
+    const holdDaysFixed = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+
+    // A customer on the FIXED rule (locked before actual costs, or their partner hasn't accepted the Terms with it): one
+    // row, the fixed deduction, released after the holding period exactly as before — no month-end costs (review of #827).
+    if (terms.costBasis !== 'actual') {
+        const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
+        const fixedAmount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
+        const availableAtFixed = new Date(payment.paidAt.getTime() + holdDaysFixed * DAY_MS);
+        const ins = await db.insert(partnerCommissions).values({
+            partnerId: ref.partnerId, partnerReferralId: terms.id, kind: 'invoice',
+            stripeInvoiceId: payment.paymentRef, stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligiblePence, rateBps: terms.rateBps, costDeductionBps, commissionPence: fixedAmount,
+            currency: PROGRAMME_CURRENCY, status: 'pending', availableAt: availableAtFixed,
+        }).onConflictDoNothing().returning({ id: partnerCommissions.id });
+        if (!ins.length) return { recorded: false, reason: 'duplicate' };
+        if (fixedAmount > 0) await notifyCommissionEarned(db, ref.partnerId, fixedAmount, availableAtFixed);
+        return { recorded: true, commissionPence: fixedAmount, partnerId: ref.partnerId };
+    }
+
+    const periodStart = payment.periodStart ?? (isAnnual ? payment.paidAt : null);
+    const periodEnd = payment.periodEnd ?? (isAnnual ? addMonthsUtc(payment.paidAt, 12) : null);
+    // Each month of service is its own row (an annual payment → 12), worked out against that month's actual costs at
+    // month end (partner-commission-sweep.ts trueUpCommissions). Recorded now provisionally at the minimum deduction,
+    // and not releasable until its month has been checked.
+    const slices = serviceSlices(netPence, periodStart, periodEnd, payment.paidAt)
+        .filter((sl) => !windowEnd || sl.periodStart.getTime() < windowEnd.getTime());
+    if (!slices.length) return { recorded: false, reason: 'outside_window' };
+    const holdDays = holdDaysFixed;
+    const holdUntil = payment.paidAt.getTime() + holdDays * DAY_MS;
+    const values = slices.map((sl, i) => {
+        // The month that straddles the end of the commission period earns only on its days inside it (pro rata).
+        const eligible = proRataPence(sl.netPence, sl.periodStart, sl.periodEnd, windowEnd);
+        return {
+            partnerId: ref.partnerId,
+            partnerReferralId: terms.id,
+            kind: 'invoice',
+            stripeInvoiceId: sliceRef(payment.paymentRef, sl, slices.length),
+            stripeChargeId: payment.paymentIntentId,
+            netAmountPence: eligible,
+            rateBps: terms.rateBps!,
+            costDeductionBps,
+            commissionPence: commissionPence(eligible, terms.rateBps!, costDeductionBps),
+            currency: PROGRAMME_CURRENCY,
+            status: 'pending',
+            servicePeriodStart: sl.periodStart,
+            servicePeriodEnd: sl.periodEnd,
+            // The whole payment's card fee belongs to its first month.
+            cardFeePence: i === 0 && typeof payment.cardFeePence === 'number' ? Math.max(0, Math.round(payment.cardFeePence)) : null,
+            availableAt: new Date(Math.max(holdUntil, sl.periodEnd.getTime())),
+        };
+    });
+    const inserted = await db.insert(partnerCommissions).values(values).onConflictDoNothing().returning({ ref: partnerCommissions.stripeInvoiceId });
     if (!inserted.length) return { recorded: false, reason: 'duplicate' };
-    // Tell the partner (in-app + email). Never throws; a redelivery never gets here (duplicate above).
-    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, availableAt);
+    // Only what was actually recorded now (a redelivery that finds some months already there adds — and announces — only the rest).
+    const insertedRefs = new Set(inserted.map((r) => r.ref));
+    const amount = values.filter((v) => insertedRefs.has(v.stripeInvoiceId)).reduce((n, v) => n + v.commissionPence, 0);
+    // Tell the partner (in-app + email): "up to" — the month-end costs can lower it. Never throws; a redelivery never gets here.
+    if (amount > 0) await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
+}
+
+/**
+ * What a payment's commission row earns on `remainingNetPence` (after refunds): with its measured month-end costs once
+ * checked (the customer used the service, so costs stay), else at the minimum deduction. Used by refunds and disputes.
+ */
+export function commissionForRow(row: {
+    rateBps: number | null; costDeductionBps: number; costsCheckedAt?: Date | null;
+    costPence?: number | null; cardFeePence?: number | null; carryInPence?: number | null;
+}, remainingNetPence: number): number {
+    if (!row.costsCheckedAt) return commissionPence(remainingNetPence, row.rateBps ?? 0, row.costDeductionBps);
+    return applyCostRule({
+        paymentPence: remainingNetPence, minDeductionBps: row.costDeductionBps, costPence: row.costPence ?? 0,
+        cardFeePence: row.cardFeePence ?? 0, carryInPence: row.carryInPence ?? 0, rateBps: row.rateBps ?? 0,
+    }).commissionPence;
 }
 
 /** Terms 4.1: annual Subscription Payments are held at least this long. */
@@ -428,7 +489,10 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
         await db.update(partnerCommissions).set({ status: 'voided', voidedAt: at, voidReason: plan.row.reason, payoutBatchId: null })
             .where(eq(partnerCommissions.id, row.id));
     } else if (plan.row) {
-        const status = row.status === 'voided' ? (row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
+        // A month not yet costed goes back to 'pending' even if its date has passed: the true-up must run before it can be
+        // released, or a won dispute would pay a heavy user's month at the provisional figure (review of #827).
+        const uncosted = !!row.servicePeriodEnd && !row.costsCheckedAt;
+        const status = row.status === 'voided' ? (!uncosted && row.availableAt && row.availableAt <= at ? 'payable' : 'pending') : row.status;
         await db.update(partnerCommissions).set({
             status, commissionPence: plan.row.amount, voidedAt: null, voidReason: null,
             note: row.status === 'voided' ? `Dispute closed in our favour — reinstated ${at.toISOString().slice(0, 10)}` : `Adjusted: was ${row.commissionPence}p`,
@@ -446,6 +510,19 @@ async function applyPlan(db: Db, row: typeof partnerCommissions.$inferSelect, pl
 }
 
 /**
+ * An annual payment is 12 rows `<ref>#m1…#m12` (actual costs, partner-costs.ts sliceRef). A refund or dispute that
+ * carries only the invoice id (a first annual payment via Checkout is recorded without a PaymentIntent) must still find
+ * all 12 — review of #827. Stripe ids contain `_`, a LIKE wildcard, so it is escaped (backslash is Postgres's default
+ * LIKE escape); ids are letters, digits and `_` only, so nothing else needs escaping.
+ */
+export function sliceLikePattern(key: string): string {
+    return key.replace(/_/g, '\\_') + '#m%';
+}
+function sliceRefMatchers(keys: string[]) {
+    return keys.filter((k) => /^[A-Za-z0-9_]+$/.test(k)).map((k) => sql`${partnerCommissions.stripeInvoiceId} LIKE ${sliceLikePattern(k)}`);
+}
+
+/**
  * A refund or dispute on a payment: bring its commission to what the remaining payment earns (0 for a dispute).
  * Idempotent: targets come from the TOTAL refunded so far and the state already recorded. Partner Terms 4.3: a
  * refund or dispute more than 180 days after the payment changes nothing.
@@ -455,7 +532,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     if (!keys.length) return { adjusted: 0 };
     const rows = await db.select().from(partnerCommissions).where(and(
         eq(partnerCommissions.kind, 'invoice'),
-        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys)),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
     const at = input.at ?? new Date();
     let adjusted = 0;
@@ -463,7 +540,7 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     for (const row of rows) {
         if (isPastClawbackWindow(row.createdAt, at)) continue;
         const remaining = input.kind === 'dispute' ? 0 : remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence);
-        const desired = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        const desired = commissionForRow(row, remaining);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
         const info = await runInfo(db, row);
         const plan = planReconcile(await stateFor(db, row, info), { kind: input.kind, desired, reason });
@@ -509,7 +586,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
     const at = input.at ?? new Date();
     const rows = await db.select().from(partnerCommissions).where(and(
         eq(partnerCommissions.kind, 'invoice'),
-        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys)),
+        or(inArray(partnerCommissions.stripeChargeId, keys), inArray(partnerCommissions.stripeInvoiceId, keys), ...sliceRefMatchers(keys)),
     ));
     let reinstated = 0;
     const touched = new Map<string, { batchId: number; partnerId: number }>();
@@ -518,7 +595,7 @@ export async function reinstateDisputedCommission(db: Db, input: {
         // Only act if a dispute is actually open on this payment (a stray 'won' event changes nothing).
         if (!((st0.rowStatus === 'voided' && st0.rowVoidReason === DISPUTE_REASON) || st0.disputeAdjustmentsOpen)) continue;
         const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);
-        const desired = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
+        const desired = commissionForRow(row, remaining);
         const info = await runInfo(db, row);
         const plan = planReconcile(st0, { kind: 'dispute_won', desired });
         await applyPlan(db, row, plan, at, touched, info);
@@ -529,11 +606,16 @@ export async function reinstateDisputedCommission(db: Db, input: {
     return { reinstated };
 }
 
-/** Nightly: pending commissions whose holding period has ended become payable. */
+/**
+ * Nightly: pending commissions whose holding period has ended become payable — but only once their month's actual
+ * costs have been checked (trueUpCommissions, which runs first). Rows from before actual costs (no service period),
+ * bonuses and adjustments release as before.
+ */
 export async function releaseDueCommissions(db: Db, now: Date = new Date()): Promise<{ released: number }> {
     const released = await db.update(partnerCommissions)
         .set({ status: 'payable' })
-        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now)))
+        .where(and(eq(partnerCommissions.status, 'pending'), lte(partnerCommissions.availableAt, now),
+            or(sql`${partnerCommissions.costsCheckedAt} IS NOT NULL`, sql`${partnerCommissions.servicePeriodEnd} IS NULL`, sql`${partnerCommissions.kind} <> 'invoice'`)))
         .returning({ id: partnerCommissions.id });
     return { released: released.length };
 }
