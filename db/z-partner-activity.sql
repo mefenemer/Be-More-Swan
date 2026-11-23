@@ -15,6 +15,7 @@
 --   activity_pause_last_day  the last day counted into activity_pause_days (keeps the nightly tick idempotent)
 --   activity_pause_anchor    the clock start those paused days belong to; a new start (approval, new customer) resets them
 --   inactivity_notice_at / inactivity_notice_ends   an open §7.5 notice; cleared when withdrawn
+--   partner_referrals.locked_while_suspended        the customer's first payment came while the partner was suspended (§7.5(b))
 
 BEGIN;
 
@@ -27,6 +28,9 @@ ALTER TABLE partners ADD COLUMN IF NOT EXISTS activity_pause_last_day DATE;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS activity_pause_anchor TIMESTAMP;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS inactivity_notice_at TIMESTAMP;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS inactivity_notice_ends TIMESTAMP;
+
+-- §7.5(b): a customer whose first payment came while the partner was suspended never qualifies.
+ALTER TABLE partner_referrals ADD COLUMN IF NOT EXISTS locked_while_suspended BOOLEAN NOT NULL DEFAULT FALSE;
 
 ALTER TABLE partners DROP CONSTRAINT IF EXISTS partners_end_reason_check;
 ALTER TABLE partners ADD CONSTRAINT partners_end_reason_check

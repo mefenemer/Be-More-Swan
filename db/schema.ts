@@ -6756,6 +6756,8 @@ export const partnerReferrals = pgTable("partner_referrals", {
   rateBps: integer("rate_bps"),
   costDeductionBps: integer("cost_deduction_bps"),
   durationMonths: integer("duration_months"),
+  // Partner Terms 1.3 §7.5(b) (db/z-partner-activity.sql): first payment came while the partner was suspended — never a Qualifying Customer.
+  lockedWhileSuspended: boolean("locked_while_suspended").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("partner_referrals_partner_idx").on(t.partnerId, t.createdAt),

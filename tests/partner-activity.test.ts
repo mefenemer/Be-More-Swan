@@ -86,7 +86,7 @@ console.log('wiring');
 check('the ledger: suspended locks but earns nothing, ended uses the run-off, re-approval ignores old customers', () => {
     const l = read('src/utils/partner-ledger.ts');
     assert.ok(l.includes("inArray(partners.status, ['approved', 'suspended', 'ended'])"), 'lookup covers suspended + ended');
-    assert.ok(l.includes("if (ref.status === 'suspended') return { recorded: false, reason: 'suspended' };"));
+    assert.ok(l.includes("if (ref.status === 'suspended') {") && l.includes("return { recorded: false, reason: 'suspended' };"));
     assert.ok(l.includes('runOffAllows(ref.endReason, ref.endedAt, existing.durationMonths, payment.paidAt)'));
     assert.ok(l.includes("terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' }"));
     // The suspended return must come AFTER the terms lock, so the real first payment is the one locked.
@@ -138,10 +138,15 @@ check('End is only possible once the active date has passed AND the notice has r
     assert.ok(a.includes("canEnd: p.status === 'approved' && !!notice && !qualifiedSinceNotice && pastDate && now.getTime() >= notice.endsAt.getTime(),"));
     assert.ok(a.includes('sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null'), 'a notice from before the latest approval is ignored');
 });
-check('a Qualifying Customer\'s FIRST commission must be live and from the first payment (not a payment while suspended)', () => {
+check('a Qualifying Customer: first payment not while suspended, first commission not voided', () => {
     const a = read('src/utils/partner-activity.ts');
-    assert.ok(a.includes("SELECT c.status <> 'voided' AND c.created_at < pr.subscribed_at + interval '3 days'"));
-    assert.ok(a.includes('ORDER BY c.created_at ASC LIMIT 1) IS TRUE'));
+    // Second review of #820: a flag, not timing — a late or hand-entered first commission still counts.
+    assert.ok(a.includes('AND NOT pr.locked_while_suspended'));
+    assert.ok(a.includes("ORDER BY c.created_at ASC LIMIT 1), FALSE) = FALSE"));
+    assert.ok(!a.includes("interval '3 days'"));
+    const l = read('src/utils/partner-ledger.ts');
+    assert.ok(l.includes('if (terms.subscribedAt.getTime() === payment.paidAt.getTime()) {') && l.includes('.set({ lockedWhileSuspended: true })'));
+    assert.ok(read('db/z-partner-activity.sql').includes('ALTER TABLE partner_referrals ADD COLUMN IF NOT EXISTS locked_while_suspended BOOLEAN NOT NULL DEFAULT FALSE;'));
 });
 check('End checks the free-period extension itself, not only the nightly sweep', () => {
     const a = read('src/utils/partner-activity.ts');

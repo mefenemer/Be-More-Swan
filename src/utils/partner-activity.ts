@@ -102,20 +102,20 @@ export interface PartnerActivity {
 }
 
 /**
- * Latest Qualifying Customer's first payment in the current partnership (§7.5(b)): the customer's
- * FIRST commission is a not-voided invoice commission recorded at that first payment (within 3 days
- * of subscribed_at). A first payment made while suspended locks the terms but earns nothing, so it
- * has no commission of its own at that time and does not count.
+ * Latest Qualifying Customer's first payment in the current partnership (§7.5(b)): not a first
+ * payment made while the partner was suspended (locked_while_suspended, set by the ledger), and not
+ * one whose first commission was voided (refunded / charged back / lost dispute). A first payment
+ * whose commission is missing or was entered late by hand still counts — the customer did pay.
  */
 async function lastQualifying(db: Db, partnerId: number, since: Date): Promise<Date | null> {
     const rows = (await db.execute(sql`
         SELECT MAX(pr.subscribed_at)::text AS at
           FROM partner_referrals pr
          WHERE pr.partner_id = ${partnerId} AND pr.subscribed_at IS NOT NULL AND pr.subscribed_at >= ${since.toISOString()}::timestamp
-           AND (SELECT c.status <> 'voided' AND c.created_at < pr.subscribed_at + interval '3 days'
-                  FROM partner_commissions c
-                 WHERE c.partner_referral_id = pr.id AND c.kind = 'invoice'
-                 ORDER BY c.created_at ASC LIMIT 1) IS TRUE`)) as Row[];
+           AND NOT pr.locked_while_suspended
+           AND COALESCE((SELECT c.status = 'voided' FROM partner_commissions c
+                          WHERE c.partner_referral_id = pr.id AND c.kind = 'invoice'
+                          ORDER BY c.created_at ASC LIMIT 1), FALSE) = FALSE`)) as Row[];
     const at = rows[0]?.at;
     return at ? new Date(`${String(at).replace(' ', 'T')}Z`) : null;
 }

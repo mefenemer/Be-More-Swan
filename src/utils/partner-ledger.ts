@@ -180,7 +180,13 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         return { recorded: false, reason: 'no_rate' };
     }
     // Suspended: the terms are locked at the real first payment above, but nothing is earned (§7.2).
-    if (ref.status === 'suspended') return { recorded: false, reason: 'suspended' };
+    // If THIS payment is the one that locked them, the customer never counts towards §7.5 (b).
+    if (ref.status === 'suspended') {
+        if (terms.subscribedAt.getTime() === payment.paidAt.getTime()) {
+            await db.update(partnerReferrals).set({ lockedWhileSuspended: true }).where(eq(partnerReferrals.id, terms.id));
+        }
+        return { recorded: false, reason: 'suspended' };
+    }
     // §7.5(i): after re-approval, only customers who first pay in the current partnership earn.
     if (ref.partnerSince && terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' };
     if (!isWithinCommissionWindow(terms.subscribedAt, terms.durationMonths, payment.paidAt)) {
