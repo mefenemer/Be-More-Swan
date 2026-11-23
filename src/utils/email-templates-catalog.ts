@@ -601,6 +601,18 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {
+        triggerKey: 'partner_terms_accepted',
+        name: 'Partner — Terms Accepted (your copy)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your copy of the Be More Swan Partner Terms (version {{partner.terms_version}})',
+        preheader: 'The version you accepted, kept for your records.',
+        bodyHtml: greet +
+            p('Thank you for accepting the Be More Swan Partner Terms, version <strong>{{partner.terms_version}}</strong> (last updated {{partner.terms_updated}}).') +
+            p('This is your copy. The exact version you accepted stays on our website at the link below, so you can always check what you agreed to. If we change the terms, we’ll give you notice first, as section 8 explains.') +
+            button('Read the version you accepted', 'link.action_url') + signoff,
+    },
+    {
         triggerKey: 'partner_inactivity_notice',
         name: 'Partner — Inactivity Notice (Terms 7.5)',
         category: 'Account',

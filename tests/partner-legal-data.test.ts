@@ -73,7 +73,7 @@ check('the Terms point to the Partner Terms WITHOUT a version bump (owner decisi
 
 check('the privacy policy covers partners, invited people, payout details in the vault, and the retention rows', () => {
     const pp = read('privacy.html');
-    for (const phrase of ['If you are a Be More Swan partner', 'If someone invited you', 'held encrypted in our secrets vault', 'with no IP address and nothing stored on the visitor\'s device',
+    for (const phrase of ['If you are a Be More Swan partner', 'If someone invited you', 'held encrypted in our secrets vault', 'we keep no IP address with the count, and nothing is stored on the visitor\'s device', 'PayPal, or Wise (including its US affiliate', 'against UK and US sanctions lists',
         '“Customer 3”', 'the first name of the person who shared it', 'Partner applications we decline', '12 months after the decision', 'Partner commission and payout records']) {
         assert.ok(pp.includes(phrase), `missing: ${phrase}`);
     }

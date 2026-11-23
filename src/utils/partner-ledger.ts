@@ -30,7 +30,7 @@ import {
     partnerCommissions, partnerProgrammeSettings, partnerRatePeriods, partnerReferrals, partners, userReferrals,
 } from '../../db/schema';
 import {
-    commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
+    addMonthsUtc, commissionPence, isWithinCommissionWindow, lockTerms, resolvePeriodAt, type RatePeriod,
 } from './partner-rate-periods';
 
 type Db = ReturnType<typeof getDb>;
@@ -48,10 +48,21 @@ export interface PartnerPayment {
     paymentRef: string;
     /** pi_… — what refunds and disputes are matched on. */
     paymentIntentId: string | null;
-    /** What the customer actually paid, excluding VAT, in pence. */
+    /** What the customer actually paid, excluding VAT, in pence (in `currency`'s minor units when not GBP). */
     netAmountPence: number;
     currency: string;
     paidAt: Date;
+    /**
+     * Partner Terms 3.2 (cross-border review): a payment in another currency counts at the sterling amount our
+     * provider converted it into. The webhook works this out from Stripe's balance transaction; null when
+     * it couldn't — then nothing is recorded and the webhook logs it for recording by hand.
+     */
+    gbpNetAmountPence?: number | null;
+    /** The period this payment covers (invoice line), for the pro-rata and annual-holding rules (Terms 3.2, 4.1). */
+    periodStart?: Date | null;
+    periodEnd?: Date | null;
+    /** True for an annual plan payment when the period isn't known (first payment via Checkout). */
+    annual?: boolean;
 }
 
 export type RecordOutcome =
@@ -160,9 +171,14 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     if (!(payment.netAmountPence > 0)) return { recorded: false, reason: 'no_amount' };
     const ref = await findPartnerReferral(db, payment.userId);
     if (!ref) return { recorded: false, reason: 'not_a_partner_referral' };
+    // Terms 3.2: another currency counts at the sterling amount our provider converted it into.
+    let netPence = payment.netAmountPence;
     if (payment.currency.toUpperCase() !== PROGRAMME_CURRENCY) {
-        console.error('[partner-ledger] payment in an unsupported currency — no commission recorded', payment);
-        return { recorded: false, reason: 'currency' };
+        if (!(typeof payment.gbpNetAmountPence === 'number' && payment.gbpNetAmountPence > 0)) {
+            console.error('[partner-ledger] payment in another currency with no sterling amount — NOT recorded, record it by hand', payment);
+            return { recorded: false, reason: 'currency' };
+        }
+        netPence = payment.gbpNetAmountPence;
     }
 
     // Ended: a customer who never paid before the end earns nothing, and nothing is locked for them (§7.4).
@@ -195,15 +211,21 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
 
     // Locked before the cost deduction existed → null → 0%: what that customer was promised stands.
     const costDeductionBps = terms.costDeductionBps ?? 0;
-    const amount = commissionPence(payment.netAmountPence, terms.rateBps, costDeductionBps);
-    const availableAt = new Date(payment.paidAt.getTime() + (await holdingDays(db)) * DAY_MS);
+    // Terms 3.2: a payment covering months beyond the commission period earns only on the months inside it.
+    const windowEnd = terms.durationMonths === null ? null : addMonthsUtc(terms.subscribedAt, terms.durationMonths);
+    const eligiblePence = proRataPence(netPence, payment.periodStart ?? null, payment.periodEnd ?? null, windowEnd);
+    const amount = commissionPence(eligiblePence, terms.rateBps, costDeductionBps);
+    // Terms 4.1: an annual Subscription Payment is held for at least 60 days.
+    const isAnnual = payment.annual === true || isAnnualPeriod(payment.periodStart ?? null, payment.periodEnd ?? null);
+    const holdDays = Math.max(await holdingDays(db), isAnnual ? ANNUAL_HOLDING_DAYS : 0);
+    const availableAt = new Date(payment.paidAt.getTime() + holdDays * DAY_MS);
     const inserted = await db.insert(partnerCommissions).values({
         partnerId: ref.partnerId,
         partnerReferralId: terms.id,
         kind: 'invoice',
         stripeInvoiceId: payment.paymentRef,
         stripeChargeId: payment.paymentIntentId,
-        netAmountPence: payment.netAmountPence,
+        netAmountPence: eligiblePence,
         rateBps: terms.rateBps,
         costDeductionBps,
         commissionPence: amount,
@@ -217,6 +239,32 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
     return { recorded: true, commissionPence: amount, partnerId: ref.partnerId };
 }
 
+/** Terms 4.1: annual Subscription Payments are held at least this long. */
+export const ANNUAL_HOLDING_DAYS = 60;
+
+/** A payment period longer than ~40 days is an annual (or other long) plan payment. */
+export function isAnnualPeriod(start: Date | null, end: Date | null): boolean {
+    return !!(start && end && end.getTime() - start.getTime() > 40 * DAY_MS);
+}
+
+/**
+ * Terms 3.2 pro rata: the part of a payment for the months inside the commission period. Full amount when
+ * the period is unknown, has no end beyond the window, or the window is lifetime (null). Rounds down.
+ */
+export function proRataPence(netPence: number, periodStart: Date | null, periodEnd: Date | null, windowEnd: Date | null): number {
+    if (!windowEnd || !periodStart || !periodEnd) return netPence;
+    const span = periodEnd.getTime() - periodStart.getTime();
+    if (span <= 0 || periodEnd.getTime() <= windowEnd.getTime()) return netPence;
+    const inside = Math.max(0, windowEnd.getTime() - periodStart.getTime());
+    return Math.floor((netPence * inside) / span);
+}
+
+/** Partner Terms 4.3: refunds and disputes more than 180 days after the payment don't touch commission. */
+export const CLAWBACK_WINDOW_DAYS = 180;
+export function isPastClawbackWindow(paidAt: Date, eventAt: Date): boolean {
+    return eventAt.getTime() - paidAt.getTime() > CLAWBACK_WINDOW_DAYS * DAY_MS;
+}
+
 export interface ReversalInput {
     /** pi_… from the refund's or dispute's charge. */
     paymentIntentId: string | null;
@@ -226,6 +274,12 @@ export interface ReversalInput {
     amountRefundedPence: number;
     kind: 'refund' | 'dispute';
     at?: Date;
+    /**
+     * The charge's full amount (charge.amount), same currency as amountRefundedPence. When given, a refund
+     * reduces commission by the refunded SHARE of the payment — right for any currency (a non-GBP payment's
+     * row holds its sterling net, which a foreign-currency refund amount can't be subtracted from).
+     */
+    chargeAmountMinor?: number | null;
 }
 
 /**
@@ -247,8 +301,15 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
     let adjusted = 0;
 
     for (const row of rows) {
+        // Partner Terms 4.3 (cross-border review): only a refund or dispute within 180 days of the payment
+        // reduces commission. The row is written by the webhook at the payment, so its created_at is the
+        // payment time (a commission entered late by hand gets a later created_at — in the partner's favour).
+        if (isPastClawbackWindow(row.createdAt, at)) continue;
         const net = row.netAmountPence ?? 0;
-        const remaining = input.kind === 'dispute' ? 0 : Math.max(0, net - input.amountRefundedPence);
+        const charged = input.chargeAmountMinor ?? 0;
+        const remaining = input.kind === 'dispute' ? 0
+            : charged > 0 ? Math.max(0, Math.floor((net * Math.max(0, charged - input.amountRefundedPence)) / charged))
+            : Math.max(0, net - input.amountRefundedPence);
         const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 

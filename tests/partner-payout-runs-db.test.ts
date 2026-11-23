@@ -53,14 +53,15 @@ async function main() {
             (5, 'sus@example.com', 'Sue', 'Spended', 'user'), (6, 'ref@example.com', 'Ref', 'Unded', 'user'),
             (7, 'old@example.com', 'Old', 'Terms', 'user')`);
         // Partners 1–7 (ids follow users): confirmed details for 1, 2, 4, 5, 6, 7; none for 3.
-        // 1–6 accepted the current Partner Terms; 7 only an older version (or an admin added them).
+        // 1–6 accepted the current Partner Terms; 7 never accepted any version (an admin added them). Terms 8.1:
+        // an OLDER accepted version still pays — only no version at all waits.
         for (const [uid, status, method, display] of [[1, 'approved', 'bank', 'UK bank · Ann Bank · ****4567'], [2, 'approved', 'paypal', 'PayPal · p***@example.com'],
             [3, 'approved', null, null], [4, 'approved', 'paypal', 'PayPal · l***@example.com'], [5, 'suspended', 'paypal', 'PayPal · s***@example.com'], [6, 'approved', 'paypal', 'PayPal · r***@example.com']] as const) {
             await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
                               VALUES (${uid}, ${uid}, '${status}', ${method ? `'${method}'` : 'NULL'}, ${display ? `'${display}'` : 'NULL'}, ${display ? 'now()' : 'NULL'}, '${PARTNER_TERMS_VERSION}')`);
         }
         await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
-                          VALUES (7, 7, 'approved', 'paypal', 'PayPal · o***@example.com', now(), '1.0')`);
+                          VALUES (7, 7, 'approved', 'paypal', 'PayPal · o***@example.com', now(), NULL)`);
         await storeSecret(db, 'aura/partner-1/payout', { method: 'bank', accountName: 'Ann Bank', sortCode: '112233', accountNumber: '01234567' });
         await storeSecret(db, 'aura/partner-2/payout', { method: 'paypal', email: 'pam.pay@example.com' });
         await storeSecret(db, 'aura/partner-5/payout', { method: 'paypal', email: 'sue.pay@example.com' });

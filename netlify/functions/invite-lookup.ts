@@ -16,6 +16,7 @@
 // (partner_link_stats) — no IP, nothing on the visitor's device. Limited per IP so a refresh loop
 // can't inflate a partner's numbers.
 
+import { createHmac } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -24,6 +25,11 @@ import { resolveInviteCode } from '../../src/utils/invite-codes';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { REFERRAL_OFFER_DISPLAY } from '../../src/utils/referral-offer';
 import { photoUrl, type InviteProfile } from '../../src/utils/partner-invite-profile';
+
+/** A keyed hash of the visitor's IP: stable enough to rate-limit repeat clicks, never the address itself. */
+export function visitorKey(ip: string): string {
+    return createHmac('sha256', process.env.JWT_SECRET || 'invite-click').update(ip).digest('hex').slice(0, 32);
+}
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body),
@@ -48,7 +54,9 @@ export default withLambda(async (event) => {
                 .where(and(eq(partners.userId, owner.id), eq(partners.status, 'approved'))).limit(1);
             if (partner) {
                 const ip = getClientIp(event.headers as Record<string, string | undefined>);
-                const { allowed } = await checkRateLimit(db, 'invite_click', `${ip}:${partner.id}`, CLICK_LIMIT);
+                // privacy.html: no IP address is kept with click counts — only a keyed hash, so the rate-limit row
+                // can't be read back as an address (cross-border legal review 2026-11-23).
+                const { allowed } = await checkRateLimit(db, 'invite_click', `${visitorKey(ip)}:${partner.id}`, CLICK_LIMIT);
                 if (allowed) {
                     await db.insert(partnerLinkStats).values({ partnerId: partner.id, day: sql`(now() AT TIME ZONE 'Europe/London')::date`, clicks: 1 })
                         .onConflictDoUpdate({ target: [partnerLinkStats.partnerId, partnerLinkStats.day], set: { clicks: sql`${partnerLinkStats.clicks} + 1` } });

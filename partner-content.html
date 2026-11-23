@@ -246,6 +246,23 @@
         <button id="pt-payout-save" type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save payout details</button>
         <p class="text-xs text-gray-500">For your security, we email you a link to confirm any change before it takes effect, and we never show your full details here.</p>
       </form>
+      <!-- Partner Terms 4.5: VAT number. A UK one (GB… / XI…) means we add UK VAT to each payout. -->
+      <form id="pt-vat-form" onsubmit="event.preventDefault(); window.partnerPage.saveVat();" class="border-t border-gray-100 pt-4 space-y-2">
+        <label for="pt-vat" class="block text-sm font-bold text-gray-700">VAT number <span class="font-normal text-gray-500">(only if you’re VAT-registered)</span></label>
+        <div class="flex gap-2 flex-wrap">
+          <input id="pt-vat" type="text" maxlength="20" placeholder="e.g. GB123456789" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <button id="pt-vat-save" type="submit" class="btn-secondary px-3 py-2 text-sm font-bold rounded-lg border">Save VAT number</button>
+        </div>
+        <p id="pt-vat-note" class="text-xs text-gray-500">Commission is stated excluding VAT. If you’re registered for VAT in the UK, we add UK VAT to each payout. Outside the UK, we account for any UK VAT under the reverse charge (Partner Terms 4.5).</p>
+        <div id="pt-vat-error" class="hidden text-sm text-red-600"></div>
+      </form>
+    </div>
+
+    <!-- Partner Terms 4.5: a self-billed statement for every payout -->
+    <div id="pt-statements-card" class="hidden bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+      <h2 class="font-semibold text-gray-800">Payout statements</h2>
+      <p class="text-sm text-gray-600 mt-0.5">One for each payout: the commission in it and any VAT. It’s your invoice under the self-billing agreement in Partner Terms 4.5.</p>
+      <ul id="pt-statements" class="mt-3 space-y-1 text-sm"></ul>
     </div>
   </div>
 
@@ -374,6 +391,13 @@
       ? `We pay you by ${p.display}${p.confirmedAt ? ' (confirmed ' + day(p.confirmedAt) + ')' : ''}.`
       : 'You haven’t told us where to pay you yet.';
     show('pt-payout-pending', !!p.pending);
+    // Terms 4.5: VAT number and payout statements.
+    document.getElementById('pt-vat').value = data.vat?.number || '';
+    const paid = data.payouts || [];
+    show('pt-statements-card', paid.length > 0);
+    document.getElementById('pt-statements').innerHTML = paid.map((b) => `<li class="flex items-center justify-between gap-3 border-t border-gray-100 pt-1">
+        <span class="text-gray-700">${esc(day(b.paidAt))} · ${money(b.commissionPence)}${data.vat?.ukRegistered ? ' + VAT' : ''}</span>
+        <a href="${API}?view=statement&batchId=${encodeURIComponent(b.batchId)}" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Statement</a></li>`).join('');
     if (p.pending) {
       document.getElementById('pt-pending-display').textContent = p.pending.display;
       document.getElementById('pt-account-email').textContent = data.partner.accountEmail || 'your account email';
@@ -584,6 +608,18 @@
     return d;
   }
 
+  async function saveVat() {
+    const err = document.getElementById('pt-vat-error');
+    const btn = document.getElementById('pt-vat-save');
+    err.classList.add('hidden'); btn.disabled = true;
+    try {
+      const d = await post({ action: 'vat_number', vatNumber: document.getElementById('pt-vat').value });
+      data.vat = d.vat;
+      window.showToast?.(d.vat?.number ? (d.vat.ukRegistered ? 'VAT number saved — we’ll add UK VAT to your payouts.' : 'VAT number saved.') : 'VAT number removed.');
+    } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+    finally { btn.disabled = false; }
+  }
+
   async function savePayout() {
     const m = method();
     const err = document.getElementById('pt-payout-error');
@@ -758,7 +794,7 @@
   function chatClear() { chat.turns = []; chatRender(); }
   function useInviteCard(i, j) { const c = chat.turns[i]?.cards?.[j]; if (c) fillInvitePage(c.headline, c.quote); }
 
-  window.partnerPage = { toggleInfo, savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList,
+  window.partnerPage = { toggleInfo, saveVat, savePayout, confirmPayout, cancelPayout, copy, syncMethod, ask, askStarter, chatSend, copyDraft, openHandoff, chatClear, acceptTerms, foldWelcome, unfoldWelcome, copyLinkFromList,
     pickInvitePhoto, removeInvitePhoto, submitInvitePage, withdrawInvitePage, countInvite, fillInvitePage, useInviteCard, setWeekly };
   load();
 })();

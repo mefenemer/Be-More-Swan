@@ -20,7 +20,8 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { partnerCommissions, partnerPayoutBatches, partnerProgrammeSettings, partners } from '../../db/schema';
 import { getPayoutDetails, type PayoutDetails } from './partner-payouts';
-import { PARTNER_TERMS_VERSION, hasAcceptedCurrentTerms } from '../config/partner-terms';
+import { PARTNER_TERMS_VERSION } from '../config/partner-terms';
+import { isUkVatRegistered, vatPenceFor } from './partner-statements';
 
 type Db = ReturnType<typeof getDb>;
 type Row = Record<string, any>;
@@ -73,15 +74,19 @@ export function underMinimumReason(amountPence: number, minPence: number, status
 
 export interface PayoutPreviewLine {
     partnerId: number; name: string | null; email: string | null; method: string | null; payoutDisplay: string | null;
-    amountPence: number; due: boolean; reason: string | null;
+    /** Commission (excl. VAT). The minimum is checked against this. */
+    amountPence: number;
+    /** Terms 4.5(b): UK VAT added for a UK-VAT-registered partner; paid on top of amountPence. */
+    vatPence: number;
+    due: boolean; reason: string | null;
 }
 
 /** Who is due, and who isn't (and why). Ready-to-pay rows not already in a batch. */
-export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; lines: PayoutPreviewLine[]; totalDuePence: number }> {
+export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; lines: PayoutPreviewLine[]; totalDuePence: number; totalVatPence: number }> {
     const [settings] = await db.select({ min: partnerProgrammeSettings.minPayoutPence }).from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
     const min = settings?.min ?? 5000;
     const rows = (await db.execute(sql`
-        SELECT p.id, p.status, p.terms_version, p.payout_method, p.payout_display, p.payout_details_confirmed_at,
+        SELECT p.id, p.status, p.terms_version, p.payout_method, p.payout_display, p.payout_details_confirmed_at, p.vat_registered, p.vat_number,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
                SUM(c.commission_pence)::int AS amount,
@@ -97,13 +102,16 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
         // Suspended and ended partners are still paid what they earned (Partner Terms 7.3).
         const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`
             // No contract, no payout: it waits (and rolls over) until they accept on their Partner page.
-            // An ENDED partner is paid under the terms they last accepted (7.3): a later version no longer binds them.
-            : !(hasAcceptedCurrentTerms(r.terms_version) || (r.status === 'ended' && r.terms_version)) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
+            // Terms 8.1: earned commission is never held back to get a newer version accepted — any accepted
+            // version is a contract. Only a partner who has never accepted any version waits (no contract, no payout).
+            : !r.terms_version ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
             : !r.payout_details_confirmed_at || !r.payout_display ? 'No confirmed payout details'
             : underMinimumReason(amount, min, r.status, r.oldest_ready ? new Date(r.oldest_ready) : null);
-        return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };
+        return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, vatPence: vatPenceFor(amount, isUkVatRegistered(r)), due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };
     });
-    return { minPayoutPence: min, lines, totalDuePence: lines.filter((l) => l.due).reduce((s, l) => s + l.amountPence, 0) };
+    const due = lines.filter((l) => l.due);
+    // totalDuePence = commission; UK VAT for VAT-registered partners is paid on top (Terms 4.5(b)).
+    return { minPayoutPence: min, lines, totalDuePence: due.reduce((s, l) => s + l.amountPence, 0), totalVatPence: due.reduce((s, l) => s + l.vatPence, 0) };
 }
 
 /** Lock everyone due into a draft batch. Refuses if nobody is due. */
@@ -169,21 +177,23 @@ const pounds = (p: number) => (p / 100).toFixed(2);
 /** UK Faster Payments references are 18 characters. */
 export const paymentReference = (batchId: number) => `BMS PARTNER ${batchId}`.slice(0, 18);
 
-export interface BatchLine { partnerId: number; name: string; email: string; amountPence: number; details: PayoutDetails | null }
+/** amountPence = commission (excl. VAT); vatPence = UK VAT paid on top for a UK-VAT-registered partner (Terms 4.5(b)). */
+export interface BatchLine { partnerId: number; name: string; email: string; amountPence: number; vatPence?: number; details: PayoutDetails | null }
 
 /** Each partner in the batch, with their decrypted payout details. Server-side only. */
 export async function batchLines(db: Db, batchId: number): Promise<BatchLine[]> {
     const rows = (await db.execute(sql`
-        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount,
+        SELECT c.partner_id, SUM(c.commission_pence)::int AS amount, p.vat_registered, p.vat_number,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
           FROM partner_commissions c JOIN partners p ON p.id = c.partner_id LEFT JOIN users u ON u.id = p.user_id
          WHERE c.payout_batch_id = ${batchId}
-         GROUP BY c.partner_id, u.email, u.first_name, u.last_name, p.applicant_email, p.applicant_name
+         GROUP BY c.partner_id, u.email, u.first_name, u.last_name, p.applicant_email, p.applicant_name, p.vat_registered, p.vat_number
          ORDER BY c.partner_id`)) as unknown as Row[];
     const out: BatchLine[] = [];
     for (const r of rows) {
-        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: Number(r.amount), details: await getPayoutDetails(db, r.partner_id) });
+        const amount = Number(r.amount);
+        out.push({ partnerId: r.partner_id, name: r.name || r.email || `Partner ${r.partner_id}`, email: r.email || '', amountPence: amount, vatPence: vatPenceFor(amount, isUkVatRegistered(r)), details: await getPayoutDetails(db, r.partner_id) });
     }
     return out;
 }
@@ -196,19 +206,21 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
     for (const l of lines) {
         const d = l.details;
         if (!d || l.amountPence <= 0) continue;
+        // Terms 4.5(b): what is sent = commission + any UK VAT.
+        const pay = l.amountPence + (l.vatPence ?? 0);
         if (format === 'wise_bank' && d.method === 'bank') {
-            rows.push([d.accountName, l.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+            rows.push([d.accountName, l.email, ref, 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
-            rows.push([d.accountName, l.email, ref, d.holderType === 'business' ? 'BUSINESS' : 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'USD',
+            rows.push([d.accountName, l.email, ref, d.holderType === 'business' ? 'BUSINESS' : 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'USD',
                 d.routingNumber, d.accountNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
-            rows.push([l.name, d.email, ref, 'PRIVATE', 'GBP', pounds(l.amountPence), 'GBP', 'GBP']);
+            rows.push([l.name, d.email, ref, 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {
             // PayPal Payouts upload: no header row; email, amount, currency, customer id, note, wallet.
-            rows.push([d.email, pounds(l.amountPence), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
+            rows.push([d.email, pounds(pay), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
         } else continue;
-        total += l.amountPence;
+        total += pay;
     }
     const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : [];
     const csv = [...header, ...rows].map((r) => r.map((v) => csvCell(safe(String(v)))).join(',')).join('\r\n') + '\r\n';

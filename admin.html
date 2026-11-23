@@ -1522,7 +1522,8 @@
           <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div>
               <h3 class="text-sm font-bold text-gray-800">Payouts</h3>
-              <p class="text-xs text-gray-500 mt-0.5">Ready-to-pay commission for partners with confirmed payout details, at or over the minimum. Create a run, download the files, pay them in Wise / PayPal, then mark the run paid.</p>
+              <p class="text-xs text-gray-500 mt-0.5">Ready-to-pay commission for partners with confirmed payout details, at or over the minimum. Create a run, download the files, pay them in Wise / PayPal, then mark the run paid. UK-VAT-registered partners are paid commission + 20% VAT (Partner Terms 4.5); the files include it.</p>
+              <p class="text-xs font-semibold text-amber-700 mt-1">Check the partner against the UK Sanctions List and OFAC SDN before approving/paying (Partner Terms 4.6).</p>
             </div>
             <button type="button" id="payout-create-btn" onclick="payoutCreate()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Create payout run</button>
           </div>
@@ -12536,10 +12537,10 @@ async function partnerDecide(id, decision) {
   if (decision === 'end') {
     // Terms 1.3: why it ends decides the run-off. Inactivity has its own steps (§7.5): notice, then "End (inactivity)".
     endReason = await window.choiceModal(`Why is the partnership with ${who} ending? Not for inactivity — for that, use "Send inactivity notice" once their active date has passed (Partner Terms 7.5), so their standard customers keep earning to term.`, [
-      { value: 'left', label: 'They asked to leave', description: 'Partner Terms 7.1 — commission stops on later payments.' },
-      { value: 'breach', label: 'Breach, fraud or reputation', description: 'Partner Terms 7.2 — commission stops on later payments.' },
-      { value: 'closure', label: 'Programme closing', description: 'Partner Terms 7.2 — they keep earning for 3 months on customers still in their window.' },
-      { value: 'other', label: 'Other', description: 'Commission stops on later payments (7.4).' },
+      { value: 'left', label: 'They asked to leave', description: 'Partner Terms 7.1 / 7.4(a) — standard 12-month customers keep earning them commission to term; longer special periods for 3 months.' },
+      { value: 'closure', label: 'Programme closing', description: 'Partner Terms 7.2 / 7.4(a) — standard 12-month customers to term; longer special periods for 3 months.' },
+      { value: 'breach', label: 'Breach, fraud or reputation', description: 'Partner Terms 7.2 / 7.4(b) — commission stops on later payments.' },
+      { value: 'other', label: 'The law or sanctions require it', description: 'Partner Terms 7.2 / 7.4(b) — commission stops on later payments.' },
     ], { title: 'End partnership' });
     if (!endReason) return;
   }
@@ -12547,7 +12548,7 @@ async function partnerDecide(id, decision) {
     const msg = decision === 'reject'
       ? `Reject ${who}'s application? They can be approved later if you change your mind.`
       : decision === 'end'
-        ? `End the partnership with ${who}? ${endReason === 'closure' ? 'They keep earning for 3 months on customers still in their commission window, then stop.' : 'They stop earning on new payments, including from customers they introduced earlier.'} Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (Partner Terms 7.4). Commission they earned before today is still paid, even under the minimum. They can be approved again later, and then earn only on customers who first pay after that.`
+        ? `End the partnership with ${who}? ${(endReason === 'closure' || endReason === 'left') ? 'On customers whose commission period is 12 months or less they keep earning until it ends; longer special periods earn for 3 more months.' : 'They stop earning on new payments, including from customers they introduced earlier.'} Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (Partner Terms 7.4). Commission they earned before today is still paid, even under the minimum. They can be approved again later, and then earn only on customers who first pay after that.`
         : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
     note = await window.promptModal(msg + '<br><br>Reason (admins only, optional):', {
       title: { reject: 'Reject application', suspend: 'Suspend partner', end: 'End partnership' }[decision],
@@ -12555,7 +12556,8 @@ async function partnerDecide(id, decision) {
     });
     if (note === null) return;
   } else if (decision === 'approve') {
-    const ok = await window.confirmModal(`Approve ${who}? They start earning cash on customers who first pay from now on.`, { title: 'Approve partner', confirmLabel: 'Approve' });
+    // Partner Terms 4.6 (cross-border review): manual sanctions check — no automated screening.
+    const ok = await window.confirmModal(`Approve ${who}? They start earning cash on customers who first pay from now on.<br><br><strong>Check the partner against the UK Sanctions List and OFAC SDN before approving/paying.</strong> UK: gov.uk/government/publications/the-uk-sanctions-list · US: sanctionssearch.ofac.treas.gov`, { title: 'Approve partner', confirmLabel: 'Approve' });
     if (!ok) return;
   }
   try {
@@ -12762,7 +12764,7 @@ async function loadPayouts() {
     pre.innerHTML = preview.lines.map((l) => `<tr class="border-t border-gray-100">
         <td class="py-2 px-2 text-gray-800">${_pEsc(l.name || l.email || 'Partner ' + l.partnerId)}</td>
         <td class="py-2 px-2 text-gray-600">${_pEsc(l.payoutDisplay || '—')}</td>
-        <td class="py-2 px-2 text-right font-mono">${_pMoney(l.amountPence)}</td>
+        <td class="py-2 px-2 text-right font-mono">${_pMoney(l.amountPence)}${l.vatPence ? `<span class="block text-[11px] text-gray-500">+ ${_pMoney(l.vatPence)} VAT</span>` : ''}</td>
         <td class="py-2 px-2">${l.due ? '<span class="text-xs font-bold text-emerald-700">Yes</span>' : `<span class="text-xs text-gray-500">${_pEsc(l.reason || 'No')}</span>`}</td>
       </tr>`).join('') || '<tr><td colspan="4" class="py-4 text-center text-gray-400">Nothing is ready to pay.</td></tr>';
     const due = preview.lines.filter((l) => l.due).length;
@@ -12794,7 +12796,7 @@ async function payoutCreate() {
   const p = _payouts.data?.preview;
   const due = (p?.lines || []).filter((l) => l.due);
   if (!due.length) return;
-  const ok = await window.confirmModal(`Create a payout run for <strong>${due.length}</strong> partner${due.length === 1 ? '' : 's'}, totalling <strong>${_pMoney(p.totalDuePence)}</strong>? Their ready-to-pay commission is set aside for this run. Nothing is paid until you pay it in Wise / PayPal.`,
+  const ok = await window.confirmModal(`Create a payout run for <strong>${due.length}</strong> partner${due.length === 1 ? '' : 's'}, totalling <strong>${_pMoney(p.totalDuePence)}</strong>${p.totalVatPence ? ` + ${_pMoney(p.totalVatPence)} UK VAT` : ''}? <strong>Check the partner against the UK Sanctions List and OFAC SDN before approving/paying.</strong> Their ready-to-pay commission is set aside for this run. Nothing is paid until you pay it in Wise / PayPal.`,
     { title: 'Create payout run', confirmLabel: 'Create run' });
   if (!ok) return;
   try {

@@ -19,6 +19,7 @@ import { addMonthsUtc } from './partner-rate-periods';
 import { TRIAL_DAYS } from './trial';
 import { createNotification } from './notify';
 import { sendTemplatedEmail } from './email';
+import { DECLINED_CHANGE_DAYS, PARTNER_TERMS_EFFECTIVE, PARTNER_TERMS_VERSION } from '../config/partner-terms';
 
 type Db = any;
 type Row = Record<string, any>;
@@ -30,8 +31,8 @@ export const FREE_MONTHS_AFTER_TRIAL = 1;
 export const NOTICE_EXTENSION_DAYS = 7;
 const DAY_MS = 86_400_000;
 
-export type EndReason = 'inactivity' | 'closure' | 'left' | 'breach' | 'other';
-export const END_REASONS: EndReason[] = ['inactivity', 'closure', 'left', 'breach', 'other'];
+export type EndReason = 'inactivity' | 'closure' | 'left' | 'change_declined' | 'breach' | 'other';
+export const END_REASONS: EndReason[] = ['inactivity', 'closure', 'left', 'change_declined', 'breach', 'other'];
 
 const ukDate = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' });
 const partnerPageUrl = () => `${(process.env.BASE_URL || 'https://bemoreswan.com').replace(/\/$/, '')}/workspace.html?view=partner`;
@@ -73,20 +74,19 @@ export function extendedNoticeEnd(noticeEnds: Date, signUps: Date[]): Date | nul
     return latest && latest.getTime() > noticeEnds.getTime() ? latest : null;
 }
 
+/** Terms 7.4(a): endings that keep the run-off — leaving (7.1), declining a change (8.1), inactivity (7.5), closure (7.2). */
+export const RUN_OFF_REASONS = ['left', 'change_declined', 'inactivity', 'closure'] as const;
+
 /**
  * Does an ENDED partner still earn on this payment? (The commission window is checked separately.)
- * §7.5(h) inactivity: ≤12-month periods run to term; longer (or lifetime) ones for 3 months after ending.
- * §7.2 closure: 3 months after closure. Anything else: nothing after the end date (§7.4).
+ * Terms 7.4(a): after leaving, declining a change, inactivity or closure, ≤12-month periods run to
+ * term and longer (or lifetime) ones earn for 3 months after ending. 7.4(b): an ending for breach,
+ * fraud or the law ('breach', 'other') earns nothing after the end date.
  */
 export function runOffAllows(endReason: string | null, endedAt: Date | null, durationMonths: number | null, paidAt: Date): boolean {
-    if (!endedAt) return false;
-    const threeMonths = paidAt.getTime() < addMonthsUtc(endedAt, RUN_OFF_MONTHS).getTime();
-    if (endReason === 'inactivity') {
-        if (durationMonths !== null && durationMonths <= STANDARD_PERIOD_MONTHS) return true;
-        return threeMonths;
-    }
-    if (endReason === 'closure') return threeMonths;
-    return false;
+    if (!endedAt || !(RUN_OFF_REASONS as readonly string[]).includes(String(endReason))) return false;
+    if (durationMonths !== null && durationMonths <= STANDARD_PERIOD_MONTHS) return true;
+    return paidAt.getTime() < addMonthsUtc(endedAt, RUN_OFF_MONTHS).getTime();
 }
 
 // ── Reading the clock ────────────────────────────────────────────────────────────────────────
@@ -293,4 +293,22 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
         if (await extendForFreePeriods(db, p.id, p.user_id ?? null, since, endsAt)) extended++;
     }
     return { paused, withdrawn, extended };
+}
+
+/**
+ * Terms 8.1: a partner who accepted an earlier version but has not accepted the current one within 60
+ * days of it taking effect is treated as leaving (7.1) — ended with end_reason 'change_declined', which
+ * keeps the 7.4(a) run-off. Partners who never accepted any version (terms_version NULL) are untouched.
+ */
+export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promise<{ ended: number }> {
+    const deadline = new Date(new Date(`${PARTNER_TERMS_EFFECTIVE}T00:00:00Z`).getTime() + DECLINED_CHANGE_DAYS * DAY_MS);
+    if (now.getTime() < deadline.getTime()) return { ended: 0 };
+    const rows = (await db.execute(sql`
+        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
+               decided_at = ${now.toISOString()}::timestamp,
+               decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
+               inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
+         WHERE status IN ('approved', 'suspended') AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
+         RETURNING id`)) as Row[];
+    return { ended: rows.length };
 }

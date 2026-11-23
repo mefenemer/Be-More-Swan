@@ -32,9 +32,9 @@ function isLocal(url: string | undefined): url is string {
     catch { return false; }
 }
 
-const TABLES = ['users', 'partners', 'email_templates'];
+const TABLES = ['users', 'partners', 'email_templates', 'partner_terms_acceptances'];   // + Terms 1.2 acceptance log
 const app = (over: Partial<ApplicationInput> = {}): ApplicationInput => ({
-    name: 'Jo Example', email: 'jo@example.com', channels: ['newsletter'], audience: '', links: '', message: '', ...over,
+    name: 'Jo Example', email: 'jo@example.com', channels: ['newsletter'], audience: '', links: '', message: '', country: 'GB', joiningAs: 'individual', ...over,
 });
 
 async function main() {
