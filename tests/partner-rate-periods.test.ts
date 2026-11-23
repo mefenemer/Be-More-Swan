@@ -94,13 +94,37 @@ check('commission is after costs: the deduction comes off first, then the rate (
     assert.strictEqual(commissionPence(7900, 2500, 10000), 0);
 });
 
+console.log('Partner Terms 3.5 caps');
+{
+    const CAP_NOW = new Date('2026-11-20T00:00:00Z');
+    const base = { partnerId: 7, rateBps: 2500, costDeductionBps: 2000, durationMonths: 12 as number | null, startsAt: new Date('2026-12-01T00:00:00Z'), endsAt: null as Date | null };
+    const launch: RatePeriod = { id: 1, partnerId: null, rateBps: 2500, costDeductionBps: 0, durationMonths: null, startsAt: new Date('2026-10-18T00:00:00Z'), endsAt: null };
+    check('3.5: a new period at the caps (40%, 20% deduction, 24 months) is allowed', () => {
+        assert.deepStrictEqual(validatePeriodChanges([launch], [{ op: 'create', period: { ...base, rateBps: 4000, durationMonths: 24 } }], CAP_NOW), []);
+    });
+    check('3.5: a rate above 40% is refused', () => {
+        assert.match(validatePeriodChanges([launch], [{ op: 'create', period: { ...base, rateBps: 4050 } }], CAP_NOW).join(' '), /40%/);
+    });
+    check('3.5: a cost deduction below 20% is refused', () => {
+        assert.match(validatePeriodChanges([launch], [{ op: 'create', period: { ...base, costDeductionBps: 1500 } }], CAP_NOW).join(' '), /at least 20%/);
+    });
+    check('3.5: lifetime and more than 24 months are refused', () => {
+        assert.match(validatePeriodChanges([launch], [{ op: 'create', period: { ...base, durationMonths: null } }], CAP_NOW).join(' '), /lifetime is not allowed/);
+        assert.match(validatePeriodChanges([launch], [{ op: 'create', period: { ...base, durationMonths: 25 } }], CAP_NOW).join(' '), /1–24 months/);
+    });
+    check('3.5: moving only the end date of an older, wider period is still allowed (its terms are locked)', () => {
+        const old: RatePeriod = { id: 3, partnerId: 7, rateBps: 5000, costDeductionBps: 0, durationMonths: null, startsAt: new Date('2026-10-20T00:00:00Z'), endsAt: null };
+        assert.deepStrictEqual(validatePeriodChanges([launch, old], [{ op: 'update', id: 3, period: { ...old, endsAt: new Date('2026-12-01T00:00:00Z') } }], CAP_NOW), []);
+    });
+}
+
 console.log('changing rates');
 const NOW = d('2026-11-20');
 
 check('end the current rate and start a new one at the same moment — allowed as one edit', () => {
     const errors = validatePeriodChanges([LAUNCH], [
         { op: 'update', id: 1, period: { ...LAUNCH, endsAt: d('2026-12-01') } },
-        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null } },
+        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null } },
     ], NOW);
     assert.deepStrictEqual(errors, []);
 });
@@ -113,7 +137,7 @@ check('ending the programme rate on its own is refused (no rate would apply afte
 check('a gap between programme rates is refused', () => {
     const errors = validatePeriodChanges([LAUNCH], [
         { op: 'update', id: 1, period: { ...LAUNCH, endsAt: d('2026-12-01') } },
-        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-02'), endsAt: null } },
+        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-02'), endsAt: null } },
     ], NOW);
     assert.match(errors.join(' '), /no gap/);
 });
@@ -121,15 +145,15 @@ check('a gap between programme rates is refused', () => {
 check('overlapping periods in the same scope are refused', () => {
     const vip: RatePeriod = { id: 2, partnerId: 7, rateBps: 3000, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: d('2027-01-01') };
     const errors = validatePeriodChanges([LAUNCH, vip], [
-        { op: 'create', period: { partnerId: 7, rateBps: 3500, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-15'), endsAt: null } },
+        { op: 'create', period: { partnerId: 7, rateBps: 3500, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-15'), endsAt: null } },
     ], NOW);
     assert.match(errors.join(' '), /overlap/);
 });
 
 check('a partner period may sit on top of the programme rate, and partner periods may have gaps', () => {
     const errors = validatePeriodChanges([LAUNCH], [
-        { op: 'create', period: { partnerId: 7, rateBps: 3000, costDeductionBps: 0, durationMonths: null, startsAt: d('2026-12-01'), endsAt: d('2027-01-01') } },
-        { op: 'create', period: { partnerId: 7, rateBps: 3000, costDeductionBps: 0, durationMonths: null, startsAt: d('2027-03-01'), endsAt: d('2027-04-01') } },
+        { op: 'create', period: { partnerId: 7, rateBps: 3000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: d('2027-01-01') } },
+        { op: 'create', period: { partnerId: 7, rateBps: 3000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2027-03-01'), endsAt: d('2027-04-01') } },
     ], NOW);
     assert.deepStrictEqual(errors, []);
 });
@@ -147,7 +171,7 @@ check('a started period cannot be deleted', () => {
 check('an end date cannot be set in the past', () => {
     const errors = validatePeriodChanges([LAUNCH], [
         { op: 'update', id: 1, period: { ...LAUNCH, endsAt: d('2026-11-01') } },
-        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-11-01'), endsAt: null } },
+        { op: 'create', period: { partnerId: null, rateBps: 2000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-11-01'), endsAt: null } },
     ], NOW);
     assert.match(errors.join(' '), /end date cannot be in the past/);
     assert.match(errors.join(' '), /cannot start in the past/);
@@ -155,7 +179,7 @@ check('an end date cannot be set in the past', () => {
 
 check('an upcoming period can be edited freely and deleted', () => {
     const current: RatePeriod = { ...LAUNCH, endsAt: d('2026-12-01') };
-    const upcoming: RatePeriod = { id: 2, partnerId: null, rateBps: 2000, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null };
+    const upcoming: RatePeriod = { id: 2, partnerId: null, rateBps: 2000, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null };
     assert.deepStrictEqual(validatePeriodChanges([current, upcoming], [
         { op: 'update', id: 2, period: { ...upcoming, rateBps: 3000, durationMonths: 6 } },
     ], NOW), []);
@@ -166,8 +190,8 @@ check('an upcoming period can be edited freely and deleted', () => {
 });
 
 check('bad shapes are refused in plain words', () => {
-    const base = { partnerId: 7, costDeductionBps: 0, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null };
-    assert.match(validatePeriodChanges([LAUNCH], [{ op: 'create', period: { ...base, rateBps: 12000 } }], NOW).join(' '), /0% and 100%/);
+    const base = { partnerId: 7, costDeductionBps: 2000, durationMonths: 12, startsAt: d('2026-12-01'), endsAt: null };
+    assert.match(validatePeriodChanges([LAUNCH], [{ op: 'create', period: { ...base, rateBps: 12000 } }], NOW).join(' '), /0% and 40%/);
     assert.match(validatePeriodChanges([LAUNCH], [{ op: 'create', period: { ...base, rateBps: 2500, durationMonths: 0 } }], NOW).join(' '), /months/);
     assert.match(validatePeriodChanges([LAUNCH], [{ op: 'create', period: { ...base, rateBps: 2500, endsAt: d('2026-11-30') } }], NOW).join(' '), /after the start/);
     assert.match(validatePeriodChanges([LAUNCH], [{ op: 'create', period: { ...base, rateBps: 2500, costDeductionBps: 10000 } }], NOW).join(' '), /cost deduction/);

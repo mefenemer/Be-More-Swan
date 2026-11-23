@@ -3026,18 +3026,18 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="partner-rate-terms">
           <label for="partner-rate-pct" class="text-xs font-bold text-gray-500 uppercase">Commission (%) <span class="text-red-500">*</span></label>
-          <input id="partner-rate-pct" type="number" min="0" max="100" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <input id="partner-rate-pct" type="number" min="0" max="40" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
         </div>
         <div class="partner-rate-terms">
-          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months)</label>
-          <input id="partner-rate-months" type="number" min="1" max="120" step="1" placeholder="Lifetime" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments. Blank = for as long as they stay.</p>
+          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months) <span class="text-red-500">*</span></label>
+          <input id="partner-rate-months" type="number" min="1" max="24" step="1" placeholder="12" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments, 1–24. No lifetime rates (Partner Terms 3.5); the rate is at most 40% and the cost deduction at least 20%.</p>
         </div>
       </div>
       <div class="partner-rate-terms">
         <label for="partner-rate-costs" class="text-xs font-bold text-gray-500 uppercase">Cost deduction (%) <span class="text-red-500">*</span></label>
-        <input id="partner-rate-costs" type="number" min="0" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 50% commission on £79 = £31.60.</p>
+        <input id="partner-rate-costs" type="number" min="20" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 25% commission on £79 = £15.80.</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div id="partner-rate-from-wrap">
@@ -12411,7 +12411,7 @@ function partnerOpenRate(ctx) {
   // A new rate starts from the programme's newest deduction, so the costs basis partners were told carries on.
   const newestProgramme = [..._partnerPeriods(null)].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).pop();
   set('partner-rate-costs', Number((period ?? newestProgramme)?.costDeductionBps ?? 2000) / 100);
-  set('partner-rate-months', period ? (period.durationMonths ?? '') : (ctx.partnerId == null ? 12 : ''));
+  set('partner-rate-months', period ? (period.durationMonths ?? '') : 12);
   set('partner-rate-from', period ? _pDay(period.startsAt) : tomorrow);
   set('partner-rate-until', period?.endsAt ? _pDay(period.endsAt) : (ctx.mode === 'end' ? tomorrow : ''));
   set('partner-rate-label', period?.label || '');

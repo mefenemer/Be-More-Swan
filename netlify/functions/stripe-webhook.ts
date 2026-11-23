@@ -16,7 +16,7 @@ import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/relea
 import { restoreAfterNewPlan } from '../../src/utils/restore-after-new-plan';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
-import { invoiceNetPence, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
+import { invoiceNetPence, isSubscriptionPaymentInvoice, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
 import { takesASeat } from '../../src/utils/assistant-capacity';
@@ -645,7 +645,8 @@ export default withLambda(async (event) => {
                 } catch (refErr) {
                     console.warn('[stripe-webhook] invoice.paid referral token grant failed (non-blocking):', refErr);
                 }
-                await _recordPartnerCommission(db, {
+                // Partner Terms 1.3 §3.2: only plan renewals and plan changes earn commission.
+                if (isSubscriptionPaymentInvoice(billingReason)) await _recordPartnerCommission(db, {
                     userId,
                     paymentRef:      invoice.id!,
                     paymentIntentId: getInvoicePaymentIntentId(invoice),

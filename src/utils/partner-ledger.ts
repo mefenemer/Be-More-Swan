@@ -65,6 +65,18 @@ export function invoiceNetPence(invoice: { amount_paid?: number | null; total?: 
     return Math.max(0, paid - tax);
 }
 
+/**
+ * Partner Terms 1.3 §3.2: commission is earned only on Subscription Payments — the customer's
+ * recurring plan, including upgrading it. Of the invoices that reach invoice.paid (the first one,
+ * `subscription_create`, is handled by the checkout paths), only renewals and plan changes count;
+ * one-off (`manual`), usage (`subscription_threshold`) and any other invoices earn nothing.
+ * Packs and top-ups never get here: their Checkout sessions return before the plan path.
+ */
+const SUBSCRIPTION_PAYMENT_REASONS = new Set(['subscription_cycle', 'subscription_update']);
+export function isSubscriptionPaymentInvoice(billingReason: string | null | undefined): boolean {
+    return !!billingReason && SUBSCRIPTION_PAYMENT_REASONS.has(billingReason);
+}
+
 /** What a Checkout Session collected, excluding VAT. */
 export function sessionNetPence(session: { amount_total?: number | null; total_details?: { amount_tax?: number | null } | null }): number {
     return Math.max(0, (session.amount_total ?? 0) - (session.total_details?.amount_tax ?? 0));
