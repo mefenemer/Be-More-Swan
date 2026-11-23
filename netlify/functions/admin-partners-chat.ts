@@ -212,7 +212,7 @@ export default withLambda(async (event) => {
             case 'propose_invite_page': {
                 const list = (await listPartnersWithNumbers(db)).map((r) => ({
                     id: r.id, status: r.status, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, email: r.email ?? null,
-                    invitePageState: invitePageView(r).state, headline: (r.invite_profile_pending ?? r.invite_profile)?.headline ?? null,
+                    invitePageState: invitePageView(r).state, headline: (r.invite_profile_pending ?? r.invite_profile)?.headline ?? null, hasLive: !!r.invite_profile,
                 }));
                 return offer(proposeInvitePage(list, input as any));
             }

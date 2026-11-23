@@ -174,8 +174,15 @@ export default withLambda(async (event) => {
         if (p.termsVersion !== PARTNER_TERMS_VERSION) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
         const pending = p.inviteProfilePending as InviteProfile | null;
         const liveKey = (p.inviteProfile as InviteProfile | null)?.photoKey ?? null;
+        // Saves are conditional on what was read: if an admin approved (or sent back) a moment ago, the photo
+        // that just went live must not be deleted as "old" (review of #815).
+        const unchanged = and(eq(partners.id, p.id),
+            sql`${partners.inviteProfilePending}::text IS NOT DISTINCT FROM ${pending ? JSON.stringify(pending) : null}::jsonb::text`,
+            sql`${partners.inviteProfile}::text IS NOT DISTINCT FROM ${p.inviteProfile ? JSON.stringify(p.inviteProfile) : null}::jsonb::text`);
+        const changedMeanwhile = json(409, { error: 'Your invite page was just reviewed. Reload the page to see the latest, then try again.' });
         if (body.action === 'invite_profile_withdraw') {
-            await db.update(partners).set({ inviteProfilePending: null, inviteProfileNote: null, updatedAt: new Date() }).where(eq(partners.id, p.id));
+            const done = await db.update(partners).set({ inviteProfilePending: null, inviteProfileNote: null, updatedAt: new Date() }).where(unchanged).returning({ id: partners.id });
+            if (!done.length) return changedMeanwhile;
             for (const k of orphanedKeys([pending?.photoKey], [liveKey])) await deletePhoto(k);
             return json(200, { ok: true });
         }
@@ -194,7 +201,11 @@ export default withLambda(async (event) => {
             if (!stored) return json(503, { error: 'Your photo could not be saved just now. Please try again, or send it without a photo.' });
         }
         const next: InviteProfile = { headline: text.headline, quote: text.quote, photoKey, submittedAt: new Date().toISOString() };
-        await db.update(partners).set({ inviteProfilePending: next, inviteProfileNote: null, updatedAt: new Date() }).where(eq(partners.id, p.id));
+        const saved = await db.update(partners).set({ inviteProfilePending: next, inviteProfileNote: null, updatedAt: new Date() }).where(unchanged).returning({ id: partners.id });
+        if (!saved.length) {
+            if (body.photo && body.photo !== 'keep' && photoKey) await deletePhoto(photoKey);   // the upload nobody will point at
+            return changedMeanwhile;
+        }
         for (const k of orphanedKeys([pending?.photoKey], [photoKey, liveKey])) await deletePhoto(k);
         // A heads-up for whoever reviews partners (same inbox as new applications).
         const [who] = await db.select({ firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where(eq(users.id, userId)).limit(1);

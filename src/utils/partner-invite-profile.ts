@@ -25,7 +25,8 @@ export const PHOTO_PREFIX = 'partner-photos/';
 // A link or handle on our page would send our visitors somewhere else, or look like an endorsement of it.
 const LINK_RE = /https?:\/\/|www\.|\b[a-z0-9-]+\.(com|co\.uk|uk|net|org|io|ai|app|me|us)\b|@[a-z0-9_]{2,}/i;
 // Words that would make the page look like it's from us, or promise what we can't back.
-const CLAIM_RE = /\b(official|guarantee[ds]?|risk[- ]free|100%|get rich|passive income)\b/i;
+// "100%" sits outside the \b group: a \b after "%" never matches (review of #815).
+const CLAIM_RE = /\b(official|guarantee[ds]?|risk[- ]free|get rich|passive income)\b|\b100\s?%/i;
 
 /** Tidy and check what the partner wrote. Errors are written for the partner. */
 export function validateInviteText(raw: { headline?: unknown; quote?: unknown }):

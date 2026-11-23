@@ -49,7 +49,7 @@ check('no links, web addresses or @handles (they would send our visitors elsewhe
 });
 
 check('nothing official-looking or promising income (Partner Terms 5.2)', () => {
-    for (const bad of ['The official Be More Swan page', 'Guaranteed more clients', 'Risk-free growth', 'Earn passive income']) {
+    for (const bad of ['The official Be More Swan page', 'Guaranteed more clients', 'Risk-free growth', 'Earn passive income', 'I am 100% sure', '100 % better']) {
         assert.ok(!validateInviteText({ headline: bad }).ok, bad);
     }
 });
@@ -105,7 +105,11 @@ check('Partner Ops cards: approve / changes only for a waiting page; changes nee
         { id: 1, status: 'approved', name: 'Angela', email: null, invitePageState: 'waiting' as const, headline: 'Why I use it' },
         { id: 2, status: 'approved', name: 'Sam', email: null, invitePageState: 'live' as const, headline: 'X' },
         { id: 3, status: 'suspended', name: 'Jo', email: null, invitePageState: 'waiting' as const, headline: 'Y' },
+        { id: 4, status: 'approved', name: 'Ali', email: null, invitePageState: 'waiting' as const, headline: 'Z', hasLive: false },
+        { id: 5, status: 'approved', name: 'Bo', email: null, invitePageState: 'waiting' as const, headline: 'W', hasLive: true },
     ];
+    assert.ok('error' in proposeInvitePage(list, { partnerId: 4, decision: 'take_down' }), 'nothing live → no take-down card');
+    assert.ok('card' in proposeInvitePage(list, { partnerId: 5, decision: 'take_down' }), 'an edit waiting over a live page → can take down');
     const ok = proposeInvitePage(list, { partnerId: 1, decision: 'approve' });
     assert.ok('card' in ok && ok.card.request.action === 'invite_page' && (ok.card.request as any).decision === 'approve');
     assert.ok('error' in proposeInvitePage(list, { partnerId: 1, decision: 'changes' }), 'note required');
@@ -146,6 +150,8 @@ check('partner side: Terms first, approved only, rate-limited, nothing goes live
     assert.ok(block.includes("checkRateLimit(db, 'partner_invite_profile'"));
     assert.ok(block.includes('inviteProfilePending: next') && !block.includes('inviteProfile: next'), 'submit only fills pending');
     assert.ok(hub.indexOf("if (impersonating) return json(403") < hub.indexOf("body.action === 'invite_profile_submit'"), 'blocked while impersonating');
+    assert.ok(block.includes('.where(unchanged)') && (block.match(/\.where\(unchanged\)/g) || []).length === 2, 'both saves conditional (no deleting a photo that just went live)');
+    assert.ok(block.includes('if (!done.length) return changedMeanwhile;') && block.includes('if (!saved.length) {'));
 });
 
 check('admin side: approve copies pending → live; changes keeps it pending with a note; conditional update; partner told', () => {

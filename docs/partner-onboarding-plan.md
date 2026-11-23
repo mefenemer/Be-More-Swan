@@ -21,7 +21,8 @@ or partner admins), partner-hub `invite_profile_submit` / `invite_profile_withdr
 (approve / changes / take down) + Partner Ops `propose_invite_page`, Partner Assistant `propose_invite_page` (fills the
 form only), invite.html "Paid partnership" block, first-week step 3, erasure; partner kit card reading
 `partner-kit/kit.json` (empty until the owner adds files). ⚠️ **NEW SQL `db/z-partner-invite-page.sql` — BOTH DBs
-before deploy.** ⚠️ privacy.html doesn't mention the invite-page photo yet — owner/legal wording. Phase 3 not started.
+before deploy** — applied to STAGING 2026-11-23; live-tested there in-process (submit, refusals, send back, resend,
+approve, public page, take down, withdraw; real R2 not tested — no R2 keys in local .env). ⚠️ privacy.html doesn't mention the invite-page photo yet — owner/legal wording. Phase 3 not started.
 
 Builds on the programme in [affiliate-partner-programme-plan.md](./affiliate-partner-programme-plan.md)
 (steps 1–9 live on prod since 2026-10-19/23). Nothing here changes how commission is worked out, held or

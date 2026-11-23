@@ -251,7 +251,7 @@ export function proposeEraseApplication(partners: PartnerLite[], input: { partne
 
 // ── Their own invite page (docs/partner-onboarding-plan.md §3.3) ─────────────────────────────
 
-export interface InvitePageLite { id: number; status: string; name: string | null; email: string | null; invitePageState: 'none' | 'waiting' | 'changes_requested' | 'live'; headline: string | null }
+export interface InvitePageLite { id: number; status: string; name: string | null; email: string | null; invitePageState: 'none' | 'waiting' | 'changes_requested' | 'live'; headline: string | null; hasLive?: boolean }
 
 export function proposeInvitePage(partners: InvitePageLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
     const p = partners.find((x) => x.id === Number(input.partnerId));
@@ -268,7 +268,8 @@ export function proposeInvitePage(partners: InvitePageLite[], input: { partnerId
             : { kind: 'invite_page', title: `Ask ${name} to change their invite page`, summary: `It stays off the page until they resend it. Note shown to them: ${note}`, request: { action: 'invite_page', partnerId: p.id, decision: 'changes', note } } };
     }
     if (decision === 'take_down') {
-        if (p.invitePageState !== 'live' && p.invitePageState !== 'waiting' && p.invitePageState !== 'changes_requested') return { error: `${name} has no live invite page.` };
+        // An edit can be waiting while nothing is live yet — the server refuses that, so the card isn't offered (review of #815).
+        if (!(p.hasLive ?? p.invitePageState === 'live')) return { error: `${name} has no live invite page to take down.` };
         return { card: { kind: 'invite_page', title: `Take ${name}'s invite page down`, summary: `Their link goes back to the standard page straight away.${note ? ` Note shown to them: ${note}` : ''}`, request: { action: 'invite_page', partnerId: p.id, decision: 'take_down', note } } };
     }
     return { error: 'Decision must be approve, changes or take_down.' };
