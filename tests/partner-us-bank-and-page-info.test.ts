@@ -105,6 +105,14 @@ check('wired: SQL allows us_bank; admin can download the file; privacy says what
     assert.ok(page.includes('<select id="pt-us-holder" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"><option value="">Choose…</option>'), 'no silent default to business');
 });
 
+check('Partner Terms 1.3: 4.2 names US bank via Wise in USD; everyone re-accepts', () => {
+    const terms = read('partner-terms.html');
+    assert.ok(terms.includes('or transfer to a US bank account through Wise'));
+    assert.ok(terms.includes('Wise converts the sterling amount to US dollars'));
+    assert.ok(terms.includes('Version 1.3 &middot; Last updated: 23 November 2026'));
+    assert.ok(read('src/config/partner-terms.ts').includes("PARTNER_TERMS_VERSION = '1.3'"), 'bumped, so the Partner page asks again');
+});
+
 console.log('Partner page: ⓘ and renewal date');
 
 check('every number card has an ⓘ wired to its explanation', () => {

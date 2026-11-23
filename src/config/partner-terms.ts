@@ -6,8 +6,10 @@
 // 1.2: legal review 2026-10-23 — ad label first + international rules (5.1, 5.3, 5.5), 30 days' notice
 //      of changes (3.3, 8.1), clawback as a debt (4.3), tax (4.5), immediate ending + 7.4, data roles
 //      (9.3), liability cap + indemnity (10), courts carve-out (11). docs/legal/partner-terms-v1.2-changes.md
-export const PARTNER_TERMS_VERSION = '1.2';
-export const PARTNER_TERMS_UPDATED = '23 October 2026';
+// 1.3: 4.2 adds payment to a US bank account through Wise, converted to US dollars at Wise's rate on the
+//      day (owner request 2026-11-23). docs/legal/partner-terms-v1.3-changes.md
+export const PARTNER_TERMS_VERSION = '1.3';
+export const PARTNER_TERMS_UPDATED = '23 November 2026';
 
 /**
  * Has this partner accepted the Terms in force now? Until they have, commission still builds up but
