@@ -12770,13 +12770,17 @@ async function loadPayouts() {
     const btn = document.getElementById('payout-create-btn');
     btn.disabled = !due;
     btn.textContent = due ? `Create payout run (${due} · ${_pMoney(preview.totalDuePence)})` : 'Create payout run';
-    document.getElementById('payout-batches-tbody').innerHTML = batches.map((b) => {
+    // Several open runs: their Wise files together need the sum (review of #822).
+    const openWise = batches.filter((b) => (b.status === 'draft' || b.status === 'exported') && b.wise_total_pence > 0);
+    const totalNote = openWise.length > 1
+      ? `<tr><td colspan="5" class="py-2 px-2 text-xs text-amber-800 bg-amber-50 font-semibold">${openWise.length} runs are open: together their Wise files need ${_pMoney(openWise.reduce((n, b) => n + b.wise_total_pence, 0))} in your Wise GBP balance.</td></tr>` : '';
+    document.getElementById('payout-batches-tbody').innerHTML = totalNote + batches.map((b) => {
       const open = b.status === 'draft' || b.status === 'exported';
       const files = [['wise_bank', 'Wise · UK bank', b.bank_partners], ['wise_us', 'Wise · US bank', b.us_bank_partners || 0], ['wise_eur', 'Wise · euro bank', b.eu_bank_partners || 0], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
         .filter(([, , n]) => n > 0)
         .map(([f, label, n]) => `<button type="button" onclick="payoutDownload(${b.id}, '${f}')" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${label} (${n})</button>`).join(' ');
       // Paying from the Wise GBP balance: say how much it must hold for this run's Wise files (owner decision 2026-11-23).
-      const topUp = open && b.wise_total_pence > 0 ? `<p class="text-[11px] text-amber-700 font-semibold mt-1">Wise: top up your GBP balance to at least ${_pMoney(b.wise_total_pence)} first</p>` : '';
+      const topUp = open && b.wise_total_pence > 0 ? `<p class="text-[11px] text-amber-700 font-semibold mt-1">Wise: this run needs ${_pMoney(b.wise_total_pence)} in your GBP balance</p>` : '';
       const statusLabel = { draft: 'Ready to export', exported: 'Exported — awaiting payment', paid: `Paid ${_pDate(b.paid_at)}`, cancelled: 'Cancelled' }[b.status] || b.status;
       return `<tr class="border-t border-gray-100">
         <td class="py-2 px-2 whitespace-nowrap text-gray-700">#${b.id} · ${_pDate(b.created_at)}</td>

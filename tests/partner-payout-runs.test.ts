@@ -137,7 +137,8 @@ check('Payouts screen: Wise is paid from the GBP balance, and each open run says
     const path = require('node:path') as typeof import('node:path');
     const root = path.join(__dirname, '..');
     const adm = fs.readFileSync(path.join(root, 'admin.html'), 'utf8');
-    assert.ok(adm.includes('Wise: top up your GBP balance to at least ${_pMoney(b.wise_total_pence)} first'));
+    assert.ok(adm.includes('Wise: this run needs ${_pMoney(b.wise_total_pence)} in your GBP balance'));
+    assert.ok(adm.includes('together their Wise files need'), 'several open runs → the combined amount');
     assert.ok(adm.includes('partners are paid from your Wise <strong>GBP balance</strong>'));
     const src = fs.readFileSync(path.join(root, 'src/utils/partner-payout-batches.ts'), 'utf8');
     assert.ok(src.includes("FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)::int AS wise_total_pence"), 'PayPal is not in the Wise total');
