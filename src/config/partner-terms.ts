@@ -10,8 +10,8 @@
 //      Subscription Payments only + fixed deduction (3.2), caps 24 months / 40% / 20% (3.5), customers
 //      are ours (6.3), closure run-off (7.2), sub-minimum balance paid on ending (7.3), staying active
 //      (7.5). docs/legal/partner-terms-v1.3-activity-draft.md
-//      Also 4.2: payment to a US bank account through Wise, converted to US dollars at Wise's rate on the
-//      day (owner request 2026-11-23). docs/legal/partner-terms-v1.3-changes.md
+//      Also 4.2: payment through Wise to a US bank account or a euro bank account (IBAN), converted to US dollars
+//      or euros at Wise's rate on the day (owner requests 2026-11-23). docs/legal/partner-terms-v1.3-changes.md
 export const PARTNER_TERMS_VERSION = '1.3';
 export const PARTNER_TERMS_UPDATED = '23 November 2026';
 /**

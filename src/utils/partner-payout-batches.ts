@@ -156,19 +156,38 @@ export async function cancelBatch(db: Db, batchId: number): Promise<{ ok: true }
 // ── Export files ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Wise batch-file headers. ⚠️ Taken from the field names Wise documents (sourceCurrency,
- * targetCurrency, amountCurrency, amount, name, recipientEmail, paymentReference, receiverType) —
- * Wise's templates vary by type, so compare these once with the template downloaded from Wise
- * (Batch payments → template) before the first real payout, and change them HERE if they differ.
+ * Wise batch-file headers.
+ * ✅ UK bank — CHECKED 2026-11-23 against Wise's "Send to bank accounts" template (GBP → GBP, local bank account,
+ *    business), downloaded by the owner:
+ *      name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber
+ *      "e.g. Batch Payment Recipient", …, "INSTITUTION","source","0.00","GBP","GBP",,
+ *    So: referenceNumber is a column (optional, left blank); amountCurrency is "source" (the amount is what we
+ *    send, in GBP — NOT the currency code); a business recipient is "INSTITUTION".
+ *    A personal account is "PERSON" (template rows added 2026-11-23).
+ * ⚠️ Not yet checked: the email template ("Send by email"). US columns: see below.
+ *    Download those from wise.com/batch/templates and change them HERE if they differ.
  */
-export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
+export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
+/** amountCurrency: "source" = the amount is in the source currency (GBP), what we pay out. From Wise's template. */
+export const WISE_AMOUNT_IN_SOURCE = 'source';
+/** receiverType: "INSTITUTION" for a business, "PERSON" for a personal account — both from Wise's template
+ *  (owner added a personal GBP and USD row, 2026-11-23). NOT "PRIVATE", which we had assumed. */
+export const WISE_RECEIVER_BUSINESS = 'INSTITUTION';
+export const WISE_RECEIVER_PERSON = 'PERSON';
 export const WISE_EMAIL_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency'];
-// ⚠️ US bank (ACH) recipients, paid in USD from a GBP balance. Field names from Wise's documented USD
-// recipient requirements (abartn, accountNumber, accountType, address.*) — like the UK headers above, COMPARE
-// WITH A TEMPLATE DOWNLOADED FROM WISE before the first real run.
-export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
-    'abartn', 'accountNumber', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
-export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'paypal';
+// ✅ US bank (ACH) recipients, paid in USD from a GBP balance — CHECKED 2026-11-23 against Wise's "Send to bank
+// accounts" template with a GBP → USD, US bank account, business row (downloaded by the owner). Wise's header, exactly:
+//   …,targetCurrency,sortCode,accountNumber,type,abartn,accountType,addressCountryCode,addressFirstLine,addressCity,addressState,addressPostCode
+//   US row: sortCode blank, type "Aba", accountType "CHECKING", addressCountryCode "US", addressState "AL" (2 letters).
+export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
+    'sortCode', 'accountNumber', 'type', 'abartn', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
+/** Wise's `type` for a US routing-number (ABA) account — from its template. */
+export const WISE_US_ACCOUNT_TYPE = 'Aba';
+// ✅ Euro bank accounts (IBAN), paid in EUR from a GBP balance — from Wise's template with GBP → EUR rows, business and
+// personal, inside and outside the EU (downloaded by the owner 2026-11-23). Those rows fill only IBAN and BIC (BIC may be
+// blank); the address columns stay empty. The template's header is the full combined one, so it is used here as is.
+export const WISE_EUR_HEADERS = [...WISE_US_HEADERS, 'IBAN', 'BIC'];
+export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'wise_eur' | 'paypal';
 
 const csvCell = (v: string) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 /** A spreadsheet treats a leading = + - @ as a formula; neutralise it (CSV injection). */
@@ -209,20 +228,24 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         // Terms 4.5(b): what is sent = commission + any UK VAT.
         const pay = l.amountPence + (l.vatPence ?? 0);
         if (format === 'wise_bank' && d.method === 'bank') {
-            rows.push([d.accountName, l.email, ref, 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'GBP', d.sortCode, d.accountNumber]);
+        } else if (format === 'wise_eur' && d.method === 'eu_bank') {
+            // The amount is the GBP commission; Wise converts it and the partner receives EUR. 10 empty US/UK columns, then IBAN, BIC.
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'EUR',
+                ...Array(WISE_US_HEADERS.length - 9).fill(''), d.iban, d.bic || '']);
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
-            rows.push([d.accountName, l.email, ref, d.holderType === 'business' ? 'BUSINESS' : 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'USD',
-                d.routingNumber, d.accountNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
+            rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'USD',
+                '', d.accountNumber, WISE_US_ACCOUNT_TYPE, d.routingNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
-            rows.push([l.name, d.email, ref, 'PRIVATE', 'GBP', pounds(pay), 'GBP', 'GBP']);
+            rows.push([l.name, d.email, ref, WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(pay), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {
             // PayPal Payouts upload: no header row; email, amount, currency, customer id, note, wallet.
             rows.push([d.email, pounds(pay), 'GBP', `P${l.partnerId}-B${batchId}`, 'Be More Swan partner commission', 'PAYPAL']);
         } else continue;
         total += pay;
     }
-    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : [];
+    const header = format === 'wise_bank' ? [WISE_BANK_HEADERS] : format === 'wise_email' ? [WISE_EMAIL_HEADERS] : format === 'wise_us' ? [WISE_US_HEADERS] : format === 'wise_eur' ? [WISE_EUR_HEADERS] : [];
     const csv = [...header, ...rows].map((r) => r.map((v) => csvCell(safe(String(v)))).join(',')).join('\r\n') + '\r\n';
     return { csv, included: rows.length, skipped: lines.length - rows.length, totalPence: total };
 }
@@ -240,6 +263,7 @@ export async function listBatches(db: Db): Promise<Row[]> {
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'bank')::int AS bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'wise')::int AS wise_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'us_bank')::int AS us_bank_partners,
+               COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'eu_bank')::int AS eu_bank_partners,
                COUNT(DISTINCT c.partner_id) FILTER (WHERE p.payout_method = 'paypal')::int AS paypal_partners
           FROM partner_payout_batches b
           LEFT JOIN partner_commissions c ON c.payout_batch_id = b.id
