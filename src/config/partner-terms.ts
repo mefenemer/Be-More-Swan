@@ -20,8 +20,12 @@ export const PARTNER_TERMS_VERSION = '1.3';
  */
 export const ACTUAL_COSTS_TERMS_VERSION = '1.3';
 export function termsIncludeActualCosts(termsVersion: string | null | undefined): boolean {
-    const v = Number(termsVersion);
-    return Number.isFinite(v) && v >= Number(ACTUAL_COSTS_TERMS_VERSION);
+    // Compare "major.minor" as integers: as a number "1.10" would be 1.1 < 1.3 (review of #827).
+    const parts = (v: string) => (/^\d+(\.\d+)?$/.test(v) ? v.split('.').map(Number) : null);
+    const a = termsVersion ? parts(String(termsVersion).trim()) : null;
+    const b = parts(ACTUAL_COSTS_TERMS_VERSION)!;
+    if (!a) return false;
+    return a[0] !== b[0] ? a[0] > b[0] : (a[1] ?? 0) >= (b[1] ?? 0);
 }
 export const PARTNER_TERMS_UPDATED = '23 November 2026';
 /**

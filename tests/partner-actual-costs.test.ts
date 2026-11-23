@@ -233,6 +233,11 @@ check('H1: actual costs only for customers whose partner had accepted the Terms 
     assert.strictEqual(termsIncludeActualCosts('1.4'), true);
     assert.strictEqual(termsIncludeActualCosts('1.2'), false);
     assert.strictEqual(termsIncludeActualCosts(null), false);
+    assert.strictEqual(termsIncludeActualCosts('1.10'), true, '1.10 is after 1.3');
+    assert.strictEqual(termsIncludeActualCosts('2.0'), true);
+    assert.strictEqual(termsIncludeActualCosts('2'), true);
+    assert.strictEqual(termsIncludeActualCosts('0.9'), false);
+    assert.strictEqual(termsIncludeActualCosts('v1.3'), false, 'not a version');
     const led = read('src/utils/partner-ledger.ts');
     assert.ok(led.includes("const costBasis = termsIncludeActualCosts(partnerRow?.termsVersion) ? 'actual' : 'fixed';"), 'decided when terms lock');
     assert.ok(led.includes("if (terms.costBasis !== 'actual') {"), 'fixed customers take the old path');
