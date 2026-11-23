@@ -29,12 +29,12 @@ console.log('payout details');
 
 check('PayPal and Wise take an email; a UK bank takes name, 6-digit sort code, 8-digit account number', () => {
     assert.deepStrictEqual(validatePayoutDetails({ method: 'paypal', email: ' Jo@Example.com ' }), { ok: true, value: { method: 'paypal', email: 'jo@example.com' } });
-    assert.deepStrictEqual(validatePayoutDetails({ method: 'bank', accountName: 'Jo Example', sortCode: '12-34-56', accountNumber: '1234 5678' }),
-        { ok: true, value: { method: 'bank', accountName: 'Jo Example', sortCode: '123456', accountNumber: '12345678' } });
+    assert.deepStrictEqual(validatePayoutDetails({ method: 'bank', accountName: 'Jo Example', holderType: 'person', sortCode: '12-34-56', accountNumber: '1234 5678' }),
+        { ok: true, value: { method: 'bank', accountName: 'Jo Example', sortCode: '123456', accountNumber: '12345678', holderType: 'person' } });
     assert.match((validatePayoutDetails({ method: 'wise', email: 'nope' }) as any).error, /Wise/);
-    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '1234', accountNumber: '12345678' }) as any).error, /sort code/);
-    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '123456', accountNumber: '123' }) as any).error, /8 digits/);
-    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise, a UK bank account or a US bank account/);
+    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', holderType: 'person', sortCode: '1234', accountNumber: '12345678' }) as any).error, /sort code/);
+    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', holderType: 'person', sortCode: '123456', accountNumber: '123' }) as any).error, /8 digits/);
+    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise, a UK bank account, a US bank account or a euro bank account/);
 });
 
 check('only a masked summary is ever shown', () => {

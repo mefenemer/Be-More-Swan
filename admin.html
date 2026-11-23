@@ -12771,7 +12771,7 @@ async function loadPayouts() {
     btn.textContent = due ? `Create payout run (${due} · ${_pMoney(preview.totalDuePence)})` : 'Create payout run';
     document.getElementById('payout-batches-tbody').innerHTML = batches.map((b) => {
       const open = b.status === 'draft' || b.status === 'exported';
-      const files = [['wise_bank', 'Wise · UK bank', b.bank_partners], ['wise_us', 'Wise · US bank', b.us_bank_partners || 0], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
+      const files = [['wise_bank', 'Wise · UK bank', b.bank_partners], ['wise_us', 'Wise · US bank', b.us_bank_partners || 0], ['wise_eur', 'Wise · euro bank', b.eu_bank_partners || 0], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
         .filter(([, , n]) => n > 0)
         .map(([f, label, n]) => `<button type="button" onclick="payoutDownload(${b.id}, '${f}')" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${label} (${n})</button>`).join(' ');
       const statusLabel = { draft: 'Ready to export', exported: 'Exported — awaiting payment', paid: `Paid ${_pDate(b.paid_at)}`, cancelled: 'Cancelled' }[b.status] || b.status;
