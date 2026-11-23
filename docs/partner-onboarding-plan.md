@@ -11,8 +11,11 @@ Status: **decisions taken 2026-11-22 — the owner accepted every suggestion in 
 greeting, starters, D7 limit), `src/config/partner-playbook.ts`, partner-hub `onboarding` block + `onboarding`
 action, partner-assistant `partner_playbook` / `my_results` tools + first-draft tick, new approval email +
 `partner_approved` bell notification, sidebar `ended` fix. ⚠️ **NEW SQL `db/z-partner-onboarding.sql` — apply to
-BOTH DBs before deploy** (partner-hub / partner-assistant select every `partners` column). Browser-checked in a
-stubbed harness (desktop + phone); **not yet run against a real database or a live model**. Phases 2–3 not started.
+BOTH DBs before deploy** (partner-hub / partner-assistant select every `partners` column). **Applied to STAGING
+2026-11-23** (verified); prod not yet. Live test 2026-11-23 on staging (real handlers in-process, test partner #3
+temporarily approved then restored): greeting + list + sums correct, 403 before Terms, marks merge, a real first
+post (label first, workspace numbers in [brackets], link) and a playbook-based 30-day plan. Fixed from it: a reply
+that said "needed more steps" above a finished draft when the 21s budget ran out. Phases 2–3 not started.
 
 Builds on the programme in [affiliate-partner-programme-plan.md](./affiliate-partner-programme-plan.md)
 (steps 1–9 live on prod since 2026-10-19/23). Nothing here changes how commission is worked out, held or

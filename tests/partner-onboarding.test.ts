@@ -108,6 +108,8 @@ check('Terms not accepted → no starters and no "where would you like to start?
     const page = read('partner-content.html');
     assert.ok(page.includes("input.disabled = locked;"), 'the chat box is locked until then');
     assert.ok(read('netlify/functions/partner-assistant.ts').includes('it’s step 1 of your first-week list'), 'the 403 points at the list, not a hidden banner');
+    assert.ok(page.includes("(k === 'first_draft' || k === 'share') && data.partnerTerms && !data.partnerTerms.accepted"), 'sharing waits for the rules too');
+    assert.ok(!page.includes('Accept the Partner Terms at the top of this page'), 'no pointer to a banner the list hides');
 });
 
 check('D7: 100 messages in the first 30 days from their FIRST message, then 50 — not from decided_at, which status changes reset', () => {
@@ -195,6 +197,12 @@ check('sidebar keeps the Partner page for ended partners (their earnings + payou
     const ws = read('workspace.html');
     assert.ok(ws.includes("['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)"));
     assert.ok(ws.includes("partnerStatus === 'approved' || partnerStatus === 'suspended' || partnerStatus === 'ended';"), 'and never hard-gated by the plan picker');
+});
+
+check('out of time after a draft → the draft is presented, not "needed more steps" (live test 2026-11-23)', () => {
+    const src = read('netlify/functions/partner-assistant.ts');
+    assert.ok(src.includes("if (!cards.length) reply ||= 'That needed more steps"));
+    assert.ok(src.includes("if (!cards.length) reply = 'That took too long"));
 });
 
 console.log(`\n${passed} passed`);

@@ -260,7 +260,7 @@
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
     const min = data.payoutRules?.minPayoutPence ?? 0;
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
-      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms at the top of this page so we can pay you.'
+      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) so we can pay you.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then.`);
     document.getElementById('pt-pending-note').textContent = s.next_release_at
@@ -306,7 +306,8 @@
     show('pt-welcome-folded', !open);
     const first = data.partner.firstName;
     document.getElementById('pt-welcome-title').textContent = first ? `Welcome to the partner team, ${first}` : 'Welcome to the partner team';
-    const termsLocked = (k) => k === 'first_draft' && data.partnerTerms && !data.partnerTerms.accepted;
+    // The Terms hold the rules for promoting us, so drafting and sharing wait for step 1 (review of #813).
+    const termsLocked = (k) => (k === 'first_draft' || k === 'share') && data.partnerTerms && !data.partnerTerms.accepted;
     document.getElementById('pt-steps').innerHTML = o.steps.map((st, i) => {
       const mark = st.done
         ? '<span aria-hidden="true" style="display:inline-flex;width:1.5rem;height:1.5rem;border-radius:9999px;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0">✓</span>'

@@ -241,7 +241,9 @@ export default withLambda(async (event) => {
     try {
         for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
             const remaining = BUDGET_MS - (Date.now() - started);
-            if (remaining < 4_000) { reply ||= 'That needed more steps than I can fit in one go — try asking for one thing at a time.'; break; }
+            // Out of time. If a draft or card is already made, say so (below) — live test 2026-11-23 showed "needed more
+            // steps" above a finished draft, after my_business + my_results + bms_facts + playbook + deliver_draft.
+            if (remaining < 4_000) { if (!cards.length) reply ||= 'That needed more steps than I can fit in one go — try asking for one thing at a time.'; break; }
             const response = await client.beta.messages.create({
                 model: PARTNER_ASSISTANT_MODEL,
                 max_tokens: 8000,
@@ -277,7 +279,7 @@ export default withLambda(async (event) => {
             messages.push({ role: 'user', content: results });
         }
     } catch (err) {
-        if (err instanceof Anthropic.APIConnectionTimeoutError) reply = 'That took too long — try asking for one thing at a time.';
+        if (err instanceof Anthropic.APIConnectionTimeoutError) { if (!cards.length) reply = 'That took too long — try asking for one thing at a time.'; }
         else if (err instanceof Anthropic.RateLimitError) return json(429, { error: 'The assistant is busy. Try again in a moment.' });
         else if (err instanceof Anthropic.APIError) { console.error('[partner-assistant] Anthropic error', err.status, err.message); return json(502, { error: 'The assistant could not answer just now. Try again.' }); }
         else throw err;
