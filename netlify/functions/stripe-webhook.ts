@@ -1073,13 +1073,13 @@ export default withLambda(async (event) => {
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
-        // A disputed payment earns its partner nothing — until it's won (charge.dispute.closed below).
+        // A disputed payment earns its partner nothing — until it closes in our favour (won / warning_closed, below).
         await _reversePartnerCommission(db, dispute.payment_intent, dispute.amount ?? 0, 'dispute', new Date(stripeEvent.created * 1000));
     }
 
-    // ── charge.dispute.closed — won: the partner's commission comes back ─
+    // ── charge.dispute.closed — won or warning_closed: the partner's commission comes back ─
     // ⚠️ Needs charge.dispute.closed enabled on the Stripe webhook endpoint (both environments).
-    // 'won', and 'warning_closed' (an inquiry / early fraud warning that closed without a chargeback — we kept the
+    // 'won', and 'warning_closed' (a card issuer's inquiry that closed without becoming a chargeback — we kept the
     // money; owner 2026-11-23): commission comes back. 'lost' leaves it voided. Refunds on the charge since stay unearned.
     if (stripeEvent.type === 'charge.dispute.closed') {
         const dispute = stripeEvent.data.object as Stripe.Dispute;

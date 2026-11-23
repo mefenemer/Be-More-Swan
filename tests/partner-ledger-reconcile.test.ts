@@ -18,7 +18,7 @@ function check(name: string, fn: () => void): void {
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
 }
 
-const WON_NOTE = 'Dispute won — commission returned';
+const WON_NOTE = 'Dispute closed in our favour — commission returned';
 type Run = null | 'draft' | 'exported' | 'paid';
 class Payment {
     status: 'pending' | 'payable' | 'paid' | 'voided' = 'payable';
@@ -131,6 +131,15 @@ check('an adjustment an admin cancelled no longer counts: goodwill-cancelled cla
 check('the unexpected negative won branch still closes the dispute, so later refunds act', () => {
     const plan = planReconcile({ rowStatus: 'paid', rowCommission: C, rowVoidReason: null, rowEditable: false, others: 500 - C + 900, disputeAdjustmentsOpen: true }, { kind: 'dispute_won', desired: 500 });
     assert.ok(plan.extra && plan.extra.pence < 0 && plan.closeDispute === true);
+});
+
+check('a closure row written with the OLD "Dispute won" wording still closes the dispute', () => {
+    const p = new Payment(C); p.markPaid();
+    p.dispute();
+    p.linked.push({ pence: C, note: 'Dispute won — commission returned', status: 'payable' });
+    assert.strictEqual(p.total(), C);
+    assert.strictEqual(p.state().disputeAdjustmentsOpen, false);
+    p.refund(500); assert.strictEqual(p.total(), 500, 'closed, so the refund acts');
 });
 
 console.log(`\n${passed} passed`);
