@@ -152,7 +152,7 @@ async function _reversePartnerCommission(
             console.warn('[stripe-webhook] could not look up the invoice for a refunded payment:', (lookupErr as any)?.message);
         }
         if (kind === 'dispute_won') {
-            const { reinstated } = await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at });
+            const { reinstated } = await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });
             if (reinstated) console.log(`[stripe-webhook] dispute won: reinstated ${reinstated} partner commission row(s) for ${paymentIntentId}`);
             return;
         }
@@ -1084,11 +1084,16 @@ export default withLambda(async (event) => {
         const dispute = stripeEvent.data.object as Stripe.Dispute;
         if (dispute.status === 'won') {
             let refunded = 0;
+            let chargeAmount: number | null = null;
             try {
                 const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
-                if (chargeId) refunded = (await stripe.charges.retrieve(chargeId)).amount_refunded ?? 0;
+                if (chargeId) {
+                    const ch = await stripe.charges.retrieve(chargeId);
+                    refunded = ch.amount_refunded ?? 0;
+                    chargeAmount = ch.amount ?? null;   // so the reinstated share uses the same proportion as refunds
+                }
             } catch (e) { console.warn('[stripe-webhook] dispute.closed: could not read the charge — reinstating in full:', (e as any)?.message); }
-            await _reversePartnerCommission(db, dispute.payment_intent, refunded, 'dispute_won', new Date(stripeEvent.created * 1000));
+            await _reversePartnerCommission(db, dispute.payment_intent, refunded, 'dispute_won', new Date(stripeEvent.created * 1000), chargeAmount);
         }
     }
 

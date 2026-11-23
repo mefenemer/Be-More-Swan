@@ -73,8 +73,8 @@ check("charge.dispute.closed with status 'won' reinstates; refunds on the charge
     const block = wh.slice(wh.indexOf("if (stripeEvent.type === 'charge.dispute.closed') {"));
     assert.ok(block.length > 100, 'handler exists');
     assert.ok(block.includes("if (dispute.status === 'won') {"));
-    assert.ok(block.includes("refunded = (await stripe.charges.retrieve(chargeId)).amount_refunded ?? 0;"));
-    assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at });'));
+    assert.ok(block.includes("refunded = ch.amount_refunded ?? 0;") && block.includes("chargeAmount = ch.amount ?? null;"));
+    assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });'));
 });
 
 console.log(`\n${passed} passed`);

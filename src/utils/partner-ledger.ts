@@ -324,25 +324,28 @@ export async function reversePartnerCommission(db: Db, input: ReversalInput): Pr
         // reduces commission. The row is written by the webhook at the payment, so its created_at is the
         // payment time (a commission entered late by hand gets a later created_at — in the partner's favour).
         if (isPastClawbackWindow(row.createdAt, at)) continue;
-        const net = row.netAmountPence ?? 0;
-        const charged = input.chargeAmountMinor ?? 0;
         const remaining = input.kind === 'dispute' ? 0
-            : charged > 0 ? Math.max(0, Math.floor((net * Math.max(0, charged - input.amountRefundedPence)) / charged))
-            : Math.max(0, net - input.amountRefundedPence);
+            : remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence);
         const target = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
         const reason = input.kind === 'dispute' ? DISPUTE_REASON : (remaining === 0 ? 'Payment refunded' : 'Payment partly refunded');
 
         if (row.status === 'voided') continue;
         if ((row.status === 'pending' || row.status === 'payable') && !inExportedRun) {
-            if (target === 0) {
+            // Adjustments already recorded for this payment (e.g. while it sat in an exported run that was then
+            // cancelled) count too: row + adjustments must end at `target`, never below it (review of #823).
+            const [{ adj }] = await db.select({ adj: sql<number>`COALESCE(SUM(${partnerCommissions.commissionPence}), 0)::int` })
+                .from(partnerCommissions)
+                .where(and(eq(partnerCommissions.kind, 'adjustment'), eq(partnerCommissions.stripeInvoiceId, row.stripeInvoiceId!)));
+            const rowTarget = Math.max(0, target - Number(adj));   // adj is ≤ 0
+            if (rowTarget === 0) {
                 // A voided row leaves any unpaid run, so marking the run paid can never pay (or un-void) it.
                 await db.update(partnerCommissions)
                     .set({ status: 'voided', voidedAt: at, voidReason: reason, payoutBatchId: null })
                     .where(eq(partnerCommissions.id, row.id));
                 adjusted++;
-            } else if (target < row.commissionPence) {
+            } else if (rowTarget < row.commissionPence) {
                 await db.update(partnerCommissions)
-                    .set({ commissionPence: target, note: `${reason}: was ${row.commissionPence}p` })
+                    .set({ commissionPence: rowTarget, note: `${reason}: was ${row.commissionPence}p` })
                     .where(eq(partnerCommissions.id, row.id));
                 adjusted++;
             }
@@ -402,10 +405,21 @@ async function refreshRunAfterChange(db: Db, batchId: number, partnerId: number)
  *   - money clawed back after payout ('Payment disputed after payout') is returned as a 'bonus' row
  *     (adjustments must be negative — partner_commissions_sign_check), net of any already returned.
  */
+/**
+ * What is left of a payment's net (excl. VAT, in sterling) after refunds: net × the charge's unrefunded share when
+ * the charge amount is known (any currency, VAT-inclusive refunds), else net − refunded. Never below 0.
+ */
+export function remainingNetPence(netPence: number, chargeAmountMinor: number, refundedMinor: number): number {
+    if (chargeAmountMinor > 0) return Math.max(0, Math.floor((netPence * Math.max(0, chargeAmountMinor - refundedMinor)) / chargeAmountMinor));
+    return Math.max(0, netPence - refundedMinor);
+}
+
 export async function reinstateDisputedCommission(db: Db, input: {
     paymentIntentId: string | null; invoiceId?: string | null;
     /** Refunded on the charge so far (charge.amount_refunded) — that part stays unearned. */
     amountRefundedPence?: number; at?: Date;
+    /** The charge's own amount, in its currency: the refunded SHARE is used, like reversePartnerCommission. */
+    chargeAmountMinor?: number | null;
 }): Promise<{ reinstated: number }> {
     const keys = [input.paymentIntentId, input.invoiceId].filter((k): k is string => !!k);
     if (!keys.length) return { reinstated: 0 };
@@ -418,7 +432,9 @@ export async function reinstateDisputedCommission(db: Db, input: {
         eq(partnerCommissions.voidReason, DISPUTE_REASON), isNull(partnerCommissions.payoutBatchId), match,
     ));
     for (const row of voided) {
-        const remaining = Math.max(0, (row.netAmountPence ?? 0) - (input.amountRefundedPence ?? 0));
+        // Same proportion as a refund (review of #823): net × unrefunded share of the charge, so VAT and other
+        // currencies come out right. Falls back to net − refunded when the charge amount is unknown (GBP-only).
+        const remaining = remainingNetPence(row.netAmountPence ?? 0, input.chargeAmountMinor ?? 0, input.amountRefundedPence ?? 0);
         const amount = commissionPence(remaining, row.rateBps ?? 0, row.costDeductionBps);
         if (amount <= 0) continue;   // refunded in full meanwhile: stays voided
         const status = row.availableAt && row.availableAt <= at ? 'payable' : 'pending';
