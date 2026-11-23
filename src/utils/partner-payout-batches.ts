@@ -136,7 +136,7 @@ export async function cancelBatch(db: Db, batchId: number): Promise<{ ok: true }
  *      "e.g. Batch Payment Recipient", …, "INSTITUTION","source","0.00","GBP","GBP",,
  *    So: referenceNumber is a column (optional, left blank); amountCurrency is "source" (the amount is what we
  *    send, in GBP — NOT the currency code); a business recipient is "INSTITUTION".
- * ⚠️ Not yet checked: the value for a person (PRIVATE assumed), the US (USD) columns, and the email template.
+ * ⚠️ Not yet checked: the value for a person (PRIVATE assumed) and the email template. US columns: see below.
  *    Download those from wise.com/batch/templates and change them HERE if they differ.
  */
 export const WISE_BANK_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'sortCode', 'accountNumber'];
@@ -146,11 +146,14 @@ export const WISE_AMOUNT_IN_SOURCE = 'source';
 export const WISE_RECEIVER_BUSINESS = 'INSTITUTION';
 export const WISE_RECEIVER_PERSON = 'PRIVATE';
 export const WISE_EMAIL_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency'];
-// ⚠️ US bank (ACH) recipients, paid in USD from a GBP balance. Field names from Wise's documented USD
-// recipient requirements (abartn, accountNumber, accountType, address.*) — like the UK headers above, COMPARE
-// WITH A TEMPLATE DOWNLOADED FROM WISE before the first real run.
+// ✅ US bank (ACH) recipients, paid in USD from a GBP balance — CHECKED 2026-11-23 against Wise's "Send to bank
+// accounts" template with a GBP → USD, US bank account, business row (downloaded by the owner). Wise's header, exactly:
+//   …,targetCurrency,sortCode,accountNumber,type,abartn,accountType,addressCountryCode,addressFirstLine,addressCity,addressState,addressPostCode
+//   US row: sortCode blank, type "Aba", accountType "CHECKING", addressCountryCode "US", addressState "AL" (2 letters).
 export const WISE_US_HEADERS = ['name', 'recipientEmail', 'paymentReference', 'referenceNumber', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency',
-    'abartn', 'accountNumber', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
+    'sortCode', 'accountNumber', 'type', 'abartn', 'accountType', 'addressCountryCode', 'addressFirstLine', 'addressCity', 'addressState', 'addressPostCode'];
+/** Wise's `type` for a US routing-number (ABA) account — from its template. */
+export const WISE_US_ACCOUNT_TYPE = 'Aba';
 export type ExportFormat = 'wise_bank' | 'wise_email' | 'wise_us' | 'paypal';
 
 const csvCell = (v: string) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
@@ -192,7 +195,7 @@ export function buildExport(format: ExportFormat, batchId: number, lines: BatchL
         } else if (format === 'wise_us' && d.method === 'us_bank') {
             // The amount is the GBP commission; Wise converts it and the partner receives USD.
             rows.push([d.accountName, l.email, ref, '', d.holderType === 'business' ? WISE_RECEIVER_BUSINESS : WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'USD',
-                d.routingNumber, d.accountNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
+                '', d.accountNumber, WISE_US_ACCOUNT_TYPE, d.routingNumber, d.accountType === 'savings' ? 'SAVINGS' : 'CHECKING', 'US', d.addressLine, d.city, d.state, d.zip]);
         } else if (format === 'wise_email' && d.method === 'wise') {
             rows.push([l.name, d.email, ref, WISE_RECEIVER_PERSON, WISE_AMOUNT_IN_SOURCE, pounds(l.amountPence), 'GBP', 'GBP']);
         } else if (format === 'paypal' && d.method === 'paypal') {

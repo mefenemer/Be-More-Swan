@@ -81,6 +81,8 @@ check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an 
     const f = buildExport('wise_us', 7, lines);
     const [head, row] = f.csv.trim().split('\r\n');
     assert.strictEqual(head, WISE_US_HEADERS.join(','));
+    // Exactly Wise's own header (its template, GBP → USD US bank account, downloaded 2026-11-23).
+    assert.strictEqual(head, 'name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber,type,abartn,accountType,addressCountryCode,addressFirstLine,addressCity,addressState,addressPostCode');
     const cells = row.split(',');
     const at = (h: string) => cells[WISE_US_HEADERS.indexOf(h)];
     assert.strictEqual(at('receiverType'), 'INSTITUTION', 'Wise’s word for a business recipient (its template, 2026-11-23)');
@@ -89,6 +91,9 @@ check('Wise · US bank file: right columns, GBP amount → USD, BUSINESS for an 
     assert.strictEqual(at('referenceNumber'), '');
     assert.strictEqual(at('targetCurrency'), 'USD');
     assert.strictEqual(at('abartn'), '021000021');
+    assert.strictEqual(at('type'), 'Aba');
+    assert.strictEqual(at('sortCode'), '');
+    assert.strictEqual(at('accountNumber'), '000123456789');
     assert.strictEqual(at('accountType'), 'CHECKING');
     assert.strictEqual(at('addressState'), 'NY');
     assert.strictEqual(at('addressCountryCode'), 'US');
