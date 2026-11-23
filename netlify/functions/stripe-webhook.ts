@@ -112,6 +112,18 @@ async function _gbpNetPence(payment: PartnerPayment): Promise<number | null> {
     return Math.round((bt.amount * payment.netAmountPence) / charge.amount);
 }
 
+/** Is any OTHER dispute on this charge still open, or lost? Then a won / warning_closed one must not reinstate. */
+async function _otherDisputeBlocksReinstate(chargeId: string, disputeId: string): Promise<boolean> {
+    try {
+        const list = await stripe.disputes.list({ charge: chargeId, limit: 20 });
+        return list.data.some((d) => d.id !== disputeId && d.status !== 'won' && d.status !== 'warning_closed');
+    } catch (e) {
+        // Can't tell: be safe for the business — leave it voided; the next close event (or an admin) can reinstate.
+        console.warn('[stripe-webhook] dispute.closed: could not list disputes on the charge — not reinstating:', (e as any)?.message);
+        return true;
+    }
+}
+
 /** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */
 function annualPeriodFrom(paidAt: Date): { periodStart: Date; periodEnd: Date } {
     const end = new Date(paidAt.getTime());
@@ -1086,8 +1098,14 @@ export default withLambda(async (event) => {
         if (dispute.status === 'won' || dispute.status === 'warning_closed') {
             let refunded = 0;
             let chargeAmount: number | null = null;
+            const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+            // Another dispute on the same charge still open, or lost (e.g. an inquiry closed while a separate
+            // chargeback was opened): don't put commission back yet (review of #826). Its own close event decides.
+            if (chargeId && await _otherDisputeBlocksReinstate(chargeId, dispute.id)) {
+                console.log(`[stripe-webhook] dispute.closed ${dispute.id}: another dispute on ${chargeId} is open or lost — commission stays voided`);
+                return { statusCode: 200, body: JSON.stringify({ received: true }) };
+            }
             try {
-                const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
                 if (chargeId) {
                     const ch = await stripe.charges.retrieve(chargeId);
                     refunded = ch.amount_refunded ?? 0;

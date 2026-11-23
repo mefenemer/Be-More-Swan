@@ -74,6 +74,10 @@ check("charge.dispute.closed with status 'won' or 'warning_closed' reinstates; r
     assert.ok(block.length > 100, 'handler exists');
     // Owner 2026-11-23: an inquiry / early fraud warning that closes without a chargeback restores commission too.
     assert.ok(block.includes("if (dispute.status === 'won' || dispute.status === 'warning_closed') {"));
+    // Review of #826: never reinstate while ANOTHER dispute on the same charge is open or lost; unknown = don't.
+    assert.ok(block.includes('if (chargeId && await _otherDisputeBlocksReinstate(chargeId, dispute.id)) {'));
+    assert.ok(wh.includes("return list.data.some((d) => d.id !== disputeId && d.status !== 'won' && d.status !== 'warning_closed');"));
+    assert.ok(wh.includes("could not list disputes on the charge — not reinstating:', (e as any)?.message);\n        return true;"));
     assert.ok(block.includes("refunded = ch.amount_refunded ?? 0;") && block.includes("chargeAmount = ch.amount ?? null;"));
     assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });'));
 });
