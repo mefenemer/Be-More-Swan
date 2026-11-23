@@ -6,7 +6,7 @@
 // A payout run:
 //   previewPayout  → who is due: approved, suspended or ended partners (they keep what they earned, Terms 7.3) who
 //                    have accepted the CURRENT Partner Terms, with CONFIRMED payout details, whose ready-to-pay balance (refund adjustments included)
-//                    reaches the minimum. Everyone else is listed with the reason they're left out.
+//                    reaches the minimum — or is paid anyway under Terms 1.3 4.2 / 7.3 (underMinimumReason). Everyone else is listed with the reason they're left out.
 //   createBatch    → locks those rows into a 'draft' batch (payout_batch_id), in one transaction under
 //                    an advisory lock so two admins can't batch the same money twice.
 //   export files   → Wise (UK bank, and Wise-by-email) and PayPal. Built from the VAULT details; the
@@ -53,6 +53,24 @@ export async function addBonus(db: Db, partnerId: number, amountPence: number, n
 
 // ── The payout run ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * Partner Terms 1.3 — when a balance under the minimum is still paid:
+ *   4.2  it has been ready to pay (the oldest ready row) for 6 months and is at least £10;
+ *   7.3  the partnership has ended — any ready balance is paid at the next run.
+ * Returns null when it's paid, or the reason it rolls over.
+ */
+export const SMALL_BALANCE_FLOOR_PENCE = 1000;
+export const SMALL_BALANCE_WAIT_MONTHS = 6;
+export function underMinimumReason(amountPence: number, minPence: number, status: string, oldestReadyAt: Date | null, now: Date = new Date()): string | null {
+    if (amountPence >= minPence || status === 'ended') return null;
+    if (amountPence >= SMALL_BALANCE_FLOOR_PENCE && oldestReadyAt) {
+        const due = new Date(oldestReadyAt.getTime());
+        due.setUTCMonth(due.getUTCMonth() + SMALL_BALANCE_WAIT_MONTHS);
+        if (due.getTime() <= now.getTime()) return null;
+    }
+    return `Under the £${(minPence / 100).toFixed(0)} minimum — rolls over (paid once it has waited ${SMALL_BALANCE_WAIT_MONTHS} months and is £${SMALL_BALANCE_FLOOR_PENCE / 100}+, or when the partnership ends)`;
+}
+
 export interface PayoutPreviewLine {
     partnerId: number; name: string | null; email: string | null; method: string | null; payoutDisplay: string | null;
     amountPence: number; due: boolean; reason: string | null;
@@ -66,7 +84,8 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
         SELECT p.id, p.status, p.terms_version, p.payout_method, p.payout_display, p.payout_details_confirmed_at,
                COALESCE(u.email, p.applicant_email) AS email,
                NULLIF(TRIM(COALESCE(u.first_name, p.applicant_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
-               SUM(c.commission_pence)::int AS amount
+               SUM(c.commission_pence)::int AS amount,
+               MIN(c.available_at) AS oldest_ready
           FROM partner_commissions c
           JOIN partners p ON p.id = c.partner_id
           LEFT JOIN users u ON u.id = p.user_id
@@ -78,10 +97,10 @@ export async function previewPayout(db: Db): Promise<{ minPayoutPence: number; l
         // Suspended and ended partners are still paid what they earned (Partner Terms 7.3).
         const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`
             // No contract, no payout: it waits (and rolls over) until they accept on their Partner page.
-            : !hasAcceptedCurrentTerms(r.terms_version) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
+            // An ENDED partner is paid under the terms they last accepted (7.3): a later version no longer binds them.
+            : !(hasAcceptedCurrentTerms(r.terms_version) || (r.status === 'ended' && r.terms_version)) ? `Hasn’t accepted the Partner Terms (v${PARTNER_TERMS_VERSION}) — it waits until they do`
             : !r.payout_details_confirmed_at || !r.payout_display ? 'No confirmed payout details'
-            : amount < min ? `Under the £${(min / 100).toFixed(0)} minimum — rolls over`
-            : null;
+            : underMinimumReason(amount, min, r.status, r.oldest_ready ? new Date(r.oldest_ready) : null);
         return { partnerId: r.id, name: r.name, email: r.email, method: r.payout_method, payoutDisplay: r.payout_display, amountPence: amount, due: !reason && amount > 0, reason: amount <= 0 && !reason ? 'Nothing to pay after refunds' : reason };
     });
     return { minPayoutPence: min, lines, totalDuePence: lines.filter((l) => l.due).reduce((s, l) => s + l.amountPence, 0) };

@@ -3026,18 +3026,18 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="partner-rate-terms">
           <label for="partner-rate-pct" class="text-xs font-bold text-gray-500 uppercase">Commission (%) <span class="text-red-500">*</span></label>
-          <input id="partner-rate-pct" type="number" min="0" max="100" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <input id="partner-rate-pct" type="number" min="0" max="40" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
         </div>
         <div class="partner-rate-terms">
-          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months)</label>
-          <input id="partner-rate-months" type="number" min="1" max="120" step="1" placeholder="Lifetime" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments. Blank = for as long as they stay.</p>
+          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months) <span class="text-red-500">*</span></label>
+          <input id="partner-rate-months" type="number" min="1" max="24" step="1" placeholder="12" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments, 1–24. No lifetime rates (Partner Terms 3.5); the rate is at most 40% and the cost deduction at least 20%.</p>
         </div>
       </div>
       <div class="partner-rate-terms">
         <label for="partner-rate-costs" class="text-xs font-bold text-gray-500 uppercase">Cost deduction (%) <span class="text-red-500">*</span></label>
-        <input id="partner-rate-costs" type="number" min="0" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 50% commission on £79 = £31.60.</p>
+        <input id="partner-rate-costs" type="number" min="20" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 25% commission on £79 = £15.80.</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div id="partner-rate-from-wrap">
@@ -12256,9 +12256,18 @@ function _partnersRenderList() {
       ? `<span class="font-mono font-bold">${_pPct(special.rateBps)}</span> <span class="text-[11px] text-gray-500">special${special.costDeductionBps ? ', after ' + _pPct(special.costDeductionBps) + ' costs' : ''}${special.endsAt ? ' until ' + _pDate(special.endsAt) : ''}</span>`
       : '<span class="text-gray-500">Programme</span>';
     const btn = (label, cls, decision) => `<button type="button" onclick="partnerDecide(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
+    // Partner Terms 1.3 §7.5 Staying active (partner-activity.ts): the date, an open notice, and the two steps.
+    const act = p.activity;
+    const activityLine = act?.activeUntil
+      ? `<p class="text-[11px] mt-1 ${act.notice ? 'text-amber-700 font-semibold' : (act.canSendNotice ? 'text-red-700 font-semibold' : 'text-gray-500')}">${act.notice
+          ? `Inactivity notice until ${_pDate(act.notice.endsAt)}${act.canEnd ? ' — run out' : ''}`
+          : `Active until ${_pDate(act.activeUntil)}${act.canSendNotice ? ' — past' : ''}`}${act.pauseDays ? ` · ${act.pauseDays} paused day${act.pauseDays === 1 ? '' : 's'}` : ''}</p>`
+      : (p.status === 'ended' && p.endReason ? `<p class="text-[11px] mt-1 text-gray-500">Ended${p.endedAt ? ' ' + _pDate(p.endedAt) : ''} · ${_pEsc(p.endReason)}</p>` : '');
+    const activityBtns = (act?.canSendNotice ? ' ' + `<button type="button" onclick="partnerInactivity(${p.id}, 'inactivity_notice')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Send inactivity notice</button>` : '')
+      + (act?.canEnd ? ' ' + `<button type="button" onclick="partnerInactivity(${p.id}, 'end_inactivity')" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">End (inactivity)</button>` : '');
     const actions = {
       applied: btn('Approve', 'btn-golive', 'approve') + ' ' + btn('Reject', 'btn-destructive', 'reject'),
-      approved: btn('Suspend', 'btn-destructive', 'suspend') + ' ' + btn('End', 'btn-destructive', 'end'),
+      approved: btn('Suspend', 'btn-destructive', 'suspend') + ' ' + btn('End', 'btn-destructive', 'end') + activityBtns,
       suspended: btn('Reinstate', 'btn-secondary', 'reinstate') + ' ' + btn('End', 'btn-destructive', 'end'),
       rejected: btn('Approve', 'btn-golive', 'approve'),
       ended: btn('Approve again', 'btn-golive', 'approve'),
@@ -12272,7 +12281,7 @@ function _partnersRenderList() {
           ${p.name && p.email ? `<p class="text-[11px] text-gray-500">${_pEsc(p.email)}</p>` : ''}
         </button>
       </td>
-      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}${p.invitePage?.state === 'waiting' ? ' <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Their invite page is waiting for review — open Details">Invite page to review</span>' : ''}</td>
+      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}${p.invitePage?.state === 'waiting' ? ' <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Their invite page is waiting for review — open Details">Invite page to review</span>' : ''}${activityLine}</td>
       <td class="py-2 px-2 text-right font-mono" title="Paying customers / everyone who signed up through them">${p.paying} / ${p.referrals}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.pendingPence)}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.payablePence)}</td>
@@ -12411,7 +12420,7 @@ function partnerOpenRate(ctx) {
   // A new rate starts from the programme's newest deduction, so the costs basis partners were told carries on.
   const newestProgramme = [..._partnerPeriods(null)].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).pop();
   set('partner-rate-costs', Number((period ?? newestProgramme)?.costDeductionBps ?? 2000) / 100);
-  set('partner-rate-months', period ? (period.durationMonths ?? '') : (ctx.partnerId == null ? 12 : ''));
+  set('partner-rate-months', period ? (period.durationMonths ?? '') : 12);
   set('partner-rate-from', period ? _pDay(period.startsAt) : tomorrow);
   set('partner-rate-until', period?.endsAt ? _pDay(period.endsAt) : (ctx.mode === 'end' ? tomorrow : ''));
   set('partner-rate-label', period?.label || '');
@@ -12523,11 +12532,22 @@ async function partnerDecide(id, decision) {
   if (!p) return;
   const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
   let note = null;
+  let endReason = null;
+  if (decision === 'end') {
+    // Terms 1.3: why it ends decides the run-off. Inactivity has its own steps (§7.5): notice, then "End (inactivity)".
+    endReason = await window.choiceModal(`Why is the partnership with ${who} ending? Not for inactivity — for that, use "Send inactivity notice" once their active date has passed (Partner Terms 7.5), so their standard customers keep earning to term.`, [
+      { value: 'left', label: 'They asked to leave', description: 'Partner Terms 7.1 — commission stops on later payments.' },
+      { value: 'breach', label: 'Breach, fraud or reputation', description: 'Partner Terms 7.2 — commission stops on later payments.' },
+      { value: 'closure', label: 'Programme closing', description: 'Partner Terms 7.2 — they keep earning for 3 months on customers still in their window.' },
+      { value: 'other', label: 'Other', description: 'Commission stops on later payments (7.4).' },
+    ], { title: 'End partnership' });
+    if (!endReason) return;
+  }
   if (decision === 'reject' || decision === 'suspend' || decision === 'end') {
     const msg = decision === 'reject'
       ? `Reject ${who}'s application? They can be approved later if you change your mind.`
       : decision === 'end'
-        ? `End the partnership with ${who}? Use this when they've left, or you're ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite. Commission they earned before today is still paid. They can be approved again later.`
+        ? `End the partnership with ${who}? ${endReason === 'closure' ? 'They keep earning for 3 months on customers still in their commission window, then stop.' : 'They stop earning on new payments, including from customers they introduced earlier.'} Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (Partner Terms 7.4). Commission they earned before today is still paid, even under the minimum. They can be approved again later, and then earn only on customers who first pay after that.`
         : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
     note = await window.promptModal(msg + '<br><br>Reason (admins only, optional):', {
       title: { reject: 'Reject application', suspend: 'Suspend partner', end: 'End partnership' }[decision],
@@ -12539,8 +12559,30 @@ async function partnerDecide(id, decision) {
     if (!ok) return;
   }
   try {
-    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note }) });
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note, endReason }) });
     window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.', end: 'Partnership ended.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Partner Terms 1.3 §7.5 Staying active: give notice once the active date has passed; end once it has run out.
+async function partnerInactivity(id, action) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
+  const months = p.activity?.noticeMonths || 1;
+  const ok = action === 'inactivity_notice'
+    ? await window.confirmModal(`Give ${who} the Partner Terms 7.5 notice? Their active date${p.activity?.activeUntil ? ' (' + _pDate(p.activity.activeUntil) + ')' : ''} has passed with no new paying customer. The notice runs ${months} month${months === 1 ? '' : 's'}; they're emailed now. A new paying customer withdraws it automatically, and a sign-up still in their free period extends it. Use the same rule for every partner past their date.`, { title: 'Send inactivity notice', confirmLabel: 'Send notice' })
+    : await window.confirmModal(`End the partnership with ${who} for inactivity (Partner Terms 7.5)? Their notice has run out with no new paying customer. Customers on a 12-month (or shorter) commission period keep earning them commission until it ends; any longer special period earns for 3 more months. Their link and code stop earning.`, { title: 'End for inactivity', confirmLabel: 'End partnership' });
+  if (!ok) return;
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, partnerId: id }) });
+    if (action === 'inactivity_notice' && !d.emailed) {
+      // Terms 12.2: email is the notice channel — say plainly when it didn't go.
+      window.showToast?.(`Notice recorded until ${_pDate(d.noticeEnds)}, but the email did NOT send. Email the partner yourself (Partner Terms 7.5 notice) before relying on it.`, { icon: '⚠️' });
+    } else {
+      window.showToast?.(action === 'inactivity_notice' ? `Notice sent and emailed — it runs until ${_pDate(d.noticeEnds)}.` : 'Partnership ended for inactivity.');
+    }
     loadPartners();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }

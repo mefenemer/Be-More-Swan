@@ -23,6 +23,7 @@
 // payment_intent — so that is the key both sides can see.
 
 import { notifyCommissionEarned } from './partner-notify';
+import { runOffAllows } from './partner-activity';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
@@ -55,7 +56,8 @@ export interface PartnerPayment {
 
 export type RecordOutcome =
     | { recorded: true; commissionPence: number; partnerId: number }
-    | { recorded: false; reason: 'not_a_partner_referral' | 'no_amount' | 'currency' | 'no_rate' | 'outside_window' | 'duplicate' };
+    | { recorded: false; reason: 'not_a_partner_referral' | 'no_amount' | 'currency' | 'no_rate' | 'outside_window' | 'duplicate'
+        | 'suspended' | 'ended' | 'before_partnership' };
 
 /** What a Stripe invoice actually collected, excluding VAT. Customer-balance credit is not money. */
 export function invoiceNetPence(invoice: { amount_paid?: number | null; total?: number | null; total_excluding_tax?: number | null }): number {
@@ -65,30 +67,50 @@ export function invoiceNetPence(invoice: { amount_paid?: number | null; total?: 
     return Math.max(0, paid - tax);
 }
 
+/**
+ * Partner Terms 1.3 §3.2: commission is earned only on Subscription Payments — the customer's
+ * recurring plan, including upgrading it. Of the invoices that reach invoice.paid (the first one,
+ * `subscription_create`, is handled by the checkout paths), only renewals and plan changes count;
+ * one-off (`manual`), usage (`subscription_threshold`) and any other invoices earn nothing.
+ * Packs and top-ups never get here: their Checkout sessions return before the plan path.
+ */
+const SUBSCRIPTION_PAYMENT_REASONS = new Set(['subscription_cycle', 'subscription_update']);
+export function isSubscriptionPaymentInvoice(billingReason: string | null | undefined): boolean {
+    return !!billingReason && SUBSCRIPTION_PAYMENT_REASONS.has(billingReason);
+}
+
 /** What a Checkout Session collected, excluding VAT. */
 export function sessionNetPence(session: { amount_total?: number | null; total_details?: { amount_tax?: number | null } | null }): number {
     return Math.max(0, (session.amount_total ?? 0) - (session.total_details?.amount_tax ?? 0));
 }
 
-/** The approved partner behind this customer's referral, if any. */
+/**
+ * The partner behind this customer's referral, if any: approved, suspended (terms still lock at the
+ * real first payment, so §7.5(b) and the window are right — but nothing is earned) or ended (the
+ * §7.2 / §7.5(h) run-off decides). Applied / rejected partners never earn.
+ */
 async function findPartnerReferral(db: Db, referredUserId: number) {
     const [row] = await db
-        .select({ referralId: userReferrals.id, partnerId: partners.id, referralCode: userReferrals.referralCode, promoCode: partners.promoCode })
+        .select({
+            referralId: userReferrals.id, partnerId: partners.id, referralCode: userReferrals.referralCode, promoCode: partners.promoCode,
+            status: partners.status, partnerSince: partners.partnerSince, endedAt: partners.endedAt, endReason: partners.endReason,
+        })
         .from(userReferrals)
         .innerJoin(partners, eq(partners.userId, userReferrals.referrerId))
-        .where(and(eq(userReferrals.referredUserId, referredUserId), eq(partners.status, 'approved')))
+        .where(and(eq(userReferrals.referredUserId, referredUserId), inArray(partners.status, ['approved', 'suspended', 'ended'])))
         .limit(1);
     return row ?? null;
 }
 
 /**
- * True when this referrer is on the partner track — approved, or suspended (a suspended partner
- * earns nothing, and must not fall back to earning tokens either). Their referrals never earn a
- * token; referral-offer.ts marks them 'partner' instead of 'qualified'.
+ * True when this referrer is on the partner track — approved, suspended or ENDED. Their referrals
+ * never earn a token; referral-offer.ts marks them 'partner' instead of 'qualified'. Ended is here
+ * because Partner Terms 1.3 §7.4: after a partnership ends the link earns neither commission nor
+ * refer-a-friend rewards.
  */
 export async function isPartnerReferrer(db: Db, referrerId: number): Promise<boolean> {
     const [row] = await db.select({ id: partners.id }).from(partners)
-        .where(and(eq(partners.userId, referrerId), inArray(partners.status, ['approved', 'suspended'])))
+        .where(and(eq(partners.userId, referrerId), inArray(partners.status, ['approved', 'suspended', 'ended'])))
         .limit(1);
     return !!row;
 }
@@ -143,6 +165,13 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         return { recorded: false, reason: 'currency' };
     }
 
+    // Ended: a customer who never paid before the end earns nothing, and nothing is locked for them (§7.4).
+    if (ref.status === 'ended') {
+        const [existing] = await db.select().from(partnerReferrals).where(eq(partnerReferrals.referralId, ref.referralId)).limit(1);
+        if (!existing?.subscribedAt || !ref.endedAt || existing.subscribedAt.getTime() >= ref.endedAt.getTime()) return { recorded: false, reason: 'ended' };
+        if (!runOffAllows(ref.endReason, ref.endedAt, existing.durationMonths, payment.paidAt)) return { recorded: false, reason: 'ended' };
+    }
+
     // Came in on the partner's memorable partner code rather than their link (invite-codes.ts)?
     const viaPartnerCode = !!ref.promoCode && ref.referralCode?.toUpperCase() === ref.promoCode.toUpperCase();
     const terms = await lockedTermsFor(db, ref.referralId, ref.partnerId, payment.paidAt, viaPartnerCode ? 'promo_code' : 'link');
@@ -150,6 +179,16 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         console.error('[partner-ledger] no rate period covers this payment — the programme has a gap', payment);
         return { recorded: false, reason: 'no_rate' };
     }
+    // Suspended: the terms are locked at the real first payment above, but nothing is earned (§7.2).
+    // If THIS payment is the one that locked them, the customer never counts towards §7.5 (b).
+    if (ref.status === 'suspended') {
+        if (terms.subscribedAt.getTime() === payment.paidAt.getTime()) {
+            await db.update(partnerReferrals).set({ lockedWhileSuspended: true }).where(eq(partnerReferrals.id, terms.id));
+        }
+        return { recorded: false, reason: 'suspended' };
+    }
+    // §7.5(i): after re-approval, only customers who first pay in the current partnership earn.
+    if (ref.partnerSince && terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' };
     if (!isWithinCommissionWindow(terms.subscribedAt, terms.durationMonths, payment.paidAt)) {
         return { recorded: false, reason: 'outside_window' };
     }

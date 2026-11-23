@@ -5,7 +5,7 @@
 //
 // ⚠️ This is ADVICE ABOUT PROMOTING, not facts about the product. It must never state a feature,
 // integration, result, price or offer — those come ONLY from `bms_facts` (memory public-copy-claims-vs-system).
-// The `rules` topic mirrors Partner Terms v1.3 (sections 3 and 5; 1.3 only changed 4.2, payouts); if the Terms change, change it too. Owner decision D8:
+// The `rules` topic mirrors Partner Terms v1.3; if the Terms change, change it too. Owner decision D8:
 // the owner reads this file, and the affiliate-legal-counsel agent checks `rules` and `channels`.
 
 export const PLAYBOOK_TOPICS = [
@@ -101,6 +101,8 @@ export const PARTNER_PLAYBOOK: Record<PlaybookTopic, { title: string; advice: st
             '5.3 Not allowed: listing the link or code on coupon, voucher, deal or cashback sites or code-applying extensions; paid ads that bid on "Be More Swan" (add it as a negative keyword); domains, social accounts or apps that could be mistaken for ours; marketing emails, texts, DMs or calls without the consent the law requires (PECR, UK GDPR, CAN-SPAM, CASL); paying or rewarding people to sign up beyond our offer; describing what our AI can do beyond what is on our website.',
             'Never bulk-message, or add to a list, the people the Lead Generator finds — personal contact only.',
             '3.1 No commission on themselves, accounts they or their business control, existing or past customers, or people someone else introduced first.',
+            '6.3 The people they introduce become Be More Swan customers, not theirs; commission is an introduction fee, not a share in the customer.',
+            '7.5 Staying active: if 6 months go by without a new paying customer through them, we may end the partnership with notice. On the standard commission period they keep earning on existing customers until each one’s period ends; only on a special period longer than that does commission stop, 3 months after ending. A new paying customer during the notice cancels it.',
             '5.4 / 5.5 What they publish is theirs to check, including anything this assistant drafts: read it, make sure it is accurate and still carries the label.',
             'The full Partner Terms are at /partner-terms.html.',
         ],
