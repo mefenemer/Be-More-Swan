@@ -4217,8 +4217,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // "Take Me There" (src/config/take-me-there.ts): the place is checked against the closed list and
             // the card carries where to go, built here — the browser never navigates where the model wrote.
             if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
-                const team = [...(mentorParts?.data.team ?? []).filter((t) => t.state !== 'archived').map((t) => ({ id: t.id, name: t.name })),
-                    { id: session.aiAssistantId, name: assistantRow.name || 'Business Mentor' }];
+                // With roles, so a "Topics & themes" button opens the card that assistant really has and Blog Studio opens
+                // only for a Blog Writer (take-me-there.ts; review on PR #839).
+                const team = [...(mentorParts?.data.team ?? []).filter((t) => t.state !== 'archived').map((t) => ({ id: t.id, name: t.name, roleKey: t.roleKey ?? null })),
+                    { id: session.aiAssistantId, name: assistantRow.name || 'Business Mentor', roleKey: assistantRow.roleKey ?? null }];
                 const card = buildTakeMeThereCard(uiElement as Record<string, unknown>, team);
                 if ('error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
                 else uiElement = card;
