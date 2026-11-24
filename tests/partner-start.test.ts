@@ -118,6 +118,9 @@ check('every gate uses the same "accepted" rule: Monday summary, Partner Assista
 });
 check('a waiting special rate is removed when the application is rejected or the partnership ends', () => {
     assert.ok(read('netlify/functions/admin-partners.ts').includes("if (rule.to === 'rejected' || rule.to === 'ended') await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);"));
+    const act = read('src/utils/partner-activity.ts');
+    assert.ok(act.includes('DELETE FROM partner_pending_rates WHERE partner_id = ${r.id}'), 'declined-change sweep');
+    assert.ok(act.includes('if (updated.length) await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);'), 'end for inactivity');
 });
 check('the Partner page retries a failed start BEFORE working out the rate', () => {
     const hub = read('netlify/functions/partner-hub.ts');

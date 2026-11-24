@@ -54,7 +54,6 @@ import { createNotification } from '../../src/utils/notify';
 import { isUkVatNumber } from '../../src/utils/partner-statements';
 import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
 import { needsAcceptance } from '../../src/utils/partner-start';
-import { startPartnershipIfReady } from '../../src/utils/partner-start';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -312,7 +311,7 @@ export default withLambda(async (event) => {
             // Any approval restarts the 6 months: no old notice or paused days carry over (§7.5(c), (g)).
             ? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,
                 // A new partnership has NO start date until the partner accepts the Partner Terms (owner 2026-11-24):
-                // partner_since is set by startPartnershipIfReady below, or when they accept on their Partner page.
+                // partner_since is set when they accept on their Partner page after this approval (partner-start.ts).
                 ...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }
             : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null }
             : rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
