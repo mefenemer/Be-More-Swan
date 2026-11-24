@@ -93,4 +93,15 @@ check('the Partner page says the partnership starts on acceptance', () => {
     assert.ok(read('netlify/functions/partner-hub.ts').includes('partnerSince: p.partnerSince ?? null,'));
 });
 
+check('approval emails say the partnership starts when they accept on their Partner page (no "from today")', () => {
+    const e = read('src/utils/email-templates-catalog.ts');
+    assert.ok(!e.includes("p('From today you earn"), 'no promise of commission from today');
+    assert.ok(e.includes('<strong>One step to start:</strong> open your Partner page and accept the Partner Terms.'));
+    assert.ok(e.includes('Then accept the Partner Terms on your Partner page: your partnership starts the moment you do'));
+    assert.ok(read('src/utils/partner-applications.ts').includes('FROM partner_pending_rates WHERE partner_id = ${partnerId}'), 'a waiting special rate is the rate in the email');
+});
+check('admin "terms accepted" uses the same rule as the Partner page', () => {
+    assert.ok(read('netlify/functions/admin-partners.ts').includes('termsAccepted: !needsAcceptance({ status: r.status'));
+});
+
 console.log(`\n${passed} passed`);

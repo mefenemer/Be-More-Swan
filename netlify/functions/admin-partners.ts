@@ -49,11 +49,11 @@ import { listPartnersWithNumbers } from '../../src/utils/partner-ops';
 import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
 import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
-import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
 import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type InviteProfile } from '../../src/utils/partner-invite-profile';
 import { createNotification } from '../../src/utils/notify';
 import { isUkVatNumber } from '../../src/utils/partner-statements';
 import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
+import { needsAcceptance } from '../../src/utils/partner-start';
 import { startPartnershipIfReady } from '../../src/utils/partner-start';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
@@ -190,7 +190,11 @@ export default withLambda(async (event) => {
                 referralCode: r.referral_code ?? null, partnerCode: r.promo_code ?? null,
                 hasAccount: !!r.has_account, invitedAt: r.invited_at ?? null, inviteExpiresAt: r.invite_expires_at ?? null,
                 // Partner Terms: payouts wait until the current version is accepted (partner-terms.ts).
-                termsAccepted: hasAcceptedCurrentTerms(r.terms_version), termsVersion: r.terms_version ?? null, termsAcceptedAt: r.terms_accepted_at ?? null,
+                // Accepted = current version AND, for an approved partner who hasn't started, accepted since approval —
+                // so an application tick alone doesn't look like a failed start (review of #838).
+                termsAccepted: !needsAcceptance({ status: r.status, terms_version: r.terms_version ?? null, partner_since: r.partner_since ?? null,
+                    terms_accepted_at: r.terms_accepted_at ? new Date(r.terms_accepted_at) : null, approved_at: r.approved_at ? new Date(r.approved_at) : null }),
+                termsVersion: r.terms_version ?? null, termsAcceptedAt: r.terms_accepted_at ?? null,
                 payoutMethod: r.payout_method, payoutDisplay: r.has_payout_details ? r.payout_display : null, hasPayoutDetails: !!r.has_payout_details,
                 referrals: r.referrals, paying: r.paying,
                 pendingPence: r.pending_pence, payablePence: r.payable_pence, paidPence: r.paid_pence,

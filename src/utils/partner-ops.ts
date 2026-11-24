@@ -27,7 +27,7 @@ const clampInt = (v: unknown, min: number, max: number, dflt: number) => {
 export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
     return rows(db, sql`
         SELECT p.id, p.user_id, p.status, p.application, p.decision_note, p.decided_at, p.created_at,
-               p.promo_code, p.terms_version, p.terms_accepted_at, p.ended_at, p.end_reason, p.vat_number, p.vat_registered, p.partner_since,
+               p.promo_code, p.terms_version, p.terms_accepted_at, p.ended_at, p.end_reason, p.vat_number, p.vat_registered, p.partner_since, p.approved_at,
                p.invite_profile, p.invite_profile_pending, p.invite_profile_note, p.invite_profile_reviewed_at, p.payout_method, p.payout_display, (p.payout_details_confirmed_at IS NOT NULL AND p.payout_display IS NOT NULL) AS has_payout_details,
                COALESCE(u.email, p.applicant_email) AS email,
                COALESCE(u.first_name, p.applicant_name) AS first_name,
