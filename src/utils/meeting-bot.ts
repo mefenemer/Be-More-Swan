@@ -103,6 +103,17 @@ export const ALONE_TIMEOUT_S = 120;
  */
 export const RECALL_RETENTION_HOURS = 48;
 
+/**
+ * Whether Recall has surely expired a finished bot's media by itself (review of #836): RECALL_RETENTION_HOURS after the
+ * recording was done, plus a day's margin. Then a delete that still fails is counted as done, so the row is not retried
+ * every 15 minutes for ever, crowding newer bots out of pollMeetingBots' batch. Timed from when the bot left the call
+ * (Recall's clock starts when the recording is done), else from its join time. Pure.
+ */
+export function recallMediaExpired(leftAt: Date | null, joinAt: Date, now: Date): boolean {
+    const from = (leftAt ?? joinAt).getTime();
+    return now.getTime() - from > (RECALL_RETENTION_HOURS + 24) * 60 * 60 * 1000;
+}
+
 export function cleanLengthLimit(raw: unknown): number {
     const n = Math.round(Number(raw));
     if (!Number.isFinite(n) || n <= 0) return DEFAULT_LENGTH_LIMIT_MINUTES;

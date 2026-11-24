@@ -5,7 +5,7 @@ import { execSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
-    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, RECALL_RETENTION_HOURS, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
+    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, RECALL_RETENTION_HOURS, recallMediaExpired, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
     nextBotState, readRecallTranscript, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
@@ -233,6 +233,16 @@ await test('Recall keeps the recording for a set time, never its default (foreve
     // retention: null is Recall's zero data retention: no transcript is stored, so the after-call download would break.
     assert.notEqual(req.recording_config.retention, null);
     assert.deepEqual(req.recording_config.transcript.provider.recallai_streaming, { mode: 'prioritize_accuracy', language_code: 'auto' }, 'accuracy + language detection kept (owner, 2026-11-24)');
+});
+
+await test('a delete that keeps failing stops being retried once Recall has expired the media itself', () => {
+    const left = new Date('2026-11-24T10:00:00Z');
+    const h = (n: number) => new Date(left.getTime() + n * 60 * 60 * 1000);
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS)), false, 'at Recall\'s expiry: keep trying');
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 23)), false, 'inside the day of margin');
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 25)), true, 'past it: counted as deleted');
+    assert.equal(recallMediaExpired(null, left, h(RECALL_RETENTION_HOURS + 25)), true, 'never joined: timed from its join time');
+    assert.equal(recallMediaExpired(null, h(200), h(RECALL_RETENTION_HOURS + 25)), false, 'booked ahead: not expired before it was due');
 });
 
 await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {

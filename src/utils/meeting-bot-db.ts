@@ -15,7 +15,7 @@ import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
-    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
+    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallMediaExpired, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
@@ -451,7 +451,12 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
 /** Deletes Recall's copy of the recording; marks the row once Recall agrees. */
 export async function deleteBotMedia(db: Db, row: BotRow, timeoutMs?: number): Promise<boolean> {
     if (!row.recallBotId || row.mediaDeletedAt) return false;
-    const done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
+    let done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
+    if (!done && recallMediaExpired(row.leftAt, row.joinAt, new Date())) {
+        // Recall's own timed retention (sent with every bot) has removed it by now; stop retrying (review of #836).
+        console.warn('[meeting-bot] delete failed past Recall retention; counted as deleted', { botId: row.id });
+        done = true;
+    }
     if (done) await db.update(meetingBots).set({ mediaDeletedAt: new Date(), updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
     return done;
 }
