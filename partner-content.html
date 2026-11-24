@@ -596,7 +596,9 @@
     const first = data.partner.firstName;
     document.getElementById('pt-welcome-title').textContent = first ? `Welcome to the partner team, ${first}` : 'Welcome to the partner team';
     // The Terms hold the rules for promoting us, so drafting and sharing wait for step 1 (review of #813).
-    const termsLocked = (k) => (k === 'first_draft' || k === 'share' || k === 'invite_page') && data.partnerTerms && !data.partnerTerms.accepted;
+    // …and sharing waits for the link itself, which only exists once the partnership has started (review of #850).
+    const termsLocked = (k) => ((k === 'first_draft' || k === 'share' || k === 'invite_page') && data.partnerTerms && !data.partnerTerms.accepted)
+      || ((k === 'share' || k === 'invite_page') && !data.link);
     document.getElementById('pt-steps').innerHTML = o.steps.map((st, i) => {
       const mark = st.done
         ? '<span aria-hidden="true" style="display:inline-flex;width:1.5rem;height:1.5rem;border-radius:9999px;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0">✓</span>'

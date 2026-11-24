@@ -148,9 +148,10 @@ export default withLambda(async (event) => {
     }
     if (!allowed) return json(429, { error: `You’ve used this month’s ${limit} Partner Assistant messages. They top up as the month rolls on — your link and numbers on this page keep working.` });
 
-    const code = await ensureReferralCode(db, userId);
+    // No link in drafts until the partnership starts (owner 2026-11-24; review of #850) — same rule as the Partner page.
+    const code = p.partnerSince ? await ensureReferralCode(db, userId) : null;
     const inviteUrl = code ? `${baseUrl()}/invite/${code}` : null;
-    const partnerCode = p.status === 'approved' ? p.promoCode : null;
+    const partnerCode = p.status === 'approved' && p.partnerSince ? p.promoCode : null;
     const [u] = await db.select({ firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
     // Their OWN workspace: one they own first. A partner who is only a team member elsewhere must not get
     // that business's name or counts as "your results" (review of #813).

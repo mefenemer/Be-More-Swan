@@ -144,4 +144,12 @@ check('no invite link (or partner code) until the partnership starts; the page s
     assert.ok(page.includes("data.partner.status === 'approved' && !!data.link;"), 'invite page card only after the start');
 });
 
+check('the link can\'t be reached any other way before the start: first-week list, Partner Assistant drafts, customer Referrals page', () => {
+    assert.ok(read('partner-content.html').includes("|| ((k === 'share' || k === 'invite_page') && !data.link);"));
+    const a = read('netlify/functions/partner-assistant.ts');
+    assert.ok(a.includes('const code = p.partnerSince ? await ensureReferralCode(db, userId) : null;'));
+    const r = read('netlify/functions/referral.ts');
+    assert.ok(r.includes("inArray(partners.status, ['approved', 'suspended']), isNull(partners.partnerSince)") && r.includes('user.referralCode && !notStarted'));
+});
+
 console.log(`\n${passed} passed`);

@@ -10,9 +10,9 @@
 import { generateReferralCode } from '../../src/utils/referral-code';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, desc, and, count } from 'drizzle-orm';
+import { eq, desc, and, count, inArray, isNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites } from '../../db/schema';
+import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites, partners } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { getReferralTokenState, freeMonthFor } from '../../src/utils/referral-tokens';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -93,7 +93,11 @@ export default withLambda(async (event) => {
             .orderBy(desc(referralInvites.sentAt));
 
         const totalRewarded = referrals.filter(r => r.status === 'rewarded').length;
-        const shareLink = user.referralCode
+        // A partner's referral code IS their partner link: hide it here too until their partnership starts
+        // (owner 2026-11-24; review of #850). Ordinary customers are unaffected.
+        const [notStarted] = await db.select({ id: partners.id }).from(partners)
+            .where(and(eq(partners.userId, callerId), inArray(partners.status, ['approved', 'suspended']), isNull(partners.partnerSince))).limit(1);
+        const shareLink = user.referralCode && !notStarted
             ? `${BASE_URL}/register.html?ref=${user.referralCode}`
             : null;
 
