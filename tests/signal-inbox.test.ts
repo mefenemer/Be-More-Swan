@@ -145,11 +145,11 @@ check('the inbox works with ONLY a Lead Generator hired', () => {
     assert.ok(listBranch.includes('discoveredLeads'), 'saved-search signals are read unconditionally');
 });
 
-check('no social assistant shows an OFFER, never an empty state', () => {
-    assert.ok(componentText.includes('!state.hasSocialFeed'),
-        'the upsell footer is conditional on the social feed being absent');
-    assert.ok(componentText.includes('needs a Social Media Assistant'),
-        'the copy offers rather than nags');
+check('no promise of social signals until they exist (Fix pipeline #65)', () => {
+    // "Also capture comments, DMs and mentions as signals — needs a Social Media Assistant" offered a feed that was never
+    // built: hasSocialFeed only says a Social Media assistant exists. The line comes back with the feed itself.
+    assert.ok(!componentText.includes('comments, DMs and mentions'), 'the unbuilt social feed is not offered');
+    assert.ok(!componentText.includes('data-si-social-hire'), 'nor sold');
 });
 
 // ── 4b. Results live behind their own search ─────────────────────────────────
