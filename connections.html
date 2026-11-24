@@ -135,14 +135,12 @@
      2026-11-18: LinkedIn document carousels (li_document) posted for real on prod from the Be More Swan
      workspace (post #5777) before the personal-feed card mentioned them — docs/linkedin-document-carousel-plan.md.
      "Live" = a customer can connect it today: the social platforms and Canva in integrations.js
-     PLATFORMS/SOURCES; Gmail/Outlook (MAILBOX_CATALOG, Lead Generator only);
+     PLATFORMS/SOURCES; Gmail/Outlook (MAILBOX_CATALOG, Lead Generator only); Search Console (its Google OAuth client
+     was set up 2026-11-24, Fix pipeline #67 — it was Coming soon while SEARCHCONSOLE_CLIENT_ID/_SECRET were missing);
      the blog destinations LinkedIn + The Swan Index (WordPress/Ghost are built but WITHHELD in
      src/utils/blog-destinations — keep them "Coming soon" until they are offered); and the
      Integration Scenario Library recipes in db/seed-catalog.ts with status 'available'.
-     "Coming soon" = no connector a customer can switch on: Google Search Console (Fix pipeline #67, 2026-11-24:
-     the code is built but no Google OAuth client is set — SEARCHCONSOLE_CLIENT_ID/_SECRET are not in Netlify,
-     so every connect fails with "not configured"; back to Live, and back in the hub list and the index/FAQ
-     copy, once they are set and a real connect works), TikTok (no OAuth), LinkedIn Company
+     "Coming soon" = no connector a customer can switch on: TikTok (no OAuth), LinkedIn Company
      Pages (page posting switched off: linkedinPageAccessEnabled() is false), Pipedrive/Zoho (recipes 'coming_soon'), Zoom (meetings
      come in as pasted transcripts), Zendesk/Intercom/Xero/QuickBooks (their categories are not
      live in src/utils/connection-map.ts), and HubSpot/Salesforce (owner's call 2026-10-20: not offered
@@ -190,6 +188,7 @@
                     <div class="cx-hub-tools">
                         <span class="cx-tool"><span class="cx-badge" style="background:#EA4335;color:#fff" aria-hidden="true">M</span>Gmail</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#0078D4;color:#fff" aria-hidden="true">O</span>Outlook</span>
+                        <span class="cx-tool"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span>Google Search Console</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span>Canva</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span>Zapier / Make</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span>Slack</span>
@@ -364,8 +363,8 @@
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Another place readers can find you.</p>
             </article>
-            <article class="cx-card is-soon" data-live="0">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span><h4>Google Search Console</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span><h4>Google Search Console</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>Every day</li>
                     <li><span class="cx-step">It</span>Reads which articles are being found in Google, and which are fading</li>
