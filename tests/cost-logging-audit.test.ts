@@ -112,12 +112,14 @@ check('Recall bot: every path that ends a bot logs it, against the bot\'s worksp
     const patch = db.slice(db.indexOf('async function applyBotPatch('), db.indexOf('async function logRecallBotCost('));
     assert.ok(/if \(!saved\) return row\.status as BotStatus;[\s\S]{0,400}if \(recallCostDue\(row\.status, saved\.status\)\) \{\s*await logRecallBotCost\(saved, saved\.leftAt\)/.test(patch),
         'a bot reaching a final state no longer records Recall\'s charge (or not from the SAVED change)');
-    // Withdrawn by us: our own 'cancelled' is final, so its Recall events won't log it later. Any row that was saved
-    // (a 'scheduled' one behind a missed webhook included — join_at in the future gives 0 hours).
+    // Capped at the most a bot can run, so a long-stale row can't log days of bot time.
+    assert.ok(/const max = untrackedRecallHours\(row\.lengthLimitMinutes\);\s*await logRecallHours\(row, Math\.min\(b\.botHours, max\.botHours\), Math\.min\(b\.transcriptHours, max\.transcriptHours\)\)/.test(helper), 'Recall hours are no longer capped');
+    // Recall answers 'deleted' only for a bot that never started joining: no charge, so removeMeetingBot logs nothing.
     const remove = db.slice(db.indexOf('export async function removeMeetingBot('), db.indexOf('// ── Recall\'s events'));
-    assert.ok(/statusReason: 'cancelled_by_user'[\s\S]{0,400}if \(saved\) await logRecallBotCost\(saved, new Date\(\)\)/.test(remove), 'a bot taken back records nothing');
+    assert.ok(!/logRecallBotCost\(/.test(remove), 'removeMeetingBot logs a bot Recall deleted before it ran');
+    // Withdrawn with its assistant and asked to LEAVE: it ran, and our final 'cancelled' hides its later events.
     const withdraw = db.slice(db.indexOf('export async function withdrawMeetingBots('));
-    assert.ok(/statusReason: 'assistant_or_workspace_removed'[\s\S]{0,700}if \(saved\) await logRecallBotCost\(saved, new Date\(\)\)/.test(withdraw), 'a bot withdrawn with its assistant records nothing');
+    assert.ok(/statusReason: 'assistant_or_workspace_removed'[\s\S]{0,900}if \(saved && how === 'left'\) await logRecallBotCost\(saved, new Date\(\)\)/.test(withdraw), 'a running bot withdrawn with its assistant records nothing');
     // A bot Recall accepted but we couldn't record (id unsaved, or the row closed meanwhile) and couldn't take back.
     const send = db.slice(db.indexOf('export async function sendMeetingBot('), db.indexOf('// ── Listing and removing'));
     assert.ok(/if \(!\(await removeRecallBot\(region, recallBotId, true\)\.catch\(\(\) => null\)\)\) await logUntrackedRecallBot\(row\)/.test(send), 'a bot withdrawn mid-send that Recall kept records nothing');

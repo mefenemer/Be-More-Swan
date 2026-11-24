@@ -279,9 +279,8 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     if (how !== 'deleted') return { ok: true, bot: botView(row) };
     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'cancelled_by_user', updatedAt: new Date() })
         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, ['scheduled', 'joining', 'waiting_room']))).returning();
-    // Taken back after it set off: Recall ran it from join_at until now. That includes a row still saying 'scheduled'
-    // because a webhook was missed. A bot booked for later gives 0 hours, so nothing is written.
-    if (saved) await logRecallBotCost(saved, new Date());
+    // No Recall cost here: Recall answers 'deleted' only for a bot that hasn't started joining, so it never ran. A bot
+    // that had set off is asked to LEAVE ('left' above) and its own final event logs it.
     return { ok: true, bot: botView(saved ?? row) };
 }
 
@@ -330,7 +329,10 @@ async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, d
 async function logRecallBotCost(row: BotRow, leftAt: Date | null): Promise<void> {
     if (!row.recallBotId) return;
     const b = recallBotBilling({ joiningAt: row.joinAt, joinedAt: row.joinedAt, leftAt });
-    await logRecallHours(row, b.botHours, b.transcriptHours);
+    // Never more than a bot can run (Recall's auto-leave rules): a row left open long after its bot really ended (webhooks
+    // missed, the poll failing) must not log days of bot time when it is finally withdrawn (review of #842).
+    const max = untrackedRecallHours(row.lengthLimitMinutes);
+    await logRecallHours(row, Math.min(b.botHours, max.botHours), Math.min(b.transcriptHours, max.transcriptHours));
 }
 
 async function logRecallHours(row: BotRow, botHours: number, transcriptHours: number): Promise<void> {
@@ -487,11 +489,12 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
                 if (how) {
                     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() })
                         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();
-                    // Withdrawn after setting off: Recall ran it from join_at until now (a bot booked for later gives 0 hours,
-                    // so nothing is written; a 'scheduled' row behind a missed webhook still counts). Logged here even for a
-                    // bot in the call, because 'cancelled' is final and its later Recall events change nothing. If the
-                    // removal FAILS, the row stays open with its Recall id, so the bot's own final event logs it.
-                    if (saved) await logRecallBotCost(saved, new Date());
+                    // Asked to LEAVE: it had set off, so Recall ran it from join_at until now. That includes a 'scheduled'
+                    // row behind a missed webhook, because Recall refuses the delete once a bot has started joining. Logged here
+                    // because 'cancelled' is final and its later Recall events change nothing. 'deleted' means it never ran,
+                    // so nothing is logged. If the removal FAILS, the row stays open with its Recall id, so the bot's own final
+                    // event logs it.
+                    if (saved && how === 'left') await logRecallBotCost(saved, new Date());
                 }
             }
             await deleteBotMedia(db, row).catch(() => false);
