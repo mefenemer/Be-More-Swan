@@ -1328,6 +1328,10 @@
       // "New meeting" writes a meeting up without the chat (meeting-minutes-form.js → meeting-minutes.ts),
       // with the same prompt and parsing as the chat (finish plan step 5, GUI-and-chat rule).
       primaryAction: { label: 'New meeting', kind: 'meetingForm' },
+      // The chat docked beside the Inbox and Meeting Notes, as on the other assistants (Fix pipeline #70, owner
+      // 2026-11-16: it only had the pop-up). Paste notes or attach a transcript there; its approve / add email / edit
+      // follow-up / reject cards already work in chat.
+      tabChat: { tabs: ['review-queue', 'datahub'], placeholder: 'Paste meeting notes, attach a transcript, or ask about a meeting…' },
       // Per-role tab label ("Inbox") — the brief forbids heavy "Review Queue" terminology for
       // the note-taker; other roles keep the default. Applied in _applyDashboardRegistry.
       reviewQueue: {

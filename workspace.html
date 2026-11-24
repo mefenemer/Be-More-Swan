@@ -4626,6 +4626,8 @@ function formatCurrency(amount, currency) {
         access_denied: 'Connection cancelled — you declined the permission request. Try connecting again if this was a mistake.',
         temporarily_unavailable: 'The platform is temporarily unavailable. Please try again in a few minutes.',
         not_configured: `${label} isn’t available to connect just yet — its integration is still being set up. Please try again later or contact support.`,
+        // One sending mailbox at a time (oauth-integrations.ts, Fix pipeline #72).
+        mailbox_already_connected: `One mailbox at a time: ${platform === 'gmail' ? 'Outlook' : 'Gmail'} is already connected. Disconnect it first, then connect ${label}.`,
         csrf_fail: 'The connection request expired or could not be verified. Please try connecting again.',
         token_exchange: `We couldn’t complete the ${label} connection. Please try again.`,
         connection_not_relevant: `${label} isn’t a relevant connection for this assistant.`,

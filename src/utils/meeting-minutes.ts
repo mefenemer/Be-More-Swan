@@ -18,8 +18,14 @@ export const MEETING_MINUTES_MODEL = 'claude-haiku-5-5';
 // A 60-minute transcript's minutes, attendees and follow-up outgrew 2048 (finish plan step 4).
 export const MEETING_MINUTES_MAX_TOKENS = 4096;
 
-/** Display labels for the set-up answer taskDestination (assistant-onboarding-schemas.js). */
+/**
+ * Display labels for the set-up answer taskDestination (assistant-onboarding-schemas.js). Since Fix pipeline #69
+ * (owner, 2026-11-16) the answer is 'be_more_swan' or 'external'; the older tool answers stay readable, and a named
+ * tool is still an external system.
+ */
 export const MEETING_DESTINATION_LABELS: Record<string, string> = {
+    be_more_swan: 'Be More Swan (Meeting Notes)',
+    external: 'your connected task tool',
     notion: 'Notion',
     jira: 'Jira',
     asana: 'Asana',
@@ -29,6 +35,11 @@ export const MEETING_DESTINATION_LABELS: Record<string, string> = {
 export function meetingDestinationLabel(taskDestination: unknown): string {
     return MEETING_DESTINATION_LABELS[String(taskDestination)]
         ?? (taskDestination ? String(taskDestination) : 'your task tracker');
+}
+
+/** True when action items stay in Be More Swan rather than going to an external system. */
+export function actionItemsStayInBeMoreSwan(taskDestination: unknown): boolean {
+    return String(taskDestination) === 'be_more_swan';
 }
 
 export interface MeetingPromptOptions {
@@ -50,7 +61,9 @@ Nothing leaves the workspace until the user approves the meeting — in the Inbo
 
 Note-taking policy (from setup):
 - Meeting platform: ${o.meetingPlatform ?? 'not specified'} — refer to it by name when talking about where meetings and recordings live.
-- Task destination: ${destinationLabel} — extracted action items are prepared for sync there; use its terminology when discussing tasks.
+- Task destination: ${actionItemsStayInBeMoreSwan(o.taskDestination)
+    ? 'Be More Swan — action items stay in the Meeting Notes tab, where the user ticks them off; nothing is sent to another tool unless they switch one on in Connections.'
+    : `${destinationLabel} — extracted action items are prepared for sync there (the Asana, Jira or Notion connection switched on for this assistant); use its terminology when discussing tasks.`}
 - Summary format: ${o.summaryFormat === 'paragraph_narrative'
     ? 'Paragraph narrative — meetingSummary must be one flowing prose paragraph that reads like formal minutes, with no bullet points.'
     : 'Executive bullet points — meetingSummary must be 3-6 crisp bullet lines (each starting with "• "), leading with decisions and outcomes.'}

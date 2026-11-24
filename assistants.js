@@ -7103,6 +7103,7 @@ async function _renderOutreachEmailConnect(data) {
     if (document.getElementById(ID) !== card) return;
 
     // The stale-answer case: the OTHER mailbox is already connected. Nothing needs authorising —
+    // (and connecting this one too is refused: one sending mailbox at a time, Fix pipeline #72) —
     // the only thing standing between this assistant and a working send is the setup answer, so
     // offer to change just that rather than sending them through an OAuth round trip.
     if (altConnected) {
@@ -7117,7 +7118,7 @@ async function _renderOutreachEmailConnect(data) {
              </div>
              <div class="shrink-0 flex flex-col items-stretch gap-2">
                ${switchBtn(altKey, 'answer-only', `Send from ${ALT.brand} instead`, primaryCls)}
-               <a href="${_outreachConnectUrl(M.key)}" class="text-xs font-bold text-gray-600 hover:text-gray-800 underline text-center">${esc(M.cta)} anyway</a>
+               <p class="text-xs text-gray-500 text-center">To use ${esc(M.brand)}, disconnect ${esc(ALT.brand)} first on Connections — one mailbox at a time.</p>
              </div>
            </div>`;
         _wireOutreachSwitches(card, data);
@@ -7914,7 +7915,14 @@ function _roleSchemaFields(roleKey) {
 
 // Human-readable value for a schema answer (option label for radio/dropdown,
 // Yes/No for toggles). '' means "not answered" and the row is omitted.
+// A field may map answers saved under an older option list onto today's options (schema `legacy`), so the
+// edit control shows them selected and the profile shows a real label (Fix pipeline #69: notion/jira/asana → external).
+function _schemaLegacyValue(field, value) {
+    const m = field && field.legacy;
+    return m && value != null && Object.prototype.hasOwnProperty.call(m, String(value)) ? m[String(value)] : value;
+}
 function _formatSchemaAnswer(field, value) {
+    value = _schemaLegacyValue(field, value);
     if (field.type === 'toggle') return (value === undefined || value === null) ? '' : (value ? 'Yes' : 'No');
     if (value === undefined || value === null || String(value).trim() === '') return '';
     if (field.picker === 'voice') return window.VoicePicker?.describe(value) || String(value);
@@ -7935,7 +7943,7 @@ function _onboardingFieldControl(f, ctx, idPrefix) {
     const esc = _escapeHtml;
     const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
     const common = `id="${esc(idPrefix + f.key)}" data-onboarding-key="${esc(f.key)}"`;
-    const v = ctx[f.key];
+    const v = _schemaLegacyValue(f, ctx[f.key]);
     // Chosen by ear / with a live sample (voice-picker.js, caption-style.js): a hidden input the
     // autosave reads, which those components set and dispatch `change` on.
     if (f.picker === 'voice' && window.VoicePicker) return window.VoicePicker.fieldHtml({ attrs: common, value: v ?? '' });
