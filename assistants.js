@@ -11310,6 +11310,14 @@ async function _renderKickOff(assistantId) {
     } catch { if (!stale()) card.classList.add('hidden'); return; }
     if (stale()) return;
 
+    // The card's heading follows what it is showing. Fix pipeline #64 (2026-11-16): a working assistant paused by a
+    // lost X connection showed "Attention required — Reconnect X" under "🚀 Kick Off Meeting", months after its
+    // kick-off. Reset on every render: the same card is reused when the page moves to another assistant.
+    const iconEl  = document.getElementById('kickoff-icon');
+    const titleEl = document.getElementById('kickoff-title');
+    if (iconEl) iconEl.textContent = data.attention ? '⚠️' : '🚀';
+    if (titleEl) titleEl.textContent = data.attention ? 'Needs your attention' : 'Kick Off Meeting';
+
     // US5 AC5.2: system_paused → red "Attention Required" diagnostic + targeted fix CTA,
     // replacing the normal kick-off flow (the kick-off endpoint also 409s on system_paused).
     if (data.attention) {
@@ -11837,7 +11845,9 @@ async function _loadBlogMetrics(assistantId) {
         if (!show) { cta?.remove(); return; }
         if (cta) return;
         cta = document.createElement('a');
-        cta.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect';
+        // With the assistant, so the callback returns to its Connections tab, not integrations.html (#66).
+        cta.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect'
+            + (window._currentAssistantId ? `&assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
         cta.className = 'kpi-gsc-cta btn-secondary inline-flex items-center min-h-[44px] sm:min-h-0 mt-2 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
         cta.textContent = 'Connect Google Search Console';
         line.after(cta);

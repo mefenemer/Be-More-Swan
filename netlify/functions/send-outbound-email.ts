@@ -23,6 +23,7 @@ import { Resend } from 'resend';
 import { getDb } from '../../db/client';
 import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents, organisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
+import { logServiceCost } from '../../src/utils/ai-usage';
 import { injectAiFooter, FOOTER_VERSION } from '../../src/utils/ai-email-footer';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -120,6 +121,8 @@ export default withLambda(async (event) => {
             ...(finalHtml ? { html: finalHtml } : {}),
         });
         emailId = (result as any)?.data?.id ?? null;
+        // One Resend email, caused by this workspace: logged against it (docs/cost-logging-audit.md).
+        if (emailId) await logServiceCost('resend-email', 1, { workspaceId: orgId, userId, assistantId, taskRunId, sessionId: 'outbound-email' });
     } else {
         // Dev mode — log instead of send
         console.log(`[DEV] Outbound email to ${to}: subject="${subject}", footerVersion=${FOOTER_VERSION}`);

@@ -96,7 +96,7 @@ export default withLambda(async (event) => {
             if (typeof tz === 'string' && tz) timezone = tz;
         }
         let parsed: Date | null = null;
-        try { parsed = await parseScheduleInstruction(instruction, new Date(), timezone); } catch (err) {
+        try { parsed = await parseScheduleInstruction(instruction, new Date(), timezone, { workspaceId: organisationId, userId, sessionId: 'reschedule-post' }); } catch (err) {
             console.error('[retry-failed-post] time parse failed', err);
             return { statusCode: 502, body: JSON.stringify({ error: 'The assistant could not reach the AI service. Please try again.' }) };
         }

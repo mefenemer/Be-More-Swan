@@ -1,8 +1,8 @@
 // netlify/functions/admin-sites.ts
-// Admin ▸ Trust ▸ Hosted Sites — every website we host on bemoreswan.site, the reports against them,
+// Admin ▸ Trust ▸ Hosted Sites — every website we host (on bemoreswan.site or its own domain), the reports against them,
 // and the power to take one offline. docs/website-assistant-plan.md §7 (abuse controls).
 //
-//   GET  ?filter=reported|all          → { sites: [{ id, slug, url, status, workspace, publishedAt,
+//   GET  ?filter=reported|all          → { sites: [{ id, slug, url, hostedUrl, ownDomain, status, workspace, publishedAt,
 //                                          suspendedReason, openReports, reports: [...] }] }
 //   POST { action: 'suspend', siteId, reason }   — take it offline now (reason required; the owner
 //                                                  sees it on their Website tab)
@@ -15,13 +15,13 @@
 // a decision that changes what the outside world sees. Every change is audit-logged.
 
 import jwt from 'jsonwebtoken';
-import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { organisations, siteReports, sites, users } from '../../db/schema';
+import { organisations, siteDomains, siteReports, sites, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
 import { getAdminIp, insertAdminAuditLog } from '../../src/utils/admin-audit';
-import { REPORT_REASONS, siteOrigin } from '../../src/utils/site-hosting';
+import { REPORT_REASONS, siteAddresses } from '../../src/utils/site-hosting';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -62,10 +62,15 @@ export default withLambda(async (event) => {
         const reports = ids.length
             ? await db.select().from(siteReports).where(inArray(siteReports.siteId, ids)).orderBy(desc(siteReports.createdAt)).limit(1000)
             : [];
+        // Its own domain, when it has one: the address it is really served at once live (#62).
+        const domains = ids.length
+            ? await db.select({ siteId: siteDomains.siteId, domain: siteDomains.domain, status: siteDomains.status }).from(siteDomains)
+                .where(and(inArray(siteDomains.siteId, ids), ne(siteDomains.status, 'removed')))
+            : [];
         return json(200, {
             reasons: REPORT_REASONS,
             sites: rows.map((r) => ({
-                ...r, url: r.slug ? siteOrigin(r.slug) : null,
+                ...r, ...siteAddresses(r.slug, domains.find((d) => d.siteId === r.id) ?? null),
                 reports: reports.filter((x) => x.siteId === r.id).slice(0, 20).map((x) => ({
                     id: x.id, reason: x.reason, details: x.details, reporterEmail: x.reporterEmail, status: x.status, createdAt: x.createdAt,
                 })),

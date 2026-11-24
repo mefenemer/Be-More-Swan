@@ -191,7 +191,12 @@
         return;
       }
       if (b.hasAttribute('data-stv-approve-all')) return act({ action: 'approve_all' }, b);
-      if (b.hasAttribute('data-stv-suggest')) { b.textContent = 'Thinking…'; return act({ action: 'suggest' }, b); }
+      if (b.hasAttribute('data-stv-suggest')) {
+        // The Region picker beside the button is the country they want terms for (#81: it was ignored).
+        var rf = b.closest('form');
+        b.textContent = 'Thinking…';
+        return act({ action: 'suggest', region: rf && rf.region ? rf.region.value : undefined }, b);
+      }
       if (b.hasAttribute('data-stv-approve')) return act({ action: 'approve', termId: Number(b.getAttribute('data-stv-approve')) }, b);
       if (b.hasAttribute('data-stv-remove')) return act({ action: 'remove', termId: Number(b.getAttribute('data-stv-remove')) }, b);
     });

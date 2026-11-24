@@ -11,7 +11,7 @@
 import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, postedAssets, scheduledPosts, scheduledPostAssets, pexelsSearchCache } from '../../db/schema';
-import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayGenerate, type GatewayRequest } from '../lib/ai-gateway';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -57,7 +57,7 @@ const PEXELS_VIDEO_SEARCH_URL = 'https://api.pexels.com/videos/search';
 const PEXELS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 // US1 AC1.2: turn a post's topic / suggestedMediaDescription into a short, specific query.
-export async function generateImageKeywords(context: string): Promise<string> {
+export async function generateImageKeywords(context: string, usage?: GatewayRequest['usage']): Promise<string> {
     const trimmed = (context || '').trim();
     if (!trimmed) return '';
     try {
@@ -68,6 +68,7 @@ export async function generateImageKeywords(context: string): Promise<string> {
                 'no quotes) best suited to finding a relevant photo. Reply with ONLY the keywords.',
             messages: [{ role: 'user', content: trimmed.slice(0, 500) }],
             maxTokens: 30,
+            usage,
         });
         const keywords = text.replace(/["'\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
         return keywords || trimmed.slice(0, 80);
@@ -267,7 +268,7 @@ export async function searchUniqueImages(
     context: string,
     { limit = 5, dedup = true, keywords: given, exclude = [], orientation }: SearchOptions = {},
 ): Promise<SearchResult> {
-    const keywords = given?.trim() || await generateImageKeywords(context);
+    const keywords = given?.trim() || await generateImageKeywords(context, { workspaceId: orgId, sessionId: 'stock-keywords' });
     if (!keywords) return { keywords, candidates: [] };
     // The never-reuse rule is a social-feed guarantee (posted_assets). Callers that don't share
     // that feed — e.g. blog hero images — opt out (dedup:false) and draw from the full stock pool.
@@ -283,7 +284,7 @@ export async function searchUniqueVideos(
     context: string,
     { limit = 5, dedup = true, keywords: given, exclude = [], orientation }: SearchOptions = {},
 ): Promise<VideoSearchResult> {
-    const keywords = given?.trim() || await generateImageKeywords(context);
+    const keywords = given?.trim() || await generateImageKeywords(context, { workspaceId: orgId, sessionId: 'stock-keywords' });
     if (!keywords) return { keywords, candidates: [] };
     const candidates = await collectCandidates<PexelsVideoCandidate>(db, orgId, 'video', keywords, { limit, dedup, exclude, orientation });
     return { keywords, candidates };

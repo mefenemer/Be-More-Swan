@@ -15,12 +15,13 @@ import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
     BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
-    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallRegionFor, replayBotState, reserveUnits,
+    botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallMediaExpired, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
 import { getTaskCosts } from './task-costs';
+import { logServiceCost, recallBotBilling } from './ai-usage';
 import { TASK_LIMIT_MESSAGE, hasTaskCapacity, recordCompletedWork } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
@@ -275,6 +276,8 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     if (how !== 'deleted') return { ok: true, bot: botView(row) };
     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'cancelled_by_user', updatedAt: new Date() })
         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, ['scheduled', 'joining', 'waiting_room']))).returning();
+    // Taken back while on its way in or waiting to be admitted: Recall ran it until now. A booked bot cost nothing.
+    if (saved && (row.status === 'joining' || row.status === 'waiting_room')) await logRecallBotCost(saved, new Date());
     return { ok: true, bot: botView(saved ?? row) };
 }
 
@@ -304,8 +307,28 @@ async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, d
         ...(patch.minutesInCall !== null ? { minutesInCall: patch.minutesInCall } : {}), updatedAt: new Date(),
     }).where(and(eq(meetingBots.id, row.id), eq(meetingBots.status, row.status))).returning();
     if (!saved) return row.status as BotStatus;
+    // Recall's charge, once per bot: on its FIRST final state (done, not admitted, failed, removed). This update only
+    // wins from the state before it, so the move into a final state happens once. removed → done (a later 'done' for a
+    // bot that heard part of the call) is final → final and isn't logged again.
+    if (FINAL_BOT_STATUSES.includes(saved.status as BotStatus) && !FINAL_BOT_STATUSES.includes(row.status as BotStatus)) {
+        await logRecallBotCost(saved, saved.leftAt);
+    }
     if (saved.status === 'done' && saved.joinedAt) await ensureBotImport(db, saved, dispatch);
     return saved.status as BotStatus;
+}
+
+/**
+ * Recall's own charge for one bot, against its workspace so COGS and the partner sweep count it
+ * (docs/cost-logging-audit.md): bot hours from the join attempt (join_at) to leaving, waiting room included, and
+ * transcript hours for the time in the call. Includes the empty-call wait our task charge leaves out, because Recall
+ * bills it. A bot that never set off (still scheduled) records nothing. Never throws.
+ */
+async function logRecallBotCost(row: BotRow, leftAt: Date | null): Promise<void> {
+    if (!row.recallBotId) return;
+    const ctx = { workspaceId: row.organisationId, assistantId: row.aiAssistantId ?? null, userId: row.requestedByUserId ?? null, sessionId: `meeting-bot:${row.id}` };
+    const b = recallBotBilling({ joiningAt: row.joinAt, joinedAt: row.joinedAt, leftAt });
+    await logServiceCost('recall-bot-hour', b.botHours, ctx);
+    await logServiceCost('recall-transcript-hour', b.transcriptHours, ctx);
 }
 
 export const botExternalId = (region: string, recallBotId: string) => `recall:${region}:${recallBotId}`;
@@ -437,7 +460,13 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
         for (const row of rows) {
             if (OPEN_BOT_STATUSES.includes(row.status as BotStatus) && row.status !== 'ended') {
                 const how = await removeRecallBot(row.recallRegion as RecallRegion, row.recallBotId!, !row.joinedAt).catch(() => null);
-                if (how) await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
+                if (how) {
+                    const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() })
+                        .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();
+                    // Withdrawn after setting off: Recall ran it until now (a booked one cost nothing). Logged here even for a
+                    // bot in the call, because 'cancelled' is final and its later Recall events change nothing.
+                    if (saved && row.status !== 'scheduled') await logRecallBotCost(saved, new Date());
+                }
             }
             await deleteBotMedia(db, row).catch(() => false);
         }
@@ -451,7 +480,12 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
 /** Deletes Recall's copy of the recording; marks the row once Recall agrees. */
 export async function deleteBotMedia(db: Db, row: BotRow, timeoutMs?: number): Promise<boolean> {
     if (!row.recallBotId || row.mediaDeletedAt) return false;
-    const done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
+    let done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
+    if (!done && recallMediaExpired(row.leftAt, row.joinAt, new Date(), row.createdAt)) {
+        // Recall's own timed retention (sent with every bot) has removed it by now; stop retrying (review of #836).
+        console.warn('[meeting-bot] delete failed past Recall retention; counted as deleted', { botId: row.id });
+        done = true;
+    }
     if (done) await db.update(meetingBots).set({ mediaDeletedAt: new Date(), updatedAt: new Date() }).where(eq(meetingBots.id, row.id));
     return done;
 }

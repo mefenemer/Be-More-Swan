@@ -76,7 +76,8 @@ check('whisper and speech prices', () => {
 check('both render paths log the render cost, before the retry', () => {
     for (const f of ['src/utils/video-render.ts', 'netlify/functions/render-post-video-background.ts']) {
         const src = read(f);
-        const log = src.indexOf('logRenderCost(progress.costUsd');
+        // Logged through RenderCostMeter (src/utils/render-cost.ts) since the cost audit, so an abandoned render counts too.
+        const log = src.indexOf('await meter.seen(progress)');
         const retry = src.indexOf('shouldRetryRender(progress.error');
         assert.ok(log > 0, `${f} never logs the render cost`);
         assert.ok(retry > log, `${f} must log before the retry, or a retried render's compute is lost`);

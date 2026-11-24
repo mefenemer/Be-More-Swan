@@ -80,7 +80,7 @@ export default withLambda(async (event) => {
             const r = await suggestTrendTerms(db, ctx.organisationId, ctx.userId, async (system, user) => (await gatewayGenerate({
                 model: SUGGEST_MODEL, system, messages: [{ role: 'user', content: user }], maxTokens: 400,
                 deadlineMs: 18_000, usage: { workspaceId: ctx.organisationId, userId: ctx.userId, sessionId: 'search-trends-suggest' },
-            })).text);
+            })).text, body.region);
             if (!r.ok) return json(400, { error: r.error });
             return json(200, { ok: true, added: r.added, trends: await loadOrgTrends(db, ctx.organisationId) });
         }

@@ -9547,7 +9547,7 @@ async function loadSecurityAbuse() {
   }
 }
 
-// ── Hosted Sites — Website Assistant sites on bemoreswan.site (admin-sites.ts) ──
+// ── Hosted Sites — Website Assistant sites, on bemoreswan.site or their own domain (admin-sites.ts) ──
 // Handlers are bound once to document (never from render); every server value is escaped.
 const HS_API = '/.netlify/functions/admin-sites';
 const _hs = { filter: 'reported', reasons: {} };
@@ -9582,6 +9582,9 @@ async function loadHostedSites() {
           <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="text-sm font-bold text-gray-900">${s.url ? `<a href="${_hsEsc(s.url)}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline">${_hsEsc(s.url.replace('https://', ''))}</a>` : '(no address)'} ${badge}</p>
+              ${s.ownDomain && s.ownDomain.status !== 'live'
+                ? `<p class="text-xs text-gray-500">Own domain ${_hsEsc(s.ownDomain.domain)} <span class="font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">connecting</span></p>`
+                : s.ownDomain && s.hostedUrl ? `<p class="text-xs text-gray-400">also ${_hsEsc(s.hostedUrl.replace('https://', ''))} (redirects to its own domain)</p>` : ''}
               <p class="text-xs text-gray-500">${_hsEsc(s.workspace)} · ${s.openReports} open report${s.openReports === 1 ? '' : 's'}${s.publishedAt ? ` · published ${fmt(s.publishedAt)}` : ''}${s.suspendedReason ? ` · offline: ${_hsEsc(s.suspendedReason)}` : ''}</p>
             </div>
             ${s.status === 'suspended'

@@ -560,7 +560,7 @@ export default withLambda(async (event) => {
 
         // ⚠️ Awaited, but it cannot fail the request: assessMarket() swallows everything and
         // resolves null. The user is waiting on this screen, so it is one small call, not a chain.
-        const marketAdvice = await assessMarket(campaign.idea, (campaign.icpSnapshot ?? null) as Record<string, unknown> | null);
+        const marketAdvice = await assessMarket(campaign.idea, (campaign.icpSnapshot ?? null) as Record<string, unknown> | null, orgId);
 
         // Tier 3: is this plan aimed at an area big enough to be worth working piece by piece?
         // Offered, never applied — the expansion is a separate action the user triggers and reads.
@@ -568,6 +568,7 @@ export default withLambda(async (event) => {
         const territorySplit = await splitTerritories(
             campaign.idea,
             body.granularity === 'fine' ? 'fine' : 'coarse',
+            orgId,
         );
 
         // The exclusions are returned alongside the queries because they are half of what the user
@@ -643,7 +644,7 @@ export default withLambda(async (event) => {
                     : [],
                 territories: offeredTerritories,
             }
-            : await splitTerritories(campaign.idea, body.granularity === 'fine' ? 'fine' : 'coarse');
+            : await splitTerritories(campaign.idea, body.granularity === 'fine' ? 'fine' : 'coarse', orgId);
         if (!split) return json(200, { expanded: false, reason: 'no_territories' });
 
         // ── Which queries get expanded ──────────────────────────────────────

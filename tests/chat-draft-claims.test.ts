@@ -183,7 +183,7 @@ check('all three routes carry the loop breaker', () => {
     // Without this the guard re-fires on the retry it just asked for, and the user reads the
     // same apology forever. Observed on a Blog Writer, 2026-08-21.
     assert.ok(orchestrator.includes('isHonestDraftReply(lastAssistantTurn)'), 'the breaker is not computed');
-    const guards = orchestrator.match(/&& replyClaimsPostSaved\(content\)[^)]*\)/g) ?? [];
+    const guards = orchestrator.match(/&& replyClaimsPostSaved\(content(?:, \{[^}]*\})?\)[^)]*\)/g) ?? [];
     assert.equal(guards.length, 3, `expected 3 claim guards, found ${guards.length}`);
     for (const g of guards) {
         assert.ok(g.includes('!alreadyApologised'), `a guard can still loop: ${g}`);

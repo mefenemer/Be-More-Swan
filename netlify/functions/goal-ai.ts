@@ -104,7 +104,7 @@ export default withLambda(async (event) => {
 
         let recommendations: string[] = [];
         try {
-            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 500 });
+            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 500, usage: { workspaceId: orgId, assistantId: goal.assistantId, sessionId: 'goal-ai' } });
             recommendations = parseModelJsonArray<string>(text) ?? [];
         } catch { /* fall through to graceful error below */ }
 
@@ -156,7 +156,7 @@ export default withLambda(async (event) => {
 
         let parsed: any = null;
         try {
-            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 700 });
+            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 700, usage: { workspaceId: orgId, assistantId: goal.assistantId, sessionId: 'goal-ai' } });
             parsed = parseModelJson(text);
         } catch { /* fall through to graceful error below */ }
 
@@ -199,7 +199,7 @@ export default withLambda(async (event) => {
             + `Current "${FIELD_LABELS[field]}":\n${currentText || '(empty)'}`;
 
         try {
-            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 400 });
+            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 400, usage: { workspaceId: orgId, assistantId, sessionId: 'goal-ai' } });
             const suggestion = text.trim();
             if (!suggestion) return json(502, { error: 'Could not generate a suggestion. Please try again.' });
             return json(200, { suggestion, field });
@@ -266,7 +266,7 @@ export default withLambda(async (event) => {
         const userMsg = `${business || 'Role: assistant'}\n\nThe goal being set:\n${draft || '(nothing filled in yet)'}`;
 
         try {
-            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 400 });
+            const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 400, usage: { workspaceId: orgId, assistantId, sessionId: 'goal-ai' } });
             // maxlength on the textarea is 600; trim here so the field never silently truncates
             // a suggestion the user was shown in full.
             const suggestion = text.trim().slice(0, 600);

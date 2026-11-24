@@ -20,7 +20,8 @@ import { getDb } from '../../db/client';
 import { tourNarrationCache } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
-import { speakVoiceover, isVoiceId, cleanScript, DEFAULT_VOICE } from '../../src/lib/tts';
+import { speakVoiceover, isVoiceId, cleanScript, DEFAULT_VOICE, elevenLabsSpeechCostUsd } from '../../src/lib/tts';
+import { logAiUsage, speechCostFromTextUsd } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MAX_CHARS = 700;
@@ -60,7 +61,14 @@ export default withLambda(async (event) => {
     if (n >= READS_PER_DAY) return json(429, { error: 'That’s the most new readings for today — the ones you’ve already heard still play. Try again tomorrow.' });
 
     try {
-        const { mp3 } = await speakVoiceover(text, voice);
+        const { mp3, provider, model } = await speakVoiceover(text, voice);
+        // A fresh reading is the only time this costs anything (cached replays above are free). Logged against the
+        // workspace so COGS and the partner sweep see it (docs/cost-logging-audit.md): ElevenLabs per character
+        // (tts.ts ELEVENLABS_USD_PER_1K_CHARS), OpenAI speech estimated from words (ai-usage.ts SPEECH_USD_PER_MINUTE).
+        await logAiUsage({
+            workspaceId: orgId, userId: ctx.userId ?? null, model, inputTokens: 0, outputTokens: 0, sessionId: 'read-aloud',
+            costUsdOverride: provider === 'elevenlabs' ? elevenLabsSpeechCostUsd(text.length) : speechCostFromTextUsd(text),
+        });
         const audio = mp3.toString('base64');
         await db.insert(tourNarrationCache).values({ textHash, voice: `readaloud:${orgId}:${voice}`, audioBase64: audio, mimeType: 'audio/mpeg' })
             .onConflictDoNothing();

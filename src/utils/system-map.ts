@@ -21,6 +21,8 @@ const RULES: Array<{ system: string; test: (model: string) => boolean }> = [
     { system: 'hunter', test: (m) => m.startsWith('hunter-') },
     { system: 'dataforseo', test: (m) => m.startsWith('dataforseo-') },
     { system: 'remotion', test: (m) => m === 'remotion-lambda' },
+    { system: 'recall', test: (m) => m.startsWith('recall-') },
+    { system: 'resend', test: (m) => m.startsWith('resend-') },
 ];
 
 /** The system a logged ai_usage_log.model belongs to, or null when no rule knows it. */

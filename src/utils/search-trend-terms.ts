@@ -49,6 +49,16 @@ export async function defaultRegionIso(db: Db, userId: number | null | undefined
     } catch { return 'GB'; }
 }
 
+/**
+ * The region a request names, when it is one we track; otherwise the fallback (the time-zone default).
+ * Fix pipeline #81 (2026-11-21): "Suggest terms for me" sent no region, so a US workspace whose owner's time
+ * zone (Europe/Athens) maps to nothing got every suggestion saved under the United Kingdom.
+ */
+export function pickRegionIso(requested: unknown, fallback: string): string {
+    const iso = typeof requested === 'string' ? requested.trim().toUpperCase() : '';
+    return iso && Object.prototype.hasOwnProperty.call(COUNTRY_LOCATION, iso) ? iso : fallback;
+}
+
 // ── Suggesting (Haiku) ──────────────────────────────────────────────────────────────────────────
 
 export function suggestSystemPrompt(): string {
@@ -60,9 +70,11 @@ export function suggestSystemPrompt(): string {
     ].join('\n');
 }
 
-export function suggestUserPrompt(input: { industry: string | null; description: string | null; products: string[]; keywords: string[]; existing: string[] }): string {
+export function suggestUserPrompt(input: { industry: string | null; description: string | null; products: string[]; keywords: string[]; existing: string[]; country?: string | null }): string {
     const fence = (s: string) => s.replace(/[<>]/g, '');
     return [
+        // The terms are tracked in this country, so they must be the words people there type (#81).
+        input.country ? `The customers are in ${fence(input.country)}: use the words and spelling people there type into Google.` : '',
         `<business industry="${fence(input.industry ?? '').slice(0, 120)}">`,
         fence(input.description ?? '').slice(0, 1500) || '(no description yet)',
         '</business>',
@@ -90,8 +102,8 @@ export type CallSuggestModel = (system: string, user: string) => Promise<string>
 
 export type SuggestResult = { ok: true; added: string[] } | { ok: false; error: string };
 
-/** Ask Haiku for terms and save them as suggestions in the workspace's default region. */
-export async function suggestTrendTerms(db: Db, orgId: number, userId: number | null, callModel: CallSuggestModel): Promise<SuggestResult> {
+/** Ask Haiku for terms and save them as suggestions in the chosen region (else the workspace's default). */
+export async function suggestTrendTerms(db: Db, orgId: number, userId: number | null, callModel: CallSuggestModel, region?: unknown): Promise<SuggestResult> {
     const [org] = await db.select({ industry: organisations.industry, description: organisations.businessDescription })
         .from(organisations).where(eq(organisations.id, orgId)).limit(1);
     const products = (await loadOrgProducts(db, orgId)).map((p) => p.name).filter(Boolean);
@@ -102,16 +114,16 @@ export async function suggestTrendTerms(db: Db, orgId: number, userId: number | 
     }
     const room = MAX_TRACKED_PER_ORG - current.length;
     if (room <= 0) return { ok: false, error: `You already track ${MAX_TRACKED_PER_ORG} terms. Remove some first.` };
+    const loc = countryLocation(pickRegionIso(region, await defaultRegionIso(db, userId)));
     let text: string;
     try {
-        text = await callModel(suggestSystemPrompt(), suggestUserPrompt({ industry: org?.industry ?? null, description: org?.description ?? null, products, keywords, existing: current.map((t) => t.term) }));
+        text = await callModel(suggestSystemPrompt(), suggestUserPrompt({ industry: org?.industry ?? null, description: org?.description ?? null, products, keywords, existing: current.map((t) => t.term), country: loc.name }));
     } catch (err) {
         console.error('[search-trend-terms] suggest failed', err instanceof Error ? err.message : err);
         return { ok: false, error: 'Could not suggest terms just now. Try again in a minute, or add your own.' };
     }
     const terms = termsFromReply(parseModelJson(text), current.map((t) => t.term)).slice(0, room);
     if (!terms.length) return { ok: false, error: 'No new terms to suggest. Add your own instead.' };
-    const loc = countryLocation(await defaultRegionIso(db, userId));
     const added: string[] = [];
     for (const term of terms) {
         const r = await trackTrendTerm(db, orgId, { term, locationCode: loc.code, locationName: loc.name, source: 'auto', approved: false });

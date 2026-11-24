@@ -96,7 +96,7 @@ export default withLambda(async (event) => {
         }
 
         const now = new Date();
-        const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now });
+        const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now, usage: { workspaceId: ctx.organisationId, userId: ctx.userId, sessionId: 'brand-extract' } });
 
         // Stamp the attempt even when nothing was found, exactly as the lazy path does — otherwise
         // a user hammering the button re-fetches an unreadable site on every click.
