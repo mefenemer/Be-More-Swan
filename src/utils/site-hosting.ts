@@ -86,6 +86,20 @@ export function siteOrigin(slug: string, domain = sitesDomain()): string {
 }
 
 /**
+ * The address a hosted site is really served at: its own domain once that is live (the bemoreswan.site address
+ * then redirects there, site-domains.ts resolveSiteHost), else its bemoreswan.site address. Fix pipeline #62
+ * (2026-11-16): Admin ▸ Hosted Sites showed restorative-futures.bemoreswan.site for a site live at
+ * www.restorativefutures.co.uk. `ownDomain` is any domain not removed, so a half-connected one can be shown too.
+ */
+export function siteAddresses(slug: string | null, domain: { domain: string; status: string } | null, sites = sitesDomain()): {
+    url: string | null; hostedUrl: string | null; ownDomain: { domain: string; status: string } | null;
+} {
+    const hostedUrl = slug ? siteOrigin(slug, sites) : null;
+    const ownDomain = domain && domain.domain && domain.status !== 'removed' ? { domain: domain.domain, status: domain.status } : null;
+    return { url: ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : hostedUrl, hostedUrl, ownDomain };
+}
+
+/**
  * The slug a request's Host names, or null when it is not a site address: the bare domain, www,
  * anything deeper than one label, or another domain altogether. A port is ignored.
  */
