@@ -14,7 +14,7 @@ import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, mee
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    BOT_STATUS_WORDS, FINAL_BOT_STATUSES, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    ALONE_TIMEOUT_S, BOT_STATUS_WORDS, recallCostDue, FINAL_BOT_STATUSES, WAITING_ROOM_TIMEOUT_S, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallMediaExpired, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
@@ -214,7 +214,8 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
         const [saved] = await db.update(meetingBots).set({ recallBotId, updatedAt: new Date() })
             .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();
         if (!saved) {
-            await removeRecallBot(region, recallBotId, true).catch(() => null);
+            // Recall has a bot this row can no longer follow: if it can't be taken back, log the most it can run.
+            if (!(await removeRecallBot(region, recallBotId, true).catch(() => null))) await logUntrackedRecallBot(row);
             const [now2] = await db.select().from(meetingBots).where(eq(meetingBots.id, row.id)).limit(1);
             return { ok: true, bot: botView(now2 ?? row), alreadySent: false };
         }
@@ -225,6 +226,8 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
         const back = await removeRecallBot(region, recallBotId, true).catch(() => null);
         await db.update(meetingBots).set({ status: 'failed', statusReason: back ? 'not_saved' : 'not_saved_bot_still_sent', updatedAt: new Date() })
             .where(eq(meetingBots.id, row.id)).catch(() => undefined);
+        // Still out there and its events can't be matched to a row (no id saved): log the most it can run.
+        if (!back) await logUntrackedRecallBot(row);
         console.error('[meeting-bot] bot sent but its id could not be saved', { botId: row.id, region, withdrawn: back, err: err instanceof Error ? err.message : err });
         return fail(500, 'not_saved', 'The Note Taker could not be sent. Please try again.');
     }
@@ -276,8 +279,9 @@ export async function removeMeetingBot(db: Db, organisationId: number, botId: nu
     if (how !== 'deleted') return { ok: true, bot: botView(row) };
     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'cancelled_by_user', updatedAt: new Date() })
         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, ['scheduled', 'joining', 'waiting_room']))).returning();
-    // Taken back while on its way in or waiting to be admitted: Recall ran it until now. A booked bot cost nothing.
-    if (saved && (row.status === 'joining' || row.status === 'waiting_room')) await logRecallBotCost(saved, new Date());
+    // Taken back after it set off: Recall ran it from join_at until now. That includes a row still saying 'scheduled'
+    // because a webhook was missed. A bot booked for later gives 0 hours, so nothing is written.
+    if (saved) await logRecallBotCost(saved, new Date());
     return { ok: true, bot: botView(saved ?? row) };
 }
 
@@ -310,7 +314,7 @@ async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, d
     // Recall's charge, once per bot: on its FIRST final state (done, not admitted, failed, removed). This update only
     // wins from the state before it, so the move into a final state happens once. removed → done (a later 'done' for a
     // bot that heard part of the call) is final → final and isn't logged again.
-    if (FINAL_BOT_STATUSES.includes(saved.status as BotStatus) && !FINAL_BOT_STATUSES.includes(row.status as BotStatus)) {
+    if (recallCostDue(row.status, saved.status)) {
         await logRecallBotCost(saved, saved.leftAt);
     }
     if (saved.status === 'done' && saved.joinedAt) await ensureBotImport(db, saved, dispatch);
@@ -325,10 +329,30 @@ async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, d
  */
 async function logRecallBotCost(row: BotRow, leftAt: Date | null): Promise<void> {
     if (!row.recallBotId) return;
-    const ctx = { workspaceId: row.organisationId, assistantId: row.aiAssistantId ?? null, userId: row.requestedByUserId ?? null, sessionId: `meeting-bot:${row.id}` };
     const b = recallBotBilling({ joiningAt: row.joinAt, joinedAt: row.joinedAt, leftAt });
-    await logServiceCost('recall-bot-hour', b.botHours, ctx);
-    await logServiceCost('recall-transcript-hour', b.transcriptHours, ctx);
+    await logRecallHours(row, b.botHours, b.transcriptHours);
+}
+
+async function logRecallHours(row: BotRow, botHours: number, transcriptHours: number): Promise<void> {
+    const ctx = { workspaceId: row.organisationId, assistantId: row.aiAssistantId ?? null, userId: row.requestedByUserId ?? null, sessionId: `meeting-bot:${row.id}` };
+    await logServiceCost('recall-bot-hour', botHours, ctx);
+    await logServiceCost('recall-transcript-hour', transcriptHours, ctx);
+}
+
+/**
+ * A bot Recall accepted that we can neither follow (its id never reached the row) nor take back: none of its events
+ * will ever match a row, so its real time can't be known. Logged at the most it can run, which is the safe error:
+ * up to WAITING_ROOM_TIMEOUT_S waiting, its length limit in the call, then ALONE_TIMEOUT_S alone (the auto-leave
+ * rules in recallBotRequest), with the transcript for the length limit.
+ */
+export function untrackedRecallHours(lengthLimitMinutes: number): { botHours: number; transcriptHours: number } {
+    const inCallS = cleanLengthLimit(lengthLimitMinutes) * 60;
+    return { botHours: (WAITING_ROOM_TIMEOUT_S + inCallS + ALONE_TIMEOUT_S) / 3600, transcriptHours: inCallS / 3600 };
+}
+
+async function logUntrackedRecallBot(row: BotRow): Promise<void> {
+    const h = untrackedRecallHours(row.lengthLimitMinutes);
+    await logRecallHours(row, h.botHours, h.transcriptHours);
 }
 
 export const botExternalId = (region: string, recallBotId: string) => `recall:${region}:${recallBotId}`;
@@ -463,9 +487,11 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
                 if (how) {
                     const [saved] = await db.update(meetingBots).set({ status: 'cancelled', statusReason: 'assistant_or_workspace_removed', updatedAt: new Date() })
                         .where(and(eq(meetingBots.id, row.id), inArray(meetingBots.status, [...OPEN_BOT_STATUSES]))).returning();
-                    // Withdrawn after setting off: Recall ran it until now (a booked one cost nothing). Logged here even for a
-                    // bot in the call, because 'cancelled' is final and its later Recall events change nothing.
-                    if (saved && row.status !== 'scheduled') await logRecallBotCost(saved, new Date());
+                    // Withdrawn after setting off: Recall ran it from join_at until now (a bot booked for later gives 0 hours,
+                    // so nothing is written; a 'scheduled' row behind a missed webhook still counts). Logged here even for a
+                    // bot in the call, because 'cancelled' is final and its later Recall events change nothing. If the
+                    // removal FAILS, the row stays open with its Recall id, so the bot's own final event logs it.
+                    if (saved) await logRecallBotCost(saved, new Date());
                 }
             }
             await deleteBotMedia(db, row).catch(() => false);
