@@ -21,7 +21,7 @@
 // ⚠️ Still scenes need a Remotion bundle from 2026-10-31 or later — redeploy both sites first.
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, organisations, scheduledPosts, videoProjects } from '../../db/schema';
 import { videoResults, type ResultRow } from '../lib/video-results';
@@ -1590,6 +1590,8 @@ export async function videoResultsFor(db: Db, orgId: number, assistantId: number
 
 /** Longer than any honest plan or build runs (the worker's own ceiling is 15 minutes). */
 export const STUCK_AFTER_MS = 20 * 60 * 1000;
+/** A killed render's cost is logged only when its project was last touched this recently (see sweepStuckProjects). */
+export const ORPHAN_RENDER_LOG_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * A worker killed mid-way (Lambda's ceiling, a deploy) leaves its project mid-step with credits held.
@@ -1599,6 +1601,11 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
     const cutoff = new Date(now.getTime() - STUCK_AFTER_MS);
     // A render nobody finished: the video was made and paid for, only the file is missing — say so,
     // and offer "Try the render again" rather than failing the whole video.
+    // Read BEFORE the update (which moves updated_at): the stuck renders cut off recently enough to log (see below).
+    const recent = new Set((await db.select({ id: videoProjects.id }).from(videoProjects).where(and(
+        eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff),
+        gt(videoProjects.updatedAt, new Date(now.getTime() - ORPHAN_RENDER_LOG_WITHIN_MS)), isNotNull(videoProjects.renderBucket),
+    ))).map((r) => r.id));
     const killed = await db.update(videoProjects)
         .set({ status: 'render_failed', note: 'The finished video took too long to render. Press “Try the render again”.', updatedAt: now })
         .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff)))
@@ -1607,7 +1614,9 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
     // its cost is logged here, once. Only this sweep's UPDATE returned the row; render-cost.ts skips it if the worker
     // logged before dying. 'starting' is the claim placeholder (no render was started). Lazy import: Remotion's client
     // stays out of every function that imports this file.
-    const orphaned = killed.filter((k) => k.renderId && k.renderId !== 'starting' && k.renderBucket);
+    // Only renders cut off recently: a project stuck since before this logging existed would date an old render's cost
+    // to today, into the wrong month's partner check (review of #844). Its status is still put right above.
+    const orphaned = killed.filter((k) => k.renderId && k.renderId !== 'starting' && k.renderBucket && recent.has(k.id));
     if (orphaned.length) {
         const { logOrphanedRenderCost } = await import('./render-cost');
         for (const k of orphaned) {

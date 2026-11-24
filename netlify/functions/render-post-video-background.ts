@@ -15,7 +15,7 @@
 // far worse here than a visible failure, which the reviewer can see and retry.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, eq, inArray, lt, ne } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
@@ -36,6 +36,9 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Longer than any worker can run (Netlify's 15-minute background ceiling): a job still 'rendering' after this was cut off. */
 export const KILLED_AFTER_MS = 20 * 60 * 1000;
+/** Only jobs cut off this recently: older ones are a backlog from before this sweep existed (review of #844), and failing
+ *  them now would surprise their owners and date their render costs to a month they don't belong to. */
+export const KILLED_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
 const KILLED_SWEEP_LIMIT = 20;
 
 /**
@@ -48,7 +51,8 @@ const KILLED_SWEEP_LIMIT = 20;
 export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: Date = new Date()): Promise<number> {
     try {
         const stale = await db.select({ id: postRenderJobs.id }).from(postRenderJobs)
-            .where(and(eq(postRenderJobs.status, 'rendering'), lt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_AFTER_MS))))
+            .where(and(eq(postRenderJobs.status, 'rendering'), lt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_AFTER_MS)),
+                gt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_WITHIN_MS))))
             .limit(KILLED_SWEEP_LIMIT);
         let swept = 0;
         for (const { id } of stale) {
