@@ -165,6 +165,24 @@ export interface SummaryInput {
     competitorChanges: Array<{ url: string; changes: string[] }>;
     /** Ideas already suggested, briefed or written by the other assistants (site-audit-covered.ts). */
     covered?: CoveredItem[];
+    /** What changed since the last check (site-audit.ts scoreChangesFrom) — so a moved score says why. */
+    scoreChanges?: ScoreChanges | null;
+}
+
+/** Why a score moved: whether the owner's page changed, and which checks now pass or fail (Fix pipeline #63). */
+export interface ScoreChanges {
+    ownPageChanged: boolean;
+    competitorsChanged: boolean;
+    flipped: Array<{ id: string; lens: Lens; label: string; now: 'pass' | 'fail' }>;
+}
+
+/** One plain line for the owner: what changed, and where. '' when nothing did. Pure. */
+export function scoreChangesLine(c: ScoreChanges | null | undefined): string {
+    if (!c) return '';
+    const now = (f: ScoreChanges['flipped'][number]) => f.now === 'pass' ? `now passes: “${f.label}”` : `now fails: “${f.label}”`;
+    const where = c.ownPageChanged ? 'Your page changed.' : c.competitorsChanged ? 'Your page didn’t change; a competitor’s did.' : 'Nothing on the pages changed.';
+    if (!c.flipped.length) return c.ownPageChanged || c.competitorsChanged ? `${where} No check changed result.` : '';
+    return `${where} ${c.flipped.slice(0, 4).map((f) => `${LENS_LABEL[f.lens]} — ${now(f)}`).join('; ')}${c.flipped.length > 4 ? `; and ${c.flipped.length - 4} more` : ''}.`;
 }
 
 /** The hand-off targets the summary may name: the active ones when known, else every target. */
@@ -195,9 +213,10 @@ export function buildSummaryPrompt(input: SummaryInput): LensPrompt {
         `<failed_checks>\n${score.failures.slice(0, 10).map((f) => `- ${f.label}`).join('\n') || '(none)'}\n</failed_checks>`,
         `<suggested_fixes>\n${fixLines.join('\n') || '(none)'}\n</suggested_fixes>`,
         changes.length ? `<competitor_changes>\n${changes.join('\n')}\n</competitor_changes>` : '',
+        scoreChangesLine(input.scoreChanges) ? `<what_changed_since_last_check>\n${scoreChangesLine(input.scoreChanges)}\n</what_changed_since_last_check>` : '',
         coveredBlock(input.covered ?? []),
         `<rules>
-- "summary": 2–3 short sentences to the business owner: where the site stands, what moved since last time, and the single most important thing to change. Calm and direct, no hype. Use ONLY the numbers given above — do not invent percentages, conversion rates or forecasts.
+- "summary": 2–3 short sentences to the business owner: where the site stands, what moved since last time — when the overall score is not the same as last time, say WHY, from <what_changed_since_last_check> (and say plainly when their own page did not change) — and the single most important thing to change. Calm and direct, no hype. Use ONLY the numbers given above — do not invent percentages, conversion rates or forecasts.
 - "priorities": up to 3 of the suggested fixes, by their [index], most valuable first, each with one sentence on why it matters commercially and an impact of "high", "medium" or "low". You may not write new fixes, and never pick two fixes that change the same text.
 - "handoffs": up to 2 briefs for other assistants who could help while the website is being changed. ${handoffTargetsLine(input.brief.activeHandoffTargets)} "title" is a short button label; "brief" is 2–4 sentences the assistant can act on. Only include a hand-off if it genuinely helps AND says something new: never one that repeats or overlaps anything in <already_covered>. When everything useful is already covered, return "handoffs": [] — an empty list is the right answer then, not a reworded repeat.
 - Reply with the JSON object only.
