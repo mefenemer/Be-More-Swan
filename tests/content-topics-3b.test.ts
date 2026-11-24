@@ -73,7 +73,7 @@ check('orchestrator: the card on Social, Blog and Email routes; kept through the
     assert.match(orch, /const ownRoute = route === ROUTES\.social_media_manager \|\| route === ROUTES\.blog_writer \|\| route === ROUTES\.newsletter_editor;/);
     assert.match(orch, /: blogAction \?\? blogKeyword \?\? blogBlockEdit \?\? pillarCard \?\? profileCard;/);
     assert.match(orch, /: emailAction \?\? emailPartCard \?\? audienceCard \?\? reviewsCard \?\? pillarCard \?\? profileCard;/);
-    assert.ok((orch.match(/!pillarCard && replyClaimsPostSaved\(content\)|!profileCard && !pillarCard\) \{/g) || []).length >= 3, 'no false "nothing was saved" apology');
+    assert.ok((orch.match(/!pillarCard && replyClaimsPostSaved\(content(?:, \{[^}]*\})?\)|!profileCard && !pillarCard\) \{/g) || []).length >= 3, 'no false "nothing was saved" apology');
 });
 
 check('chat card: topic words, the Blog/Email settings place, no Social redraft offer', () => {

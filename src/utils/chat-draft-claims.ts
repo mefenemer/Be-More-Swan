@@ -51,6 +51,24 @@ const CONTENT_NOUN = /\b(?:posts?|articles?|blogs?|drafts?|captions?|pieces?|iss
 /** The verbs that describe making a draft. Split by tense — they are gated differently below. */
 const DONE_VERB = '(?:drafted|saved|scheduled|created|queued|added)';
 const DOING_VERB = '(?:drafting|writing up|putting together|creating|scheduling)';
+/**
+ * Rewriting an existing post. Only ever first-person: "I've rewritten the Ipswich post" claims a new version
+ * exists; "your rewritten homepage" does not. Fix pipeline #78 (2026-11-18): that reply went out with no card and
+ * nothing saved, and the user went looking for it.
+ */
+const REVISE_VERB = '(?:rewritten|rewrote|revised|redrafted|reworked)';
+
+/**
+ * A condition, not a report: "articles only publish WHEN THEY'RE SCHEDULED in Blog Studio" explains how
+ * publishing works. Fix pipeline #71 (2026-11-16): the content-predicate pattern read "they're scheduled" in that
+ * sentence as a claim, and an honest answer to "what does this button do?" was swapped for "Sorry — I said that
+ * was done". The clause from the conjunction to the next comma is dropped before the claim patterns run; a claim
+ * outside it ("When you asked, I've drafted it") still counts.
+ */
+/** First person, rewriting an existing post: "I've rewritten the Ipswich post", "I revised it" (#78). */
+const CLAIMS_REVISION = new RegExp(`\\bi(?:'|’)?(?:ve|\\s+have)?\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\b`, 'i');
+
+const CONDITION_CLAUSE = /\b(?:when|whenever|if|once|until|unless)\b[^,;:]*/gi;
 
 /**
  * Phrasings that assert a post EXISTS, or is being made right now. Each one requires the
@@ -127,13 +145,18 @@ function sentences(text: string): string[] {
  * So are sentences that ask the user for the very input the promise depends on. The caller is
  * responsible for only asking when persistence genuinely produced nothing.
  */
-export function replyClaimsPostSaved(reply: string): boolean {
+export function replyClaimsPostSaved(reply: string, opts: { revisions?: boolean } = {}): boolean {
+    // "I've rewritten it" counts as a claim unless the caller says otherwise: in the post editor's chat the
+    // rewrite IS on the card below the reply, and nothing there is ever saved on its own, so it is honest.
+    const revisions = opts.revisions !== false;
     if (!reply || !reply.trim()) return false;
     return sentences(reply).some((s) => {
         if (s.endsWith('?')) return false;          // asking, not asserting
         if (OFFER_OPENER.test(s)) return false;     // offering, not asserting
         if (NEGATED.test(s)) return false;          // denying, not asserting
-        if (ASSERTS_EXISTS.some(re => re.test(s))) return true;
+        const stated = s.replace(CONDITION_CLAUSE, ' ').trim();   // "…when they're scheduled" is a condition (#71)
+        if (ASSERTS_EXISTS.some(re => re.test(stated))) return true;
+        if (revisions && CLAIMS_REVISION.test(stated)) return true;
         return PROMISES_TO_WRITE.test(s) && !ASKS_USER_FOR_INPUT.test(s);
     });
 }

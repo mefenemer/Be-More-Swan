@@ -4784,7 +4784,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && !postPartCard && !profileCard && !pillarCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !postPartCard && !profileCard && !pillarCard && replyClaimsPostSaved(content, { revisions: !draftTarget }) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
