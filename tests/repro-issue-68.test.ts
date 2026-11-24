@@ -40,4 +40,22 @@ assert.ok(orch.includes("if (offersOwnCards && (uiElement as { type?: unknown } 
 assert.ok(orch.includes('const card = buildTakeMeThereCard(uiElement as Record<string, unknown>, takeMeThereTeam);'), 'against the same closed list');
 assert.ok(orch.includes('if (takeMeThereCard) uiElement = takeMeThereCard;'), 'and put back after the route rebuilds its own card');
 
+// 4. Review on PR #839: "Topics & themes" opens the card that assistant really has, by its role.
+const roles = [{ id: 6, name: 'Lyra', roleKey: 'blog_writer' }, { id: 1, name: 'Marvin', roleKey: 'social_media_manager' }, { id: 9, name: 'Nina', roleKey: 'lead_qualifier' }];
+const forBlog = tmt.buildTakeMeThereCard({ place: 'assistant_topics', assistantId: 6 }, roles);
+const forSocial = tmt.buildTakeMeThereCard({ place: 'assistant_topics', assistantId: 1 }, roles);
+const forOther = tmt.buildTakeMeThereCard({ place: 'assistant_topics', assistantId: 9 }, roles);
+assert.ok(!('error' in forBlog) && forBlog.place === 'assistant_topics' && forBlog.assistantTab === 'operation', 'Blog Writer: Topics & themes');
+assert.ok(!('error' in forSocial) && forSocial.place === 'assistant_what_i_post_about' && forSocial.assistantTab === 'strategy', 'Social: What I post about');
+assert.ok(!('error' in forSocial) && !forSocial.label.includes('Topics & themes'), 'and the label names what is there');
+assert.ok(!('error' in forOther) && forOther.place === 'assistant_how_i_work', 'no topics at all: When and how I work');
+
+// 5. One cap for the assistants read and named: the line names at most TAKE_ME_THERE_TEAM_CAP others.
+const cap = (tmt as any).TAKE_ME_THERE_TEAM_CAP as number;
+assert.ok(Number.isInteger(cap) && cap > 0);
+const many = [lyra, ...Array.from({ length: cap + 5 }, (_, i) => ({ id: 100 + i, name: `A${i}` }))];
+const named = (lineFor(lyra, many).match(/\b1\d\d = A\d+/g) || []).length;
+assert.strictEqual(named, cap, 'names exactly the cap');
+assert.ok(orch.includes('.limit(TAKE_ME_THERE_TEAM_CAP)'), 'and reads the same number');
+
 console.log('repro-issue-68: Take Me There on every assistant\'s chat ✓');

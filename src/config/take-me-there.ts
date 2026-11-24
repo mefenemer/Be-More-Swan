@@ -9,6 +9,11 @@
 // values (assets.html); assistant tabs are the detail page's data-maintab / data-tab names, and an
 // unknown one lands on the role's default tab (assistants.js), never a blank page.
 
+import { pillarProfileFor } from '../utils/pillar-profiles';
+
+/** How many of the workspace's assistants a non-Mentor chat reads AND names (one cap for both: review on PR #839). */
+export const TAKE_ME_THERE_TEAM_CAP = 30;
+
 export interface TakeMeTherePlace {
     /** What the place is called in the reply and on the card. */
     label: string;
@@ -60,7 +65,9 @@ export const TAKE_ME_THERE_PLACES: Readonly<Record<string, TakeMeTherePlace>> = 
     assistant_how_i_work: { label: 'the assistant\'s "When and how I post" card ("When and how I work" on assistants that don\'t post) — schedule and settings', assistantTab: 'operation' },
     // Blog Writer / Email: their topics are a row in that same card (Fix pipeline #68, 2026-11-16: "where are topics
     // and themes" got the right words and no button).
-    assistant_topics: { label: 'the assistant\'s Topics & themes (in its "When and how I work" card)', assistantTab: 'operation' },
+    // Only the Blog Writer and the Email assistant have it; for any other assistant the card opens the place its topics
+    // really are (buildTakeMeThereCard, by role — review on PR #839).
+    assistant_topics: { label: 'the assistant\'s Topics & themes (in its "When and how I work" card; Blog Writer and Email assistant only)', assistantTab: 'operation' },
     assistant_briefs: { label: 'the Brand Designer\'s Briefs tab', assistantTab: 'briefs' },
     assistant_inspo: { label: 'the assistant\'s Inspo tab', assistantTab: 'inspo' },
     assistant_website: { label: 'the Website Assistant\'s Website tab', assistantTab: 'sitebuilder' },
@@ -93,16 +100,25 @@ export interface TakeMeThereCard {
  */
 export function buildTakeMeThereCard(
     raw: { place?: unknown; summary?: unknown; assistantId?: unknown },
-    team: Array<{ id: number; name: string }>,
+    team: Array<{ id: number; name: string; roleKey?: string | null }>,
 ): TakeMeThereCard | { error: string } {
-    const key = String(raw.place ?? '');
-    const place = Object.prototype.hasOwnProperty.call(TAKE_ME_THERE_PLACES, key) ? TAKE_ME_THERE_PLACES[key] : null;
+    let key = String(raw.place ?? '');
+    let place = Object.prototype.hasOwnProperty.call(TAKE_ME_THERE_PLACES, key) ? TAKE_ME_THERE_PLACES[key] : null;
     if (!place) return { error: 'I don\'t have a button for that page.' };
     const summary = typeof raw.summary === 'string' ? raw.summary.trim().slice(0, 300) : '';
     if (place.assistantTab !== undefined) {
         const id = Number(raw.assistantId);
         const who = team.find((t) => t.id === id);
         if (!who) return { error: 'I couldn\'t tell which assistant\'s page to open.' };
+        // "Topics & themes" is the Blog Writer's and Email assistant's row. A Social Media assistant's topics are its
+        // content pillars ("What I post about"); any other role has neither, so its "When and how I work" card.
+        // Only when the role is known: the Mentor's team list carries none, and keeps the place as asked.
+        if (key === 'assistant_topics' && who.roleKey !== undefined) {
+            const prof = pillarProfileFor(who.roleKey);
+            if (prof?.contextKey === 'content_pillars') key = 'assistant_what_i_post_about';
+            else if (!prof) key = 'assistant_how_i_work';
+            place = TAKE_ME_THERE_PLACES[key];
+        }
         return {
             type: 'mentor_take_me_there', summary, place: key,
             label: place.label.replace(/^the assistant's|^the Brand Designer's|^the Website Assistant's|^the Video Producer's|^the Blog Writer's|^your Business Mentor's/, `${who.name}'s`),
@@ -122,9 +138,9 @@ export function buildTakeMeThereCard(
  * assistant's chat"). Same card, same closed list, checked by the same buildTakeMeThereCard. `team` = the
  * workspace's assistants, so an assistant-page place can name one by id — the assistant itself included.
  */
-export function takeMeThereAssistantPromptLine(self: { id: number; name: string }, team: Array<{ id: number; name: string; job?: string | null }>): string {
+export function takeMeThereAssistantPromptLine(self: { id: number; name: string }, team: Array<{ id: number; name: string; job?: string | null; roleKey?: string | null }>): string {
     const keys = Object.entries(TAKE_ME_THERE_PLACES).map(([k, p]) => `"${k}" (${p.label})`).join(', ');
-    const others = team.filter((t) => t.id !== self.id).slice(0, 20)
+    const others = team.filter((t) => t.id !== self.id).slice(0, TAKE_ME_THERE_TEAM_CAP)
         .map((t) => `${t.id} = ${t.name.replace(/["\n]/g, '')}${t.job ? ` (${String(t.job).replace(/["\n]/g, '')})` : ''}`).join('; ');
     return `TAKE ME THERE — WHENEVER the user asks where something is, how to find it, or how to get to a page in Be More Swan (and no other card is needed): say where it is in words, AND put this card in "uiElement" so they can go there with one click. "place" is one of: ${keys}. For a place on one assistant's page, also give "assistantId": yours is ${self.id}${others ? `; the others on this workspace: ${others}` : ''}. It changes nothing and needs no confirming:
 {"type":"mentor_take_me_there","summary":"<one short sentence: what they'll find there>","place":"<key>","assistantId":<id, only for an assistant's page>}`;

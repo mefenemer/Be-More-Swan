@@ -158,7 +158,7 @@ import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { buildPillarChatBlock, pillarRequestFromUiElement, resolvePillarProposal, settingsPlaceFor, type PillarCard } from '../../src/utils/chat-pillar-card';
 import { pillarProfileFor } from '../../src/utils/pillar-profiles';
-import { buildTakeMeThereCard, takeMeThereAssistantPromptLine } from '../../src/config/take-me-there';
+import { buildTakeMeThereCard, TAKE_ME_THERE_TEAM_CAP, takeMeThereAssistantPromptLine } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
@@ -3748,14 +3748,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;
     // "Take Me There" on every assistant's chat, not only the Mentor's (Fix pipeline #68): the workspace's assistants
     // by id, so the card can open one's page. The Mentor has its own line (mentor-cards.ts). Never throws.
-    const takeMeThereTeam: Array<{ id: number; name: string; job?: string | null }> = offersOwnCards
-        ? await db.select({ id: aiAssistants.id, name: aiAssistants.name, job: aiAssistants.aiAssistantJobRole }).from(aiAssistants)
-            .where(and(eq(aiAssistants.organisationId, orgId), isNull(aiAssistants.archivedAt))).limit(40)
-            .catch(() => [] as Array<{ id: number; name: string; job: string | null }>)
+    // Its role too, so a "Topics & themes" button opens the card that assistant really has. Itself is always on it,
+    // ahead of the cap, so the others named are at most TAKE_ME_THERE_TEAM_CAP — the same number the line names.
+    const takeMeThereTeam: Array<{ id: number; name: string; job?: string | null; roleKey: string | null }> = offersOwnCards
+        ? await db.select({ id: aiAssistants.id, name: aiAssistants.name, job: aiAssistants.aiAssistantJobRole, roleKey: masterAssistants.roleKey })
+            .from(aiAssistants).leftJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
+            .where(and(eq(aiAssistants.organisationId, orgId), isNull(aiAssistants.archivedAt), sql`${aiAssistants.id} <> ${session.aiAssistantId}`))
+            .limit(TAKE_ME_THERE_TEAM_CAP)
+            .catch(() => [] as Array<{ id: number; name: string; job: string | null; roleKey: string | null }>)
         : [];
-    if (offersOwnCards && !takeMeThereTeam.some((t) => t.id === session.aiAssistantId)) {
-        takeMeThereTeam.push({ id: session.aiAssistantId, name: assistantRow.name || 'This assistant' });
-    }
+    if (offersOwnCards) takeMeThereTeam.unshift({ id: session.aiAssistantId, name: assistantRow.name || 'This assistant', roleKey: assistantRow.roleKey ?? null });
     const takeMeThereBlock = offersOwnCards
         ? takeMeThereAssistantPromptLine({ id: session.aiAssistantId, name: assistantRow.name || 'This assistant' }, takeMeThereTeam)
         : null;
