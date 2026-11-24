@@ -241,10 +241,13 @@ export const SERVICE_UNIT_PRICE_USD: Record<string, { envVar: string; fallback: 
     // Claude's server-side web search: $10 per 1,000 searches, on top of tokens (Anthropic pricing).
     // Logged by the gateway for every grounded call (src/lib/ai-gateway.ts recordSearchFee).
     'anthropic-web-search': { envVar: 'ANTHROPIC_WEB_SEARCH_USD', fallback: 0.01, unit: 'search' },
-    // Recall.ai Note Taker bot (cost audit 2026-11-23, docs/cost-logging-audit.md): pay-as-you-go $0.50 per hour of
-    // recording + $0.15 per hour for Recall's built-in transcript, "prorated to the second" (recall.ai/pricing,
-    // read 2026-11-23). Units are HOURS in the call (fractional). Logged once per bot (meeting-bot-db.ts).
-    'recall-bot-hour': { envVar: 'RECALL_USD_PER_HOUR', fallback: 0.65, unit: 'hour' },
+    // Recall.ai Note Taker bot (cost audit 2026-11-23, docs/cost-logging-audit.md): pay-as-you-go "$0.50/hr of
+    // recording" + "$0.15/h" for Recall's built-in transcript, "prorated to the second" (recall.ai/pricing, read
+    // 2026-11-23). Units are fractional HOURS (recallBotHours). The bot hour runs from the join attempt to leaving,
+    // waiting room included (Recall runs the bot the whole time — overstating is the safe error); the transcript only
+    // covers time in the call. Logged once per bot when it reaches a final state (meeting-bot-db.ts logRecallBotCost).
+    'recall-bot-hour': { envVar: 'RECALL_BOT_USD_PER_HOUR', fallback: 0.5, unit: 'hour' },
+    'recall-transcript-hour': { envVar: 'RECALL_TRANSCRIPT_USD_PER_HOUR', fallback: 0.15, unit: 'hour' },
     // Resend: overage is $0.90 per 1,000 emails on Pro (resend.com/pricing, read 2026-11-23). The plan's included
     // emails are a fixed fee, so this is the marginal price — the safe (higher) error. Logged for sends a workspace
     // causes (send-outbound-email.ts); platform mail (sign-in, notifications) stays unattributed.
@@ -308,11 +311,25 @@ export function logRenderCost(costUsd: number | null | undefined, ctx: Omit<AiUs
     return logAiUsage({ ...ctx, model: REMOTION_USAGE_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: costUsd.toFixed(6) });
 }
 
-/** Seconds → billed Recall hours: joined to left, to the second (Recall prorates to the second). Pure. */
-export function recallBotHours(joinedAt: Date | null | undefined, leftAt: Date | null | undefined): number {
-    if (!joinedAt || !leftAt) return 0;
-    const ms = leftAt.getTime() - joinedAt.getTime();
+/** Fractional hours from `from` to `to`, whole seconds rounded up (Recall prorates to the second). Pure. */
+export function recallBotHours(from: Date | null | undefined, to: Date | null | undefined): number {
+    if (!from || !to) return 0;
+    const ms = to.getTime() - from.getTime();
     return ms > 0 ? Math.ceil(ms / 1000) / 3600 : 0;
+}
+
+/**
+ * What one Recall bot is billed, in hours. `joiningAt` = when it set off (the bot's join_at: Recall starts joining
+ * then, and it is the send time for a bot sent "now"); `joinedAt` = admitted to the call (null if it never was);
+ * `leftAt` = gone. The bot hours run from the join attempt — never later than admission — to leaving; the transcript
+ * hours only from admission. Pure.
+ */
+export function recallBotBilling(b: { joiningAt: Date | null | undefined; joinedAt: Date | null | undefined; leftAt: Date | null | undefined }): { botHours: number; transcriptHours: number } {
+    const end = b.leftAt ?? null;
+    const admitted = b.joinedAt ?? null;
+    let start = b.joiningAt ?? admitted;
+    if (start && admitted && start.getTime() > admitted.getTime()) start = admitted;
+    return { botHours: recallBotHours(start, end), transcriptHours: recallBotHours(admitted, end) };
 }
 
 /** Record one whisper transcription. Never throws; AWAIT it. */

@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MEDIA_LIST_PRICE_USD, SERVICE_UNIT_PRICE_USD, mediaCostUsd, recallBotHours, serviceUnitPriceUsd } from '../src/utils/ai-usage';
+import { MEDIA_LIST_PRICE_USD, SERVICE_UNIT_PRICE_USD, mediaCostUsd, recallBotBilling, recallBotHours, serviceUnitPriceUsd } from '../src/utils/ai-usage';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -54,22 +54,39 @@ function calls(src: string, name: RegExp): string[] {
 
 console.log('\nCost audit — every paid provider logs its cost against the workspace');
 
-check('Recall bot: priced per hour (bot + transcript), to the second', () => {
-    assert.strictEqual(SERVICE_UNIT_PRICE_USD['recall-bot-hour'].fallback, 0.65, '$0.50/h recording + $0.15/h transcript');
-    const t0 = new Date('2026-11-23T10:00:00Z');
-    assert.strictEqual(recallBotHours(t0, new Date('2026-11-23T10:30:00Z')), 0.5);
-    assert.strictEqual(recallBotHours(t0, new Date('2026-11-23T10:00:00.400Z')), 1 / 3600, 'a part second is billed as a second');
-    assert.strictEqual(recallBotHours(null, t0), 0);
-    assert.strictEqual(recallBotHours(t0, t0), 0);
+check('Recall bot: recording from the join attempt, transcript only in the call, to the second', () => {
+    assert.strictEqual(SERVICE_UNIT_PRICE_USD['recall-bot-hour'].fallback, 0.5, '$0.50/h of recording');
+    assert.strictEqual(SERVICE_UNIT_PRICE_USD['recall-transcript-hour'].fallback, 0.15, '$0.15/h transcript');
+    const at = (hhmm: string) => new Date(`2026-11-23T${hhmm}:00Z`);
+    assert.strictEqual(recallBotHours(at('10:00'), at('10:30')), 0.5);
+    assert.strictEqual(recallBotHours(at('10:00'), new Date('2026-11-23T10:00:00.400Z')), 1 / 3600, 'a part second is billed as a second');
+    assert.strictEqual(recallBotHours(null, at('10:00')), 0);
+    // Waited 10 minutes, admitted, 30 minutes in the call.
+    assert.deepStrictEqual(recallBotBilling({ joiningAt: at('10:00'), joinedAt: at('10:10'), leftAt: at('10:40') }), { botHours: 40 / 60, transcriptHours: 0.5 });
+    // Never admitted: the waiting room is still billed, no transcript.
+    assert.deepStrictEqual(recallBotBilling({ joiningAt: at('10:00'), joinedAt: null, leftAt: at('10:15') }), { botHours: 0.25, transcriptHours: 0 });
+    // join_at after admission (clock skew, joined early): never billed from later than admission.
+    assert.deepStrictEqual(recallBotBilling({ joiningAt: at('10:05'), joinedAt: at('10:00'), leftAt: at('10:30') }), { botHours: 0.5, transcriptHours: 0.5 });
+    // Left "before" it set off (a bot that failed at once): nothing.
+    assert.deepStrictEqual(recallBotBilling({ joiningAt: at('10:00'), joinedAt: null, leftAt: at('09:59') }), { botHours: 0, transcriptHours: 0 });
 });
 
-check('Recall bot: logged once, on the move into done, against the bot\'s workspace', () => {
+check('Recall bot: logged once, on its first final state, against the bot\'s workspace', () => {
     const db = read('src/utils/meeting-bot-db.ts');
-    const fn = db.slice(db.indexOf('async function applyBotPatch('), db.indexOf('export const botExternalId'));
-    assert.ok(fn.length > 0, 'applyBotPatch() is gone');
-    assert.ok(/saved\.status === 'done' && row\.status !== 'done' && saved\.joinedAt\)[\s\S]{0,40}await logServiceCost\('recall-bot-hour', recallBotHours\(saved\.joinedAt, saved\.leftAt\)/.test(fn),
-        'a finished bot no longer records Recall\'s charge (or records it more than once)');
-    assert.ok(/workspaceId: saved\.organisationId/.test(fn), 'the Recall cost lost its workspace');
+    const helper = db.slice(db.indexOf('async function logRecallBotCost('), db.indexOf('export const botExternalId'));
+    assert.ok(helper.length > 0, 'logRecallBotCost() is gone');
+    assert.ok(/workspaceId: row\.organisationId/.test(helper), 'the Recall cost lost its workspace');
+    assert.ok(/recallBotBilling\(\{ joiningAt: row\.joinAt, joinedAt: row\.joinedAt, leftAt \}\)/.test(helper), 'not timed from the join attempt');
+    assert.ok(/logServiceCost\('recall-bot-hour', b\.botHours/.test(helper) && /logServiceCost\('recall-transcript-hour', b\.transcriptHours/.test(helper));
+    const patch = db.slice(db.indexOf('async function applyBotPatch('), db.indexOf('async function logRecallBotCost('));
+    // Every final state, not just 'done' (a bot never admitted still ran in the waiting room) — and only on the way IN.
+    assert.ok(/FINAL_BOT_STATUSES\.includes\(saved\.status as BotStatus\) && !FINAL_BOT_STATUSES\.includes\(row\.status as BotStatus\)\) \{\s*await logRecallBotCost\(saved, saved\.leftAt\)/.test(patch),
+        'a bot reaching a final state no longer records Recall\'s charge (or records it more than once)');
+    // Withdrawn by us after setting off: our own 'cancelled' is final, so its Recall events won't log it later.
+    const remove = db.slice(db.indexOf('export async function removeMeetingBot('), db.indexOf('// ── Recall\'s events'));
+    assert.ok(/row\.status === 'joining' \|\| row\.status === 'waiting_room'\)\) await logRecallBotCost\(saved, new Date\(\)\)/.test(remove), 'a bot taken back from the waiting room records nothing');
+    const withdraw = db.slice(db.indexOf('export async function withdrawMeetingBots('));
+    assert.ok(/row\.status !== 'scheduled'\) await logRecallBotCost\(saved, new Date\(\)\)/.test(withdraw), 'a bot withdrawn with its assistant records nothing');
     // The only Recall caller stays the only one: a new one must log too. (meeting-bot.ts only DEFINES RECALL_HOSTS.)
     const direct = sources.filter((f) => !['src/utils/meeting-bot-recall.ts', 'src/utils/meeting-bot.ts'].includes(f) && /recall\.ai\/api|RECALL_HOSTS/.test(read(f)));
     assert.deepStrictEqual(direct, [], `these call Recall directly:\n    ${direct.join('\n    ')}`);
