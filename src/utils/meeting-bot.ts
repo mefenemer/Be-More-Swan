@@ -93,6 +93,15 @@ export const MAX_SCHEDULE_AHEAD_MS = 60 * 24 * 60 * 60 * 1000;
 /** Plan §4 auto-leave rules. */
 export const WAITING_ROOM_TIMEOUT_S = 600;
 export const ALONE_TIMEOUT_S = 120;
+/**
+ * How long Recall may keep a bot's recording (audio, video AND transcript) after it is done, as a backstop: we delete it
+ * ourselves once the minutes are written, or 24 h after the bot finished at the latest (pollMeetingBots), so this only
+ * bites if our delete fails. Left out, Recall keeps media FOREVER on accounts made after 12 June 2025 (Recall docs
+ * "Storage and playback", read 2026-11-24). Longer than our 24 h so it never cuts off a transcript the writer still needs.
+ * Not Recall's zero data retention (`retention: null`): that stores no transcript at all, works only in English
+ * low-latency mode and would need live transcript intake (Recall reply 2026-11-24; docs/note-taker-bot-legal.md §10).
+ */
+export const RECALL_RETENTION_HOURS = 48;
 
 export function cleanLengthLimit(raw: unknown): number {
     const n = Math.round(Number(raw));
@@ -328,6 +337,7 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
             },
         } : {}),
         recording_config: {
+            retention: { type: 'timed', hours: RECALL_RETENTION_HOURS },
             transcript: {
                 provider: { recallai_streaming: { mode: 'prioritize_accuracy', language_code: 'auto' } },
                 diarization: { use_separate_streams_when_available: true },

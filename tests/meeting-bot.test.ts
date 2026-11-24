@@ -5,7 +5,7 @@ import { execSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
-    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
+    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, RECALL_RETENTION_HOURS, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
     nextBotState, readRecallTranscript, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
@@ -220,6 +220,19 @@ await test('the Recall request: platform speaker names, Recall\'s transcript, th
     assert.equal(now.automatic_leave.everyone_left_timeout.timeout, ALONE_TIMEOUT_S);
     assert.equal(now.automatic_leave.in_call_recording_timeout, 90 * 60, 'the length limit, in seconds');
     assert.deepEqual(now.metadata, { bms_bot_id: '7', bms_org_id: '58' });
+});
+
+await test('Recall keeps the recording for a set time, never its default (forever) and never zero data retention', () => {
+    const base = { meetingUrl: 'https://meet.google.com/xtt-xerh-qte', businessName: 'Marmalade', joinAt: at(0), scheduled: false, lengthLimitMinutes: 60, botRowId: 1, organisationId: 1 };
+    const req = recallBotRequest(base) as Record<string, any>;
+    assert.deepEqual(req.recording_config.retention, { type: 'timed', hours: RECALL_RETENTION_HOURS }, 'set explicitly: left out, Recall keeps media forever');
+    assert.ok(Number.isInteger(RECALL_RETENTION_HOURS) && RECALL_RETENTION_HOURS >= 1, 'whole hours, Recall minimum 1');
+    // Our own delete runs once the minutes are written, or 24 h after the bot finished (pollMeetingBots). Recall's backstop
+    // must be longer, or a transcript the writer is still waiting for could expire first.
+    assert.ok(RECALL_RETENTION_HOURS > 24, 'longer than our own 24 h delete');
+    // retention: null is Recall's zero data retention: no transcript is stored, so the after-call download would break.
+    assert.notEqual(req.recording_config.retention, null);
+    assert.deepEqual(req.recording_config.transcript.provider.recallai_streaming, { mode: 'prioritize_accuracy', language_code: 'auto' }, 'accuracy + language detection kept (owner, 2026-11-24)');
 });
 
 await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {
