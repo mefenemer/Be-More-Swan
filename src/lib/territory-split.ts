@@ -114,7 +114,7 @@ ${granularity === 'fine'
  * Never throws. Returns null when there is no useful split — no area named, an area already small
  * enough, or any failure at all. The caller shows nothing in that case.
  */
-export async function splitTerritories(idea: string, granularity: SplitGranularity = 'coarse'): Promise<TerritorySplit | null> {
+export async function splitTerritories(idea: string, granularity: SplitGranularity = 'coarse', workspaceId?: number | null): Promise<TerritorySplit | null> {
     const text = String(idea ?? '').trim();
     if (!text || !process.env.ANTHROPIC_API_KEY) return null;
 
@@ -125,8 +125,7 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
             system: systemPrompt(granularity),
             messages: [{ role: 'user', content: `Who they want to find:\n${text.slice(0, 1000)}` }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        // No workspace in scope here: counted in the platform total, unattributed.
-        await logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
+        await logMessageUsage(resp, MODEL, { workspaceId: workspaceId ?? null, sessionId: 'territory-split' });
         const parsed = parseModelJson<Record<string, unknown>>(
             replyText(resp.content),
         );

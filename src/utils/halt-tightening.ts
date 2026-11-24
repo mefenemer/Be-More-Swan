@@ -131,7 +131,7 @@ Rewrite the description so the search stops finding those companies:
 Return STRICT JSON only: { "idea": "<the tightened description>" | null }`;
 
 /** The model's rewrite, or null. Never throws. */
-export async function modelTightening(idea: string, cold: ColdLead[]): Promise<string | null> {
+export async function modelTightening(idea: string, cold: ColdLead[], workspaceId?: number | null): Promise<string | null> {
     if (!process.env.ANTHROPIC_API_KEY || cold.length < MIN_PATTERN_LEADS) return null;
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -152,7 +152,7 @@ export async function modelTightening(idea: string, cold: ColdLead[]): Promise<s
                 content: `Current description:\n${idea.slice(0, MAX_IDEA)}\n\nCompanies it found that were rated cold, with the scorer's reasons:\n${evidence.slice(0, 8000)}`,
             }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        await logMessageUsage(resp, MODEL, { sessionId: 'halt-tightening' });
+        await logMessageUsage(resp, MODEL, { workspaceId: workspaceId ?? null, sessionId: 'halt-tightening' });
         const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         return usableIdea(parsed?.idea, idea);
@@ -177,7 +177,7 @@ export function usableIdea(value: unknown, current: string): string | null {
  */
 export async function proposeTightening(
     db: Db, organisationId: number, discoveryCampaignId: number, since: Date,
-    rewrite: (idea: string, cold: ColdLead[]) => Promise<string | null> = modelTightening,
+    rewrite: (idea: string, cold: ColdLead[], workspaceId?: number | null) => Promise<string | null> = modelTightening,
 ): Promise<Tightening | null> {
     const [search] = await db.select({ idea: discoveryCampaigns.idea })
         .from(discoveryCampaigns)
@@ -185,6 +185,6 @@ export async function proposeTightening(
         .limit(1);
     if (!search) return null;
     const cold = await loadColdLeads(db, discoveryCampaignId, since);
-    const idea = (await rewrite(search.idea, cold)) ?? usableIdea(structuredTightening(search.idea, cold), search.idea);
+    const idea = (await rewrite(search.idea, cold, organisationId)) ?? usableIdea(structuredTightening(search.idea, cold), search.idea);
     return { previousIdea: search.idea, idea };
 }

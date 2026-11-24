@@ -318,6 +318,12 @@ export const SERVICES: ServiceDef[] = [
         consoleUrl: 'https://app.dataforseo.com/api-dashboard', envVars: ['DATAFORSEO_LOGIN', 'DATAFORSEO_PASSWORD'],
     },
     {
+        key: 'recall', name: 'Recall.ai (Note Taker bot)', category: 'AI', tier: 'core',
+        purpose: 'The Note Taker bot that joins Meet / Teams / Zoom calls and returns the transcript (docs/note-taker-bot-plan.md). '
+            + 'US and EU regions are separate accounts. Spend is logged per bot, against the workspace, when the call is done.',
+        consoleUrl: 'https://www.recall.ai', envVars: ['RECALL_US_API_KEY', 'RECALL_EU_API_KEY', 'RECALL_US_WEBHOOK_SECRET', 'RECALL_EU_WEBHOOK_SECRET'],
+    },
+    {
         key: 'companies-house', name: 'Companies House', category: 'Search', tier: 'core',
         purpose: 'UK company register lookups for Lead Generator (free API).',
         consoleUrl: 'https://developer.company-information.service.gov.uk', envVars: ['COMPANIES_HOUSE_API_KEY'],

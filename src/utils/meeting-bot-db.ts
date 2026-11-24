@@ -21,6 +21,7 @@ import {
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
 import { getTaskCosts } from './task-costs';
+import { logServiceCost, recallBotHours } from './ai-usage';
 import { TASK_LIMIT_MESSAGE, hasTaskCapacity, recordCompletedWork } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
@@ -304,6 +305,16 @@ async function applyBotPatch(db: Db, row: BotRow, patch: BotStatePatch | null, d
         ...(patch.minutesInCall !== null ? { minutesInCall: patch.minutesInCall } : {}), updatedAt: new Date(),
     }).where(and(eq(meetingBots.id, row.id), eq(meetingBots.status, row.status))).returning();
     if (!saved) return row.status as BotStatus;
+    // Recall's own charge (bot + transcript, to the second), once per bot: 'done' is final and this update only wins
+    // from the state before it, so only the move INTO 'done' gets here. Logged against the workspace so the partner
+    // sweep counts it (docs/cost-logging-audit.md). Priced on the full time in the call: Recall bills the empty-call
+    // wait that our task charge leaves out.
+    if (saved.status === 'done' && row.status !== 'done' && saved.joinedAt) {
+        await logServiceCost('recall-bot-hour', recallBotHours(saved.joinedAt, saved.leftAt), {
+            workspaceId: saved.organisationId, assistantId: saved.aiAssistantId ?? null, userId: saved.requestedByUserId ?? null,
+            sessionId: `meeting-bot:${saved.id}`,
+        });
+    }
     if (saved.status === 'done' && saved.joinedAt) await ensureBotImport(db, saved, dispatch);
     return saved.status as BotStatus;
 }

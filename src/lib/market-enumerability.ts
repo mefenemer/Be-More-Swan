@@ -56,7 +56,7 @@ Return STRICT JSON only:
 /**
  * Never throws, never blocks. Returns null when there is nothing dependable to say.
  */
-export async function assessMarket(idea: string, icp?: Record<string, unknown> | null): Promise<MarketAdvice | null> {
+export async function assessMarket(idea: string, icp?: Record<string, unknown> | null, workspaceId?: number | null): Promise<MarketAdvice | null> {
     const text = String(idea ?? '').trim();
     if (!text || !process.env.ANTHROPIC_API_KEY) return null;
 
@@ -71,8 +71,7 @@ export async function assessMarket(idea: string, icp?: Record<string, unknown> |
                     + (icp ? `\n\nIdeal customer profile:\n${JSON.stringify(icp).slice(0, 600)}` : ''),
             }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        // No workspace in scope here: counted in the platform total, unattributed.
-        await logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
+        await logMessageUsage(resp, MODEL, { workspaceId: workspaceId ?? null, sessionId: 'market-enumerability' });
         const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (!parsed || typeof parsed.enumerable !== 'boolean') return null;

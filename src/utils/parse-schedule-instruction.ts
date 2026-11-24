@@ -5,14 +5,14 @@
 // way the Social chat does. The blog chat resolves it while building its confirm card, so the card
 // shows the exact time before the user presses anything.
 
-import { gatewayGenerate } from '../lib/ai-gateway';
+import { gatewayGenerate, type GatewayRequest } from '../lib/ai-gateway';
 
 /**
  * Parse a natural-language scheduling instruction into a UTC Date, read in `timezone`.
  * Returns null if the model cannot determine a clear date/time. Throws only when the AI service
  * cannot be reached — callers decide how to say that.
  */
-export async function parseScheduleInstruction(instruction: string, now: Date, timezone: string): Promise<Date | null> {
+export async function parseScheduleInstruction(instruction: string, now: Date, timezone: string, usage?: GatewayRequest['usage']): Promise<Date | null> {
     const localNow = now.toLocaleString('en-GB', {
         timeZone: timezone,
         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -26,6 +26,7 @@ export async function parseScheduleInstruction(instruction: string, now: Date, t
             content: `Current date/time in user's timezone (${timezone}): ${localNow}\nInstruction: "${instruction}"\n\nISO UTC timestamp:`,
         }],
         maxTokens: 60,
+        usage,
     });
 
     const trimmed = text.trim();

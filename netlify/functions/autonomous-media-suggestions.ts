@@ -25,7 +25,7 @@ import {
     mediaGenerationJobs, organisations,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { gatewayGenerate, type GatewayRequest } from '../../src/lib/ai-gateway';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { directPostImage } from '../../src/utils/post-image-direction';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
@@ -54,11 +54,12 @@ interface DraftCopy { caption: string; hashtags: string; imagePrompt: string; }
 // ⚠️ The system prompt used to be the business NAME and nothing else, so the model invented a
 // business to match it (prod org 43: 21 posts about a shop that does not exist) — the brief now
 // comes from src/utils/autonomous-draft-brief.ts.
-async function draftCopy(system: string): Promise<DraftCopy> {
+async function draftCopy(system: string, usage: GatewayRequest['usage']): Promise<DraftCopy> {
     const res = await gatewayGenerate({
         system,
         messages: [{ role: 'user', content: 'Draft a post for an upcoming empty slot in the content calendar.' }],
         maxTokens: 800,
+        usage,
     });
     const parsed = parseModelJson<Record<string, unknown>>(res.text);
     if (parsed) {
@@ -205,7 +206,7 @@ export async function runAutonomousDrafts(opts: { imageWriter?: boolean } = {}) 
             const copy = await draftCopy(buildAutonomousDraftSystem({
                 org, assistantName: a.name, platformLabel: fmt.label,
                 onboardingContext: a.onboardingContext, pillar, pillarDescription: pillarRecord?.description ?? null, slot: gapDay,
-            }));
+            }), { workspaceId: a.organisationId, assistantId: a.id, sessionId: 'autonomous-draft' });
             if (!copy.caption) { failed++; continue; }
 
             // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job

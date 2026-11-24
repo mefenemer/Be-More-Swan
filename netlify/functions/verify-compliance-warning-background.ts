@@ -95,6 +95,7 @@ export default withLambda(async (event) => {
             caption,
             platform: post.platform || 'instagram',
             declaredFacts,
+            usage: { workspaceId: post.organisationId ?? null, assistantId: post.assistantId ?? null, sessionId: 'compliance-verify' },
         });
         const finishedAt = new Date().toISOString();
         verification = result.outcome === 'declared'

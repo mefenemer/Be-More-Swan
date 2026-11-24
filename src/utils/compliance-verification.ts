@@ -33,7 +33,7 @@
 // places. Both the worker and any future caller come through here.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { gatewayGenerateGrounded } from '../lib/ai-gateway';
+import { gatewayGenerateGrounded, type GatewayRequest } from '../lib/ai-gateway';
 import { parseModelJson } from './model-json';
 import { FACT_LOCATION_VALUES } from './post-quality-review';
 
@@ -154,6 +154,8 @@ export async function runWarningVerification(args: {
     declaredFacts?: string;
     /** Override only for tests; production callers should take the default. */
     deadlineMs?: number;
+    /** Whose workspace the call (and its web searches) is logged against. */
+    usage?: GatewayRequest['usage'];
 }): Promise<VerificationOutcome> {
     const { warning, caption, platform } = args;
     const declaredFacts = args.declaredFacts || '';
@@ -163,6 +165,7 @@ export async function runWarningVerification(args: {
         messages: [{ role: 'user', content: buildPrompt(warning, caption, platform, declaredFacts) }],
         maxTokens: 2000,
         deadlineMs: args.deadlineMs ?? VERIFY_DEADLINE_MS,
+        usage: args.usage,
     });
 
     const parsed = parseModelJson<{

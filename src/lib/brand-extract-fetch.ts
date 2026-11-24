@@ -11,7 +11,7 @@
 import { eq } from 'drizzle-orm';
 import { organisations } from '../../db/schema';
 import { safeFetchText, SafeFetchError } from '../utils/safe-fetch';
-import { gatewayGenerate } from './ai-gateway';
+import { gatewayGenerate, type GatewayRequest } from './ai-gateway';
 import { parseModelJson } from '../utils/model-json';
 import { harvestBrandSignals, signalsToBrandKit, type BrandSignals } from '../utils/brand-extract';
 import { kitWithNoColourFound, normalizeBrandKit, shouldExtractBrandKit, type BrandKit } from '../utils/brand-kit';
@@ -38,7 +38,7 @@ const MAX_STYLESHEETS = 4;
  */
 export async function readWebsiteBrand(
     websiteUrl: string,
-    opts: { useModel?: boolean; now?: Date } = {},
+    opts: { useModel?: boolean; now?: Date; usage?: GatewayRequest['usage'] } = {},
 ): Promise<{ kit: BrandKit | null; fontFamily: string | null }> {
     let page;
     try {
@@ -64,7 +64,7 @@ export async function readWebsiteBrand(
         return { kit: null, fontFamily: signals.fontFamily };
     }
 
-    const chosenAccent = opts.useModel === false ? null : await chooseAccentWithModel(signals, websiteUrl);
+    const chosenAccent = opts.useModel === false ? null : await chooseAccentWithModel(signals, websiteUrl, opts.usage);
 
     const kit = signalsToBrandKit(signals, {
         website: hostOf(page.finalUrl),
@@ -102,7 +102,7 @@ function hostOf(raw: string): string | null {
  *
  * Returns null on any failure, which falls back to the deterministic top candidate.
  */
-async function chooseAccentWithModel(signals: BrandSignals, websiteUrl: string): Promise<string | null> {
+async function chooseAccentWithModel(signals: BrandSignals, websiteUrl: string, usage?: GatewayRequest['usage']): Promise<string | null> {
     const shortlist = signals.candidates.slice(0, 8);
     // One candidate is not a choice, and the deterministic pick is already that one.
     if (shortlist.length < 2) return null;
@@ -129,6 +129,7 @@ async function chooseAccentWithModel(signals: BrandSignals, websiteUrl: string):
                 ].filter(Boolean).join('\n'),
             }],
             maxTokens: 128,
+            usage,
         });
 
         const parsed = parseModelJson<{ hex?: string }>(text);
@@ -158,7 +159,7 @@ export async function resolveBrandKitForOrg(db: Db, orgId: number, now = new Dat
     const stored = normalizeBrandKit(org?.brandKit);
     if (!org?.websiteUrl || !shouldExtractBrandKit(stored, now)) return stored;
 
-    const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now });
+    const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now, usage: { workspaceId: orgId, sessionId: 'brand-extract' } });
 
     // Stamp the attempt either way. With no colour found this is all that is written, besides a font,
     // and it is what stops an unreachable site being re-fetched on every post for the life of the account.
