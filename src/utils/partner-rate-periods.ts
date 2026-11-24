@@ -119,6 +119,9 @@ export function commissionPence(netAmountPence: number, rateBps: number, costDed
 // `termsCaps` = Partner Terms 3.5 applies: true whenever the rate, deduction or length is being SET
 // (a new period, or an upcoming one re-priced). Moving only the end date of an existing period
 // keeps its locked terms, so the wide limits still apply to it.
+/** Shape checks for one period (exported for pending special rates). termsCaps false = a director-signed agreement lifts the Terms 3.5 caps. */
+export function periodShapeErrors(p: Omit<RatePeriod, 'id'>, termsCaps = true): string[] { return shapeErrors(p, termsCaps); }
+
 function shapeErrors(p: Omit<RatePeriod, 'id'>, termsCaps = true): string[] {
     const errors: string[] = [];
     if (!termsCaps) return [...legacyShapeErrors(p), ...dateErrors(p)];

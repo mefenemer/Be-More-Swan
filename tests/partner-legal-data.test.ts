@@ -56,7 +56,7 @@ check('applying requires accepting them, and the version is recorded', () => {
 
 check('partners who have not accepted the current version are asked on their Partner page', () => {
     const hub = read('netlify/functions/partner-hub.ts');
-    assert.ok(hub.includes('const termsAccepted = p.termsVersion === PARTNER_TERMS_VERSION') && hub.includes('partnerTerms: { accepted: termsAccepted'));
+    assert.ok(hub.includes('const termsAccepted = !needsAcceptance({') && hub.includes('partnerTerms: { accepted: termsAccepted'))  // owner 2026-11-24: also re-asked after approval until they accept;
     assert.ok(hub.includes("if (body.action === 'accept_terms') {"));
     assert.ok(read('partner-content.html').includes('id="pt-terms-banner"'));
 });

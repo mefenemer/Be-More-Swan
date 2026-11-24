@@ -147,7 +147,7 @@ check('partner side: Terms first, approved only, rate-limited, nothing goes live
     const hub = read('netlify/functions/partner-hub.ts');
     const block = hub.slice(hub.indexOf("body.action === 'invite_profile_submit' || body.action === 'invite_profile_withdraw'"), hub.indexOf("body.action === 'cancel_payout_change'"));
     assert.ok(block.includes("if (p.status !== 'approved') return json(403"));
-    assert.ok(block.includes('if (p.termsVersion !== PARTNER_TERMS_VERSION) return json(403'));
+    assert.ok(block.includes('if (!acceptedForUse(p)) return json(403'))  // accepted since approval (owner 2026-11-24);
     assert.ok(block.includes("checkRateLimit(db, 'partner_invite_profile'"));
     assert.ok(block.includes('inviteProfilePending: next') && !block.includes('inviteProfile: next'), 'submit only fills pending');
     assert.ok(hub.indexOf("if (impersonating) return json(403") < hub.indexOf("body.action === 'invite_profile_submit'"), 'blocked while impersonating');

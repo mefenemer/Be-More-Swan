@@ -6836,6 +6836,19 @@ export const partnerCommissions = pgTable("partner_commissions", {
   check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
 ]);
 
+// A special rate agreed with a partner that has NO dates yet (db/z-partner-start-on-acceptance.sql): it becomes a
+// partnerRatePeriods row starting the day the partner accepts the Partner Terms after approval (src/utils/partner-start.ts).
+export const partnerPendingRates = pgTable("partner_pending_rates", {
+  partnerId: integer("partner_id").primaryKey().references(() => partners.id, { onDelete: "cascade" }),
+  rateBps: integer("rate_bps").notNull(),
+  costDeductionBps: integer("cost_deduction_bps").notNull().default(2000),
+  durationMonths: integer("duration_months"),
+  windowMonths: integer("window_months").notNull().default(12),
+  label: text(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Terms 4.5(b)/(c) (db/z-partner-terms-cross-border.sql): each partner's VAT in a payout run, frozen at creation so
 // statements and exports never follow a later VAT-number edit.
 export const partnerPayoutVat = pgTable("partner_payout_vat", {

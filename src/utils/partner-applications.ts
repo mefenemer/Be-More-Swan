@@ -250,9 +250,14 @@ export async function claimPartnerInvite(db: Db, partnerId: number, userId: numb
 
 const partnerPageUrl = () => `${baseUrl()}/workspace.html?view=partner`;
 
-/** Their rate today, in one line, for the welcome email. Falls back to the template's default. */
+/**
+ * Their rate, in one line, for the welcome email: a special rate waiting to start on acceptance (partner-start.ts) wins
+ * over today's programme rate (review of #838). Falls back to the template's default.
+ */
 async function currentRateLine(db: Db, partnerId: number): Promise<string> {
     try {
+        const waiting = (await db.execute(sql`SELECT rate_bps, cost_deduction_bps, duration_months FROM partner_pending_rates WHERE partner_id = ${partnerId}`)) as unknown as Array<Record<string, any>>;
+        if (waiting[0]) return rateLine({ rateBps: Number(waiting[0].rate_bps), costDeductionBps: Number(waiting[0].cost_deduction_bps), durationMonths: waiting[0].duration_months == null ? null : Number(waiting[0].duration_months) });
         const periods = await db.select().from(partnerRatePeriods)
             .where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, partnerId)));
         const t = resolvePeriodAt(periods, partnerId, new Date());

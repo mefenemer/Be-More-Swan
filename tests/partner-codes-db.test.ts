@@ -45,7 +45,7 @@ async function main() {
         await sql.unsafe(`INSERT INTO users (id, email, first_name, role, referral_code) VALUES
             (1, 'sam@example.com', 'Sam', 'user', 'SAMLINK1'), (2, 'sue@example.com', 'Sue', 'user', 'SUELINK2'),
             (10, 'new@example.com', 'New', 'user', 'NEWCUST1'), (11, 'paid@example.com', 'Paid', 'user', 'PAIDCUS1'), (12, 'cust@example.com', 'Cust', 'user', 'CUSTONE1')`);
-        await sql.unsafe(`INSERT INTO partners (id, user_id, status) VALUES (1, 1, 'approved'), (2, 2, 'suspended')`);
+        await sql.unsafe(`INSERT INTO partners (id, user_id, status, partner_since) VALUES (1, 1, 'approved', '2026-01-01'), (2, 2, 'suspended', '2026-01-01')`);
         await sql.unsafe(`INSERT INTO partner_programme_settings (id) VALUES (1)`);
         await sql.unsafe(`INSERT INTO partner_rate_periods (partner_id, rate_bps, duration_months, starts_at) VALUES (NULL, 2500, 12, '2026-01-01')`);
         await sql.unsafe(`INSERT INTO plans (organisation_id, user_id, plan_name, plan_type, status) VALUES (11, 11, 'Saver', 'subscription', 'active'), (10, 10, 'Trial', 'trial', 'active')`);

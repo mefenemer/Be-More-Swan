@@ -325,6 +325,10 @@ jobs:
       # double payment, paid / cancelled, payment files from the vault. This is the step that sends money.
       - name: Partner payout runs
         run: npx tsx tests/partner-payout-runs-db.test.ts
+      # A partnership starts when the partner accepts the Partner Terms after approval (src/utils/partner-start.ts):
+      # partner_since, the waiting special rate → dated period, atomically and never overlapping.
+      - name: Partner start on acceptance
+        run: npx tsx tests/partner-start-db.test.ts
       # Partner codes (src/utils/invite-codes.ts): unique across referral and partner codes, the late
       # "Have an invite code?" rules, and partner-code customers recorded as such in the ledger.
       - name: Partner codes

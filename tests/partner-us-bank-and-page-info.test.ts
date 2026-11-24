@@ -214,7 +214,7 @@ check('the ⓘ texts match how the numbers are counted', () => {
 check('renewal date = when the current rate ends; none set → 30 days’ notice (Terms 8.1)', () => {
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.includes('renewsOn: current.endsAt ?? null'));
-    assert.ok(hub.includes('partnerSince: p.decidedAt ?? null'));
+    assert.ok(hub.includes('partnerSince: p.partnerSince ?? null'));
     const page = read('partner-content.html');
     assert.ok(page.includes('Renewal date <strong>'));
     assert.ok(page.includes('Renewal date: <strong>none set</strong>'));
