@@ -64,3 +64,10 @@ for (const s of [
     'Unless you object I\'ve scheduled all three for Monday.',
     'If all goes well it\'s scheduled for Thursday.',
 ]) assert.strictEqual(replyClaimsPostSaved(s), true, `claim beside a condition word: ${s}`);
+
+// A revise verb is a claim only in the present perfect and about a piece of content (review on #832).
+for (const s of [
+    'I revised my advice: post on Tuesdays instead.',
+    'Last week I rewrote the Ipswich post, and it went out on Monday.',
+    "I've revised my thinking on hashtags.",
+]) assert.strictEqual(replyClaimsPostSaved(s), false, `not a claim: ${s}`);

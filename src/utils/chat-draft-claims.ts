@@ -56,10 +56,18 @@ const DOING_VERB = '(?:drafting|writing up|putting together|creating|scheduling)
  * exists; "your rewritten homepage" does not. Fix pipeline #78 (2026-11-18): that reply went out with no card and
  * nothing saved, and the user went looking for it.
  */
-const REVISE_VERB = '(?:rewritten|rewrote|revised|redrafted|reworked)';
+const REVISE_VERB = '(?:rewritten|revised|redrafted|reworked)';
 
-/** First person, rewriting an existing post: "I've rewritten the Ipswich post", "I revised it" (#78). */
-const CLAIMS_REVISION = new RegExp(`\\bi(?:'|’)?(?:ve|\\s+have)?\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\b`, 'i');
+/**
+ * First person, present perfect, about a piece of content: "I've rewritten the Ipswich post", "I have revised your
+ * caption" (#78). Not "I revised my advice: post on Tuesdays" or "last week I rewrote the post, and it went out" —
+ * past tense or about something else is not a claim that a new draft exists now (review on PR #832).
+ */
+const CLAIMS_REVISION = new RegExp(
+    `\\bi(?:(?:'|’)ve|\\s+have)\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\s+[^.!?:;]{0,30}?`
+    + `\\b(?:posts?|articles?|blogs?|captions?|drafts?|newsletters?|issues?|pieces?|it|them)\\b`,
+    'i',
+);
 
 /**
  * A condition, not a report: "articles only publish WHEN THEY'RE SCHEDULED in Blog Studio" explains how
