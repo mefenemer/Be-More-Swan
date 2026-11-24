@@ -47,7 +47,7 @@ const CATALOG = [
         iconKey: 'mail',
         iconColor: 'blue',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // retired — the Email Assistant (email_assistant) does this job (Fix pipeline #60, owner 2026-11-15; db/z-retire-inbox-assistant.sql)
     },
     {
         roleKey: 'calendar_coordinator',
