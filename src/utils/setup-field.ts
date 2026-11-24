@@ -94,7 +94,7 @@ export const SETUP_FIELD_EXCLUDED: Readonly<Record<string, Readonly<Record<strin
     },
     meeting_note_taker: {
         meetingPlatform: 'Names a connected tool: switching it means connecting the new one first.',
-        taskDestination: 'Names a connected tool: switching it means connecting the new one first.',
+        taskDestination: 'In Be More Swan or an external system: switching to external means switching on Asana, Jira or Notion in Connections first.',
     },
 };
 
