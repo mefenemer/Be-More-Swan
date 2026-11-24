@@ -163,7 +163,7 @@ import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, o
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
-import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
+import { cardOutcomeLine, cardSentLine } from '../../src/utils/mentor-card-outcome';
 import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
 import { latestMorningForMentor, renderMorningSettingsForMentor } from '../../src/utils/mentor-morning';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
@@ -3901,7 +3901,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 // applied change isn't read as the Mentor's own mistake.
                 : route === ROUTES.business_mentor && m.role === 'assistant' && cardOutcomeLine(m.uiElementJson)
                     ? `${m.content}\n\n${cardOutcomeLine(m.uiElementJson)}`
-                    : m.content,
+                    // Every other structured route: which card went with each earlier reply, so its history shows cards
+                    // reaching the user as uiElement, not plain-text replies to copy (Fix pipeline #61 / #78).
+                    : route !== defaultRoute && route !== ROUTES.business_mentor && m.role === 'assistant' && cardSentLine(m.uiElementJson)
+                        ? `${m.content}\n\n${cardSentLine(m.uiElementJson)}`
+                        : m.content,
         })),
         { role: 'user' as const, content: [
             recordContext,
