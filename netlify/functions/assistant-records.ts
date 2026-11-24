@@ -901,9 +901,10 @@ export default withLambda(async (event) => {
                         // exactly as approval makes them; already-synced items stay synced, so nothing is filed twice.
                         await materialiseActionItems(db, orgId, m);
                         const [withSync] = await attachActionItemSync(db, orgId, [m]);
-                        if (meetingSendState(target, m.data, (withSync as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null).sent) {
-                            return json(409, { error: `Every action item is already in ${label}.`, code: 'already_sent' });
-                        }
+                        const state = meetingSendState(target, m.data, (withSync as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null);
+                        if (state.sent) return json(409, { error: `Every action item is already in ${label}.`, code: 'already_sent' });
+                        // Filed in the other tool: each action item is filed once, so this job would file nothing.
+                        if (state.filedElsewhere) return json(409, { error: `These action items are already in ${state.filedElsewhere}. Each one is filed once, so there is nothing to send to ${label}.`, code: 'filed_elsewhere' });
                     } else if (meetingSendState(target, m.data).sent) {
                         return json(409, { error: `Already sent to ${label}.`, code: 'already_sent' });
                     }

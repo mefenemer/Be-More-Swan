@@ -17,14 +17,21 @@ const data = { tasks: [{ description: 'a' }, { description: 'b' }], handoffs: { 
 assert.ok(meetingSendState('slack_post_summary', data).sent, 'Slack stamped sent');
 assert.ok(!meetingSendState('notion_create_page', data).sent, 'Notion only claimed, not sent');
 assert.ok(meetingSendState('email_meeting_followup', data).sent, 'an older followupSentAt counts');
-assert.deepStrictEqual(meetingSendState('jira_create_tasks', data, { total: 2, synced: 1 }), { sent: false, partly: true, sentAt: null, sending: false });
+assert.deepStrictEqual(meetingSendState('jira_create_tasks', data, { total: 2, synced: 1 }), { sent: false, partly: true, sentAt: null, sending: false, filedElsewhere: null, remaining: 1 });
 
 // Review on PR #853: synced items count only for the tool they went to — items in Jira are not "sent to Asana".
 const inJira = { total: 2, items: [{ syncStatus: 'synced', provider: 'jira' }, { syncStatus: 'synced', provider: 'jira' }] };
 assert.ok(meetingSendState('jira_create_tasks', data, inJira).sent, 'in Jira');
 assert.ok(!meetingSendState('asana_create_tasks', data, inJira).sent, 'not in Asana');
 assert.ok(!meetingSendState('asana_create_tasks', data, { total: 2, synced: 2, syncedBy: { jira: 2, asana: 0 } }).sent, 'the chat snapshot counts by tool too');
-assert.match(sendToBlock('asana_create_tasks', ['asana_create_tasks'], data, { total: 2, synced: 2, syncedBy: { jira: 2, asana: 0 } }) ?? 'can go', /can go/, 'so Asana can still be sent');
+// …but each action item is filed once (one ledger row per item), so items already in Jira leave nothing to send to Asana:
+// a "Send to Asana" there would queue a job that files nothing (re-review on PR #853). Blocked with the reason instead.
+assert.strictEqual(meetingSendState('asana_create_tasks', data, inJira).filedElsewhere, 'Jira');
+assert.match(sendToBlock('asana_create_tasks', ['asana_create_tasks'], data, { total: 2, synced: 2, syncedBy: { jira: 2, asana: 0 } }) ?? '', /already in Jira/);
+// One in Jira, one never filed: Asana gets the one that is left.
+const mixed = { total: 2, items: [{ syncStatus: 'synced', provider: 'jira' }, { syncStatus: 'pending', provider: null }] };
+const m2 = meetingSendState('asana_create_tasks', data, mixed);
+assert.ok(!m2.sent && !m2.filedElsewhere && m2.partly && m2.remaining === 1, 'the rest can go to Asana');
 
 // Review on PR #853: just approved, the approval's own job is sending — "Sending…", not another button.
 const now = Date.parse('2026-11-24T10:00:00Z');
@@ -70,6 +77,8 @@ assert.ok(live.includes("sendTo:notion_create_page") && live.includes('Send to N
 assert.ok(live.includes('Send the rest to Jira'), 'and the rest of the action items');
 const sending = row(T, { recordType: 'meeting', approvalStatus: 'approved', data: {}, sendState: { slack_post_summary: { sending: true }, notion_create_page: {}, jira_create_tasks: {} } });
 assert.ok(sending.includes('Sending to Slack…') && !sending.includes('sendTo:slack_post_summary'), 'while it is being sent: no button');
+const elsewhere = row([{ actionType: 'asana_create_tasks', label: 'Asana', tasks: true }], { recordType: 'meeting', approvalStatus: 'approved', data, sendState: { asana_create_tasks: { filedElsewhere: 'Jira' } } });
+assert.ok(elsewhere.includes('Action items already in Jira') && !elsewhere.includes('sendTo:asana_create_tasks'), 'filed in the other tool: said, no button');
 assert.ok(row(T, { recordType: 'meeting', approvalStatus: 'pending_approval', data: {} }).includes('Approving sends it to: Slack, Notion, Jira'), 'before approval: where it will go');
 assert.ok(row([], { recordType: 'meeting', approvalStatus: 'approved', data: {} }).includes("_openBriefDrawer?.('platforms')"), 'nothing on: where to switch one on');
 
@@ -77,6 +86,7 @@ assert.ok(row([], { recordType: 'meeting', approvalStatus: 'approved', data: {} 
 const srv = readFileSync(join(root, 'netlify/functions/assistant-records.ts'), 'utf8');
 const block = srv.slice(srv.indexOf('if (body.sendTo !== undefined) {'), srv.indexOf('// ── "Send the follow-up now" (Inbox)'));
 assert.ok(block.includes('LIVE_APPROVAL.has(') && block.includes("code: 'target_off'") && block.includes("code: 'already_sent'"));
+assert.ok(block.includes("code: 'filed_elsewhere'"), 'the server refuses a send that would file nothing');
 assert.ok(block.indexOf('materialiseActionItems(db, orgId, m)') < block.indexOf('enqueueHandoffOnApproval(db, orgId, m, [target])'), 'tasks: the ledger first, so only missing items are filed');
 const reg = readFileSync(join(root, 'src/components/disruptive-ui-registry.js'), 'utf8');
 assert.ok(reg.includes("if (ui.action === 'send_to' && typeof ui.target === 'string') return { id, sendTo: ui.target };"), 'the chat card uses the same PATCH');

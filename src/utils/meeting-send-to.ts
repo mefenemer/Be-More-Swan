@@ -57,7 +57,17 @@ export function taskProvider(target: MeetingSendTarget): string | null {
 /** Just approved, or claimed by a run: the approval's own job is (probably) sending it now. */
 export const SENDING_WINDOW_MINUTES = { claimed: 15, approved: 5 } as const;
 
-export type MeetingSendState = { sent: boolean; partly: boolean; sentAt: string | null; sending: boolean };
+export type MeetingSendState = {
+    sent: boolean; partly: boolean; sentAt: string | null; sending: boolean;
+    /**
+     * Jira/Asana: every action item not in THIS tool is already in the other one ('Jira' / 'Asana'), so there is
+     * nothing left to file here. The ledger keeps one row per action item, not per tool, and a filed item is never
+     * filed again, so a send would do nothing (review on PR #853). Null otherwise.
+     */
+    filedElsewhere: string | null;
+    /** Jira/Asana: action items not yet filed in either tool. */
+    remaining: number;
+};
 
 /**
  * Pure: whether this meeting has gone to this target. Slack/Notion/email: the once-per-meeting stamp
@@ -73,13 +83,25 @@ export function meetingSendState(
     if (MEETING_TASK_TARGETS.has(target)) {
         const total = Number(sync?.total ?? 0);
         const provider = taskProvider(target);
-        const synced = Array.isArray(sync?.items)
-            ? sync!.items!.filter((i) => i && i.syncStatus === 'synced' && (i.provider ?? provider) === provider).length
+        const items = Array.isArray(sync?.items) ? sync!.items!.filter(Boolean) : null;
+        const syncedAll = items ? items.filter((i) => i.syncStatus === 'synced').length : Number(sync?.synced ?? 0);
+        const syncedHere = items
+            ? items.filter((i) => i.syncStatus === 'synced' && (i.provider ?? provider) === provider).length
             : sync?.syncedBy ? Number(sync.syncedBy[provider ?? ''] ?? 0)
-            : Number(sync?.synced ?? 0);
-        const sent = total > 0 && synced >= total;
-        // Approved a moment ago and nothing filed yet: the approval's job is filing them.
-        return { sent, partly: synced > 0 && synced < total, sentAt: null, sending: !sent && synced === 0 && !!opts.approvedRecently };
+            : syncedAll;
+        const elsewhere = Math.max(0, syncedAll - syncedHere);
+        const remaining = Math.max(0, total - syncedAll);
+        const sent = total > 0 && syncedHere >= total;
+        const other = provider === 'jira' ? 'Asana' : 'Jira';
+        return {
+            sent,
+            partly: syncedAll > 0 && remaining > 0,
+            sentAt: null,
+            // Approved a moment ago and nothing filed yet: the approval's job is filing them.
+            sending: !sent && syncedAll === 0 && !!opts.approvedRecently,
+            filedElsewhere: !sent && remaining === 0 && elsewhere > 0 ? other : null,
+            remaining,
+        };
     }
     const h = d.handoffs && typeof d.handoffs === 'object' ? (d.handoffs as Record<string, unknown>)[target] : null;
     const stamped = h && typeof h === 'object' && typeof (h as { sentAt?: unknown }).sentAt === 'string' ? (h as { sentAt: string }).sentAt : null;
@@ -88,7 +110,7 @@ export function meetingSendState(
     const claimedAt = h && typeof h === 'object' && typeof (h as { claimedAt?: unknown }).claimedAt === 'string' ? Date.parse((h as { claimedAt: string }).claimedAt) : NaN;
     const claimedRecently = Number.isFinite(claimedAt) && now - claimedAt < SENDING_WINDOW_MINUTES.claimed * 60_000;
     const notSentForGood = target === 'email_meeting_followup' && !!d.followupNotSent;
-    return { sent: !!sentAt, partly: false, sentAt, sending: !sentAt && !notSentForGood && (claimedRecently || (!!opts.approvedRecently && !h)) };
+    return { sent: !!sentAt, partly: false, sentAt, sending: !sentAt && !notSentForGood && (claimedRecently || (!!opts.approvedRecently && !h)), filedElsewhere: null, remaining: 0 };
 }
 
 /** Pure: approved (and last changed) within the last few minutes — its hand-offs are probably still running. */

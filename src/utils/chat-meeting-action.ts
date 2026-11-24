@@ -198,6 +198,7 @@ function sentWords(targets: MeetingSendTarget[], d: Record<string, unknown>, syn
     const sent: string[] = []; const notYet: string[] = [];
     for (const t of targets) {
         const s = meetingSendState(t, d, sync ?? null);
+        if (s.filedElsewhere) continue;   // its action items went to the other tool; nothing to send here
         (s.sent ? sent : notYet).push(MEETING_TASK_TARGETS.has(t) && s.partly ? `${MEETING_SEND_TARGETS[t].label} (some action items)` : MEETING_SEND_TARGETS[t].label);
     }
     return [sent.length ? `sent to ${sent.join(', ')}` : '', notYet.length ? `not yet sent to ${notYet.join(', ')}` : ''].filter(Boolean).join('; ');
@@ -348,7 +349,7 @@ export async function resolveMeetingActionProposal(
             const on = await loadMeetingSendTargets(db, organisationId, aiAssistantId);
             const sync = (await taskSyncByMeeting(db, organisationId, [rec.id]))[rec.id];
             card.blocked = sendToBlock(card.target, on, rec.data, sync);
-            if (MEETING_TASK_TARGETS.has(card.target)) card.tasksLeft = sync ? Math.max(0, sync.total - Number(sync.syncedBy?.[card.target === 'jira_create_tasks' ? 'jira' : 'asana'] ?? sync.synced)) : meetingTaskCount(rec.data);
+            if (MEETING_TASK_TARGETS.has(card.target)) card.tasksLeft = sync ? meetingSendState(card.target, rec.data, sync).remaining : meetingTaskCount(rec.data);
         }
         if (card.action === 'approve' && !card.blocked) {
             card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);
@@ -367,7 +368,9 @@ export function sendToBlock(target: MeetingSendTarget, on: MeetingSendTarget[], 
     if (!on.includes(target)) return `${label} isn’t switched on for this assistant. Switch it on in Assistant Settings ▸ Connections, then ask me again.`;
     if (MEETING_TASK_TARGETS.has(target)) {
         if (!meetingTaskCount(data)) return 'This meeting has no action items to send.';
-        if (meetingSendState(target, data, sync ?? null).sent) return `Every action item is already in ${label}.`;
+        const st = meetingSendState(target, data, sync ?? null);
+        if (st.sent) return `Every action item is already in ${label}.`;
+        if (st.filedElsewhere) return `These action items are already in ${st.filedElsewhere}. Each one is filed once, so there is nothing to send to ${label}.`;
         return null;
     }
     if (meetingSendState(target, data).sent) return target === 'email_meeting_followup' ? 'The follow-up email has already been sent.' : `Already sent to ${label}.`;
