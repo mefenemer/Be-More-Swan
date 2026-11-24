@@ -59,7 +59,8 @@ A worker killed outright (a deploy, a platform fault) can't log its render. Its 
 - **Time-limited:** the Remotion read waits at most 5 s.
 - **Bounded in user requests:** the Video Producer sweep runs when the Videos tab loads and on each chat turn, so it logs at most 2 killed renders per sweep. The rest stay `rendering` until the next sweep. None are marked failed without being logged.
 - **Only recent ones:** both sweeps log only renders cut off in the last 3 days. The post sweep only touches those jobs at all. Older stuck rows are a backlog from before this existed, so their costs would land in the wrong month, and failing old posts now would surprise their owners.
-- **Not covered:** crosspost siblings that wait on a killed job's render stay held at `pending`, the same as with any failed render today. Also, `ai_usage_log.session_id` has no index, so the "already logged?" check reads the table. That's acceptable only because it runs just for a killed render; add an index if killed renders become common.
+- **Indexed:** the "already logged?" check reads `ai_usage_log` by `session_id`, through a partial index (`db/z-ai-usage-log-session-id-index.sql`, built CONCURRENTLY). ⚠️ Apply it on BOTH databases. Until then the check scans the table, which is slow but still correct.
+- **Not covered:** crosspost siblings that wait on a killed job's render stay held at `pending`, the same as with any failed render today.
 
 ## Left unattributed on purpose (system work)
 

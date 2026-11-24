@@ -2600,7 +2600,11 @@ export const aiUsageLog = pgTable("ai_usage_log", {
   // Valid values: 'general' | 'business_context' | 'pii_redacted' | 'special_category_suspected' | 'financial' | 'health'
   dataCategories: text("data_categories").array().notNull().default(sql`'{general}'`),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => [
+  // A killed render's "already logged?" check reads by session id (src/utils/render-cost.ts logOrphanedRenderCost).
+  // db/z-ai-usage-log-session-id-index.sql — built CONCURRENTLY, both DBs.
+  index("ai_usage_log_session_id_idx").on(t.sessionId).where(sql`session_id IS NOT NULL`),
+]);
 
 // ── AI Model Pricing — per-model token cost rates for COGS calculation (US-ADM-3.1.1) ──
 // Distinct from aiModelConfig (routing slots, US13). Uses a different DB table name.
