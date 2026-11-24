@@ -7103,6 +7103,7 @@ async function _renderOutreachEmailConnect(data) {
     if (document.getElementById(ID) !== card) return;
 
     // The stale-answer case: the OTHER mailbox is already connected. Nothing needs authorising —
+    // (and connecting this one too is refused: one sending mailbox at a time, Fix pipeline #72) —
     // the only thing standing between this assistant and a working send is the setup answer, so
     // offer to change just that rather than sending them through an OAuth round trip.
     if (altConnected) {
@@ -7117,7 +7118,7 @@ async function _renderOutreachEmailConnect(data) {
              </div>
              <div class="shrink-0 flex flex-col items-stretch gap-2">
                ${switchBtn(altKey, 'answer-only', `Send from ${ALT.brand} instead`, primaryCls)}
-               <a href="${_outreachConnectUrl(M.key)}" class="text-xs font-bold text-gray-600 hover:text-gray-800 underline text-center">${esc(M.cta)} anyway</a>
+               <p class="text-xs text-gray-500 text-center">To use ${esc(M.brand)}, disconnect ${esc(ALT.brand)} first on Connections — one mailbox at a time.</p>
              </div>
            </div>`;
         _wireOutreachSwitches(card, data);
