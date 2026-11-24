@@ -39,6 +39,15 @@ tests/usage-writes-awaited.test.ts), so writes that were started but never finis
 | **Stripe** card fees | Stripe balance transactions | Separately (`card_fee_pence`) | Per payment | Stripe's actual fee | Not in `ai_usage_log` by design (PR #827) |
 | Pexels, Companies House, Reed, social / CRM / Google APIs, R2 | many | n/a | n/a | Free APIs, or fixed / storage fees not per call | None |
 
+## Known small gaps (accepted)
+
+Each needs an unusual failure and costs cents. Listed so nobody is surprised:
+
+- **Recall bot whose id never saved:** Recall accepted the bot, saving its id failed, and taking it back failed too (`not_saved_bot_still_sent`). The row has no `recallBotId`, so no cost is logged.
+- **Recall bot removed while the row still says `scheduled`:** a missed webhook left the row behind the bot. `removeMeetingBot` treats it as booked and logs nothing.
+- **Recall withdrawal that fails:** in `withdrawMeetingBots`, if `removeRecallBot` fails, the bot may keep running and nothing is logged.
+- **Remotion render in a killed function:** a function killed outright can't log. The 12-minute poll limit keeps clear of Netlify's 15-minute ceiling.
+
 ## Left unattributed on purpose (system work)
 
 These rows keep `workspace_id = NULL`. They count in the platform total on the COGS page, not against any customer:
