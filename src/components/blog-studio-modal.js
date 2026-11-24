@@ -3732,7 +3732,11 @@
     setupTab.host = host;
     setupTab.assistantId = assistantId;
     state.assistantId = assistantId != null ? assistantId : null;
-    setupTab.sections.forEach(function (s) { s.open = true; host.appendChild(s); });
+    // Closed, like every other card on the assistant's tabs (fold.js): click a heading to open it. Fix pipeline #77 (owner,
+    // 2026-11-17: "items within the tabs in the Blog Assistant details page should be expandable and collapsible") —
+    // these three could fold but were forced open each time the tab opened. A "Blog setup › Keywords" link still opens
+    // its own section (revealKeywordsIfAsked).
+    setupTab.sections.forEach(function (s) { s.open = false; host.appendChild(s); });
     loadWidget();
     loadSearchConsole();
     loadKeywordManager();

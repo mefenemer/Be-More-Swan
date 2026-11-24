@@ -37,7 +37,8 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
  * in one chat ended that way, so the user read "[Card: …]" and saw no card. It is taken out of what is
  * shown, and counts as pointing at a card.
  */
-const CARD_PLACEHOLDER_SOURCE = /\[\s*card(?: under this reply)?\s*:[^\]\n]{0,400}\]?/.source;
+// Also the "[Sent with this reply: …]" history line (mentor-card-outcome.ts cardSentLine, Fix pipeline #61) copied as text.
+const CARD_PLACEHOLDER_SOURCE = /\[\s*(?:card(?: under this reply)?|sent with this reply)\s*:[^\]\n]{0,400}\]?/.source;
 const CARD_PLACEHOLDER_LINES = new RegExp(`\\n*[ \\t]*${CARD_PLACEHOLDER_SOURCE}[ \\t]*`, 'gi');
 export function withoutCardPlaceholder(content: string): string {
     const out = content.replace(CARD_PLACEHOLDER_LINES, '').replace(/\n{3,}/g, '\n\n').trim();
