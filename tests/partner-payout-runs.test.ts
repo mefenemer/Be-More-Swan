@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildExport, paymentReference, WISE_BANK_HEADERS, type BatchLine } from '../src/utils/partner-payout-batches';
+import { buildExport, paymentReference, underMinimumReason, WISE_BANK_HEADERS, type BatchLine } from '../src/utils/partner-payout-batches';
 import { proposeBatchStatus, proposeBonus, proposeCreateBatch, proposeVoidCommission } from '../src/utils/partner-ops-proposals';
 
 let passed = 0;
@@ -40,7 +40,9 @@ check('Wise bank file: header, then one row per bank partner, pounds with 2dp, G
     const f = buildExport('wise_bank', 12, LINES);
     const rows = f.csv.trim().split('\r\n');
     assert.strictEqual(rows[0], WISE_BANK_HEADERS.join(','));
-    assert.strictEqual(rows[1], 'Ann Bank,ann@example.com,BMS PARTNER 12,PRIVATE,GBP,125.50,GBP,GBP,112233,01234567');
+    // Column order and values from Wise's own template (downloaded 2026-11-23): referenceNumber blank, amountCurrency "source".
+    assert.strictEqual(rows[0], 'name,recipientEmail,paymentReference,referenceNumber,receiverType,amountCurrency,amount,sourceCurrency,targetCurrency,sortCode,accountNumber');
+    assert.strictEqual(rows[1], 'Ann Bank,ann@example.com,BMS PARTNER 12,,PERSON,source,125.50,GBP,GBP,112233,01234567');
     assert.deepStrictEqual([f.included, f.skipped, f.totalPence], [2, 3, 18550]);
 });
 
@@ -51,7 +53,7 @@ check('a cell starting with = + - @ is neutralised (CSV formula injection), and 
 
 check('Wise email file pays Wise users by email; PayPal file has NO header and PayPal\'s documented columns', () => {
     const w = buildExport('wise_email', 12, LINES).csv.trim().split('\r\n');
-    assert.strictEqual(w[1], 'Wil Wise,wil.wise@example.com,BMS PARTNER 12,PRIVATE,GBP,50.00,GBP,GBP');
+    assert.strictEqual(w[1], 'Wil Wise,wil.wise@example.com,BMS PARTNER 12,PERSON,source,50.00,GBP,GBP');
     const pp = buildExport('paypal', 12, LINES).csv.trim().split('\r\n');
     assert.deepStrictEqual(pp, ['pam.pay@example.com,75.25,GBP,P3-B12,Be More Swan partner commission,PAYPAL']);
 });
@@ -119,6 +121,29 @@ check('the bonus modal sits outside every .admin-view', () => {
     const at = html.indexOf('<div id="ledger-bonus-modal"');
     const before = html.slice(0, at);
     assert.ok(at > 0 && (before.match(/<\/section>/g) || []).length >= (before.match(/<section id="view-/g) || []).length);
+});
+
+check('Partner Terms 1.3 4.2 / 7.3: small balances are paid after 6 months (if £10+) or when the partnership ends', () => {
+    const now = new Date('2027-06-15T00:00:00Z');
+    assert.strictEqual(underMinimumReason(6000, 5000, 'approved', new Date('2027-06-01T00:00:00Z'), now), null, 'at or over the minimum');
+    assert.match(underMinimumReason(2000, 5000, 'approved', new Date('2027-01-01T00:00:00Z'), now)!, /rolls over/, 'under 6 months');
+    assert.strictEqual(underMinimumReason(2000, 5000, 'approved', new Date('2026-12-15T00:00:00Z'), now), null, 'exactly 6 months');
+    assert.match(underMinimumReason(900, 5000, 'approved', new Date('2026-01-01T00:00:00Z'), now)!, /rolls over/, 'under £10 waits');
+    assert.strictEqual(underMinimumReason(300, 5000, 'ended', new Date('2027-06-14T00:00:00Z'), now), null, 'ended: any balance');
+});
+
+check('Payouts screen: Wise is paid from the GBP balance, and each open run says how much to top it up by (owner 2026-11-23)', () => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const root = path.join(__dirname, '..');
+    const adm = fs.readFileSync(path.join(root, 'admin.html'), 'utf8');
+    assert.ok(adm.includes('Wise: this run needs ${_pMoney(b.wise_total_pence)} in your GBP balance'));
+    assert.ok(adm.includes('together their Wise files need'), 'several open runs → the combined amount');
+    assert.ok(adm.includes('partners are paid from your Wise <strong>GBP balance</strong>'));
+    const src = fs.readFileSync(path.join(root, 'src/utils/partner-payout-batches.ts'), 'utf8');
+    assert.ok(src.includes("FILTER (WHERE p.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0)"), 'PayPal is not in the Wise total');
+    // Terms 4.5(b): the frozen UK VAT for Wise-paid partners is added, because the files send commission + VAT.
+    assert.ok(src.includes("WHERE v.batch_id = b.id AND pv.payout_method IN ('bank', 'us_bank', 'eu_bank', 'wise')), 0))::int AS wise_total_pence"));
 });
 
 console.log(`\n${passed} passed`);

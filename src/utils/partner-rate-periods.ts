@@ -46,6 +46,15 @@ export const MAX_RATE_BPS = 10000;
 /** Partner Terms 1.1 (owner 2026-10-22): 20% off for costs, unless a period says otherwise. */
 export const DEFAULT_COST_DEDUCTION_BPS = 2000;
 export const MAX_DURATION_MONTHS = 120;
+/**
+ * Partner Terms 1.3 §3.5: no new period may go beyond these, whatever the admin enters. A
+ * director-signed agreement can override §3.5 in the contract, but not here — that needs a code
+ * change on purpose. Started periods are frozen, so older lifetime / wider periods (none existed
+ * at 1.3) still pay as locked; isWithinCommissionWindow keeps supporting null for them.
+ */
+export const TERMS_MAX_RATE_BPS = 4000;
+export const TERMS_MIN_COST_DEDUCTION_BPS = 2000;
+export const TERMS_MAX_DURATION_MONTHS = 24;
 
 function covers(p: RatePeriod, at: Date): boolean {
     const t = at.getTime();
@@ -89,6 +98,14 @@ export function isWithinCommissionWindow(subscribedAt: Date, durationMonths: num
 }
 
 /**
+ * Partner Terms 1.3 §3.2: what partners are told — commission as a plain share of each Subscription
+ * Payment. Internally a period still holds a rate and a fixed cost deduction; 25% after 20% = 20%.
+ */
+export function effectiveShareBps(rateBps: number, costDeductionBps = 0): number {
+    return Math.round((rateBps * (MAX_RATE_BPS - Math.max(0, costDeductionBps))) / MAX_RATE_BPS);
+}
+
+/**
  * Commission on a payment excluding VAT, after costs: the cost deduction comes off the payment
  * first, then the rate applies to what is left. One rounding, DOWN to the penny.
  * £79 net, 20% costs, 50% rate → floor(7900 × 0.8 × 0.5) = 3160p.
@@ -99,11 +116,28 @@ export function commissionPence(netAmountPence: number, rateBps: number, costDed
     return Math.floor((netAmountPence * afterCosts * rateBps) / (MAX_RATE_BPS * MAX_RATE_BPS));
 }
 
-function shapeErrors(p: Omit<RatePeriod, 'id'>): string[] {
+// `termsCaps` = Partner Terms 3.5 applies: true whenever the rate, deduction or length is being SET
+// (a new period, or an upcoming one re-priced). Moving only the end date of an existing period
+// keeps its locked terms, so the wide limits still apply to it.
+function shapeErrors(p: Omit<RatePeriod, 'id'>, termsCaps = true): string[] {
     const errors: string[] = [];
-    if (!Number.isInteger(p.rateBps) || p.rateBps < 0 || p.rateBps > MAX_RATE_BPS) {
-        errors.push('The rate must be between 0% and 100%.');
+    if (!termsCaps) return [...legacyShapeErrors(p), ...dateErrors(p)];
+    if (!Number.isInteger(p.rateBps) || p.rateBps < 0 || p.rateBps > TERMS_MAX_RATE_BPS) {
+        errors.push(`The rate must be between 0% and ${TERMS_MAX_RATE_BPS / 100}% (Partner Terms 3.5).`);
     }
+    if (!Number.isInteger(p.costDeductionBps) || p.costDeductionBps < TERMS_MIN_COST_DEDUCTION_BPS || p.costDeductionBps >= MAX_RATE_BPS) {
+        errors.push(`The cost deduction must be at least ${TERMS_MIN_COST_DEDUCTION_BPS / 100}% (Partner Terms 3.5) and less than 100%.`);
+    }
+    if (p.durationMonths === null
+        || !Number.isInteger(p.durationMonths) || p.durationMonths < 1 || p.durationMonths > TERMS_MAX_DURATION_MONTHS) {
+        errors.push(`The commission length must be 1–${TERMS_MAX_DURATION_MONTHS} months; lifetime is not allowed (Partner Terms 3.5).`);
+    }
+    return [...errors, ...dateErrors(p)];
+}
+
+function legacyShapeErrors(p: Omit<RatePeriod, 'id'>): string[] {
+    const errors: string[] = [];
+    if (!Number.isInteger(p.rateBps) || p.rateBps < 0 || p.rateBps > MAX_RATE_BPS) errors.push('The rate must be between 0% and 100%.');
     if (!Number.isInteger(p.costDeductionBps) || p.costDeductionBps < 0 || p.costDeductionBps >= MAX_RATE_BPS) {
         errors.push('The cost deduction must be at least 0% and less than 100%.');
     }
@@ -111,12 +145,13 @@ function shapeErrors(p: Omit<RatePeriod, 'id'>): string[] {
         && (!Number.isInteger(p.durationMonths) || p.durationMonths < 1 || p.durationMonths > MAX_DURATION_MONTHS)) {
         errors.push(`The commission length must be 1–${MAX_DURATION_MONTHS} months, or lifetime.`);
     }
-    if (Number.isNaN(p.startsAt.getTime()) || (p.endsAt && Number.isNaN(p.endsAt.getTime()))) {
-        errors.push('The dates are not valid.');
-    } else if (p.endsAt && p.endsAt.getTime() <= p.startsAt.getTime()) {
-        errors.push('The end date must be after the start date.');
-    }
     return errors;
+}
+
+function dateErrors(p: Omit<RatePeriod, 'id'>): string[] {
+    if (Number.isNaN(p.startsAt.getTime()) || (p.endsAt && Number.isNaN(p.endsAt.getTime()))) return ['The dates are not valid.'];
+    if (p.endsAt && p.endsAt.getTime() <= p.startsAt.getTime()) return ['The end date must be after the start date.'];
+    return [];
 }
 
 function overlaps(a: Omit<RatePeriod, 'id'>, b: Omit<RatePeriod, 'id'>): boolean {
@@ -155,7 +190,9 @@ export function validatePeriodChanges(existing: RatePeriod[], changes: PeriodCha
         }
 
         const next = change.period;
-        errors.push(...shapeErrors(next));
+        const termsUnchanged = !!current && next.rateBps === current.rateBps
+            && next.costDeductionBps === current.costDeductionBps && next.durationMonths === current.durationMonths;
+        errors.push(...shapeErrors(next, !termsUnchanged));
         if (current && !sameScope(current, next)) errors.push('A period cannot be moved between partners.');
         if (current && started) {
             if (next.rateBps !== current.rateBps || next.costDeductionBps !== current.costDeductionBps

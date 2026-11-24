@@ -40,7 +40,7 @@ check('the page states the version and date the code records, and is unlisted (n
 });
 
 check('it says what we decided: ad labels, no voucher sites, rates fixed per customer, holding period, minimum, forfeit on fraud', () => {
-    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the rate, or increases the cost deduction, on customers who have already paid', 'Commission is worked out after costs',
+    for (const phrase of ['clearly identifiable as advertising', 'coupon, voucher, deal or cashback sites', 'a change never reduces the commission on customers who have already paid', '25% of each Subscription Payment after costs',
         'holding period', 'currently £50', 'forfeited', 'excluding VAT', 'England and Wales']) {
         assert.ok(terms.includes(phrase), `missing: ${phrase}`);
     }
@@ -56,7 +56,7 @@ check('applying requires accepting them, and the version is recorded', () => {
 
 check('partners who have not accepted the current version are asked on their Partner page', () => {
     const hub = read('netlify/functions/partner-hub.ts');
-    assert.ok(hub.includes('partnerTerms: { accepted: p.termsVersion === PARTNER_TERMS_VERSION'));
+    assert.ok(hub.includes('const termsAccepted = p.termsVersion === PARTNER_TERMS_VERSION') && hub.includes('partnerTerms: { accepted: termsAccepted'));
     assert.ok(hub.includes("if (body.action === 'accept_terms') {"));
     assert.ok(read('partner-content.html').includes('id="pt-terms-banner"'));
 });
@@ -73,7 +73,7 @@ check('the Terms point to the Partner Terms WITHOUT a version bump (owner decisi
 
 check('the privacy policy covers partners, invited people, payout details in the vault, and the retention rows', () => {
     const pp = read('privacy.html');
-    for (const phrase of ['If you are a Be More Swan partner', 'If someone invited you', 'held encrypted in our secrets vault', 'with no IP address and nothing stored on the visitor\'s device',
+    for (const phrase of ['If you are a Be More Swan partner', 'If someone invited you', 'held encrypted in our secrets vault', 'we keep no IP address with the count, and nothing is stored on the visitor\'s device', 'PayPal, or Wise (including its US and European affiliates', 'against UK and US sanctions lists',
         '“Customer 3”', 'the first name of the person who shared it', 'Partner applications we decline', '12 months after the decision', 'Partner commission and payout records']) {
         assert.ok(pp.includes(phrase), `missing: ${phrase}`);
     }
@@ -123,7 +123,7 @@ check('commission earned and payout sent — in-app (opening the Partner page) a
 
 check('earned is sent once per commission (after a successful insert); paid is sent when a run is marked paid', () => {
     const led = read('src/utils/partner-ledger.ts');
-    assert.ok(led.indexOf("if (!inserted.length) return { recorded: false, reason: 'duplicate' };") < led.indexOf('await notifyCommissionEarned(db, ref.partnerId, amount, availableAt);'));
+    assert.ok(led.indexOf("if (!inserted.length) return { recorded: false, reason: 'duplicate' };") < led.indexOf('await notifyCommissionEarned(db, ref.partnerId, amount, values[0].availableAt);'));
     assert.ok(read('netlify/functions/admin-partners.ts').includes("const notified = body.action === 'mark_paid' ? await notifyPayoutSent(db, batchId) : 0;"));
     assert.ok(/catch \(err\) \{\s*console\.error\('\[partner-notify\]/.test(read('src/utils/partner-notify.ts')), 'never throws');
 });

@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applicationAnswers, hashInviteToken, newInviteToken, validateApplication, INVITE_TTL_DAYS } from '../src/utils/partner-applications';
+import { applicationAnswers, hashInviteToken, newInviteToken, validateApplication, INVITE_TTL_DAYS, PARTNER_COUNTRIES } from '../src/utils/partner-applications';
 import { getTemplateDefault } from '../src/utils/email-templates-catalog';
 import { generateReferralCode } from '../src/utils/referral-code';
 
@@ -28,12 +28,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 console.log('the application');
-const good = { name: ' Jo Example ', email: ' Jo@Example.com ', channels: ['newsletter', 'clients', 'bogus', 'newsletter'], audience: '4,000 readers', links: '', message: '', consent: true, acceptTerms: true };
+const good = { name: ' Jo Example ', email: ' Jo@Example.com ', channels: ['newsletter', 'clients', 'bogus', 'newsletter'], audience: '4,000 readers', links: '', message: '', consent: true, acceptTerms: true, country: 'gb', joiningAs: 'individual' };
 
 check('a good application is tidied: trimmed, lower-cased email, known channels once each', () => {
     const r = validateApplication(good);
     assert.ok(r.ok);
-    assert.deepStrictEqual(r.value, { name: 'Jo Example', email: 'jo@example.com', channels: ['newsletter', 'clients'], audience: '4,000 readers', links: '', message: '' });
+    assert.deepStrictEqual(r.value, { name: 'Jo Example', email: 'jo@example.com', channels: ['newsletter', 'clients'], audience: '4,000 readers', links: '', message: '', country: 'GB', joiningAs: 'individual' });
 });
 
 check('missing name, bad email, no channel, or no consent is refused in words', () => {
@@ -46,7 +46,19 @@ check('missing name, bad email, no channel, or no consent is refused in words', 
 
 check('answers are stored the way the admin screen and the chat read them', () => {
     const r = validateApplication(good) as any;
-    assert.deepStrictEqual(applicationAnswers(r.value), { 'How they will promote': 'Email newsletter, My own clients (consultancy / agency)', Audience: '4,000 readers' });
+    assert.deepStrictEqual(applicationAnswers(r.value), {
+        'Based in': 'United Kingdom', 'Joining as': 'An individual (sole trader or freelancer)',
+        'How they will promote': 'Email newsletter, My own clients (consultancy / agency)', Audience: '4,000 readers',
+    });
+});
+
+check('Terms 2.1 / 4.5 / 4.6: country and joining-as are required, and the form lists exactly the known countries', () => {
+    assert.match((validateApplication({ ...good, country: 'XX' }) as any).error, /country/);
+    assert.match((validateApplication({ ...good, joiningAs: 'robot' }) as any).error, /individual or a business/);
+    const page = read('partners.html');
+    const codes = [...page.matchAll(/<option value="([A-Z]+)">/g)].map((m) => m[1]);
+    assert.deepStrictEqual(codes.sort(), Object.keys(PARTNER_COUNTRIES).sort());
+    assert.ok(page.includes("country: document.getElementById('pa-country').value,") && page.includes('input[name="joiningAs"]:checked'));
 });
 
 console.log('the private account link');
@@ -127,7 +139,9 @@ check('partners.html never hard-codes a rate — it reads the live programme ter
 
 check('invite-lookup reveals only a first name and counts visits for approved partners only', () => {
     const lookup = read('netlify/functions/invite-lookup.ts');
-    assert.ok(lookup.includes('return json(200, { valid: true, code: invite.code, firstName: owner.firstName || null, offer: REFERRAL_OFFER_DISPLAY });'));
+    // + an approved partner's APPROVED invite page (2026-11-23, tests/partner-invite-page.test.ts) — still no surname or email.
+    assert.ok(lookup.includes('return json(200, { valid: true, code: invite.code, firstName: owner.firstName || null, offer: REFERRAL_OFFER_DISPLAY, ...(profile ? { profile } : {}) });'));
+    assert.ok(!/lastName|email/.test(lookup.slice(lookup.indexOf('let profile'))), 'the profile adds no surname or email');
     assert.ok(lookup.includes("eq(partners.status, 'approved')"));
     assert.ok(lookup.includes("checkRateLimit(db, 'invite_click'"));
 });

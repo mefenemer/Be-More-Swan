@@ -3,8 +3,9 @@
 // (docs/affiliate-partner-programme-plan.md §4.8; privacy.html §9).
 //
 // What goes: the application (name, email, answers), the decision note, VAT number, partner code,
-// invite and payout-change tokens, the masked payout summary, and the payout details themselves (the
-// vault secrets aura/partner-<id>/payout and …/payout-pending).
+// invite and payout-change tokens, the masked payout summary, the payout details themselves (the
+// vault secrets aura/partner-<id>/payout and …/payout-pending), and their own invite page — photo
+// (R2 partner-photos/<id>/…), headline and words (docs/partner-onboarding-plan.md §3.3).
 // What stays: the commission and payout ledger — amounts, dates, statuses — because tax law requires
 // payment records for 7 years. It no longer identifies anyone once this has run (the user row is
 // anonymised or deleted by the caller).
@@ -18,12 +19,14 @@ import { and, eq, isNull, lt, notExists, sql } from 'drizzle-orm';
 import { partnerCommissions, partners } from '../../db/schema';
 import { deleteSecret } from './vault';
 import { payoutRefKey, pendingPayoutRefKey } from './partner-payouts';
+import { deleteAllPhotos } from './partner-invite-profile';
 
 type Db = any;   // the app db or a transaction
 
 export async function erasePartnerRow(db: Db, partnerId: number): Promise<void> {
     await deleteSecret(db, payoutRefKey(partnerId));
     await deleteSecret(db, pendingPayoutRefKey(partnerId));
+    await deleteAllPhotos(partnerId);   // their whole partner-photos/<id>/ folder, not just the photos the row points at
     await db.update(partners).set({
         status: 'suspended',
         applicantName: null, applicantEmail: null, application: { erased: true }, decisionNote: 'Personal data erased on request',
@@ -31,6 +34,7 @@ export async function erasePartnerRow(db: Db, partnerId: number): Promise<void> 
         inviteTokenHash: null, inviteExpiresAt: null,
         payoutDisplay: null, payoutMethod: null, payoutDetailsConfirmedAt: null,
         payoutPendingMethod: null, payoutPendingDisplay: null, payoutPendingTokenHash: null, payoutPendingExpiresAt: null,
+        inviteProfile: null, inviteProfilePending: null, inviteProfileNote: null, onboarding: {},
         updatedAt: new Date(),
     }).where(eq(partners.id, partnerId));
 }

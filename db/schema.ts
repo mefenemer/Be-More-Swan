@@ -6667,7 +6667,7 @@ export const partners = pgTable("partners", {
   // Partner Terms acceptance (db/z-affiliate-partner-terms.sql; src/config/partner-terms.ts).
   termsVersion: text("terms_version"),
   termsAcceptedAt: timestamp("terms_accepted_at"),
-  payoutMethod: text("payout_method"),                       // wise | paypal | bank
+  payoutMethod: text("payout_method"),                       // wise | paypal | bank | us_bank | eu_bank (db/z-partner-us-bank.sql, z-partner-eu-bank.sql)
   payoutDetailsEnc: text("payout_details_enc"),              // UNUSED (always null) — details live in the vault, see below
   payoutDetailsConfirmedAt: timestamp("payout_details_confirmed_at"),
   // Payout details (db/z-affiliate-partner-payouts.sql): the details are in the VAULT
@@ -6690,6 +6690,25 @@ export const partners = pgTable("partners", {
   inviteTokenHash: text("invite_token_hash"),
   inviteExpiresAt: timestamp("invite_expires_at"),
   invitedAt: timestamp("invited_at"),
+  // "Your first week" steps no other column records (db/z-partner-onboarding.sql;
+  // docs/partner-onboarding-plan.md): { link_copied_at?, first_draft_at?, dismissed_at? } as ISO strings.
+  onboarding: jsonb().$type<{ link_copied_at?: string; first_draft_at?: string; dismissed_at?: string; assistant_started_at?: string; weekly_nudge_off_at?: string; nudge_started_at?: string; last_nudge_week?: string }>().notNull().default({}),
+  // Their own invite page (db/z-partner-invite-page.sql; src/utils/partner-invite-profile.ts). Live only once
+  // an admin approves it: invite_profile = approved (public), invite_profile_pending = submitted / sent back.
+  inviteProfile: jsonb("invite_profile").$type<{ headline: string; quote: string; photoKey: string | null; submittedAt: string } | null>(),
+  inviteProfilePending: jsonb("invite_profile_pending").$type<{ headline: string; quote: string; photoKey: string | null; submittedAt: string } | null>(),
+  inviteProfileNote: text("invite_profile_note"),
+  inviteProfileReviewedAt: timestamp("invite_profile_reviewed_at"),
+  // Partner Terms 1.3 §7.5 Staying active (db/z-partner-activity.sql; src/utils/partner-activity.ts).
+  approvedAt: timestamp("approved_at"),                      // most recent move to approved — the activity clock starts here
+  partnerSince: timestamp("partner_since"),                  // start of the CURRENT partnership — tenure, and §7.5(i) re-approval
+  endedAt: timestamp("ended_at"),
+  endReason: text("end_reason"),                             // inactivity | closure | left | change_declined | breach | other — drives the run-off (Terms 7.4)
+  activityPauseDays: integer("activity_pause_days").notNull().default(0),
+  activityPauseLastDay: date("activity_pause_last_day"),
+  activityPauseAnchor: timestamp("activity_pause_anchor"),    // the clock start the paused days count against
+  inactivityNoticeAt: timestamp("inactivity_notice_at"),
+  inactivityNoticeEnds: timestamp("inactivity_notice_ends"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -6699,7 +6718,7 @@ export const partners = pgTable("partners", {
   uniqueIndex("partners_promo_code_uq").on(sql`upper(${t.promoCode})`).where(sql`promo_code IS NOT NULL`),
   uniqueIndex("partners_payout_pending_token_uq").on(t.payoutPendingTokenHash).where(sql`payout_pending_token_hash IS NOT NULL`),
   check("partners_status_check", sql`${t.status} IN ('applied','approved','rejected','suspended')`),
-  check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank')`),
+  check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank','us_bank','eu_bank')`),
 ]);
 
 // Commission rates over time. partnerId null = programme-wide; endsAt null = open-ended;
@@ -6733,10 +6752,17 @@ export const partnerReferrals = pgTable("partner_referrals", {
   partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "restrict" }),
   source: text().notNull().default("link"),                  // link | promo_code | manual
   subscribedAt: timestamp("subscribed_at"),
+  // The running shortfall: this customer's costs above what they paid, taken off their next months (z-partner-actual-costs.sql).
+  costCarryPence: integer("cost_carry_pence").notNull().default(0),
+  // 'fixed' | 'actual' — set when terms lock (z-partner-actual-costs.sql): actual costs only for customers whose partner had
+  // accepted the Terms version with the rule (ACTUAL_COSTS_TERMS_VERSION) when they first paid.
+  costBasis: text("cost_basis").notNull().default("fixed"),
   ratePeriodId: integer("rate_period_id").references(() => partnerRatePeriods.id, { onDelete: "set null" }),
   rateBps: integer("rate_bps"),
   costDeductionBps: integer("cost_deduction_bps"),
   durationMonths: integer("duration_months"),
+  // Partner Terms 1.3 §7.5(b) (db/z-partner-activity.sql): first payment came while the partner was suspended — never a Qualifying Customer.
+  lockedWhileSuspended: boolean("locked_while_suspended").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   index("partner_referrals_partner_idx").on(t.partnerId, t.createdAt),
@@ -6774,6 +6800,18 @@ export const partnerCommissions = pgTable("partner_commissions", {
   netAmountPence: integer("net_amount_pence"),               // customer payment excl. VAT
   rateBps: integer("rate_bps"),                              // snapshot of the rate used
   costDeductionBps: integer("cost_deduction_bps").notNull().default(0), // snapshot of the cost deduction used
+  // Actual costs (db/z-partner-actual-costs.sql; docs/partner-actual-costs-plan.md): cost_deduction_bps is the MINIMUM;
+  // the month-end true-up records what was measured and which deduction applied. costs_checked_at NULL = provisional.
+  servicePeriodStart: timestamp("service_period_start"),
+  servicePeriodEnd: timestamp("service_period_end"),
+  costPence: integer("cost_pence"),
+  cardFeePence: integer("card_fee_pence"),
+  deductionPence: integer("deduction_pence"),
+  deductionBasis: text("deduction_basis"),                  // 'minimum' | 'actual'
+  carryInPence: integer("carry_in_pence"),
+  carryOutPence: integer("carry_out_pence"),
+  usdGbpRate: decimal("usd_gbp_rate", { precision: 12, scale: 6 }),
+  costsCheckedAt: timestamp("costs_checked_at"),
   commissionPence: integer("commission_pence").notNull(),
   currency: text().notNull().default("GBP"),
   status: text().notNull().default("pending"),               // pending | payable | paid | voided
@@ -6796,6 +6834,30 @@ export const partnerCommissions = pgTable("partner_commissions", {
   check("partner_commissions_invoice_check", sql`${t.kind} <> 'invoice' OR (${t.stripeInvoiceId} IS NOT NULL AND ${t.netAmountPence} IS NOT NULL AND ${t.rateBps} IS NOT NULL AND ${t.commissionPence} >= 0)`),
   check("partner_commissions_cost_deduction_bps_check", sql`${t.costDeductionBps} BETWEEN 0 AND 10000`),
   check("partner_commissions_sign_check", sql`(${t.kind} = 'adjustment' AND ${t.commissionPence} < 0) OR (${t.kind} <> 'adjustment' AND ${t.commissionPence} >= 0)`),
+]);
+
+// Terms 4.5(b)/(c) (db/z-partner-terms-cross-border.sql): each partner's VAT in a payout run, frozen at creation so
+// statements and exports never follow a later VAT-number edit.
+export const partnerPayoutVat = pgTable("partner_payout_vat", {
+  batchId: integer("batch_id").notNull().references(() => partnerPayoutBatches.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  vatNumber: text("vat_number"),
+  vatPence: integer("vat_pence").notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.batchId, t.partnerId] })]);
+
+// Partner Terms 1.2 (cross-border review 2026-11-23; db/z-partner-terms-cross-border.sql): an append-only record of
+// every acceptance — partners.terms_version says what is current, this keeps the history and the channel.
+export const partnerTermsAcceptances = pgTable("partner_terms_acceptances", {
+  id: serial().primaryKey(),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  applicantEmail: text("applicant_email"),
+  version: text().notNull(),
+  channel: text().notNull(),                                 // application | partner_page
+  acceptedAt: timestamp("accepted_at").notNull().defaultNow(),
+}, (t) => [
+  index("partner_terms_acceptances_partner_idx").on(t.partnerId, t.acceptedAt),
+  check("partner_terms_acceptances_channel_check", sql`${t.channel} IN ('application','partner_page')`),
 ]);
 
 // /invite/<code> clicks per partner per day — no IP, nothing on the visitor's device.
@@ -7551,3 +7613,12 @@ export const meetingPickupState = pgTable("meeting_pickup_state", {
   uniqueIndex("meeting_pickup_state_org_platform_uq").on(t.organisationId, t.platform),
   check("meeting_pickup_state_platform_check", sql`${t.platform} IN ('google_meet','teams','zoom')`),
 ]);
+
+// The European Central Bank's daily USD→GBP reference rate (db/z-partner-actual-costs.sql), saved by the nightly partner
+// sweep; partner commission converts costs logged in USD with the rate for the day.
+export const fxRates = pgTable("fx_rates", {
+  day: date("day").primaryKey(),
+  usdGbp: decimal("usd_gbp", { precision: 12, scale: 6 }).notNull(),
+  source: text().notNull().default("ECB"),
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+});

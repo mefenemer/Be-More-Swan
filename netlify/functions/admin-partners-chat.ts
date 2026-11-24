@@ -23,6 +23,7 @@
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
+import { invitePageView } from '../../src/utils/partner-invite-profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { partnerProgrammeSettings, partnerRatePeriods, users } from '../../db/schema';
@@ -35,7 +36,7 @@ import { listBatches, listLedger, previewPayout } from '../../src/utils/partner-
 import {
     proposeAddPartner, proposeBatchStatus, proposeBonus, proposeCreateBatch, proposeDecision, proposeEndSpecialRate, proposePayoutRules, proposeProgrammeRate,
     proposeEraseApplication, proposePartnerCode, proposeResendInvite, proposeSpecialRate, proposeVoidCommission,
-    type ActionCard, type PartnerLite, type ProposalResult,
+    proposeInvitePage, type ActionCard, type PartnerLite, type ProposalResult,
 } from '../../src/utils/partner-ops-proposals';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -63,9 +64,9 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
     tool('top_referrers', 'Partners ranked by commission earned (not voided) in the last N days, with revenue and new paying customers.', { days: { type: 'integer' }, limit: { type: 'integer' } }),
     tool('payout_audit', 'Before a payout: ready-to-pay balance per partner (and whether it clears the minimum), payout details on file, and warning signs — same card as a referred customer, same email domain, commissions reversed in 90 days, burst of new paying customers in 7 days.'),
     tool('recruitment_candidates', 'Paying customers who are not partners yet, ranked by AI actions in the last N days (BMS does not record logins — AI actions are the activity measure).', { days: { type: 'integer' }, minActions: { type: 'integer' }, limit: { type: 'integer' } }),
-    tool('propose_decision', 'Offer the admin a card to approve, reject, suspend, reinstate or end a partner. end = they left or we ended it (Terms 7.1/7.2): no new earning, earned commission still paid; suspend = paused, may come back.', { partnerId: { type: 'integer' }, decision: { type: 'string', enum: ['approve', 'reject', 'suspend', 'reinstate', 'end'] }, note: { type: ['string', 'null'] } }),
-    tool('propose_programme_rate', 'Offer a card scheduling a new programme-wide rate from a date (the current rate ends that day). durationMonths null = lifetime. costDeductionPercent null = keep the current programme deduction.', { ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day }),
-    tool('propose_special_rate', "Offer a card giving one partner a special rate between dates (endsOn null = no end). durationMonths null = lifetime. costDeductionPercent null = the current programme deduction.", { partnerId: { type: 'integer' }, ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day, endsOn: { type: ['string', 'null'] } }),
+    tool('propose_decision', 'Offer the admin a card to approve, reject, suspend, reinstate or end a partner. end = they left or we ended it (Terms 7.1/7.2): no new earning, earned commission still paid; suspend = paused, may come back. endReason (end only): left | closure (Terms 7.4(a): standard 12-month customers keep earning to term, longer special periods 3 months) | breach | other (= the law or sanctions; 7.4(b): nothing after the end). NEVER end a partner for inactivity here: that is the Partner Terms 7.5 notice on the Partners screen, which keeps standard customers earning to term.', { partnerId: { type: 'integer' }, decision: { type: 'string', enum: ['approve', 'reject', 'suspend', 'reinstate', 'end'] }, note: { type: ['string', 'null'] }, endReason: { type: ['string', 'null'], enum: ['left', 'breach', 'closure', 'other', null] } }),
+    tool('propose_programme_rate', 'Offer a card scheduling a new programme-wide rate from a date (the current rate ends that day). durationMonths 1–24 (Partner Terms 3.5: no lifetime, rate at most 40%, deduction at least 20%). costDeductionPercent null = keep the current programme deduction.', { ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day }),
+    tool('propose_special_rate', "Offer a card giving one partner a special rate between dates (endsOn null = no end). durationMonths 1–24 (Partner Terms 3.5: no lifetime, rate at most 40%, deduction at least 20%). costDeductionPercent null = the current programme deduction.", { partnerId: { type: 'integer' }, ratePercent: { type: 'number' }, costDeductionPercent: { type: ['number', 'null'] }, durationMonths: nullableInt, startsOn: day, endsOn: { type: ['string', 'null'] } }),
     tool('propose_end_special_rate', "Offer a card ending one partner's special rate on a date.", { partnerId: { type: 'integer' }, periodId: { type: 'integer' }, endsOn: day }),
     tool('propose_payout_rules', 'Offer a card changing the holding period (days) and minimum payout (pounds).', { holdingDays: { type: 'integer' }, minPayoutPounds: { type: 'number' } }),
     tool('propose_add_partner', 'Offer a card adding an existing Be More Swan account (by email) as an approved partner.', { email: { type: 'string' }, note: { type: ['string', 'null'] } }),
@@ -78,13 +79,14 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
     tool('propose_cancel_batch', 'Offer a card cancelling an unpaid payout run (its commission goes back to ready-to-pay).', { batchId: { type: 'integer' } }),
     tool('propose_partner_code', 'Offer a card setting, changing (code) or turning off (null) a partner\'s memorable partner code — e.g. SAMSWAN, 4–20 letters/numbers starting with a letter. It works anywhere their invite link does, for new customers.', { partnerId: { type: 'integer' }, code: { type: ['string', 'null'] } }),
     tool('propose_erase_application', 'Offer a card deleting an application from someone with no account (applied or declined) — e.g. they asked us to delete their data. Partners with an account need GDPR erasure on their user instead.', { partnerId: { type: 'integer' } }),
+    tool('propose_invite_page', "Offer a card about a partner's own invite page (their photo, headline and words on /invite/<code>): approve = put the version waiting for review live; changes = send it back with a note they see (required); take_down = remove the live one (their link shows the standard page). Check list_partners → invitePage first: only a page in state 'waiting' can be approved or sent back. Judge it against the Partner Terms 5.2–5.3: honest, no links or handles, nothing that looks official or promises results or income, a real photo of them.", { partnerId: { type: 'integer' }, decision: { type: 'string', enum: ['approve', 'changes', 'take_down'] }, note: { type: ['string', 'null'] } }),
     tool('propose_resend_invite', "Offer a card emailing an approved partner who has no account yet a fresh private link to create one (e.g. they lost the first, or it expired).", { partnerId: { type: 'integer' } }),
 ];
 
 const SYSTEM = `You are Partner Ops, the assistant on Be More Swan's admin screen Admin → Money → Partners. You help a Be More Swan admin run the affiliate partner programme: people who actively promote Be More Swan and earn CASH commission. (Customers who simply refer a friend earn tokens instead — they are not partners and you have no tools for them.)
 
 How the programme works:
-- Commission rates are dated periods. A partner's customer gets the rate in force when they FIRST PAY and keeps it for the period's length (months of their payments, or lifetime).
+- Commission rates are dated periods. A partner's customer gets the rate in force when they FIRST PAY and keeps it for the period's length (months of their payments). Partner Terms 3.5 caps new periods at 24 months, a 40% rate and a 20% minimum cost deduction — no lifetime rates.
 - Commission is AFTER COSTS: each period also has a cost deduction (costDeductionBps, 2000 = 20%) taken off what the customer paid excluding VAT, then the rate applies to what is left — 50% with a 20% deduction on a £79 payment = £31.60. The deduction is locked onto the customer with the rate. A rate that has started can't be changed — a new period is scheduled instead. A partner can have special rates that beat the programme rate between dates.
 - Commission is earned on what the customer paid excluding VAT, held for the holding period (so refunds can cancel it), then becomes ready to pay. Balances under the minimum payout roll over.
 - Money in tool results is in pence; show it to the admin in pounds (£12.50). Rates are basis points in tool results (2500 = 25%).
@@ -174,6 +176,8 @@ export default withLambda(async (event) => {
                     payoutDetailsOnFile: !!r.has_payout_details, application: r.application, decisionNote: r.decision_note,
                     hasAccount: !!r.has_account, accountLinkSentAt: r.invited_at ?? null, partnerCode: r.promo_code ?? null,
                     specialRates: periods.filter((p) => p.partnerId === r.id).map((p) => ({ id: p.id, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths, startsAt: p.startsAt, endsAt: p.endsAt })),
+                    // Their own invite page: state waiting / changes_requested / live / none, with the words (the photo is checked on the screen).
+                    invitePage: (({ state, live, pending, note }) => ({ state, live: live && { headline: live.headline, quote: live.quote, hasPhoto: !!live.photoUrl }, pending: pending && { headline: pending.headline, quote: pending.quote, hasPhoto: !!pending.photoUrl }, note }))(invitePageView(r)),
                 }));
             }
             case 'partner_detail': return partnerDetail(db, Number(input.partnerId));
@@ -205,6 +209,13 @@ export default withLambda(async (event) => {
             case 'propose_partner_code': return offer(proposePartnerCode((await state()).partners, input as any));
             case 'propose_erase_application': return offer(proposeEraseApplication((await state()).partners, input as any));
             case 'propose_resend_invite': return offer(proposeResendInvite((await state()).partners, input as any));
+            case 'propose_invite_page': {
+                const list = (await listPartnersWithNumbers(db)).map((r) => ({
+                    id: r.id, status: r.status, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, email: r.email ?? null,
+                    invitePageState: invitePageView(r).state, headline: (r.invite_profile_pending ?? r.invite_profile)?.headline ?? null, hasLive: !!r.invite_profile,
+                }));
+                return offer(proposeInvitePage(list, input as any));
+            }
             default: throw new Error(`Unknown tool ${name}`);
         }
     }

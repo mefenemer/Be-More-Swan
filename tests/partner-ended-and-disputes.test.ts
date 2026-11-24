@@ -52,8 +52,10 @@ check('Partner Ops chat can propose it too (GUI and chat parity)', () => {
 check('ended partners are still paid what they earned (7.3), and earn nothing new', () => {
     const runs = read('src/utils/partner-payout-batches.ts');
     assert.ok(runs.includes("const reason = !['approved', 'suspended', 'ended'].includes(r.status) ? `Partner is ${r.status}`"));
-    // New commission needs an APPROVED partner — ended is left out by the same check as suspended.
-    assert.ok(read('src/utils/partner-ledger.ts').includes("eq(partners.status, 'approved')"));
+    // Terms 1.3: an ended partner earns only through the §7.2 / §7.5(h) run-off, and never on a customer who first pays after the end.
+    const ledger = read('src/utils/partner-ledger.ts');
+    assert.ok(ledger.includes("if (!existing?.subscribedAt || !ref.endedAt || existing.subscribedAt.getTime() >= ref.endedAt.getTime()) return { recorded: false, reason: 'ended' };"));
+    assert.ok(ledger.includes("if (!runOffAllows(ref.endReason, ref.endedAt, existing.durationMonths, payment.paidAt)) return { recorded: false, reason: 'ended' };"));
 });
 
 check('their Partner page keeps earnings and payout details, without the link or the assistant', () => {
@@ -66,13 +68,19 @@ check('their Partner page keeps earnings and payout details, without the link or
 
 console.log('won disputes');
 
-check("charge.dispute.closed with status 'won' reinstates; refunds on the charge stay unearned", () => {
+check("charge.dispute.closed with status 'won' or 'warning_closed' reinstates; refunds on the charge stay unearned", () => {
     const wh = read('netlify/functions/stripe-webhook.ts');
     const block = wh.slice(wh.indexOf("if (stripeEvent.type === 'charge.dispute.closed') {"));
     assert.ok(block.length > 100, 'handler exists');
-    assert.ok(block.includes("if (dispute.status === 'won') {"));
-    assert.ok(block.includes("refunded = (await stripe.charges.retrieve(chargeId)).amount_refunded ?? 0;"));
-    assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at });'));
+    // Owner 2026-11-23: an inquiry / early fraud warning that closes without a chargeback restores commission too.
+    assert.ok(block.includes("if (dispute.status === 'won' || dispute.status === 'warning_closed') {"));
+    // Review of #826: never reinstate while ANOTHER dispute on the same charge is open or lost; unknown = don't.
+    assert.ok(block.includes('if (chargeId && await _otherDisputeBlocksReinstate(chargeId, dispute.id)) {'));
+    // The rule itself is tested for real in tests/partner-disputes.test.ts; here: it's wired, and a failed list retries.
+    assert.ok(wh.includes('return otherDisputeBlocksReinstate(list.data.map((d) => ({ id: d.id, status: d.status })), disputeId);'));
+    assert.ok(wh.includes('Stripe will retry the event:') && wh.includes('        throw e;'));
+    assert.ok(block.includes("refunded = ch.amount_refunded ?? 0;") && block.includes("chargeAmount = ch.amount ?? null;"));
+    assert.ok(wh.includes('await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });'));
 });
 
 console.log(`\n${passed} passed`);

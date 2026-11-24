@@ -29,12 +29,12 @@ console.log('payout details');
 
 check('PayPal and Wise take an email; a UK bank takes name, 6-digit sort code, 8-digit account number', () => {
     assert.deepStrictEqual(validatePayoutDetails({ method: 'paypal', email: ' Jo@Example.com ' }), { ok: true, value: { method: 'paypal', email: 'jo@example.com' } });
-    assert.deepStrictEqual(validatePayoutDetails({ method: 'bank', accountName: 'Jo Example', sortCode: '12-34-56', accountNumber: '1234 5678' }),
-        { ok: true, value: { method: 'bank', accountName: 'Jo Example', sortCode: '123456', accountNumber: '12345678' } });
+    assert.deepStrictEqual(validatePayoutDetails({ method: 'bank', accountName: 'Jo Example', holderType: 'person', sortCode: '12-34-56', accountNumber: '1234 5678' }),
+        { ok: true, value: { method: 'bank', accountName: 'Jo Example', sortCode: '123456', accountNumber: '12345678', holderType: 'person' } });
     assert.match((validatePayoutDetails({ method: 'wise', email: 'nope' }) as any).error, /Wise/);
-    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '1234', accountNumber: '12345678' }) as any).error, /sort code/);
-    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', sortCode: '123456', accountNumber: '123' }) as any).error, /8 digits/);
-    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise or a UK bank/);
+    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', holderType: 'person', sortCode: '1234', accountNumber: '12345678' }) as any).error, /sort code/);
+    assert.match((validatePayoutDetails({ method: 'bank', accountName: 'Jo', holderType: 'person', sortCode: '123456', accountNumber: '123' }) as any).error, /8 digits/);
+    assert.match((validatePayoutDetails({ method: 'crypto' }) as any).error, /PayPal, Wise, a UK bank account, a US bank account or a euro bank account/);
 });
 
 check('only a masked summary is ever shown', () => {
@@ -80,7 +80,7 @@ check('check-capacity reports partner status, and a failed lookup can never brea
 });
 
 check('an approved or suspended partner with no plan goes to the Partner page, never the hard plan gate', () => {
-    const gate = ws.indexOf("const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended';");
+    const gate = ws.indexOf("const partnerNeverGated = partnerStatus === 'approved' || partnerStatus === 'suspended' || partnerStatus === 'ended';");   // 'ended' added 2026-11-22 (keeps earnings page)
     const exempt = ws.indexOf('if (!planActivated && cap?.noPlan && partnerNeverGated) {');
     const hard = ws.indexOf("} else if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0 || cap?.trialEnded)) {");
     assert.ok(gate > 0 && exempt > gate && hard > exempt, 'the partner exemption must come before the hard gate, as its else-branch');
@@ -92,7 +92,7 @@ check('the Partner page is a workspace view, and its sidebar link is hidden unti
     assert.ok(ws.includes("'partner': document.getElementById('nav-partner'),"));
     const side = read('components/sidebar.html');
     assert.ok(/<a href="#" id="nav-partner" class="hidden [^"]*" style="display:none">/.test(side));
-    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended'].includes(partnerStatus)) {"));
+    assert.ok(ws.includes("if (navPartner && ['applied', 'approved', 'suspended', 'ended'].includes(partnerStatus)) {"))   // 'ended' added 2026-11-22;
 });
 
 check('"Partner" is translated in every locale', () => {

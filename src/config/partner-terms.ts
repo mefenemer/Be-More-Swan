@@ -6,8 +6,43 @@
 // 1.2: legal review 2026-10-23 — ad label first + international rules (5.1, 5.3, 5.5), 30 days' notice
 //      of changes (3.3, 8.1), clawback as a debt (4.3), tax (4.5), immediate ending + 7.4, data roles
 //      (9.3), liability cap + indemnity (10), courts carve-out (11). docs/legal/partner-terms-v1.2-changes.md
-export const PARTNER_TERMS_VERSION = '1.2';
-export const PARTNER_TERMS_UPDATED = '23 October 2026';
+// 1.3: (also 4.3: a dispute that closes without the payment being taken back — e.g. an issuer inquiry,
+//      'warning_closed' — reinstates commission like a won one; owner 2026-11-23)
+// 1.3: launch contract, before the first partner (no partners had accepted 1.2): commission on
+//      Subscription Payments only + fixed deduction (3.2), caps 24 months / 40% / 20% (3.5), customers
+//      are ours (6.3), closure run-off (7.2), sub-minimum balance paid on ending (7.3), staying active
+//      (7.5). docs/legal/partner-terms-v1.3-activity-draft.md
+//      Also 4.2: payment through Wise to a US bank account or a euro bank account (IBAN), converted to US dollars
+//      or euros at Wise's rate on the day (owner requests 2026-11-23). docs/legal/partner-terms-v1.3-changes.md
+export const PARTNER_TERMS_VERSION = '1.3';
+/**
+ * The first Partner Terms version whose §3.2 takes actual costs off (docs/partner-actual-costs-plan.md). A customer's
+ * commission follows the actual-costs rule only if their partner had accepted this version (or later) when the customer
+ * first paid; everyone else keeps the fixed deduction they were promised (v1.2 §3.3, §8.1 — review of #827).
+ */
+export const ACTUAL_COSTS_TERMS_VERSION = '1.3';
+export function termsIncludeActualCosts(termsVersion: string | null | undefined): boolean {
+    // Compare "major.minor" as integers: as a number "1.10" would be 1.1 < 1.3 (review of #827).
+    const parts = (v: string) => (/^\d+(\.\d+)?$/.test(v) ? v.split('.').map(Number) : null);
+    const a = termsVersion ? parts(String(termsVersion).trim()) : null;
+    const b = parts(ACTUAL_COSTS_TERMS_VERSION)!;
+    if (!a) return false;
+    return a[0] !== b[0] ? a[0] > b[0] : (a[1] ?? 0) >= (b[1] ?? 0);
+}
+export const PARTNER_TERMS_UPDATED = '23 November 2026';
+/**
+ * When the current version took effect (ISO date). Terms 8.1: a partner who has not accepted it 60 days
+ * after this is treated as leaving (7.1) and keeps the 7.4(a) run-off — partner-activity.ts endDeclinedChanges.
+ * Bump with the version: the date the new version's notice period ended.
+ */
+// The date each version took effect (Terms 8.1: 60 days after it, a partner still on an older version is treated as
+// leaving). Add the new version HERE when you bump PARTNER_TERMS_VERSION — the nightly sweep does nothing (and logs
+// an error) while the current version has no date, so forgetting it can never end partners early (review of #823).
+// 1.3: no partner had accepted any earlier version (owner, 2026-11-23), so this date can't shorten anyone's notice.
+// For a later version, use the day the notice actually goes out to partners, not the day the code changes.
+export const PARTNER_TERMS_EFFECTIVE_DATES: Record<string, string> = { '1.3': '2026-11-23' };
+export const PARTNER_TERMS_EFFECTIVE: string | null = PARTNER_TERMS_EFFECTIVE_DATES[PARTNER_TERMS_VERSION] ?? null;
+export const DECLINED_CHANGE_DAYS = 60;
 
 /**
  * Has this partner accepted the Terms in force now? Until they have, commission still builds up but

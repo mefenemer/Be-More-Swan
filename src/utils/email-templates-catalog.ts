@@ -510,12 +510,31 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         name: 'Partner Application — Approved',
         category: 'Account',
         transactional: true,
-        subject: 'You’re a Be More Swan partner',
-        preheader: 'Your partner link is ready.',
+        // docs/partner-onboarding-plan.md §2: a welcome, the rate in one line, and ONE button that opens the
+        // Partner page, where the Partner Assistant greets them with their first-week plan.
+        subject: 'Welcome to the Be More Swan partner team',
+        preheader: 'Your Partner Assistant has your first-week plan ready.',
         bodyHtml: greet +
-            p('Good news — your application is approved. You’re now a Be More Swan partner.') +
-            p('From today you earn commission when someone you invite becomes a paying customer. Sign in to find your personal invite link.') +
-            button('Sign in', 'link.action_url') + signoff,
+            p('Welcome to the partner team — your application is approved.') +
+            p('From today you earn {{partner.rate_line | "commission on every customer you invite"}}. It starts when someone you invite first pays.') +
+            p('Your Partner page has your personal invite link and a short first-week plan. Your Partner Assistant is there too: it writes posts, emails and scripts in your voice (with your link and an ad label added), answers what you’ve earned, and tells you what to do next.') +
+            button('Meet your Partner Assistant', 'link.action_url') + signoff,
+    },
+    {
+        // The Monday summary from their Partner Assistant (partner-weekly-nudge.ts; docs/partner-onboarding-plan.md §3.5).
+        // Not transactional: it carries the unsubscribe link, and the Partner page has a one-click off switch.
+        triggerKey: 'partner_weekly_summary',
+        name: 'Partner — weekly summary',
+        category: 'Account',
+        transactional: false,
+        subject: '{{partner.title | "Your week as a Be More Swan partner"}}',
+        preheader: 'Your numbers, and one thing to try this week.',
+        bodyHtml: greet +
+            p('{{partner.summary}}') +
+            p('<strong>This week:</strong> {{partner.action}}') +
+            button('Ask your Partner Assistant', 'link.action_url') +
+            p('<span style="color:#6b7280;font-size:14px;">Your Partner Assistant sends this on Mondays in your first 8 weeks, and after that only in weeks something happened. You can turn it off on your Partner page.</span>') +
+            signoff,
     },
     {
         triggerKey: 'partner_approved_create_account',
@@ -562,11 +581,11 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         name: 'Partner — Commission Earned',
         category: 'Account',
         transactional: true,
-        subject: 'You earned {{partner.amount}} with Be More Swan',
+        subject: 'You earned up to {{partner.amount}} with Be More Swan',
         preheader: 'A customer you introduced just paid.',
         bodyHtml: greet +
-            p('Good news — a customer you introduced just paid, and you’ve earned <strong>{{partner.amount}}</strong> in commission.') +
-            p('It becomes ready to pay on <strong>{{partner.ready_on}}</strong>, once the refund window has passed, and goes out in the next monthly payout when you have at least the minimum.') +
+            p('Good news — a customer you introduced just paid, and you’ve earned up to <strong>{{partner.amount}}</strong> in commission.') +
+            p('The final figure is worked out at the end of each month of service, after that customer’s costs (Partner Terms 3.2) — your Partner page shows the breakdown. It becomes ready to pay from <strong>{{partner.ready_on}}</strong>, once the refund window has passed, and goes out in the next monthly payout when you have at least the minimum.') +
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {
@@ -579,6 +598,56 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         bodyHtml: greet +
             p('We’ve paid <strong>{{partner.amount}}</strong> of partner commission to <strong>{{partner.payout_display}}</strong>. It can take a few working days to arrive.') +
             p('Thank you for recommending Be More Swan. Your Partner page shows every commission and payout.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_terms_accepted',
+        name: 'Partner — Terms Accepted (your copy)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your copy of the Be More Swan Partner Terms (version {{partner.terms_version}})',
+        preheader: 'The version you accepted, kept for your records.',
+        bodyHtml: greet +
+            p('Thank you for accepting the Be More Swan Partner Terms, version <strong>{{partner.terms_version}}</strong> (last updated {{partner.terms_updated}}).') +
+            p('This is your copy. The exact version you accepted stays on our website at the link below, so you can always check what you agreed to. If we change the terms, we’ll give you notice first, as section 8 explains.') +
+            button('Read the version you accepted', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_inactivity_notice',
+        name: 'Partner — Inactivity Notice (Terms 7.5)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Notice about your Be More Swan partnership',
+        preheader: 'A new paying customer before {{partner.notice_ends}} cancels this notice.',
+        bodyHtml: greet +
+            p('It’s been 6 months since a customer you introduced started paying, so under section 7.5 of the Partner Terms (Staying active) we are giving you notice that we may end your partnership after <strong>{{partner.notice_ends}}</strong>.') +
+            p('<strong>You can cancel this notice:</strong> if a new customer you introduce starts paying before that date, the notice is withdrawn automatically. If someone signs up through your link or code and is still in their free period on that date, the notice is extended until 7 days after their free period ends.') +
+            p('If your partnership does end, customers on the standard 12-month commission period keep earning you commission until their period ends. Any special period longer than 12 months earns for 3 more months. Commission you’ve already earned is always paid.') +
+            p('<a href="{{link.terms_url}}">Read section 7.5 of the Partner Terms</a>.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_ended_change_declined',
+        name: 'Partner — Ended: New Terms Not Accepted (8.1)',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your Be More Swan partnership has ended',
+        preheader: 'Your existing customers keep earning you commission to the end of their period.',
+        bodyHtml: greet +
+            p('We asked you to accept version {{partner.version}} of the Partner Terms, and it hasn’t been accepted within {{partner.days}} days of taking effect. Under section 8.1 you are treated as leaving the programme.') +
+            p('Customers on the standard 12-month commission period keep earning you commission until their period ends (any special period longer than 12 months earns for 3 more months), and everything you have already earned is paid, even under the minimum. Your invite link and partner code no longer earn.') +
+            p('If this is a mistake, reply to this email and you can apply again.') +
+            button('See your Partner page', 'link.action_url') + signoff,
+    },
+    {
+        triggerKey: 'partner_inactivity_withdrawn',
+        name: 'Partner — Inactivity Notice Withdrawn',
+        category: 'Account',
+        transactional: true,
+        subject: 'Your Be More Swan partner notice is cancelled',
+        preheader: 'A customer you introduced started paying.',
+        bodyHtml: greet +
+            p('Good news — a customer you introduced started paying on <strong>{{partner.first_payment_on}}</strong>, so the notice we gave you under section 7.5 of the Partner Terms is withdrawn. Your partnership carries on as normal.') +
             button('See your Partner page', 'link.action_url') + signoff,
     },
     {

@@ -73,6 +73,60 @@
         </div>
       </div>
 
+      <!-- Partner Terms 2.1 / 4.5 / 4.6: where you're based and how you join (VAT, sanctions checks, which rules apply).
+           The country codes must match PARTNER_COUNTRIES in src/utils/partner-applications.ts. -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <label for="pa-country" class="block text-sm font-bold text-gray-700 mb-1">Country where you’re based <span class="text-emerald-700">*</span></label>
+          <select id="pa-country" required class="w-full px-4 py-3 rounded-lg border border-gray-300 bg-white focus:ring-2 focus:ring-emerald-700 outline-none">
+            <option value="">Choose…</option>
+            <option value="GB">United Kingdom</option>
+            <option value="US">United States</option>
+            <option value="CA">Canada</option>
+            <option value="AU">Australia</option>
+            <option value="NZ">New Zealand</option>
+            <option value="IE">Ireland</option>
+            <option value="AT">Austria</option>
+            <option value="BE">Belgium</option>
+            <option value="BG">Bulgaria</option>
+            <option value="HR">Croatia</option>
+            <option value="CY">Cyprus</option>
+            <option value="CZ">Czechia</option>
+            <option value="DK">Denmark</option>
+            <option value="EE">Estonia</option>
+            <option value="FI">Finland</option>
+            <option value="FR">France</option>
+            <option value="DE">Germany</option>
+            <option value="GR">Greece</option>
+            <option value="HU">Hungary</option>
+            <option value="IT">Italy</option>
+            <option value="LV">Latvia</option>
+            <option value="LT">Lithuania</option>
+            <option value="LU">Luxembourg</option>
+            <option value="MT">Malta</option>
+            <option value="NL">Netherlands</option>
+            <option value="PL">Poland</option>
+            <option value="PT">Portugal</option>
+            <option value="RO">Romania</option>
+            <option value="SK">Slovakia</option>
+            <option value="SI">Slovenia</option>
+            <option value="ES">Spain</option>
+            <option value="SE">Sweden</option>
+            <option value="CH">Switzerland</option>
+            <option value="NO">Norway</option>
+            <option value="IS">Iceland</option>
+            <option value="OTHER">Somewhere else</option>
+          </select>
+        </div>
+        <fieldset>
+          <legend class="block text-sm font-bold text-gray-700 mb-1">Joining as <span class="text-emerald-700">*</span></legend>
+          <div class="space-y-1 text-sm text-gray-700 pt-1">
+            <label class="flex items-center gap-2"><input type="radio" name="joiningAs" value="individual"> An individual (sole trader or freelancer)</label>
+            <label class="flex items-center gap-2"><input type="radio" name="joiningAs" value="business"> A business</label>
+          </div>
+        </fieldset>
+      </div>
+
       <fieldset>
         <legend class="block text-sm font-bold text-gray-700 mb-2">How would you promote Be More Swan? <span class="text-emerald-700">*</span></legend>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
@@ -114,6 +168,7 @@
         <input id="pa-terms" type="checkbox" class="mt-1">
         <span>I have read and agree to the <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-emerald-700 font-bold underline underline-offset-2">Partner Terms</a>, including labelling my posts as ads.</span>
       </label>
+      <p id="pa-terms-active" class="-mt-3 pl-6 text-xs text-gray-600">Please read section 7.5 (<a href="/partner-terms.html#staying-active" target="_blank" rel="noopener" class="text-emerald-700 font-bold underline underline-offset-2">Staying active</a>): if 6 months go by without a new paying customer through you, we may end your partnership. On the standard 12-month commission period you keep earning on your existing customers until each one’s period ends.</p>
 
       <div id="pa-error" class="hidden bg-red-50 text-red-700 text-sm font-semibold p-3 rounded-lg border border-red-100"></div>
       <button id="pa-submit" type="submit" class="btn-primary w-full block text-center px-6 py-4 text-lg font-bold rounded-xl shadow-lg cursor-pointer">Apply to become a partner</button>
@@ -150,11 +205,11 @@
     try {
       const t = await (await fetch('/.netlify/functions/partner-programme-public')).json();
       if (t.rateBps == null) return;
-      const pct = (Number(t.rateBps) / 100).toString();
+      // Partner Terms §3.2 (actual costs, 2026-11-23): the rate after costs — the higher of the minimum or that customer's
+      // actual costs that month — so "up to" the rate after the minimum.
+      const pct = (Math.round(Number(t.rateBps) * (10000 - Number(t.costDeductionBps || 0)) / 10000) / 100).toString();
       const length = t.durationMonths == null ? 'for as long as they stay a customer' : `for their first ${t.durationMonths} month${t.durationMonths === 1 ? '' : 's'}`;
-      const costs = Number(t.costDeductionBps || 0) / 100;
-      const basis = costs > 0 ? `on what every customer you introduce pays after costs (${costs}% off, excluding VAT)` : 'on what every customer you introduce pays';
-      document.getElementById('partner-term-rate').innerHTML = `<strong>${pct}% commission</strong> ${basis}, ${length}.`;
+      document.getElementById('partner-term-rate').innerHTML = `<strong>Up to ${pct}% commission</strong> on each plan payment every customer you introduce makes (excluding VAT), ${length} — ${Number(t.rateBps) / 100}% of what they pay after our costs for that customer (Partner Terms 3.2).`;
       if (t.minPayoutPence != null && t.holdingDays != null) {
         document.getElementById('partner-term-payout').innerHTML =
           `<strong>Paid monthly</strong> once a payment is ${t.holdingDays} days old (so refunds can settle), when you have £${Math.round(t.minPayoutPence / 100)} or more to come.`;
@@ -169,6 +224,8 @@
     const val = (id) => document.getElementById(id).value.trim();
     const body = {
       name: val('pa-name'), email: val('pa-email'),
+      country: document.getElementById('pa-country').value,
+      joiningAs: document.querySelector('input[name="joiningAs"]:checked')?.value || '',
       channels: [...document.querySelectorAll('input[name="channels"]:checked')].map((c) => c.value),
       audience: val('pa-audience'), links: val('pa-links'), message: val('pa-message'),
       consent: document.getElementById('pa-consent').checked,

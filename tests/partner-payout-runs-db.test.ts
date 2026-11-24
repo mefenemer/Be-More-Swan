@@ -28,7 +28,7 @@ function isLocal(url: string | undefined): url is string {
     catch { return false; }
 }
 
-const TABLES = ['users', 'partners', 'partner_commissions', 'partner_payout_batches', 'partner_programme_settings', 'vault_secrets'];
+const TABLES = ['users', 'partners', 'partner_commissions', 'partner_payout_batches', 'partner_payout_vat', 'partner_programme_settings', 'vault_secrets'];
 
 async function main() {
     console.log('Ledger actions and payout runs (real Postgres + vault)');
@@ -53,14 +53,15 @@ async function main() {
             (5, 'sus@example.com', 'Sue', 'Spended', 'user'), (6, 'ref@example.com', 'Ref', 'Unded', 'user'),
             (7, 'old@example.com', 'Old', 'Terms', 'user')`);
         // Partners 1–7 (ids follow users): confirmed details for 1, 2, 4, 5, 6, 7; none for 3.
-        // 1–6 accepted the current Partner Terms; 7 only an older version (or an admin added them).
+        // 1–6 accepted the current Partner Terms; 7 never accepted any version (an admin added them). Terms 8.1:
+        // an OLDER accepted version still pays — only no version at all waits.
         for (const [uid, status, method, display] of [[1, 'approved', 'bank', 'UK bank · Ann Bank · ****4567'], [2, 'approved', 'paypal', 'PayPal · p***@example.com'],
             [3, 'approved', null, null], [4, 'approved', 'paypal', 'PayPal · l***@example.com'], [5, 'suspended', 'paypal', 'PayPal · s***@example.com'], [6, 'approved', 'paypal', 'PayPal · r***@example.com']] as const) {
             await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
                               VALUES (${uid}, ${uid}, '${status}', ${method ? `'${method}'` : 'NULL'}, ${display ? `'${display}'` : 'NULL'}, ${display ? 'now()' : 'NULL'}, '${PARTNER_TERMS_VERSION}')`);
         }
         await sql.unsafe(`INSERT INTO partners (id, user_id, status, payout_method, payout_display, payout_details_confirmed_at, terms_version)
-                          VALUES (7, 7, 'approved', 'paypal', 'PayPal · o***@example.com', now(), '1.0')`);
+                          VALUES (7, 7, 'approved', 'paypal', 'PayPal · o***@example.com', now(), NULL)`);
         await storeSecret(db, 'aura/partner-1/payout', { method: 'bank', accountName: 'Ann Bank', sortCode: '112233', accountNumber: '01234567' });
         await storeSecret(db, 'aura/partner-2/payout', { method: 'paypal', email: 'pam.pay@example.com' });
         await storeSecret(db, 'aura/partner-5/payout', { method: 'paypal', email: 'sue.pay@example.com' });
@@ -111,7 +112,7 @@ async function main() {
         await check('the files come from the vault: Ann in the bank file, Pam and Sue in PayPal', async () => {
             const lines = await runs.batchLines(db, batchId);
             const bank = runs.buildExport('wise_bank', batchId, lines);
-            assert.ok(bank.csv.includes(`Ann Bank,ann@example.com,BMS PARTNER ${batchId},PRIVATE,GBP,75.00,GBP,GBP,112233,01234567`), bank.csv);
+            assert.ok(bank.csv.includes(`Ann Bank,ann@example.com,BMS PARTNER ${batchId},,PERSON,source,75.00,GBP,GBP,112233,01234567`), bank.csv);
             const pp = runs.buildExport('paypal', batchId, lines);
             assert.deepStrictEqual([pp.included, pp.totalPence], [2, 13025]);
             await runs.markExported(db, batchId);

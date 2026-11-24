@@ -55,12 +55,14 @@ check('emails and DMs open with the label (after a subject line); video scripts 
     const e = finaliseDraft('email', 'Subject: A tool I use\nHi all — try this. ' + ctx.inviteUrl, ctx).text;
     assert.ok(e.startsWith('Subject: A tool I use\n') && e.indexOf(AD_LABELS.message) < e.indexOf('Hi all'), 'label sits under the subject, above the greeting');
     const v = finaliseDraft('video_script', 'Scene 1: me at my desk.', ctx).text;
-    assert.ok(v.startsWith('[Say or show: “This is a paid partnership'));
+    assert.ok(v.startsWith('[Say and show on screen: “This is a paid partnership'), 'said AND shown (FTC / ASA video guidance; legal review M5)');
     assert.ok(v.includes(`[On screen / in the description: ${ctx.inviteUrl}]`));
 });
 
 check('what counts as a disclosure', () => {
-    for (const ok of ['#ad', 'Ad: try this', '(ad)', 'This is an affiliate link', 'I earn a commission', 'paid partnership']) assert.ok(hasDisclosure(ok), ok);
+    for (const ok of ['#ad', 'Ad: try this', '(ad)', 'I earn a commission', 'paid partnership']) assert.ok(hasDisclosure(ok), ok);
+    // "affiliate link" alone is NOT enough (Partner Terms 5.1: "#affiliate"/"#partner" alone are not enough — legal review M5).
+    assert.ok(!hasDisclosure('This is an affiliate link'));
     for (const no of ['I added this', 'read my lead: x', 'admin tools', 'adorable']) assert.ok(!hasDisclosure(no), no);
 });
 
@@ -97,8 +99,9 @@ check('payout details never pass through the model — only a card to the form',
     assert.ok(ep.includes("tool('open_payout_form',") && ep.includes("cards.push({ kind: 'payout_form' });"));
 });
 
-check('hand-offs only to assistants they actually have, and only Social / Email / Lead Generator', () => {
-    assert.ok(ep.includes("export const HANDOFF_ROLES = { social_media_manager: 'Social Media Manager', newsletter_editor: 'Email Marketing Assistant', lead_qualifier: 'Lead Generator' } as const;"));
+check('hand-offs only to assistants they actually have, and only Social / Email — never the Lead Generator (Terms 5.3(d), legal review 2026-11-23 H1)', () => {
+    assert.ok(ep.includes("export const HANDOFF_ROLES = { social_media_manager: 'Social Media Manager', newsletter_editor: 'Email Marketing Assistant' } as const;"));
+    assert.ok(!/lead_qualifier/.test(ep), 'no Lead Generator hand-off anywhere in the assistant');
     assert.ok(ep.includes('const who = team.find((a) => a.roleKey === target);'));
     assert.ok(ep.includes("if (!who) return { offered: false"));
 });
@@ -108,10 +111,10 @@ check('hand-off briefs carry the rules: label first + link (posts, emails), cons
     assert.ok(s.startsWith('Post my draft on LinkedIn.') && s.includes(`Start every post with “${AD_LABELS.post}”`) && s.includes(ctx.inviteUrl));
     const n = handoffBrief('newsletter_editor', 'Email my list about it.', ctx);
     assert.ok(n.includes(AD_LABELS.message) && n.includes('only to my own subscribers who agreed to hear from me') && n.includes(ctx.inviteUrl));
-    const l = handoffBrief('lead_qualifier', 'Find accountants near me.', ctx);
-    assert.ok(/Don’t add them to an email list or send them marketing emails/.test(l));
+    assert.ok(n.includes('not people on my list only because they bought from me'), 'soft opt-in does not cover promoting us');
     assert.ok(ep.includes('brief: handoffBrief(target, brief, { inviteUrl, partnerCode })'), 'the endpoint wraps every brief');
-    assert.ok(ep.includes('Never suggest emailing, messaging in bulk or adding to a list the people the Lead Generator finds'));
+    assert.ok(ep.includes('Never suggest using the Lead Generator, or anyone it finds, to promote Be More Swan in any way (Partner Terms 5.3(d))'));
+    assert.ok(ep.includes("Only draft it for someone who asked about it, or agreed to hear recommendations from them"), 'knowing someone is not consent (H2)');
 });
 
 check('no drafting until the CURRENT Partner Terms are accepted (admin-added partners included)', () => {

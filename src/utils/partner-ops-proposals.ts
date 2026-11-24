@@ -26,7 +26,8 @@ export type AdminPartnersRequest =
     | { action: 'mark_paid'; batchId: number }
     | { action: 'cancel_batch'; batchId: number }
     | { action: 'partner_code'; partnerId: number; code: string | null }
-    | { action: 'erase_application'; partnerId: number };
+    | { action: 'erase_application'; partnerId: number }
+    | { action: 'invite_page'; partnerId: number; decision: 'approve' | 'changes' | 'take_down'; note: string | null };
 
 export interface ActionCard { kind: string; title: string; summary: string; request: AdminPartnersRequest }
 export type ProposalResult = { card: ActionCard } | { error: string };
@@ -74,7 +75,7 @@ function checkRates(periods: RatePeriod[], partnerId: number | null, changes: Ar
     return validatePeriodChanges(scope, parsed, now);
 }
 
-export function proposeDecision(partners: PartnerLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
+export function proposeDecision(partners: PartnerLite[], input: { partnerId: unknown; decision: unknown; note?: unknown; endReason?: unknown }): ProposalResult {
     const p = partners.find((x) => x.id === Number(input.partnerId));
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
     const decision = String(input.decision) as 'approve' | 'reject' | 'suspend' | 'reinstate' | 'end';
@@ -87,10 +88,12 @@ export function proposeDecision(partners: PartnerLite[], input: { partnerId: unk
         reject: 'Their application is turned down. They can be approved later.',
         suspend: 'They stop earning on new payments straight away. Commission already earned is kept.',
         reinstate: 'They start earning again on new payments.',
-        end: 'They left, or we are ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite (free months, not cash). Commission they earned before today is still paid. They can be approved again later.',
+        end: 'They left, or we are ending it (Partner Terms 7.1 / 7.2). If they left or the programme is closing (Terms 7.4(a)): on customers whose commission period is 12 months or less they keep earning until it ends; longer special periods earn for 3 more months. If it is for breach, fraud, the law or sanctions (7.4(b)): they stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (7.4). Commission they earned before today is still paid. They can be approved again later, and then earn only on customers who first pay after that.',
     }[decision];
-    return { card: { kind: 'decision', title: `${verb} ${who(p)}`, summary: effect + (note ? ` Reason: ${note}` : ''),
-        request: { action: 'decide', partnerId: p.id, decision, note } } };
+    // Terms 1.3: the reason decides the run-off. Inactivity is NOT ended here — it has its own §7.5 steps on the Partners screen.
+    const endReason = decision === 'end' ? (['closure', 'left', 'breach', 'other'].includes(String(input.endReason)) ? String(input.endReason) : 'other') : undefined;
+    return { card: { kind: 'decision', title: `${verb} ${who(p)}`, summary: effect + (endReason ? ` Why: ${endReason}.` : '') + (note ? ` Reason: ${note}` : ''),
+        request: { action: 'decide', partnerId: p.id, decision, note, ...(endReason ? { endReason } : {}) } } };
 }
 
 export function proposeProgrammeRate(periods: RatePeriod[], input: { ratePercent: unknown; costDeductionPercent?: unknown; durationMonths: unknown; startsOn: unknown }, now = new Date()): ProposalResult {
@@ -246,4 +249,30 @@ export function proposeEraseApplication(partners: PartnerLite[], input: { partne
     if (!p) return { error: `There is no partner #${input.partnerId}.` };
     if (p.hasAccount || (p.status !== 'applied' && p.status !== 'rejected')) return { error: `${who(p)} has an account or is a partner — use GDPR erasure on their user instead.` };
     return { card: { kind: 'erase_application', title: `Erase ${who(p)}'s application`, summary: 'Their name, email and answers are deleted for good. This cannot be undone.', request: { action: 'erase_application', partnerId: p.id } } };
+}
+
+// ── Their own invite page (docs/partner-onboarding-plan.md §3.3) ─────────────────────────────
+
+export interface InvitePageLite { id: number; status: string; name: string | null; email: string | null; invitePageState: 'none' | 'waiting' | 'changes_requested' | 'live'; headline: string | null; hasLive?: boolean }
+
+export function proposeInvitePage(partners: InvitePageLite[], input: { partnerId: unknown; decision: unknown; note?: unknown }): ProposalResult {
+    const p = partners.find((x) => x.id === Number(input.partnerId));
+    if (!p) return { error: `There is no partner #${input.partnerId}.` };
+    const decision = String(input.decision);
+    const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 500) : null;
+    const name = p.name || p.email || `partner #${p.id}`;
+    if (decision === 'approve' || decision === 'changes') {
+        if (p.invitePageState !== 'waiting') return { error: `${name} has no invite page waiting for review (it is ${p.invitePageState.replace('_', ' ')}).` };
+        if (decision === 'approve' && p.status !== 'approved') return { error: `${name} is ${p.status}, so their invite page can't go live.` };
+        if (decision === 'changes' && !note) return { error: 'Say what to change — the partner sees the note.' };
+        return { card: decision === 'approve'
+            ? { kind: 'invite_page', title: `Put ${name}'s invite page live`, summary: `Their photo and words go on /invite/<their code>${p.headline ? ` — headline: “${p.headline}”` : ''}. They're told in-app.`, request: { action: 'invite_page', partnerId: p.id, decision: 'approve', note: null } }
+            : { kind: 'invite_page', title: `Ask ${name} to change their invite page`, summary: `It stays off the page until they resend it. Note shown to them: ${note}`, request: { action: 'invite_page', partnerId: p.id, decision: 'changes', note } } };
+    }
+    if (decision === 'take_down') {
+        // An edit can be waiting while nothing is live yet — the server refuses that, so the card isn't offered (review of #815).
+        if (!(p.hasLive ?? p.invitePageState === 'live')) return { error: `${name} has no live invite page to take down.` };
+        return { card: { kind: 'invite_page', title: `Take ${name}'s invite page down`, summary: `Their link goes back to the standard page straight away.${note ? ` Note shown to them: ${note}` : ''}`, request: { action: 'invite_page', partnerId: p.id, decision: 'take_down', note } } };
+    }
+    return { error: 'Decision must be approve, changes or take_down.' };
 }

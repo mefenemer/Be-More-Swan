@@ -27,7 +27,8 @@ const clampInt = (v: unknown, min: number, max: number, dflt: number) => {
 export async function listPartnersWithNumbers(db: Db): Promise<Row[]> {
     return rows(db, sql`
         SELECT p.id, p.user_id, p.status, p.application, p.decision_note, p.decided_at, p.created_at,
-               p.promo_code, p.terms_version, p.terms_accepted_at, p.payout_method, p.payout_display, (p.payout_details_confirmed_at IS NOT NULL AND p.payout_display IS NOT NULL) AS has_payout_details,
+               p.promo_code, p.terms_version, p.terms_accepted_at, p.ended_at, p.end_reason, p.vat_number, p.vat_registered,
+               p.invite_profile, p.invite_profile_pending, p.invite_profile_note, p.invite_profile_reviewed_at, p.payout_method, p.payout_display, (p.payout_details_confirmed_at IS NOT NULL AND p.payout_display IS NOT NULL) AS has_payout_details,
                COALESCE(u.email, p.applicant_email) AS email,
                COALESCE(u.first_name, p.applicant_name) AS first_name,
                CASE WHEN u.id IS NULL THEN NULL ELSE u.last_name END AS last_name,
@@ -180,17 +181,39 @@ export async function partnerHubSummary(db: Db, partnerId: number): Promise<{ st
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 6)::int AS clicks_7d,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
              AND day >= (now() AT TIME ZONE 'Europe/London')::date - 29)::int AS clicks_30d,
+          -- The Monday summary's visits: the last 7 FULL UK days (yesterday back 7), so each Monday covers
+          -- Monday–Sunday with no day missed or counted twice (review of #816).
+          (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id}
+             AND day >= (now() AT TIME ZONE 'Europe/London')::date - 7
+             AND day <  (now() AT TIME ZONE 'Europe/London')::date)::int AS clicks_last_week,
           (SELECT COALESCE(SUM(clicks), 0) FROM partner_link_stats WHERE partner_id = ${id})::int AS clicks_all,
           (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
              WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
                AND ur.created_at >= COALESCE(p.decided_at, p.created_at))::int AS signups,
           (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at IS NOT NULL)::int AS paying,
+          -- Phase 3 (docs/partner-onboarding-plan.md §3.5–3.6): who is in the free trial right now, and the last 7 days.
+          -- A COUNT only — partners never see who (customers are numbered, never named).
+          -- DISTINCT: trials is one row per WORKSPACE, so one invitee with two open trials counts once (review of #816).
+          (SELECT COUNT(DISTINCT ur.referred_user_id) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             JOIN trials t ON t.user_id = ur.referred_user_id
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= COALESCE(p.decided_at, p.created_at)
+               AND t.ended_at IS NULL AND t.converted_at IS NULL AND t.ends_at > now())::int AS in_trial,
+          (SELECT COUNT(*) FROM user_referrals ur JOIN partners p ON p.id = ${id}
+             WHERE ur.referrer_id = p.user_id AND ur.status IN ('pending', 'partner')
+               AND ur.created_at >= GREATEST(COALESCE(p.decided_at, p.created_at), now() - interval '7 days'))::int AS signups_7d,
+          (SELECT COUNT(*) FROM partner_referrals WHERE partner_id = ${id} AND subscribed_at >= now() - interval '7 days')::int AS paying_7d,
+          (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id}
+             AND status <> 'voided' AND created_at >= now() - interval '7 days')::int AS earned_7d_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending')::int AS pending_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'payable')::int AS payable_pence,
           (SELECT COALESCE(SUM(commission_pence), 0) FROM partner_commissions WHERE partner_id = ${id} AND status = 'paid')::int AS paid_pence,
           (SELECT MIN(available_at) FROM partner_commissions WHERE partner_id = ${id} AND status = 'pending') AS next_release_at`);
     const commissions = await rows(db, sql`
         SELECT c.id, c.kind, c.status, c.commission_pence, c.rate_bps, c.cost_deduction_bps, c.available_at, c.created_at, c.paid_at, c.void_reason,
+               -- Actual costs (Terms 3.2): the month, what the customer paid, the costs taken off and the shortfall carried.
+               c.net_amount_pence, c.service_period_start, c.service_period_end, c.cost_pence, c.card_fee_pence, c.deduction_pence,
+               c.deduction_basis, c.carry_in_pence, c.carry_out_pence, c.costs_checked_at,
                (SELECT COUNT(*) FROM partner_referrals x WHERE x.partner_id = ${id} AND x.id <= c.partner_referral_id)::int AS customer_no
           FROM partner_commissions c
          WHERE c.partner_id = ${id}

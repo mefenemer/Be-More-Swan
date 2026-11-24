@@ -16,7 +16,8 @@ import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/relea
 import { restoreAfterNewPlan } from '../../src/utils/restore-after-new-plan';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 import { qualifyPendingReferral } from '../../src/utils/referral-offer';
-import { invoiceNetPence, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
+import { otherDisputeBlocksReinstate } from '../../src/utils/partner-disputes';
+import { hasPartnerReferral, invoiceNetPence, isSubscriptionPaymentInvoice, recordPartnerPayment, reinstateDisputedCommission, reversePartnerCommission, sessionNetPence, type PartnerPayment } from '../../src/utils/partner-ledger';
 import { finishPlanMove } from '../../src/utils/plan-moves';
 import { planStatusForCancelFlag } from '../../src/utils/subscription-cancel-state';
 import { takesASeat } from '../../src/utils/assistant-capacity';
@@ -79,6 +80,19 @@ async function _isUntrackedSubscription(db: ReturnType<typeof getDb>, userId: nu
 // insert short-circuits a redelivery as a duplicate before this line.
 async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: PartnerPayment): Promise<void> {
     try {
+        // Partner Terms 3.2: a payment in another currency counts at the sterling amount Stripe settled it into, and the
+        // card fee is part of the actual costs taken off. Both come from the charge's balance transaction, looked up only
+        // for a customer a partner actually introduced (review of #823).
+        if (await hasPartnerReferral(db, payment.userId)) {
+            const st = await _settlement(payment).catch((e) => { console.error('[stripe-webhook] settlement lookup failed:', e?.message); return null; });
+            payment = {
+                ...payment,
+                gbpNetAmountPence: payment.currency.toLowerCase() !== 'gbp' && payment.gbpNetAmountPence == null ? st?.gbpNetPence ?? null : payment.gbpNetAmountPence,
+                cardFeePence: payment.cardFeePence ?? st?.feePence ?? null,
+                // Keep the PaymentIntent the lookup found: refunds and disputes match on it (review of #827).
+                paymentIntentId: payment.paymentIntentId ?? st?.paymentIntentId ?? null,
+            };
+        }
         const out = await recordPartnerPayment(db, payment);
         if (out.recorded) console.log(`[stripe-webhook] partner ${out.partnerId} earned ${out.commissionPence}p on ${payment.paymentRef}`);
     } catch (err) {
@@ -86,6 +100,56 @@ async function _recordPartnerCommission(db: ReturnType<typeof getDb>, payment: P
             userId: payment.userId, paymentRef: payment.paymentRef, netAmountPence: payment.netAmountPence,
         }, err);
     }
+}
+
+/**
+ * From the charge's balance transaction: the sterling amount Stripe settled the payment into, for its tax-exclusive
+ * part (amount × net ÷ charge amount — proportional, so zero-decimal currencies and VAT both come out right), and the
+ * fee Stripe charged (GBP pence). Null when there is no charge or it didn't settle in GBP.
+ */
+async function _settlement(payment: PartnerPayment): Promise<{ gbpNetPence: number; feePence: number; paymentIntentId: string } | null> {
+    let piId = payment.paymentIntentId;
+    if (!piId && payment.paymentRef.startsWith('in_')) {
+        const inv = await stripe.invoices.retrieve(payment.paymentRef, { expand: ['payments'] });
+        piId = getInvoicePaymentIntentId(inv);
+    }
+    if (!piId) return null;
+    const pi = await stripe.paymentIntents.retrieve(piId, { expand: ['latest_charge.balance_transaction'] });
+    const charge = pi.latest_charge && typeof pi.latest_charge !== 'string' ? pi.latest_charge : null;
+    const bt = charge?.balance_transaction && typeof charge.balance_transaction !== 'string' ? charge.balance_transaction : null;
+    if (!charge || !bt || bt.currency !== 'gbp' || !(charge.amount > 0)) return null;
+    return { gbpNetPence: Math.round((bt.amount * payment.netAmountPence) / charge.amount), feePence: Math.max(0, bt.fee ?? 0), paymentIntentId: piId };
+}
+
+/** Is any OTHER dispute on this charge still open, or lost? Then a won / warning_closed one must not reinstate. */
+async function _otherDisputeBlocksReinstate(chargeId: string, disputeId: string): Promise<boolean> {
+    // If Stripe can't be asked, THROW (review of #826): the handler releases the idempotency claim and returns 5xx, so
+    // Stripe retries the event later — instead of the commission silently staying voided with only a warning.
+    let list: Stripe.ApiList<Stripe.Dispute>;
+    try {
+        list = await stripe.disputes.list({ charge: chargeId, limit: 20 });
+    } catch (e) {
+        console.error('[stripe-webhook] dispute.closed: could not list disputes on the charge — Stripe will retry the event:', { chargeId, disputeId, err: (e as any)?.message });
+        throw e;
+    }
+    return otherDisputeBlocksReinstate(list.data.map((d) => ({ id: d.id, status: d.status })), disputeId);
+}
+
+/** A first annual payment's period when Stripe gives none on the checkout paths: 12 months from the payment. */
+function annualPeriodFrom(paidAt: Date): { periodStart: Date; periodEnd: Date } {
+    const end = new Date(paidAt.getTime());
+    end.setUTCFullYear(end.getUTCFullYear() + 1);
+    return { periodStart: paidAt, periodEnd: end };
+}
+
+/** The subscription period an invoice pays for (its line items), for Terms 3.2 pro rata and 4.1 annual holding. */
+function getInvoicePaidPeriod(invoice: Stripe.Invoice): { periodStart: Date | null; periodEnd: Date | null } {
+    const lines = (invoice.lines?.data ?? []).filter((l) => typeof l.period?.start === 'number' && typeof l.period?.end === 'number' && (l.amount ?? 0) > 0);
+    if (!lines.length) return { periodStart: null, periodEnd: null };
+    return {
+        periodStart: new Date(Math.min(...lines.map((l) => l.period!.start)) * 1000),
+        periodEnd: new Date(Math.max(...lines.map((l) => l.period!.end)) * 1000),
+    };
 }
 
 // A refund or dispute reduces or voids the partner commission on that payment; a WON dispute puts it back. Matched on the
@@ -97,6 +161,7 @@ async function _reversePartnerCommission(
     amountRefundedPence: number,
     kind: 'refund' | 'dispute' | 'dispute_won',
     at: Date,
+    chargeAmountMinor: number | null = null,
 ): Promise<void> {
     const paymentIntentId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent?.id ?? null;
     if (!paymentIntentId) return;
@@ -110,11 +175,11 @@ async function _reversePartnerCommission(
             console.warn('[stripe-webhook] could not look up the invoice for a refunded payment:', (lookupErr as any)?.message);
         }
         if (kind === 'dispute_won') {
-            const { reinstated } = await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at });
+            const { reinstated } = await reinstateDisputedCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, at, chargeAmountMinor });
             if (reinstated) console.log(`[stripe-webhook] dispute won: reinstated ${reinstated} partner commission row(s) for ${paymentIntentId}`);
             return;
         }
-        const { adjusted } = await reversePartnerCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, kind, at });
+        const { adjusted } = await reversePartnerCommission(db, { paymentIntentId, invoiceId, amountRefundedPence, kind, at, chargeAmountMinor });
         if (adjusted) console.log(`[stripe-webhook] ${kind}: adjusted ${adjusted} partner commission row(s) for ${paymentIntentId}`);
     } catch (err) {
         console.error(`[stripe-webhook] partner commission NOT adjusted after a ${kind} — fix it by hand:`, { paymentIntentId, amountRefundedPence }, err);
@@ -328,6 +393,9 @@ export default withLambda(async (event) => {
                 netAmountPence:  sessionNetPence(session),
                 currency:        session.currency || 'gbp',
                 paidAt:          new Date(stripeEvent.created * 1000),
+                annual:          billingCycle === 'annual',   // Terms 4.1: 60-day hold
+                // Terms 3.2: a first annual payment covers 12 months, so a shorter commission period is pro-rated (review of #823).
+                ...(billingCycle === 'annual' ? annualPeriodFrom(new Date(stripeEvent.created * 1000)) : {}),
             });
         }
 
@@ -525,6 +593,8 @@ export default withLambda(async (event) => {
             netAmountPence:  pi.amount_received ?? pi.amount ?? 0,
             currency:        pi.currency || 'gbp',
             paidAt:          new Date(stripeEvent.created * 1000),
+            annual:          billingCycle === 'annual',   // Terms 4.1: 60-day hold
+            ...(billingCycle === 'annual' ? annualPeriodFrom(new Date(stripeEvent.created * 1000)) : {}),
         });
 
         // ── Founder alert — a new subscriber just paid ────────────────
@@ -645,13 +715,15 @@ export default withLambda(async (event) => {
                 } catch (refErr) {
                     console.warn('[stripe-webhook] invoice.paid referral token grant failed (non-blocking):', refErr);
                 }
-                await _recordPartnerCommission(db, {
+                // Partner Terms 1.3 §3.2: only plan renewals and plan changes earn commission.
+                if (isSubscriptionPaymentInvoice(billingReason)) await _recordPartnerCommission(db, {
                     userId,
                     paymentRef:      invoice.id!,
                     paymentIntentId: getInvoicePaymentIntentId(invoice),
                     netAmountPence:  invoiceNetPence(invoice),
                     currency:        invoice.currency || 'gbp',
                     paidAt:          new Date(stripeEvent.created * 1000),
+                    ...getInvoicePaidPeriod(invoice),   // Terms 3.2 pro rata, 4.1 annual hold
                 });
             }
 
@@ -944,7 +1016,7 @@ export default withLambda(async (event) => {
     // endpoint in both environments, or this never runs.
     if (stripeEvent.type === 'charge.refunded') {
         const charge = stripeEvent.data.object as Stripe.Charge;
-        await _reversePartnerCommission(db, charge.payment_intent, charge.amount_refunded ?? 0, 'refund', new Date(stripeEvent.created * 1000));
+        await _reversePartnerCommission(db, charge.payment_intent, charge.amount_refunded ?? 0, 'refund', new Date(stripeEvent.created * 1000), charge.amount ?? null);
     }
 
     // ── charge.dispute.created — chargeback opened ────────────────
@@ -1024,22 +1096,34 @@ export default withLambda(async (event) => {
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
-        // A disputed payment earns its partner nothing — until it's won (charge.dispute.closed below).
+        // A disputed payment earns its partner nothing — until it closes in our favour (won / warning_closed, below).
         await _reversePartnerCommission(db, dispute.payment_intent, dispute.amount ?? 0, 'dispute', new Date(stripeEvent.created * 1000));
     }
 
-    // ── charge.dispute.closed — won: the partner's commission comes back ─
+    // ── charge.dispute.closed — won or warning_closed: the partner's commission comes back ─
     // ⚠️ Needs charge.dispute.closed enabled on the Stripe webhook endpoint (both environments).
-    // 'won' only: lost / warning_closed leave it voided. Refunds on the charge since stay unearned.
+    // 'won', and 'warning_closed' (a card issuer's inquiry that closed without becoming a chargeback — we kept the
+    // money; owner 2026-11-23): commission comes back. 'lost' leaves it voided. Refunds on the charge since stay unearned.
     if (stripeEvent.type === 'charge.dispute.closed') {
         const dispute = stripeEvent.data.object as Stripe.Dispute;
-        if (dispute.status === 'won') {
+        if (dispute.status === 'won' || dispute.status === 'warning_closed') {
             let refunded = 0;
+            let chargeAmount: number | null = null;
+            const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+            // Another dispute on the same charge still open, or lost (e.g. an inquiry closed while a separate
+            // chargeback was opened): don't put commission back yet (review of #826). Its own close event decides.
+            if (chargeId && await _otherDisputeBlocksReinstate(chargeId, dispute.id)) {
+                console.log(`[stripe-webhook] dispute.closed ${dispute.id}: another dispute on ${chargeId} is open or lost — commission stays voided`);
+                return { statusCode: 200, body: JSON.stringify({ received: true }) };
+            }
             try {
-                const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
-                if (chargeId) refunded = (await stripe.charges.retrieve(chargeId)).amount_refunded ?? 0;
+                if (chargeId) {
+                    const ch = await stripe.charges.retrieve(chargeId);
+                    refunded = ch.amount_refunded ?? 0;
+                    chargeAmount = ch.amount ?? null;   // so the reinstated share uses the same proportion as refunds
+                }
             } catch (e) { console.warn('[stripe-webhook] dispute.closed: could not read the charge — reinstating in full:', (e as any)?.message); }
-            await _reversePartnerCommission(db, dispute.payment_intent, refunded, 'dispute_won', new Date(stripeEvent.created * 1000));
+            await _reversePartnerCommission(db, dispute.payment_intent, refunded, 'dispute_won', new Date(stripeEvent.created * 1000), chargeAmount);
         }
     }
 

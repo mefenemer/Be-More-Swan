@@ -12,16 +12,22 @@
 //        All changes are checked together (partner-rate-periods.ts validatePeriodChanges) and saved
 //        in one transaction, so "end the current rate and start a new one" is a single edit.
 //   POST { action: 'settings', holdingDays, minPayoutPence }
-//   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate', note? }
+//   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate'|'end', note?, endReason? }
+//        endReason (end only) = 'closure'|'left'|'breach'|'other' — decides the run-off (Terms 1.3 §7.2 / §7.4)
+//   POST { action: 'inactivity_notice', partnerId } | { action: 'end_inactivity', partnerId }   → Terms 1.3 §7.5
+//   POST { action: 'confirm_vat', partnerId, vatNumber }  → Terms 4.5(b): UK VAT is added only after this (HMRC check done)
 //   POST { action: 'create', email, note? }               → an existing BMS user becomes an approved partner
 //   POST { action: 'resend_invite', partnerId }          → a fresh account link for an approved applicant with no account
 //   GET  ?view=ledger[&status=]                           → { ledger }    (newest 200)
 //   GET  ?view=payouts                                    → { preview, batches }
-//   GET  ?export=wise_bank|wise_email|paypal&batchId=N    → a payment file (CSV) — decrypts payout details, audited
+//   GET  ?export=wise_bank|wise_email|wise_us|wise_eur|paypal&batchId=N → a payment file (CSV) — decrypts payout details, audited
 //   POST { action: 'void', commissionId, reason } | { action: 'bonus', partnerId, amountPence, note }
 //   POST { action: 'create_batch' } | { action: 'mark_paid', batchId } | { action: 'cancel_batch', batchId }
 //   POST { action: 'partner_code', partnerId, code | null }  → a memorable partner code on / changed / off
 //   POST { action: 'erase_application', partnerId }      → delete an application with no account and no commission
+//   POST { action: 'invite_page', partnerId, decision: 'approve'|'changes'|'take_down', note? }
+//        → their own invite page (docs/partner-onboarding-plan.md §3.3): put the waiting version live, send it
+//          back with a note the partner sees, or take the live one down. The partner is told in-app.
 //
 // Cookie: aura_session; role must clear `manage_partners` (billing_admin and above). Every write is
 // in the admin audit log. Dates are UK calendar days: a period "from 1 December" starts at midnight
@@ -41,6 +47,10 @@ import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
 import { deleteApplicantOnly } from '../../src/utils/partner-erasure';
 import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
+import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type InviteProfile } from '../../src/utils/partner-invite-profile';
+import { createNotification } from '../../src/utils/notify';
+import { isUkVatNumber } from '../../src/utils/partner-statements';
+import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -133,7 +143,7 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET' && qp.export) {
         const format = String(qp.export) as ExportFormat;
         const batchId = Number(qp.batchId);
-        if (!['wise_bank', 'wise_email', 'paypal'].includes(format) || !Number.isInteger(batchId)) return json(400, { error: 'Invalid export.' });
+        if (!['wise_bank', 'wise_email', 'wise_us', 'wise_eur', 'paypal'].includes(format) || !Number.isInteger(batchId)) return json(400, { error: 'Invalid export.' });
         const [batch] = await listBatches(db).then((b) => b.filter((x) => x.id === batchId));
         if (!batch || batch.status === 'cancelled') return json(404, { error: 'That payout run does not exist.' });
         const lines = await batchLines(db, batchId);   // decrypts payout details from the vault
@@ -152,6 +162,9 @@ export default withLambda(async (event) => {
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         const periods = await db.select().from(partnerRatePeriods).orderBy(asc(partnerRatePeriods.startsAt));
         const rows = await listPartnersWithNumbers(db);   // shared with the Partner Ops chat
+        // Terms 1.3 §7.5: the activity clock for approved / suspended partners (a few queries each; partners are few).
+        const activityById = new Map<number, Awaited<ReturnType<typeof getPartnerActivity>>>();
+        for (const r of rows) if (r.status === 'approved' || r.status === 'suspended') activityById.set(r.id, await getPartnerActivity(db, r.id));
         const shape = (p: typeof periods[number]) => ({
             id: p.id, partnerId: p.partnerId, rateBps: p.rateBps, costDeductionBps: p.costDeductionBps, durationMonths: p.durationMonths,
             startsAt: p.startsAt, endsAt: p.endsAt, label: p.label,
@@ -172,6 +185,10 @@ export default withLambda(async (event) => {
                 referrals: r.referrals, paying: r.paying,
                 pendingPence: r.pending_pence, payablePence: r.payable_pence, paidPence: r.paid_pence,
                 rates: periods.filter((p) => p.partnerId === r.id).map(shape),
+                invitePage: invitePageView(r),
+                endedAt: r.ended_at ?? null, endReason: r.end_reason ?? null,
+                vatNumber: r.vat_number ?? null, vatConfirmed: !!r.vat_registered,
+                activity: activityById.get(r.id) ?? null,
             })),
         });
     }
@@ -263,12 +280,23 @@ export default withLambda(async (event) => {
             return json(409, { error: `This partner is ${before.status}, so they cannot be ${rule.label}. Reload to see the latest.` });
         }
         // Conditional on the status read above, so two admins deciding at once cannot both win.
+        // Partner Terms 1.3 §7.5 (partner-activity.ts): approving starts the activity clock; a first
+        // approval or a re-approval after ending starts a new partnership (§7.5(i)); ending records
+        // why, which decides the run-off (§7.2 closure, §7.4). Inactivity endings use 'end_inactivity'.
+        const now = new Date();
+        const endReason = rule.to === 'ended' ? (['closure', 'left', 'breach', 'other'].includes(String(body.endReason)) ? String(body.endReason) : 'other') : null;
+        const activity = rule.to === 'approved'
+            // Any approval restarts the 6 months: no old notice or paused days carry over (§7.5(c), (g)).
+            ? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,
+                ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }
+            : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null }
+            : rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
         const updated = await db.update(partners)
-            .set({ status: rule.to, decidedBy: adminId, decidedAt: new Date(), decisionNote: note, updatedAt: new Date() })
+            .set({ status: rule.to, decidedBy: adminId, decidedAt: now, decisionNote: note, updatedAt: now, ...activity })
             .where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
-        await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note });
+        await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
         // Approving tells them: a welcome if they have an account, a private account link if not.
         // Best-effort — the approval stands, and "Resend account link" is there if the email failed.
         let emailed: Awaited<ReturnType<typeof sendApprovalEmail>> | null = null;
@@ -276,6 +304,36 @@ export default withLambda(async (event) => {
             emailed = await sendApprovalEmail(db, partnerId).catch((err) => { console.error('[admin-partners] approval email failed', err); return null; });
         }
         return json(200, { ok: true, status: rule.to, emailed });
+    }
+
+    // ── Terms 4.5(b): an admin confirms a partner's UK VAT number (checked with HMRC) before VAT is added ─
+    if (body.action === 'confirm_vat') {
+        const partnerId = Number(body.partnerId);
+        const expected = typeof body.vatNumber === 'string' ? body.vatNumber : '';
+        // Only a UK number (GB / XI) can mean UK VAT on payouts; anything else is reverse charge (Terms 4.5(d)).
+        if (!isUkVatNumber(expected)) return json(400, { error: 'Only a UK VAT number (GB… or XI…) needs confirming — outside the UK we account for VAT under the reverse charge.' });
+        // Conditional on the number the admin checked, so a partner edit in between can't be confirmed blind.
+        const done = (await db.execute(sql`
+            UPDATE partners SET vat_registered = TRUE, updated_at = now()
+             WHERE id = ${partnerId} AND vat_number = ${expected} AND vat_registered = FALSE RETURNING id`)) as unknown as Array<{ id: number }>;
+        if (!done.length) return json(409, { error: 'That VAT number has changed or is already confirmed. Reload to see the latest.' });
+        await audit('partner_decision', partnerId, { vatRegistered: false }, { vatRegistered: true, vatNumber: expected });
+        return json(200, { ok: true });
+    }
+
+    // ── Partner Terms 1.3 §7.5 Staying active: give notice / end once it has run out ─────────
+    if (body.action === 'inactivity_notice' || body.action === 'end_inactivity') {
+        const partnerId = Number(body.partnerId);
+        if (body.action === 'inactivity_notice') {
+            const r = await sendInactivityNotice(db, partnerId);
+            if (!r.ok) return json(409, { error: r.error });
+            await audit('partner_decision', partnerId, undefined, { inactivityNotice: true, noticeEnds: r.endsAt.toISOString(), emailed: r.emailed });
+            return json(200, { ok: true, noticeEnds: r.endsAt.toISOString(), emailed: r.emailed });
+        }
+        const r = await endForInactivity(db, partnerId, adminId);
+        if (!r.ok) return json(409, { error: r.error });
+        await audit('partner_decision', partnerId, { status: 'approved' }, { status: 'ended', endReason: 'inactivity' });
+        return json(200, { ok: true, status: 'ended' });
     }
 
     // ── Erase an application (no account, never earned) — a privacy request, or tidying up ────
@@ -351,7 +409,7 @@ export default withLambda(async (event) => {
         if (!user) return json(404, { error: 'No Be More Swan account uses that email address. They need an account first.' });
         const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) || null : null;
         const inserted = await db.insert(partners)
-            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), decisionNote: note, application: { addedByAdmin: true } })
+            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), approvedAt: new Date(), partnerSince: new Date(), decisionNote: note, application: { addedByAdmin: true } })
             .onConflictDoNothing()
             .returning({ id: partners.id });
         if (!inserted.length) return json(409, { error: 'That person is already on the partner list.' });
@@ -360,5 +418,49 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, id: inserted[0].id, emailed });
     }
 
+    // ── Their own invite page: approve / ask for changes / take down ─────────────────────────
+    if (body.action === 'invite_page') {
+        const partnerId = Number(body.partnerId);
+        const decision = String(body.decision);
+        if (!['approve', 'changes', 'take_down'].includes(decision)) return json(400, { error: 'Invalid decision.' });
+        const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+        const [p] = await db.select({ status: partners.status, userId: partners.userId, live: partners.inviteProfile, pending: partners.inviteProfilePending, note: partners.inviteProfileNote })
+            .from(partners).where(eq(partners.id, partnerId)).limit(1);
+        if (!p) return json(404, { error: 'That partner no longer exists.' });
+        const live = p.live as InviteProfile | null;
+        const pending = p.pending as InviteProfile | null;
+        let set: Record<string, unknown>;
+        let notice: 'partner_invite_page_live' | 'partner_invite_page_changes' | 'partner_invite_page_removed';
+        if (decision === 'approve') {
+            if (p.status !== 'approved') return json(409, { error: `This partner is ${p.status}, so their invite page can't go live.` });
+            if (!pending || p.note) return json(409, { error: 'There is nothing waiting for review. Reload to see the latest.' });
+            set = { inviteProfile: pending, inviteProfilePending: null, inviteProfileNote: null };
+            notice = 'partner_invite_page_live';
+        } else if (decision === 'changes') {
+            if (!pending || p.note) return json(409, { error: 'There is nothing waiting for review. Reload to see the latest.' });
+            if (!note) return json(400, { error: 'Say what to change — the partner sees this note.' });
+            set = { inviteProfileNote: note };   // kept as pending so they can edit and resend
+            notice = 'partner_invite_page_changes';
+        } else {
+            if (!live) return json(409, { error: 'Their invite page has nothing live to take down.' });
+            set = { inviteProfile: null, ...(note ? { inviteProfileNote: pending ? note : null } : {}) };
+            notice = 'partner_invite_page_removed';
+        }
+        // Conditional on what was read, so two admins (or the partner resending) can't cross over.
+        const updated = await db.update(partners).set({ ...set, inviteProfileReviewedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(partners.id, partnerId), sql`${partners.inviteProfilePending}::text IS NOT DISTINCT FROM ${pending ? JSON.stringify(pending) : null}::jsonb::text`))
+            .returning({ id: partners.id });
+        if (!updated.length) return json(409, { error: 'Their invite page changed a moment ago. Reload to see the latest.' });
+        const after = decision === 'approve' ? [pending?.photoKey] : decision === 'changes' ? [live?.photoKey, pending?.photoKey] : [pending?.photoKey];
+        for (const k of orphanedKeys([live?.photoKey, pending?.photoKey], after)) await deletePhoto(k);
+        await audit('partner_decision', partnerId, { invitePage: inviteProfileState({ inviteProfile: live, inviteProfilePending: pending, inviteProfileNote: p.note }) }, { invitePage: decision, note: note || null });
+        if (p.userId) {
+            await createNotification(db, notice, { userId: p.userId, context: { partner: { note: note || '' } }, metadata: { action: 'partner_page' } })
+                .catch((err) => console.error('[admin-partners] invite page notification failed (non-blocking):', err));
+        }
+        return json(200, { ok: true });
+    }
+
     return json(400, { error: 'Unknown action.' });
 });
+

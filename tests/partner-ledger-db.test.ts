@@ -22,6 +22,7 @@ import {
     isPartnerReferrer, recordPartnerPayment, reinstateDisputedCommission, releaseDueCommissions, reversePartnerCommission,
 } from '../src/utils/partner-ledger';
 import { qualifyPendingReferral } from '../src/utils/referral-offer';
+import { trueUpCommissions } from '../src/utils/partner-costs-db';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -39,7 +40,9 @@ function isLocal(url: string | undefined): url is string {
     catch { return false; }
 }
 
-const TABLES = ['users', 'user_referrals', 'partners', 'partner_rate_periods', 'partner_referrals', 'partner_programme_settings', 'partner_commissions'];
+// fx_rates / user_organisations / ai_usage_log: the month-end actual-costs check (docs/partner-actual-costs-plan.md).
+const TABLES = ['users', 'user_referrals', 'partners', 'partner_rate_periods', 'partner_referrals', 'partner_programme_settings', 'partner_commissions',
+    'fx_rates', 'user_organisations', 'ai_usage_log'];
 const d = (s: string) => new Date(`${s}T12:00:00Z`);
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -77,6 +80,10 @@ async function main() {
 
         await check('a suspended partner earns nothing, and is still on the partner track (no token either)', async () => {
             assert.strictEqual((await pay(202, 'in_s1', 2900, d('2026-11-01'))).recorded, false);
+            // Terms 1.3 §7.5(b): the terms lock at this real first payment, flagged so it never counts as a Qualifying Customer.
+            const [locked] = await sql.unsafe(`SELECT subscribed_at IS NOT NULL AS locked, locked_while_suspended FROM partner_referrals pr JOIN user_referrals ur ON ur.id = pr.referral_id WHERE ur.referred_user_id = 202`);
+            assert.strictEqual(locked?.locked, true);
+            assert.strictEqual(locked?.locked_while_suspended, true);
             assert.strictEqual(await isPartnerReferrer(db, 101), true);
             assert.strictEqual(await isPartnerReferrer(db, 102), false);
         });
@@ -185,6 +192,13 @@ async function main() {
         });
 
         await check('the nightly sweep releases only commissions past their holding period', async () => {
+            // Partner 100 never accepted the Terms with actual costs, so its customers are on the FIXED rule (review of
+            // #827): one row, no service month, never touched by the month-end check, released after the hold as before.
+            const a1 = (await commissions('in_a1'))[0];
+            assert.strictEqual(a1.service_period_end, null, 'fixed rule: no month to cost');
+            await sql.unsafe(`INSERT INTO fx_rates (day, usd_gbp) VALUES ('2026-11-01', 0.79) ON CONFLICT DO NOTHING`);
+            await trueUpCommissions(db, d('2026-12-06'));
+            assert.strictEqual((await commissions('in_a1'))[0].costs_checked_at, null, 'the true-up never touches a fixed-rule row');
             const { released } = await releaseDueCommissions(db, d('2026-12-06'));   // in_a1 due 2026-12-05
             assert.strictEqual(released, 1);
             assert.strictEqual((await commissions('in_a1'))[0].status, 'payable');
@@ -200,6 +214,39 @@ async function main() {
             await reinstateDisputedCommission(db, { paymentIntentId: 'pi_in_a1' });
             const rows = await commissions('in_a1');
             assert.deepStrictEqual(rows.map((r: any) => [r.kind, r.commission_pence]), [['invoice', paid], ['adjustment', -paid], ['bonus', paid]]);
+        });
+
+        await check('annual plan: 12 monthly rows; a refund matched only by invoice id (Checkout, no PaymentIntent) reaches all 12 (review of #827)', async () => {
+            // This customer's partner has accepted the Terms with actual costs, so they lock on the 'actual' rule.
+            await sql.unsafe(`UPDATE partners SET terms_version = '1.3' WHERE user_id = 100`);
+            await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES (100, 260, 'p1')`);
+            const out = await recordPartnerPayment(db, { userId: 260, paymentRef: 'in_y1', paymentIntentId: null, netAmountPence: 82800, currency: 'gbp', paidAt: d('2026-11-10'), annual: true });
+            assert.strictEqual(out.recorded, true);
+            const slices = await sql.unsafe(`SELECT * FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%' ORDER BY service_period_start`);
+            assert.strictEqual(slices.length, 12);
+            assert.strictEqual(slices.reduce((n: number, r: any) => n + r.net_amount_pence, 0), 82800);
+            assert.ok(slices.every((r: any) => r.costs_checked_at === null && r.stripe_charge_id === null));
+            const { adjusted } = await reversePartnerCommission(db, { paymentIntentId: null, invoiceId: 'in_y1', amountRefundedPence: 82800, chargeAmountMinor: 82800, kind: 'refund', at: d('2026-11-20') });
+            assert.strictEqual(adjusted, 12, 'every month adjusted');
+            const after = await sql.unsafe(`SELECT status FROM partner_commissions WHERE stripe_invoice_id LIKE 'in\\_y1#m%'`);
+            assert.ok(after.every((r: any) => r.status === 'voided'), 'fully refunded → every month voided');
+            const [pr260] = await sql.unsafe(`SELECT pr.cost_basis FROM partner_referrals pr JOIN user_referrals ur ON ur.id = pr.referral_id WHERE ur.referred_user_id = 260`);
+            assert.strictEqual(pr260.cost_basis, 'actual');
+            await sql.unsafe(`UPDATE partners SET terms_version = NULL WHERE user_id = 100`);
+        });
+
+        await check('a month whose customer deleted their account (referral gone → NULL) is checked at the minimum and released (review of #827)', async () => {
+            const [p1row] = await sql.unsafe(`SELECT id FROM partners WHERE user_id = 100`);
+            await sql.unsafe(`INSERT INTO partner_commissions (partner_id, partner_referral_id, kind, stripe_invoice_id, net_amount_pence, rate_bps, cost_deduction_bps,
+                                commission_pence, status, available_at, service_period_start, service_period_end)
+                              VALUES (${p1row.id}, NULL, 'invoice', 'in_gone1', 6900, 5000, 2000, 2760, 'pending', '2027-02-01', '2027-01-01', '2027-02-01')`);
+            await trueUpCommissions(db, d('2027-02-03'));
+            const [g] = await commissions('in_gone1');
+            assert.ok(g.costs_checked_at, 'checked even with no customer');
+            assert.strictEqual(g.deduction_basis, 'minimum');
+            assert.strictEqual(g.commission_pence, 2760);
+            await releaseDueCommissions(db, d('2027-02-03'));
+            assert.strictEqual((await commissions('in_gone1'))[0].status, 'payable', 'not stuck pending');
         });
 
         await check("a partner's referral qualifies as 'partner', never as a token", async () => {

@@ -1522,7 +1522,8 @@
           <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
             <div>
               <h3 class="text-sm font-bold text-gray-800">Payouts</h3>
-              <p class="text-xs text-gray-500 mt-0.5">Ready-to-pay commission for partners with confirmed payout details, at or over the minimum. Create a run, download the files, pay them in Wise / PayPal, then mark the run paid.</p>
+              <p class="text-xs text-gray-500 mt-0.5">Ready-to-pay commission for partners with confirmed payout details, at or over the minimum. Create a run, download the files, pay them in Wise / PayPal, then mark the run paid. UK-VAT-registered partners are paid commission + 20% VAT (Partner Terms 4.5); the files include it.</p>
+              <p class="text-xs font-semibold text-amber-700 mt-1">Check the partner against the UK Sanctions List and OFAC SDN before approving/paying (Partner Terms 4.6).</p>
             </div>
             <button type="button" id="payout-create-btn" onclick="payoutCreate()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Create payout run</button>
           </div>
@@ -1543,7 +1544,8 @@
               <tbody id="payout-batches-tbody"></tbody>
             </table>
           </div>
-          <p class="text-[11px] text-gray-400 mt-2">Wise files: check the column names once against the template you download from Wise before your first run. Payment reference on bank transfers: <span class="font-mono">BMS PARTNER &lt;run&gt;</span>.</p>
+          <p class="text-[11px] text-gray-500 mt-2"><strong>Paying from Wise:</strong> partners are paid from your Wise <strong>GBP balance</strong>. Before uploading a run's Wise files, convert enough EUR to GBP in Wise to cover the amount shown on the run (decision 2026-11-23). Wise converts to USD / EUR for partners paid in those currencies.</p>
+          <p class="text-[11px] text-gray-400 mt-1">Wise files follow the columns of Wise's own template (checked 2026-11-23); the first time, upload one to Wise and check it shows no errors before you confirm. Payment reference on bank transfers: <span class="font-mono">BMS PARTNER &lt;run&gt;</span>.</p>
         </div>
 
         <!-- Commission ledger: every commission, refund adjustment and bonus. -->
@@ -3026,18 +3028,18 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="partner-rate-terms">
           <label for="partner-rate-pct" class="text-xs font-bold text-gray-500 uppercase">Commission (%) <span class="text-red-500">*</span></label>
-          <input id="partner-rate-pct" type="number" min="0" max="100" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <input id="partner-rate-pct" type="number" min="0" max="40" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
         </div>
         <div class="partner-rate-terms">
-          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months)</label>
-          <input id="partner-rate-months" type="number" min="1" max="120" step="1" placeholder="Lifetime" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments. Blank = for as long as they stay.</p>
+          <label for="partner-rate-months" class="text-xs font-bold text-gray-500 uppercase">Paid for (months) <span class="text-red-500">*</span></label>
+          <input id="partner-rate-months" type="number" min="1" max="24" step="1" placeholder="12" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <p class="text-[11px] text-gray-400 mt-1">Months of each customer's payments, 1–24. No lifetime rates (Partner Terms 3.5); the rate is at most 40% and the cost deduction at least 20%.</p>
         </div>
       </div>
       <div class="partner-rate-terms">
         <label for="partner-rate-costs" class="text-xs font-bold text-gray-500 uppercase">Cost deduction (%) <span class="text-red-500">*</span></label>
-        <input id="partner-rate-costs" type="number" min="0" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 50% commission on £79 = £31.60.</p>
+        <input id="partner-rate-costs" type="number" min="20" max="99" step="0.5" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">Taken off what the customer paid (excluding VAT) before the commission rate applies. 20% costs + 25% commission on £79 = £15.80.</p>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div id="partner-rate-from-wrap">
@@ -12256,9 +12258,18 @@ function _partnersRenderList() {
       ? `<span class="font-mono font-bold">${_pPct(special.rateBps)}</span> <span class="text-[11px] text-gray-500">special${special.costDeductionBps ? ', after ' + _pPct(special.costDeductionBps) + ' costs' : ''}${special.endsAt ? ' until ' + _pDate(special.endsAt) : ''}</span>`
       : '<span class="text-gray-500">Programme</span>';
     const btn = (label, cls, decision) => `<button type="button" onclick="partnerDecide(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
+    // Partner Terms 1.3 §7.5 Staying active (partner-activity.ts): the date, an open notice, and the two steps.
+    const act = p.activity;
+    const activityLine = act?.activeUntil
+      ? `<p class="text-[11px] mt-1 ${act.notice ? 'text-amber-700 font-semibold' : (act.canSendNotice ? 'text-red-700 font-semibold' : 'text-gray-500')}">${act.notice
+          ? `Inactivity notice until ${_pDate(act.notice.endsAt)}${act.canEnd ? ' — run out' : ''}`
+          : `Active until ${_pDate(act.activeUntil)}${act.canSendNotice ? ' — past' : ''}`}${act.pauseDays ? ` · ${act.pauseDays} paused day${act.pauseDays === 1 ? '' : 's'}` : ''}</p>`
+      : (p.status === 'ended' && p.endReason ? `<p class="text-[11px] mt-1 text-gray-500">Ended${p.endedAt ? ' ' + _pDate(p.endedAt) : ''} · ${_pEsc(p.endReason)}</p>` : '');
+    const activityBtns = (act?.canSendNotice ? ' ' + `<button type="button" onclick="partnerInactivity(${p.id}, 'inactivity_notice')" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Send inactivity notice</button>` : '')
+      + (act?.canEnd ? ' ' + `<button type="button" onclick="partnerInactivity(${p.id}, 'end_inactivity')" class="btn-destructive px-2.5 py-1 text-xs font-bold rounded-lg border">End (inactivity)</button>` : '');
     const actions = {
       applied: btn('Approve', 'btn-golive', 'approve') + ' ' + btn('Reject', 'btn-destructive', 'reject'),
-      approved: btn('Suspend', 'btn-destructive', 'suspend') + ' ' + btn('End', 'btn-destructive', 'end'),
+      approved: btn('Suspend', 'btn-destructive', 'suspend') + ' ' + btn('End', 'btn-destructive', 'end') + activityBtns,
       suspended: btn('Reinstate', 'btn-secondary', 'reinstate') + ' ' + btn('End', 'btn-destructive', 'end'),
       rejected: btn('Approve', 'btn-golive', 'approve'),
       ended: btn('Approve again', 'btn-golive', 'approve'),
@@ -12272,7 +12283,7 @@ function _partnersRenderList() {
           ${p.name && p.email ? `<p class="text-[11px] text-gray-500">${_pEsc(p.email)}</p>` : ''}
         </button>
       </td>
-      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}</td>
+      <td class="py-2 px-2">${_pStatusBadge[p.status] || _pEsc(p.status)}${p.invitePage?.state === 'waiting' ? ' <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Their invite page is waiting for review — open Details">Invite page to review</span>' : ''}${activityLine}</td>
       <td class="py-2 px-2 text-right font-mono" title="Paying customers / everyone who signed up through them">${p.paying} / ${p.referrals}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.pendingPence)}</td>
       <td class="py-2 px-2 text-right font-mono">${_pMoney(p.payablePence)}</td>
@@ -12302,12 +12313,19 @@ function _partnersRenderList() {
           : 'none — applied without one')}</span>
         ${['approved', 'suspended', 'ended'].includes(p.status) ? `<span>Partner Terms: ${p.termsAccepted
           ? `v${_pEsc(p.termsVersion)} accepted${p.termsAcceptedAt ? ' ' + _pDate(p.termsAcceptedAt) : ''}`
-          : `<span class="text-amber-700 font-semibold">${p.termsVersion ? `only v${_pEsc(p.termsVersion)} accepted` : 'not accepted'}</span> — no payouts or Partner Assistant until they accept on their Partner page`}</span>` : ''}
+          : p.termsVersion
+            ? `<span class="text-amber-700 font-semibold">only v${_pEsc(p.termsVersion)} accepted</span> — payouts continue; no Partner Assistant until they accept the current version (Terms 8.1)`
+            : `<span class="text-amber-700 font-semibold">not accepted</span> — no payouts or Partner Assistant until they accept on their Partner page`}</span>` : ''}
+        ${p.vatNumber ? `<span>VAT number: ${_pEsc(p.vatNumber)} ${!/^(GB|XI)(\d{9}|\d{12})$/.test(p.vatNumber)
+          ? '<span class="text-gray-500">outside the UK — reverse charge, no VAT added (Terms 4.5(d))</span>'
+          : p.vatConfirmed ? '<span class="text-emerald-700 font-semibold">confirmed — UK VAT added to payouts</span>'
+          : `<span class="text-amber-700 font-semibold">not checked</span> <button type="button" onclick="partnerConfirmVat(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg">Confirm after HMRC check</button>`}</span>` : ''}
         <span>Payout details: ${p.hasPayoutDetails ? _pEsc(p.payoutDisplay || p.payoutMethod || 'set') : '<span class="text-amber-700 font-semibold">not set yet</span>'}</span>
         ${p.decisionNote ? `<span>Last decision note: <em>${_pEsc(p.decisionNote)}</em></span>` : ''}
         ${!p.hasAccount && (p.status === 'applied' || p.status === 'rejected') ? `<button type="button" onclick="partnerEraseApplication(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg">Erase application</button>` : ''}
       </div>
       <div><h4 class="text-xs font-bold text-gray-700 uppercase mb-1">Application</h4>${appHtml}</div>
+      ${_partnerInvitePageHtml(p)}
       <div>
         <div class="flex items-center justify-between gap-3 mb-1">
           <h4 class="text-xs font-bold text-gray-700 uppercase">Special rates</h4>
@@ -12319,6 +12337,57 @@ function _partnersRenderList() {
     </td></tr>`;
     return main + detail;
   }).join('') || `<tr><td colspan="8" class="py-6 text-center text-gray-400">${all.length ? 'Nobody in this group.' : 'No partners yet. Add one, or wait for applications.'}</td></tr>`;
+}
+
+// Their own invite page (docs/partner-onboarding-plan.md §3.3): live only after we approve it, because it's
+// on our domain. Check: honest words, no links or handles, nothing official-looking or promising income
+// (Partner Terms 5.2–5.3), and a real photo of them.
+function _partnerInvitePageHtml(p) {
+  const ip = p.invitePage;
+  if (!ip || !['approved', 'suspended'].includes(p.status) && ip.state === 'none') return '';
+  const card = (x, label) => `<div class="border border-gray-200 rounded-lg p-3 bg-white flex gap-3 items-start">
+      ${x.photoUrl ? `<img src="${_pEsc(x.photoUrl)}" alt="Their photo" style="width:64px;height:64px;border-radius:9999px;object-fit:cover;flex-shrink:0">` : '<span class="text-[11px] text-gray-400" style="width:64px;flex-shrink:0">No photo</span>'}
+      <div class="min-w-0"><p class="text-[11px] font-bold text-gray-500 uppercase">${label}</p>
+        <p class="text-sm font-bold text-gray-900 break-words">${_pEsc(x.headline)}</p>
+        ${x.quote ? `<p class="text-sm text-gray-700 break-words">“${_pEsc(x.quote)}”</p>` : ''}</div></div>`;
+  const btn = (label, cls, decision) => `<button type="button" onclick="partnerInvitePage(${p.id}, '${decision}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg border">${label}</button>`;
+  const stateLine = { none: 'Not set up yet — their link shows the standard page.', waiting: '<span class="text-amber-700 font-semibold">Waiting for your review.</span> It goes live when you approve it.',
+    changes_requested: `Sent back for changes: <em>${_pEsc(ip.note || '')}</em>`, live: 'Live on their invite link.' }[ip.state] || '';
+  return `<div>
+      <h4 class="text-xs font-bold text-gray-700 uppercase mb-1">Invite page</h4>
+      <p class="text-xs text-gray-600 mb-2">${stateLine}</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        ${ip.pending ? card(ip.pending, ip.state === 'waiting' ? 'Waiting for review' : 'Sent back') : ''}
+        ${ip.live ? card(ip.live, 'Live now') : ''}
+      </div>
+      <div class="flex flex-wrap gap-2 mt-2">
+        ${ip.state === 'waiting' ? btn('Approve — put it live', 'btn-golive', 'approve') + btn('Ask for changes', 'btn-secondary', 'changes') : ''}
+        ${ip.live ? btn('Take it down', 'btn-destructive', 'take_down') : ''}
+      </div>
+    </div>`;
+}
+
+async function partnerInvitePage(id, decision) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const who = _pEsc(p.name || p.email || 'this partner');
+  let note = null;
+  if (decision === 'approve') {
+    const ok = await window.confirmModal(`Put <strong>${who}</strong>'s photo and words on their invite page? Everyone who opens their link will see them.`, { title: 'Approve invite page', confirmLabel: 'Put it live' });
+    if (!ok) return;
+  } else {
+    note = await window.promptModal(decision === 'changes'
+      ? `What should <strong>${who}</strong> change? They see this note on their Partner page.`
+      : `Take <strong>${who}</strong>'s invite page down? Their link shows the standard page straight away. Optional note for them:`,
+      { title: decision === 'changes' ? 'Ask for changes' : 'Take invite page down', confirmLabel: decision === 'changes' ? 'Send back' : 'Take it down', placeholder: decision === 'changes' ? 'e.g. Please use a photo of you rather than a logo.' : '' });
+    if (note === null) return;
+    if (decision === 'changes' && !note.trim()) { window.showToast?.('Say what to change — the partner sees this note.', { icon: '⚠️' }); return; }
+  }
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'invite_page', partnerId: id, decision, note }) });
+    window.showToast?.({ approve: 'Their invite page is live.', changes: 'Sent back with your note.', take_down: 'Their invite page is back to the standard version.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 function partnerSetFilter(val) { _partners.filter = val; _partnersRenderList(); }
@@ -12359,7 +12428,7 @@ function partnerOpenRate(ctx) {
   // A new rate starts from the programme's newest deduction, so the costs basis partners were told carries on.
   const newestProgramme = [..._partnerPeriods(null)].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).pop();
   set('partner-rate-costs', Number((period ?? newestProgramme)?.costDeductionBps ?? 2000) / 100);
-  set('partner-rate-months', period ? (period.durationMonths ?? '') : (ctx.partnerId == null ? 12 : ''));
+  set('partner-rate-months', period ? (period.durationMonths ?? '') : 12);
   set('partner-rate-from', period ? _pDay(period.startsAt) : tomorrow);
   set('partner-rate-until', period?.endsAt ? _pDay(period.endsAt) : (ctx.mode === 'end' ? tomorrow : ''));
   set('partner-rate-label', period?.label || '');
@@ -12471,11 +12540,22 @@ async function partnerDecide(id, decision) {
   if (!p) return;
   const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
   let note = null;
+  let endReason = null;
+  if (decision === 'end') {
+    // Terms 1.3: why it ends decides the run-off. Inactivity has its own steps (§7.5): notice, then "End (inactivity)".
+    endReason = await window.choiceModal(`Why is the partnership with ${who} ending? Not for inactivity — for that, use "Send inactivity notice" once their active date has passed (Partner Terms 7.5), so their standard customers keep earning to term.`, [
+      { value: 'left', label: 'They asked to leave', description: 'Partner Terms 7.1 / 7.4(a) — standard 12-month customers keep earning them commission to term; longer special periods for 3 months.' },
+      { value: 'closure', label: 'Programme closing', description: 'Partner Terms 7.2 / 7.4(a) — standard 12-month customers to term; longer special periods for 3 months.' },
+      { value: 'breach', label: 'Breach, fraud or reputation', description: 'Partner Terms 7.2 / 7.4(b) — commission stops on later payments.' },
+      { value: 'other', label: 'The law or sanctions require it', description: 'Partner Terms 7.2 / 7.4(b) — commission stops on later payments.' },
+    ], { title: 'End partnership' });
+    if (!endReason) return;
+  }
   if (decision === 'reject' || decision === 'suspend' || decision === 'end') {
     const msg = decision === 'reject'
       ? `Reject ${who}'s application? They can be approved later if you change your mind.`
       : decision === 'end'
-        ? `End the partnership with ${who}? Use this when they've left, or you're ending it (Partner Terms 7.1 / 7.2). They stop earning on new payments, including from customers they introduced earlier. Their partner code stops working, and their invite link becomes an ordinary customer invite. Commission they earned before today is still paid. They can be approved again later.`
+        ? `End the partnership with ${who}? ${(endReason === 'closure' || endReason === 'left') ? 'On customers whose commission period is 12 months or less they keep earning until it ends; longer special periods earn for 3 more months.' : 'They stop earning on new payments, including from customers they introduced earlier.'} Their partner code stops working, and their invite link earns neither commission nor refer-a-friend rewards (Partner Terms 7.4). Commission they earned before today is still paid, even under the minimum. They can be approved again later, and then earn only on customers who first pay after that.`
         : `Suspend ${who}? They stop earning on new payments straight away, and their customers don't earn them tokens either. Commission already earned is kept.`;
     note = await window.promptModal(msg + '<br><br>Reason (admins only, optional):', {
       title: { reject: 'Reject application', suspend: 'Suspend partner', end: 'End partnership' }[decision],
@@ -12483,12 +12563,48 @@ async function partnerDecide(id, decision) {
     });
     if (note === null) return;
   } else if (decision === 'approve') {
-    const ok = await window.confirmModal(`Approve ${who}? They start earning cash on customers who first pay from now on.`, { title: 'Approve partner', confirmLabel: 'Approve' });
+    // Partner Terms 4.6 (cross-border review): manual sanctions check — no automated screening.
+    const ok = await window.confirmModal(`Approve ${who}? They start earning cash on customers who first pay from now on.<br><br><strong>Check the partner against the UK Sanctions List and OFAC SDN before approving/paying.</strong> UK: gov.uk/government/publications/the-uk-sanctions-list · US: sanctionssearch.ofac.treas.gov`, { title: 'Approve partner', confirmLabel: 'Approve' });
     if (!ok) return;
   }
   try {
-    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note }) });
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note, endReason }) });
     window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.', end: 'Partnership ended.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Terms 4.5(b): check the number on HMRC's VAT checker first; only then is UK VAT added to their payouts.
+async function partnerConfirmVat(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p?.vatNumber) return;
+  const ok = await window.confirmModal(`Have you checked <strong>${_pEsc(p.vatNumber)}</strong> on HMRC’s “Check a UK VAT number” service, and does it match ${_pEsc(p.name || p.email || 'this partner')}? Once confirmed, 20% UK VAT is added to their payouts and their statements become self-billed VAT invoices.`, { title: 'Confirm VAT number', confirmLabel: 'Confirm VAT number' });
+  if (!ok) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'confirm_vat', partnerId: id, vatNumber: p.vatNumber }) });
+    window.showToast?.('VAT number confirmed.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Partner Terms 1.3 §7.5 Staying active: give notice once the active date has passed; end once it has run out.
+async function partnerInactivity(id, action) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const who = `<strong>${_pEsc(p.name || p.email || 'this partner')}</strong>`;
+  const months = p.activity?.noticeMonths || 1;
+  const ok = action === 'inactivity_notice'
+    ? await window.confirmModal(`Give ${who} the Partner Terms 7.5 notice? Their active date${p.activity?.activeUntil ? ' (' + _pDate(p.activity.activeUntil) + ')' : ''} has passed with no new paying customer. The notice runs ${months} month${months === 1 ? '' : 's'}; they're emailed now. A new paying customer withdraws it automatically, and a sign-up still in their free period extends it. Use the same rule for every partner past their date.`, { title: 'Send inactivity notice', confirmLabel: 'Send notice' })
+    : await window.confirmModal(`End the partnership with ${who} for inactivity (Partner Terms 7.5)? Their notice has run out with no new paying customer. Customers on a 12-month (or shorter) commission period keep earning them commission until it ends; any longer special period earns for 3 more months. Their link and code stop earning.`, { title: 'End for inactivity', confirmLabel: 'End partnership' });
+  if (!ok) return;
+  try {
+    const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, partnerId: id }) });
+    if (action === 'inactivity_notice' && !d.emailed) {
+      // Terms 12.2: email is the notice channel — say plainly when it didn't go.
+      window.showToast?.(`Notice recorded until ${_pDate(d.noticeEnds)}, but the email did NOT send. Email the partner yourself (Partner Terms 7.5 notice) before relying on it.`, { icon: '⚠️' });
+    } else {
+      window.showToast?.(action === 'inactivity_notice' ? `Notice sent and emailed — it runs until ${_pDate(d.noticeEnds)}.` : 'Partnership ended for inactivity.');
+    }
     loadPartners();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
@@ -12600,7 +12716,11 @@ async function loadLedger() {
     }).join('');
     tbody.innerHTML = _ledger.rows.map((r) => {
       const what = r.kind === 'invoice'
-        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}${r.cost_deduction_bps ? ` less ${_pPct(r.cost_deduction_bps)} costs` : ''}`
+        ? `${_lgKind.invoice} · ${_pPct(r.rate_bps)} of ${_pMoney(r.net_amount_pence)}` + (r.costs_checked_at
+            // Actual costs: the costs taken off, flagged when the customer's real costs beat the minimum (heavy user).
+            ? ` less ${_pMoney(r.deduction_pence)} costs${r.deduction_basis === 'actual' ? ' <span class="inline-block px-1.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">actual costs</span>' : ` (${_pPct(r.cost_deduction_bps)} minimum)`}`
+              + (r.carry_in_pence > 0 ? ` · ${_pMoney(r.carry_in_pence)} carried in` : '') + (r.carry_out_pence > 0 ? ` · <span class="text-amber-700">${_pMoney(r.carry_out_pence)} carried forward</span>` : '')
+            : (r.service_period_end ? ` · <span class="text-gray-400">costs checked at month end (provisional at ${_pPct(r.cost_deduction_bps)} minimum)</span>` : (r.cost_deduction_bps ? ` less ${_pPct(r.cost_deduction_bps)} costs` : '')))
         : `${_lgKind[r.kind] || r.kind}${r.note ? ' · ' + _pEsc(r.note) : ''}`;
       const status = r.status === 'pending' ? `Waiting until ${_pDate(r.available_at)}`
         : r.status === 'voided' ? `Cancelled${r.void_reason ? ' — ' + _pEsc(r.void_reason) : ''}`
@@ -12668,25 +12788,31 @@ async function loadPayouts() {
     pre.innerHTML = preview.lines.map((l) => `<tr class="border-t border-gray-100">
         <td class="py-2 px-2 text-gray-800">${_pEsc(l.name || l.email || 'Partner ' + l.partnerId)}</td>
         <td class="py-2 px-2 text-gray-600">${_pEsc(l.payoutDisplay || '—')}</td>
-        <td class="py-2 px-2 text-right font-mono">${_pMoney(l.amountPence)}</td>
+        <td class="py-2 px-2 text-right font-mono">${_pMoney(l.amountPence)}${l.vatPence ? `<span class="block text-[11px] text-gray-500">+ ${_pMoney(l.vatPence)} VAT</span>` : ''}</td>
         <td class="py-2 px-2">${l.due ? '<span class="text-xs font-bold text-emerald-700">Yes</span>' : `<span class="text-xs text-gray-500">${_pEsc(l.reason || 'No')}</span>`}</td>
       </tr>`).join('') || '<tr><td colspan="4" class="py-4 text-center text-gray-400">Nothing is ready to pay.</td></tr>';
     const due = preview.lines.filter((l) => l.due).length;
     const btn = document.getElementById('payout-create-btn');
     btn.disabled = !due;
     btn.textContent = due ? `Create payout run (${due} · ${_pMoney(preview.totalDuePence)})` : 'Create payout run';
-    document.getElementById('payout-batches-tbody').innerHTML = batches.map((b) => {
+    // Several open runs: their Wise files together need the sum (review of #822).
+    const openWise = batches.filter((b) => (b.status === 'draft' || b.status === 'exported') && b.wise_total_pence > 0);
+    const totalNote = openWise.length > 1
+      ? `<tr><td colspan="5" class="py-2 px-2 text-xs text-amber-800 bg-amber-50 font-semibold">${openWise.length} runs are open: together their Wise files need ${_pMoney(openWise.reduce((n, b) => n + b.wise_total_pence, 0))} in your Wise GBP balance.</td></tr>` : '';
+    document.getElementById('payout-batches-tbody').innerHTML = totalNote + batches.map((b) => {
       const open = b.status === 'draft' || b.status === 'exported';
-      const files = [['wise_bank', 'Wise · bank', b.bank_partners], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
+      const files = [['wise_bank', 'Wise · UK bank', b.bank_partners], ['wise_us', 'Wise · US bank', b.us_bank_partners || 0], ['wise_eur', 'Wise · euro bank', b.eu_bank_partners || 0], ['wise_email', 'Wise · email', b.wise_partners], ['paypal', 'PayPal', b.paypal_partners]]
         .filter(([, , n]) => n > 0)
         .map(([f, label, n]) => `<button type="button" onclick="payoutDownload(${b.id}, '${f}')" class="btn-utility px-2 py-1 text-xs font-bold rounded-lg">${label} (${n})</button>`).join(' ');
+      // Paying from the Wise GBP balance: say how much it must hold for this run's Wise files (owner decision 2026-11-23).
+      const topUp = open && b.wise_total_pence > 0 ? `<p class="text-[11px] text-amber-700 font-semibold mt-1">Wise: this run needs ${_pMoney(b.wise_total_pence)} in your GBP balance</p>` : '';
       const statusLabel = { draft: 'Ready to export', exported: 'Exported — awaiting payment', paid: `Paid ${_pDate(b.paid_at)}`, cancelled: 'Cancelled' }[b.status] || b.status;
       return `<tr class="border-t border-gray-100">
         <td class="py-2 px-2 whitespace-nowrap text-gray-700">#${b.id} · ${_pDate(b.created_at)}</td>
         <td class="py-2 px-2 text-gray-600">${statusLabel}</td>
         <td class="py-2 px-2 text-right font-mono">${_pMoney(b.total_pence)}</td>
         <td class="py-2 px-2 text-right">${b.partner_count}</td>
-        <td class="py-2 px-2 text-right whitespace-nowrap">${b.status !== 'cancelled' ? files : ''}
+        <td class="py-2 px-2 text-right whitespace-nowrap">${b.status !== 'cancelled' ? files + topUp : ''}
           ${open ? `<button type="button" onclick="payoutMarkPaid(${b.id})" class="btn-golive px-2.5 py-1 text-xs font-bold rounded-lg border">Mark paid</button>
                     <button type="button" onclick="payoutCancel(${b.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Cancel run</button>` : ''}</td>
       </tr>`;
@@ -12700,7 +12826,7 @@ async function payoutCreate() {
   const p = _payouts.data?.preview;
   const due = (p?.lines || []).filter((l) => l.due);
   if (!due.length) return;
-  const ok = await window.confirmModal(`Create a payout run for <strong>${due.length}</strong> partner${due.length === 1 ? '' : 's'}, totalling <strong>${_pMoney(p.totalDuePence)}</strong>? Their ready-to-pay commission is set aside for this run. Nothing is paid until you pay it in Wise / PayPal.`,
+  const ok = await window.confirmModal(`Create a payout run for <strong>${due.length}</strong> partner${due.length === 1 ? '' : 's'}, totalling <strong>${_pMoney(p.totalDuePence)}</strong>${p.totalVatPence ? ` + ${_pMoney(p.totalVatPence)} UK VAT` : ''}? <strong>Check the partner against the UK Sanctions List and OFAC SDN before approving/paying.</strong> Their ready-to-pay commission is set aside for this run. Nothing is paid until you pay it in Wise / PayPal.`,
     { title: 'Create payout run', confirmLabel: 'Create run' });
   if (!ok) return;
   try {
