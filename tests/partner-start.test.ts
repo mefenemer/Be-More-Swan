@@ -156,4 +156,8 @@ check('the link can\'t be reached any other way before the start: first-week lis
     assert.ok(read('referral-content.html').includes('if (data.partnerNotStarted) {'));
 });
 
+check('a step locked only because the partnership hasn\'t started says so, not "after step 1"', () => {
+    assert.ok(read('partner-content.html').includes("${data.partnerTerms && !data.partnerTerms.accepted ? 'after step 1' : 'once your partnership starts'}"));
+});
+
 console.log(`\n${passed} passed`);
