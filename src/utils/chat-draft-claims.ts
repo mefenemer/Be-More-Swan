@@ -64,8 +64,8 @@ const REVISE_VERB = '(?:rewritten|revised|redrafted|reworked)';
  * past tense or about something else is not a claim that a new draft exists now (review on PR #832).
  */
 const CLAIMS_REVISION = new RegExp(
-    `\\bi(?:(?:'|’)ve|\\s+have)\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\s+[^.!?:;]{0,30}?`
-    + `\\b(?:posts?|articles?|blogs?|captions?|drafts?|newsletters?|issues?|pieces?|it|them)\\b`,
+    `\\bi(?:(?:'|’)ve|\\s+have)\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\s+(?:(?:it|them)\\b|[^.!?:;]{0,30}?`
+    + `\\b(?:posts?|articles?|blogs?|captions?|drafts?|newsletters?|issues?|pieces?)\\b)`,
     'i',
 );
 

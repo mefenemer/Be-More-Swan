@@ -71,3 +71,6 @@ for (const s of [
     'Last week I rewrote the Ipswich post, and it went out on Monday.',
     "I've revised my thinking on hashtags.",
 ]) assert.strictEqual(replyClaimsPostSaved(s), false, `not a claim: ${s}`);
+// "it"/"them" only straight after the verb: the plan is not a post (review on #832).
+assert.strictEqual(replyClaimsPostSaved("I've reworked your content plan so it leans into Tuesdays."), false, 'a plan rework is not a post claim');
+assert.strictEqual(replyClaimsPostSaved("I've rewritten it with a stronger opening."), true, '"rewritten it" is');
