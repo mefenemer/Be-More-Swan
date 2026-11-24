@@ -1361,6 +1361,9 @@ let _detailRqTotal = null;
 // "N posts failed" link fired both): whichever answered LAST used to win, so Needs attention could
 // sit highlighted above the Review list.
 let _detailRqRenderSeq = 0;
+// The tools switched on for the Note Taker shown in the Inbox, from the meetings GET: [{ actionType, label, tasks }].
+// Null until a meetings column has loaded (Fix pipeline #73, src/utils/meeting-send-to.ts).
+let _rqSendTargets = null;
 
 /**
  * A column is loading. With a list already on screen, dim it rather than blank it: swapping it for
@@ -2512,6 +2515,44 @@ function _rqMeetingFollowupNotSent(r) {
 }
 
 /**
+ * "Send to" on a meeting (Fix pipeline #73): which switched-on tools it has gone to, and a button for each one it
+ * hasn't — Slack, Notion, Jira, Asana, the follow-up email. The click is the server's own `sendTo` (assistant-records.ts),
+ * which queues that one hand-off through the same runner as approval, so nothing is sent twice. Before approval it
+ * only says where approving will send it; with nothing switched on, it says where to switch one on.
+ */
+function _rqMeetingSendTo(r) {
+    if (r.recordType !== 'meeting' || !Array.isArray(_rqSendTargets)) return '';
+    const targets = _rqSendTargets;
+    if (!targets.length) {
+        return `<p class="rq-send-to mt-2 text-[11px] text-gray-600">Not sent to any other tool. Switch on Slack, Notion, Asana or Jira in <button type="button" onclick="window._openBriefDrawer?.('platforms')" class="font-bold text-emerald-700 underline cursor-pointer">Connections</button> to send meetings there.</p>`;
+    }
+    const live = r.approvalStatus === 'approved' || r.approvalStatus === 'scheduled';
+    if (!live) {
+        return r.approvalStatus === 'rejected' ? ''
+            : `<p class="rq-send-to mt-2 text-[11px] text-gray-600">Approving sends it to: ${targets.map((t) => _rqEsc(t.label)).join(', ')}.</p>`;
+    }
+    const d = r.data || {};
+    const st = r.sendState || {};
+    const chip = 'text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200';
+    const btnCls = 'btn-secondary border min-h-[44px] sm:min-h-0 px-2.5 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer';
+    const items = targets.map((t) => {
+        const s = st[t.actionType] || {};
+        const isEmail = t.actionType === 'email_meeting_followup';
+        if (s.sent) return `<span class="${chip}">✓ ${isEmail ? 'Follow-up email sent' : `Sent to ${_rqEsc(t.label)}`}</span>`;
+        // The approval's own job is sending it (just approved, or claimed by a run): no button that would queue it again.
+        // Its action items were filed in the other task tool; each is filed once, so there is nothing to send here.
+        if (s.filedElsewhere) return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">Action items already in ${_rqEsc(s.filedElsewhere)}</span>`;
+        if (s.sending) return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">Sending to ${_rqEsc(t.label)}…</span>`;
+        // The amber "Follow-up not sent" box above already carries its own button.
+        if (isEmail && d.followupNotSent && !d.followupSentVia) return '';
+        const words = isEmail ? 'Send the follow-up email' : `${s.partly ? 'Send the rest to' : 'Send to'} ${_rqEsc(t.label)}`;
+        return `<button type="button" onclick="_detailRqRecordAct(this,'sendTo:${_rqEsc(t.actionType)}')" class="${btnCls}">${words}</button>`;
+    }).filter(Boolean);
+    if (!items.length) return '';
+    return `<div class="rq-send-to mt-2 flex flex-wrap items-center gap-1.5"><span class="text-[11px] font-bold text-gray-500 mr-1">Send to</span>${items.join('')}</div>`;
+}
+
+/**
  * The Lead Generator's email signature, shown under a draft exactly as it will be added when it sends
  * (src/utils/outreach-signature.ts). Drafts written before the signature was set still end with a
  * sign-off of their own — seeing both, one under the other, is what tells the reviewer to trim it.
@@ -3487,6 +3528,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${_rqAttendeeFix(r, statusKey)}
         ${_rqMeetingPickedUp(r)}${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
+        ${_rqMeetingSendTo(r)}
         ${_rqLeadNotes(r)}
         ${_rqDecisionDetail(r, statusKey)}
         ${_rqRecordActions(r, statusKey)}
@@ -3560,8 +3602,10 @@ async function _detailRqRenderRecords(statusKey) {
     try {
         const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approvalQuery}${deliverableOnly ? '&deliverable=1' : ''}`);
         if (!res.ok) throw new Error();
-        records = (await res.json()).records || [];
+        const payload = await res.json();
+        records = payload.records || [];
         if (seq !== _detailRqRenderSeq) return;
+        if (recordType === 'meeting') _rqSendTargets = Array.isArray(payload.sendTargets) ? payload.sendTargets : null;
     } catch { if (seq === _detailRqRenderSeq) _detailRqRenderError(container, statusKey); return; }
 
     // Staged Outreach (Lead Generator): 'approved' is the "Approved — send it yourself" pill under
@@ -4291,6 +4335,31 @@ window._detailRqRecordAct = async function (btn, action) {
     // approving with an inbox connected would have done.
     // "Send the follow-up now" on a meeting whose follow-up was not sent (no mailbox at approval). The
     // server refuses until Gmail or Outlook is connected and queues the follow-up alone.
+    // "Send to" one tool on an approved meeting (Fix pipeline #73): the server queues that one hand-off.
+    if (typeof action === 'string' && action.startsWith('sendTo:')) {
+        const target = action.slice('sendTo:'.length);
+        const label = (_rqSendTargets || []).find((t) => t.actionType === target)?.label || 'that tool';
+        const id = Number(card.getAttribute('data-rq-record'));
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch('/.netlify/functions/assistant-records', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, sendTo: target }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `It couldn’t be sent to ${label}. Please try again.`);
+            window.showToast?.(target === 'email_meeting_followup'
+                ? 'Sending — the follow-up goes from your inbox within a few minutes.'
+                : `Sending to ${label} — it goes within a few minutes, and this card says when it has.`);
+        } catch (err) {
+            showErr(err.message);
+            btns.forEach((b) => { b.disabled = false; });
+            return;
+        }
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+        return;
+    }
+
     if (action === 'sendFollowup') {
         const id = Number(card.getAttribute('data-rq-record'));
         const btns = card.querySelectorAll('button');

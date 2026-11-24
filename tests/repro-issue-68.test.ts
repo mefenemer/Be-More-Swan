@@ -50,6 +50,12 @@ assert.ok(!('error' in forSocial) && forSocial.place === 'assistant_what_i_post_
 assert.ok(!('error' in forSocial) && !forSocial.label.includes('Topics & themes'), 'and the label names what is there');
 assert.ok(!('error' in forOther) && forOther.place === 'assistant_how_i_work', 'no topics at all: When and how I work');
 
+// 4b. Review on PR #839 (second round): Blog Studio opens only for a Blog Writer, and the Mentor's team carries roles.
+assert.ok(!('error' in tmt.buildTakeMeThereCard({ place: 'blog_top_list', assistantId: 6 }, roles)), 'Blog Writer: Blog Studio opens');
+assert.ok('error' in tmt.buildTakeMeThereCard({ place: 'blog_top_list', assistantId: 1 }, roles), 'Social assistant: no Blog Studio button');
+assert.ok(!('error' in tmt.buildTakeMeThereCard({ place: 'blog_top_list', assistantId: 6 }, [{ id: 6, name: 'Lyra' }])), 'role unknown: unchanged');
+assert.ok(orch.includes("map((t) => ({ id: t.id, name: t.name, roleKey: t.roleKey ?? null }))"), 'the Mentor\'s team list carries roles');
+
 // 5. One cap for the assistants read and named: the line names at most TAKE_ME_THERE_TEAM_CAP others.
 const cap = (tmt as any).TAKE_ME_THERE_TEAM_CAP as number;
 assert.ok(Number.isInteger(cap) && cap > 0);

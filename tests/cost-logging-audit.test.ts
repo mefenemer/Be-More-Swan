@@ -245,6 +245,15 @@ check('the stuck sweeps log a killed render, only from the UPDATE that claims th
     assert.ok(/gt\(postRenderJobs\.updatedAt, new Date\(now\.getTime\(\) - KILLED_WITHIN_MS\)\)/.test(pw), 'the post sweep would fail the whole pre-existing backlog');
 });
 
+check('ai_usage_log.session_id is indexed for the killed-render check, built without locking the table', () => {
+    const f = read('db/z-ai-usage-log-session-id-index.sql');
+    const statements = f.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n').trim();
+    assert.match(statements, /^CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_usage_log_session_id_idx ON ai_usage_log \(session_id\) WHERE session_id IS NOT NULL;?$/,
+        'one statement only: CONCURRENTLY cannot run in a transaction, and db-migrate.mjs sends the file as one query');
+    assert.ok(/index\("ai_usage_log_session_id_idx"\)\.on\(t\.sessionId\)\.where\(sql`session_id IS NOT NULL`\)/.test(read('db/schema.ts')), 'schema.ts and the SQL file disagree');
+    assert.ok(/eq\(aiUsageLog\.sessionId, sessionId\)/.test(read('src/utils/render-cost.ts')), 'the check no longer reads by session id (the index would be unused)');
+});
+
 check('both render loops go through the meter: started, every poll, and every way out', () => {
     for (const f of ['src/utils/video-render.ts', 'netlify/functions/render-post-video-background.ts']) {
         const s = read(f);

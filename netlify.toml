@@ -1118,6 +1118,12 @@ node_bundler = "esbuild"
 [functions.refresh-search-trends]
   schedule = "23 * * * *"
 
+# Killed-render sweeps on a clock (docs/cost-logging-audit.md): fail renders whose worker was killed and log their Remotion
+# cost, so partner commission sees it even when nobody renders again or opens their videos within the 3-day window.
+# Hourly at :26, off the :00/:07/:15/:23/:30/:45 batch. Production only; on staging the inline sweeps still run.
+[functions.sweep-killed-renders]
+  schedule = "26 * * * *"
+
 # US-ADM-2.3.1: Stripe↔DB nightly billing reconciliation — 02:00 UTC every day
 [functions.reconcile-billing]
   schedule = "0 2 * * *"

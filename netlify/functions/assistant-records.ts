@@ -43,6 +43,7 @@ import { keepServerOwnedMeetingKeys } from '../../src/utils/meeting-handoff-once
 import { NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
+import { approvedRecently, isMeetingSendTarget, loadMeetingSendTargets, MEETING_TASK_TARGETS, meetingSendLabel, meetingSendState, meetingTaskCount, type ActionItemSyncSummary } from '../../src/utils/meeting-send-to';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
@@ -659,6 +660,20 @@ export default withLambda(async (event) => {
                     records: enriched.map((r) => ({ ...r, enrichmentInFlight: inFlight.has(r.id) })),
                 });
             }
+            // Meetings: the tools switched on for this assistant, so each Inbox card can say where it went and offer
+            // "Send to" for the rest (Fix pipeline #73, src/utils/meeting-send-to.ts).
+            if (recordType === 'meeting' && Number.isInteger(assistantId) && assistantId > 0) {
+                const targets = await loadMeetingSendTargets(db, orgId, assistantId);
+                return json(200, {
+                    records: enriched.map((r) => r.recordType !== 'meeting' ? r : {
+                        ...r,
+                        // Per tool: sent / partly (some action items) / not yet — the same rule the server enforces.
+                        sendState: Object.fromEntries(targets.map((t) => [t, meetingSendState(t, r.data, (r as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null,
+                            { approvedRecently: approvedRecently((r as { approvalStatus?: unknown }).approvalStatus, (r as { updatedAt?: unknown }).updatedAt) })])),
+                    }),
+                    sendTargets: targets.map((t) => ({ actionType: t, label: meetingSendLabel(t), tasks: MEETING_TASK_TARGETS.has(t) })),
+                });
+            }
             return json(200, { records: enriched });
         }
 
@@ -734,7 +749,7 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown; dataMerge?: unknown; sendFollowup?: unknown };
+            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown; dataMerge?: unknown; sendFollowup?: unknown; sendTo?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
             // ── Bulk REJECT ─────────────────────────────────────────────────────────────
@@ -856,6 +871,46 @@ export default withLambda(async (event) => {
                 .limit(1);
             if (mirrorCheck && MIRROR_RECORD_TYPES.has(mirrorCheck.recordType)) {
                 return json(409, { error: 'Campaign decisions and orders are settled on the Campaign Assistant, not edited here.' });
+            }
+
+            // ── "Send to" one tool (Inbox card and chat, Fix pipeline #73) ──────────────────────────────────
+            // An APPROVED meeting, sent to one switched-on tool now: after switching a tool on, or after a send failed.
+            // The same runner and the same once-per-meeting claim as approval (src/utils/meeting-send-to.ts). The
+            // follow-up email keeps its own rules (mailbox required) in the block below.
+            if (body.sendTo !== undefined) {
+                if (!isMeetingSendTarget(body.sendTo)) return json(400, { error: 'Unknown place to send it.' });
+                const target = body.sendTo;
+                if (target === 'email_meeting_followup') {
+                    body.sendFollowup = true;
+                } else {
+                    const label = meetingSendLabel(target);
+                    const [m] = await db.select({
+                        id: assistantRecords.id, recordType: assistantRecords.recordType, aiAssistantId: assistantRecords.aiAssistantId,
+                        title: assistantRecords.title, status: assistantRecords.status, data: assistantRecords.data,
+                        approvalStatus: assistantRecords.approvalStatus,
+                    }).from(assistantRecords)
+                        .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                        .limit(1);
+                    if (!m || m.recordType !== 'meeting') return json(404, { error: 'Meeting not found.' });
+                    if (!LIVE_APPROVAL.has(m.approvalStatus ?? '')) return json(409, { error: 'Approve the meeting first — approving sends it to every tool switched on.', code: 'not_approved' });
+                    const on = await loadMeetingSendTargets(db, orgId, m.aiAssistantId);
+                    if (!on.includes(target)) return json(409, { error: `${label} isn’t switched on for this assistant. Switch it on in Connections, then send it.`, code: 'target_off' });
+                    if (MEETING_TASK_TARGETS.has(target)) {
+                        if (!meetingTaskCount(m.data)) return json(409, { error: 'This meeting has no action items to send.', code: 'no_tasks' });
+                        // The ledger rows (and a 'skipped' one revived to pending — e.g. approved before the tool was on),
+                        // exactly as approval makes them; already-synced items stay synced, so nothing is filed twice.
+                        await materialiseActionItems(db, orgId, m);
+                        const [withSync] = await attachActionItemSync(db, orgId, [m]);
+                        const state = meetingSendState(target, m.data, (withSync as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null);
+                        if (state.sent) return json(409, { error: `Every action item is already in ${label}.`, code: 'already_sent' });
+                        // Filed in the other tool: each action item is filed once, so this job would file nothing.
+                        if (state.filedElsewhere) return json(409, { error: `These action items are already in ${state.filedElsewhere}. Each one is filed once, so there is nothing to send to ${label}.`, code: 'filed_elsewhere' });
+                    } else if (meetingSendState(target, m.data).sent) {
+                        return json(409, { error: `Already sent to ${label}.`, code: 'already_sent' });
+                    }
+                    await enqueueHandoffOnApproval(db, orgId, m, [target]);
+                    return json(200, { queued: true, target });
+                }
             }
 
             // ── "Send the follow-up now" (Inbox) ─────────────────────────────────────────────
