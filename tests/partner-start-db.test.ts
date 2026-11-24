@@ -73,10 +73,12 @@ async function main() {
         await check('only the application tick (accepted before approval): does not start', async () => {
             assert.strictEqual((await startPartnershipIfReady(db, 5, d('2026-12-03'))).started, false);
         });
-                await check('suspended: does not start; once reinstated (approved) it does', async () => {
+                await check('suspended: does not start; reinstated (approved_at = now, as the real code sets it) still waits for a NEW acceptance', async () => {
             assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-03'))).started, false);
-            await sql`UPDATE partners SET status = 'approved' WHERE id = 4`;
-            assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-10'))).started, true);
+            await sql`UPDATE partners SET status = 'approved', approved_at = '2026-12-10' WHERE id = 4`;
+            assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-10'))).started, false, 'the old acceptance predates the reinstatement');
+            await sql`UPDATE partners SET terms_accepted_at = '2026-12-11' WHERE id = 4`;
+            assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-11'))).started, true, 'accepted again after reinstatement → starts');
         });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});

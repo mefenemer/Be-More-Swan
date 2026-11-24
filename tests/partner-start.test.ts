@@ -49,10 +49,10 @@ check('no clock before the partnership starts; a reinstatement after it restarts
 });
 
 console.log('wiring');
-check('approval no longer sets a start date; it starts the partnership only if the current terms were already accepted', () => {
+check('approval never sets a start date or starts the partnership (it needs an acceptance AFTER approval)', () => {
     const a = read('netlify/functions/admin-partners.ts');
     assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }"));
-    assert.ok(a.includes("if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now).catch("), 'every move to approved, incl. reinstatement');
+    assert.ok(!a.includes('startPartnershipIfReady('), 'approval / reinstatement do not start it — the partner accepts on their Partner page');
     assert.ok(!a.includes('approvedAt: new Date(), partnerSince: new Date()'), 'admin-added partners also wait for acceptance');
 });
 check('accepting on the Partner page starts it', () => {
@@ -61,7 +61,7 @@ check('accepting on the Partner page starts it', () => {
     assert.strictEqual((hub.match(/const retry = await startPartnershipIfReady\(db, p\.id\)/g) || []).length, 2, 'accepting again retries a failed start (review of #838)');
     assert.ok(hub.includes("if (!impersonating && canStart({"), 'opening the Partner page retries a failed start (never while impersonating)');
     assert.ok(read('src/utils/partner-start.ts').includes('AND terms_accepted_at IS NOT NULL AND (approved_at IS NULL OR terms_accepted_at >= approved_at)'), 'the SQL start needs acceptance after approval');
-    assert.ok(read('netlify/functions/admin-partners.ts').includes("await startPartnershipIfReady(db, partnerId, now).catch((err) =>"), 'approval email still goes out if the start fails');
+
 });
 check('starting is conditional (approved, current terms, not started) and turns the waiting rate into a dated period', () => {
     const s = read('src/utils/partner-start.ts');
@@ -87,7 +87,9 @@ check('admins can add a special rate that waits for acceptance; a director agree
     assert.ok(read('db/z-partner-start-on-acceptance.sql').includes('CREATE TABLE IF NOT EXISTS partner_pending_rates ('));
 });
 check('the Partner page says the partnership starts on acceptance', () => {
-    assert.ok(read('partner-content.html').includes('Your partnership starts when you accept the Partner Terms'));
+    const page = read('partner-content.html');
+    assert.ok(page.includes('Your partnership starts when you accept the Partner Terms'));
+    assert.ok(page.includes(": data.partner.status !== 'approved' ? ''"), 'not shown to a suspended partner who can\'t start');
     assert.ok(read('netlify/functions/partner-hub.ts').includes('partnerSince: p.partnerSince ?? null,'));
 });
 

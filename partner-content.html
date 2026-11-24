@@ -358,6 +358,7 @@
     // Owner 2026-11-24: a partnership has no start date until they accept the Partner Terms after approval.
     const pr = data.pendingRate;
     const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>`
+      : data.partner.status !== 'approved' ? ''
       : `<span class="text-amber-800 font-semibold">Your partnership starts when you accept the Partner Terms — customers who first pay before then don’t earn you commission</span>${pr ? ` — your special rate of ${Math.round(pr.rateBps * (10000 - pr.costDeductionBps) / 10000) / 100}% of each plan payment (at most) then applies to customers who first pay in the following ${pr.windowMonths} months, ${pr.durationMonths == null ? 'for as long as they stay' : 'for ' + pr.durationMonths + ' months each'}` : ''}`;
     const renew = !t || !data.partnerSince ? '' : t.renewsOn
       ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special commission ends; customers who first paid before then keep it' : ' — when this commission ends'}`

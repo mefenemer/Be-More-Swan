@@ -318,10 +318,8 @@ export default withLambda(async (event) => {
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
         await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
-        // On EVERY move to approved (incl. reinstatement — review of #838: a partner suspended before accepting must still
-        // be able to start): if the current terms are accepted and it hasn't started, it starts now. Idempotent.
-        // Best-effort: the approval stands and its email still goes out; the partner's acceptance retries a failed start.
-        if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now).catch((err) => console.error('[admin-partners] start after approval failed — retried when the partner accepts:', err));
+        // No start here: approval sets approved_at = now, and the start needs an acceptance AFTER approval (owner
+        // 2026-11-24). A not-yet-started partner — new, re-approved or reinstated — is asked on their Partner page.
         // Approving tells them: a welcome if they have an account, a private account link if not.
         // Best-effort — the approval stands, and "Resend account link" is there if the email failed.
         let emailed: Awaited<ReturnType<typeof sendApprovalEmail>> | null = null;
