@@ -157,7 +157,7 @@ check('the link can\'t be reached any other way before the start: first-week lis
 });
 
 check('a step locked only because the partnership hasn\'t started says so, not "after step 1"', () => {
-    assert.ok(read('partner-content.html').includes("${data.partnerTerms && !data.partnerTerms.accepted ? 'after step 1' : 'once your partnership starts'}"));
+    assert.ok(read('partner-content.html').includes("${data.partnerTerms && !data.partnerTerms.accepted ? 'after step 1' : !data.partnerSince ? 'once your partnership starts' : 'no link yet'}"), 'label chosen from the actual reason (review of #855)');
 });
 
 console.log(`\n${passed} passed`);
