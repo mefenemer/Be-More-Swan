@@ -452,7 +452,7 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
 export async function deleteBotMedia(db: Db, row: BotRow, timeoutMs?: number): Promise<boolean> {
     if (!row.recallBotId || row.mediaDeletedAt) return false;
     let done = await deleteRecallMedia(row.recallRegion as RecallRegion, row.recallBotId, timeoutMs).catch(() => false);
-    if (!done && recallMediaExpired(row.leftAt, row.joinAt, new Date())) {
+    if (!done && recallMediaExpired(row.leftAt, row.joinAt, new Date(), row.createdAt)) {
         // Recall's own timed retention (sent with every bot) has removed it by now; stop retrying (review of #836).
         console.warn('[meeting-bot] delete failed past Recall retention; counted as deleted', { botId: row.id });
         done = true;

@@ -5,7 +5,7 @@ import { execSync } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
-    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, RECALL_RETENTION_HOURS, recallMediaExpired, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
+    ALONE_TIMEOUT_S, JOIN_MESSAGE_MAX, RECALL_RETENTION_HOURS, RECALL_RETENTION_SINCE, recallMediaExpired, MEETING_BOT_FLAG, SCHEDULE_AHEAD_MS, WAITING_ROOM_TIMEOUT_S,
     botName, botPlatformOf, chargeUnits, cleanJoinAt, immediateJoinAt, cleanLengthLimit, cleanMeetingLink, joinMessage, minutesInCall,
     nextBotState, readRecallTranscript, recallBotRequest, replayBotState, recallRegionFor, recallTranscriptLines, reserveUnits, verifyRecallSignature,
     type BotStateRow, type BotStatus,
@@ -236,13 +236,14 @@ await test('Recall keeps the recording for a set time, never its default (foreve
 });
 
 await test('a delete that keeps failing stops being retried once Recall has expired the media itself', () => {
-    const left = new Date('2026-11-24T10:00:00Z');
+    const left = new Date('2026-12-01T10:00:00Z');
     const h = (n: number) => new Date(left.getTime() + n * 60 * 60 * 1000);
-    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS)), false, 'at Recall\'s expiry: keep trying');
-    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 23)), false, 'inside the day of margin');
-    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 25)), true, 'past it: counted as deleted');
-    assert.equal(recallMediaExpired(null, left, h(RECALL_RETENTION_HOURS + 25)), true, 'never joined: timed from its join time');
-    assert.equal(recallMediaExpired(null, h(200), h(RECALL_RETENTION_HOURS + 25)), false, 'booked ahead: not expired before it was due');
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS), left), false, 'at Recall\'s expiry: keep trying');
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 23), left), false, 'inside the day of margin');
+    assert.equal(recallMediaExpired(left, h(-1), h(RECALL_RETENTION_HOURS + 25), left), true, 'past it: counted as deleted');
+    assert.equal(recallMediaExpired(null, left, h(RECALL_RETENTION_HOURS + 25), left), true, 'never joined: timed from its join time');
+    assert.equal(recallMediaExpired(null, h(200), h(RECALL_RETENTION_HOURS + 25), left), false, 'booked ahead: not expired before it was due');
+    assert.equal(recallMediaExpired(left, h(-1), h(1000), new Date(RECALL_RETENTION_SINCE.getTime() - 1)), false, 'sent before retention existed: Recall keeps it, keep trying');
 });
 
 await test('the bot\'s video tile: a JPEG for recording and one for not recording, inside Recall\'s 1.3 MB limit', () => {
