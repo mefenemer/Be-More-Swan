@@ -21,8 +21,8 @@ import { sweepKilledPostRenders } from './render-post-video-background';
 
 type Db = ReturnType<typeof getDb>;
 
-/** Stop starting new work after this long. The worst single step (two 5 s Remotion reads) still ends inside 30 s. */
-export const BUDGET_MS = 12_000;
+/** Stop starting new work after this long. Leaves ~22 s for the last workspace: two 5 s Remotion reads, the ai_usage_log look-ups (fast once #851 indexes session_id) and its projects' clean-up (review of #852). */
+export const BUDGET_MS = 8_000;
 /** Post render jobs per run. Each can take one 5 s Remotion read. */
 export const POST_JOBS_PER_RUN = 2;
 /** Workspaces with stuck Video Producer projects per run. Each sweep logs at most 2 killed renders. */

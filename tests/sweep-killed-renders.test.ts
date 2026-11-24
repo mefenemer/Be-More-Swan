@@ -45,12 +45,12 @@ await check('runs the post sweep with its small per-run limit, then each stuck v
 });
 
 await check('stops starting new workspaces once the time budget is spent (Netlify stops scheduled functions at 30 s)', async () => {
-    const { d, calls } = deps({ orgs: [1, 2, 3, 4, 5], stepMs: 5_000 });
+    const { d, calls } = deps({ orgs: [1, 2, 3, 4, 5], stepMs: 4_000 });
     const r = await sweepKilledRenders(db, now, d);
-    // posts 5 s, org 1 → 10 s, org 2 → 15 s (≥ budget), so orgs 3–5 wait for the next hour.
-    assert.deepStrictEqual(calls.projects, [1, 2]);
-    assert.strictEqual(r.videoOrgsLeft, 3);
-    assert.ok(BUDGET_MS + 2 * 5_000 < 30_000, 'the last step started inside the budget (two 5 s Remotion reads) still ends before 30 s');
+    // posts 4 s, org 1 → 8 s (= budget), so orgs 2–5 wait for the next hour.
+    assert.deepStrictEqual(calls.projects, [1]);
+    assert.strictEqual(r.videoOrgsLeft, 4);
+    assert.ok(BUDGET_MS + 2 * 5_000 <= 20_000, 'the last step started inside the budget (two 5 s Remotion reads) still ends before 30 s');
 });
 
 await check('one workspace failing does not stop the others, and a failed lookup does not throw', async () => {
