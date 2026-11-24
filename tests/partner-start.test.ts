@@ -136,4 +136,12 @@ check('Terms 1.3 say the partnership starts on acceptance after approval (2.3), 
     assert.ok(t.includes('so that we can review your application, and again on your Partner page once we approve you'));
 });
 
+check('no invite link (or partner code) until the partnership starts; the page says why', () => {
+    assert.ok(read('netlify/functions/partner-hub.ts').includes('link: code && p.partnerSince ? {'));
+    const page = read('partner-content.html');
+    assert.ok(page.includes('Your invite link appears here once you accept the Partner Terms.'));
+    assert.ok(page.includes("show('pt-link-block', !!l);") && page.includes("show('pt-link-locked', !l && data.partner.status !== 'ended');"));
+    assert.ok(page.includes("data.partner.status === 'approved' && !!data.link;"), 'invite page card only after the start');
+});
+
 console.log(`\n${passed} passed`);
