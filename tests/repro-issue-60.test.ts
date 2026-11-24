@@ -13,6 +13,7 @@ const seedJson = JSON.parse(readFileSync(join(root, 'seed/data/master_assistants
 const inbox = seedJson.find((r) => r.roleKey === 'inbox_manager');
 assert.strictEqual(inbox?.isActive, false, 'seed JSON: Inbox Assistant not active');
 assert.strictEqual(inbox?.comingSoon, false, 'seed JSON: not "Coming soon" either');
+assert.strictEqual((inbox as any)?.lifecycleState, 'archived', 'seed JSON: archived, so a fresh database reads it as Retired');
 
 // The seed catalog writes the RETIRED columns (columnsFor('retired') in assistant-go-live.ts), not a hidden/coming-soon mix.
 const catalog = readFileSync(join(root, 'db/seed-catalog.ts'), 'utf8');
