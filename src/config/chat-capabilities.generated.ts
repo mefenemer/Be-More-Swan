@@ -350,6 +350,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "mentorPointerBlock",
         "mentorNoPlanBlock",
         "SUPPORT_REQUEST_PROMPT",
+        "takeMeThereBlock",
         "ASSISTANT_PAGE_LAYOUT",
         "OUTSIDE_PRODUCTS_RULE",
         "PLATFORM_NOTE_PROMPT"

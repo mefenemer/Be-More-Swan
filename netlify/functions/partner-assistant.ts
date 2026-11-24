@@ -23,6 +23,7 @@
 //
 // ⚠️ Synchronous function, 26s limit (netlify.toml): low effort + a 21s budget, as admin-partners-chat.ts.
 
+import { acceptedForUse } from '../../src/utils/partner-start';
 import jwt from 'jsonwebtoken';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, isNull, or, sql } from 'drizzle-orm';
@@ -41,7 +42,6 @@ import { resolvePeriodAt, effectiveShareBps } from '../../src/utils/partner-rate
 import { ensureReferralCode } from '../../src/utils/referral-code';
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { DRAFT_CHANNELS, finaliseDraft, handoffBrief, type DraftChannel } from '../../src/utils/partner-promo';
-import { hasAcceptedCurrentTerms } from '../../src/config/partner-terms';
 
 export const PARTNER_ASSISTANT_MODEL = 'claude-opus-5-5';
 const FALLBACK_MODEL = 'claude-opus-4-8';
@@ -125,7 +125,9 @@ export default withLambda(async (event) => {
     const p = await loadContext(db, userId);
     if (!p || (p.status !== 'approved' && p.status !== 'suspended')) return json(403, { error: 'The Partner Assistant is for approved partners.' });
     // The Terms hold the rules for promoting us (labelling ads, no spam) — no drafting before they're accepted.
-    if (!hasAcceptedCurrentTerms(p.termsVersion)) return json(403, { error: 'Please accept the Partner Terms first — it’s step 1 of your first-week list on this page (or the banner at the top, if you’ve hidden the list). They include the rules for promoting Be More Swan.' });
+    // …and, for a partner who hasn't started, accepted SINCE approval (owner 2026-11-24): drafts carry their link, and
+    // customers who first pay before the start never earn — so the assistant waits for the start too.
+    if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — it’s step 1 of your first-week list on this page (or the banner at the top, if you’ve hidden the list). They include the rules for promoting Be More Swan.' });
 
     let body: { messages?: Array<{ role?: unknown; content?: unknown }> };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request.' }); }

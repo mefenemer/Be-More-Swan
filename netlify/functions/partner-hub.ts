@@ -34,6 +34,7 @@ import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { getPartnerActivity } from '../../src/utils/partner-activity';
+import { acceptedForUse, canStart, needsAcceptance, startPartnershipIfReady } from '../../src/utils/partner-start';
 import { recordTermsAcceptance } from '../../src/utils/partner-terms-acceptance';
 import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml, isUkVatNumber } from '../../src/utils/partner-statements';
 import { checkRateLimit } from '../../src/utils/rate-limit';
@@ -84,13 +85,20 @@ export default withLambda(async (event) => {
         const code = live && p.status !== 'ended'
             ? impersonating ? await readReferralCode(db, userId) : await ensureReferralCode(db, userId)
             : null;
+        // BEFORE working out the rate, so this load already shows a special rate the start creates (review of #838).
+        // Ready but not started (a start that failed earlier)? Start now — idempotent; never while impersonating (GET stays a read).
+        if (!impersonating && canStart({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt })) {
+            const r = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry on load failed:', err); return { started: false }; });
+            if (r.started) { const [fresh] = await db.select({ partnerSince: partners.partnerSince }).from(partners).where(eq(partners.id, p.id)).limit(1); p.partnerSince = fresh?.partnerSince ?? p.partnerSince; }
+        }
         const periods = await db.select().from(partnerRatePeriods).where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, p.id)));
         const now = new Date();
         const current = resolvePeriodAt(periods, p.id, now);
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         const { stats, commissions } = live ? await partnerHubSummary(db, p.id) : { stats: null, commissions: [] };
         const [u] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
-        const termsAccepted = p.termsVersion === PARTNER_TERMS_VERSION;
+        // Accepted = the current version AND (for an approved partner who hasn't started) accepted since approval.
+        const termsAccepted = !needsAcceptance({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt });
         // The first-week card and the Partner Assistant's opening words (docs/partner-onboarding-plan.md §2).
         // Built from data, never a model call (owner decision D2). Not for 'ended' partners — no link, no assistant.
         let onboarding: Record<string, unknown> | null = null;
@@ -143,7 +151,13 @@ export default withLambda(async (event) => {
                 // Partner Terms have no fixed term, so with no end date it runs until changed on 30 days' notice (8.1).
                 renewsOn: current.endsAt ?? null,
             } : null,
-            partnerSince: p.decidedAt ?? null,
+            // Set when they accepted the Partner Terms after approval (partner-start.ts); null until then.
+            partnerSince: p.partnerSince ?? null,
+            // A special rate agreed with no dates yet: it starts when they accept the Partner Terms (partner-start.ts).
+            pendingRate: await (async () => {
+                const [r] = (await db.execute(sql`SELECT rate_bps, cost_deduction_bps, duration_months, window_months FROM partner_pending_rates WHERE partner_id = ${p.id}`)) as unknown as Array<Record<string, any>>;
+                return r ? { rateBps: Number(r.rate_bps), costDeductionBps: Number(r.cost_deduction_bps), durationMonths: r.duration_months == null ? null : Number(r.duration_months), windowMonths: Number(r.window_months) } : null;
+            })(),
             stats, commissions: commissions.map((c) => ({
                 id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps, costDeductionBps: c.cost_deduction_bps ?? 0,
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
@@ -199,16 +213,28 @@ export default withLambda(async (event) => {
         return r.ok ? json(200, { display: r.display }) : json(400, { error: r.error });
     }
     if (body.action === 'accept_terms') {
-        // A double click or retry: already on the current version — no second log row or copy email (review of #823).
-        if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
-        const moved = await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() })
-            .where(and(eq(partners.id, p.id), sql`${partners.termsVersion} IS DISTINCT FROM ${PARTNER_TERMS_VERSION}`)).returning({ id: partners.id });
-        if (!moved.length) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        // Owner 2026-11-24: the partnership starts when they accept AFTER approval (the application tick doesn't
+        // count). Already accepted since approval (or started)? No second log row or email — just retry the start.
+        if (!needsAcceptance({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt })) {
+            const retry = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry failed:', err); return { started: false }; });
+            return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: retry.started });
+        }
+        const now = new Date();
+        const moved = await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: now, updatedAt: now })
+            .where(and(eq(partners.id, p.id), sql`(${partners.termsVersion} IS DISTINCT FROM ${PARTNER_TERMS_VERSION} OR ${partners.termsAcceptedAt} IS NULL OR ${partners.termsAcceptedAt} < COALESCE(${partners.approvedAt}, '-infinity'::timestamp))`))
+            .returning({ id: partners.id });
+        if (!moved.length) {
+            const retry = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry failed:', err); return { started: false }; });
+            return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: retry.started });
+        }
         // Terms 1.2: keep the acceptance (append-only) and email a copy. Best-effort — the acceptance stands.
         const [me] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
         await recordTermsAcceptance(db, { partnerId: p.id, userId, channel: 'partner_page', email: me?.email ?? null, firstName: me?.firstName ?? null })
             .catch((err) => console.error('[partner-hub] acceptance record failed:', err));
-        return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        // Accepting (after approval) STARTS the partnership: Partner since, the activity clock, any waiting special rate.
+        // A failure here must not lose the acceptance: it's saved; opening the Partner page or accepting again retries.
+        const start = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start after acceptance failed — retried on the next Partner page load:', err); return { started: false }; });
+        return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: start.started });
     }
     if (body.action === 'onboarding') {
         const mark = String(body.mark || '') as PageMark;
@@ -234,7 +260,7 @@ export default withLambda(async (event) => {
     if (body.action === 'invite_profile_submit' || body.action === 'invite_profile_withdraw') {
         if (p.status !== 'approved') return json(403, { error: 'Your invite page can be changed while your partnership is active.' });
         // The page carries their words under our name: the Terms (5.1–5.3) come first.
-        if (p.termsVersion !== PARTNER_TERMS_VERSION) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
+        if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
         const pending = p.inviteProfilePending as InviteProfile | null;
         const liveKey = (p.inviteProfile as InviteProfile | null)?.photoKey ?? null;
         // Saves are conditional on what was read: if an admin approved (or sent back) a moment ago, the photo

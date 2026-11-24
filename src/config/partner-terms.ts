@@ -6,6 +6,8 @@
 // 1.2: legal review 2026-10-23 — ad label first + international rules (5.1, 5.3, 5.5), 30 days' notice
 //      of changes (3.3, 8.1), clawback as a debt (4.3), tax (4.5), immediate ending + 7.4, data roles
 //      (9.3), liability cap + indemnity (10), courts carve-out (11). docs/legal/partner-terms-v1.2-changes.md
+// 1.3: (also 1.2 / new 2.3 / 3.1 / 7.5(c),(i): the partnership starts when the partner accepts on their Partner page AFTER
+//      approval — the application tick only lets us review it; owner 2026-11-24; amended before anyone accepted 1.3)
 // 1.3: (also 4.3: a dispute that closes without the payment being taken back — e.g. an issuer inquiry,
 //      'warning_closed' — reinstates commission like a won one; owner 2026-11-23)
 // 1.3: launch contract, before the first partner (no partners had accepted 1.2): commission on

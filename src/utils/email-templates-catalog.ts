@@ -516,7 +516,9 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'Your Partner Assistant has your first-week plan ready.',
         bodyHtml: greet +
             p('Welcome to the partner team — your application is approved.') +
-            p('From today you earn {{partner.rate_line | "commission on every customer you invite"}}. It starts when someone you invite first pays.') +
+            // Owner 2026-11-24: nothing starts until they accept the Partner Terms on their Partner page (after approval).
+            p('<strong>One step to start:</strong> open your Partner page and accept the Partner Terms. Your partnership starts the moment you do — customers who first pay before then don’t earn you commission, so please accept before you share your link.') +
+            p('Once you’ve accepted, you earn {{partner.rate_line | "commission on every customer you invite"}}. It starts when someone you invite first pays.') +
             p('Your Partner page has your personal invite link and a short first-week plan. Your Partner Assistant is there too: it writes posts, emails and scripts in your voice (with your link and an ad label added), answers what you’ve earned, and tells you what to do next.') +
             button('Meet your Partner Assistant', 'link.action_url') + signoff,
     },
@@ -546,6 +548,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         bodyHtml: greet +
             p('Good news — your application to become a Be More Swan partner is approved.') +
             p('Use the button below to set up your partner account. Please use this email address — the link is private to you and works once.') +
+            p('Then accept the Partner Terms on your Partner page: your partnership starts the moment you do, and customers who first pay before then don’t earn you commission.') +
             button('Set up my partner account', 'link.action_url') +
             p('<span style="color:#6b7280;font-size:14px;">The link expires in {{partner.link_expires_days | "14"}} days. If it has, just reply and we’ll send a new one.</span>') +
             signoff,

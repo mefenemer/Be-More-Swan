@@ -16,6 +16,7 @@
 // numbers; once there are a few dozen approved partners, move the loop to a background function or batch
 // it — anyone not reached simply misses that week, nobody gets two (review of #816).
 
+import { acceptedForUse } from '../../src/utils/partner-start';
 import { eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -25,7 +26,6 @@ import { buildChecklist } from '../../src/utils/partner-onboarding';
 import { buildNudge, isoWeek, nudgeDecision, type NudgeMarks, type WeekStats } from '../../src/utils/partner-weekly-nudge';
 import { createNotification } from '../../src/utils/notify';
 import { sendTemplatedEmail } from '../../src/utils/email';
-import { PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 
 const baseUrl = () => (process.env.BASE_URL || 'https://bemoreswan.com').replace(/\/$/, '');
 
@@ -52,7 +52,7 @@ export async function sendWeeklyPartnerNudges(now = new Date()): Promise<{ sent:
 
             const [u] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, p.userId!)).limit(1);
             const steps = buildChecklist({
-                termsAccepted: p.termsVersion === PARTNER_TERMS_VERSION, payoutSet: !!(p.payoutDetailsConfirmedAt && p.payoutDisplay),
+                termsAccepted: acceptedForUse(p), payoutSet: !!(p.payoutDetailsConfirmedAt && p.payoutDisplay),
                 marks, stats: s, invitePageLive: !!p.inviteProfile,
             });
             const n = buildNudge({ firstName: u?.firstName ?? null, stats: s, steps });

@@ -127,7 +127,16 @@ function toDate(v: unknown): Date | null {
     return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
 }
 
-/** The clock's start (§7.5(c)): the later of the latest approval and the latest Qualifying Customer. */
+/**
+ * Where the clock counts from (owner 2026-11-24): the partnership's START — when the partner accepted the Partner
+ * Terms after approval (partner_since) — or a later reinstatement (approved_at). Null = not started: no clock at all.
+ */
+export function clockBase(partnerSince: Date | null, approvedAt: Date | null): Date | null {
+    if (!partnerSince) return null;
+    return approvedAt && approvedAt.getTime() > partnerSince.getTime() ? approvedAt : partnerSince;
+}
+
+/** The clock's start (§7.5(c)): the later of the clock base and the latest Qualifying Customer. */
 function clockStart(approvedAt: Date, last: Date | null): Date {
     return last && last.getTime() > approvedAt.getTime() ? last : approvedAt;
 }
@@ -148,15 +157,16 @@ export async function getPartnerActivity(db: Db, partnerId: number, now: Date = 
     const p = rows[0];
     const empty: PartnerActivity = { activeUntil: null, lastQualifyingAt: null, pauseDays: 0, notice: null, noticeMonths: 1, canSendNotice: false, canEnd: false };
     if (!p || !['approved', 'suspended'].includes(p.status)) return empty;
-    const approvedAt = toDate(p.approved_at) ?? toDate(p.decided_at) ?? toDate(p.created_at)!;
-    const since = toDate(p.partner_since) ?? approvedAt;
+    const since = toDate(p.partner_since);
+    const base = clockBase(since, toDate(p.approved_at));
+    if (!since || !base) return empty;   // not started: they haven't accepted the Partner Terms since approval
     const last = await lastQualifying(db, partnerId, since);
-    const pauseDays = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), clockStart(approvedAt, last));
-    const until = activeUntil(approvedAt, last, pauseDays);
+    const pauseDays = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), clockStart(base, last));
+    const until = activeUntil(base, last, pauseDays);
     const sentAt = toDate(p.notice_at);
     const endsAt = toDate(p.notice_ends);
     // A notice from before the latest approval is stale (approvals clear it; this is belt and braces).
-    const notice = sentAt && endsAt && sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null;
+    const notice = sentAt && endsAt && sentAt.getTime() >= base.getTime() ? { sentAt, endsAt } : null;
     const qualifiedSinceNotice = !!(notice && last && last.getTime() >= notice.sentAt.getTime());
     const pastDate = now.getTime() >= until.getTime();
     return {
@@ -240,10 +250,14 @@ export async function endForInactivity(db: Db, partnerId: number, adminId: numbe
         const ext = await extendForFreePeriods(db, partnerId, row.user_id ?? null, toDate(row.since)!, a.notice.endsAt);
         if (ext) return { ok: false, error: `Someone signed up through their link and is still in their free period, so the notice now runs until ${ukDate(ext)} (Partner Terms 7.5(e)).` };
     }
+    // One statement (review of #838): the end and removing any waiting special rate land together.
     const updated = (await db.execute(sql`
-        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'inactivity', decided_by = ${adminId}, decided_at = ${now.toISOString()}::timestamp,
-               decision_note = 'Ended for inactivity (Partner Terms 7.5)', inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
-         WHERE id = ${partnerId} AND status = 'approved' RETURNING id`)) as Row[];
+        WITH ended AS (
+            UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'inactivity', decided_by = ${adminId}, decided_at = ${now.toISOString()}::timestamp,
+                   decision_note = 'Ended for inactivity (Partner Terms 7.5)', inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
+             WHERE id = ${partnerId} AND status = 'approved' RETURNING id),
+        dropped AS (DELETE FROM partner_pending_rates WHERE partner_id IN (SELECT id FROM ended))
+        SELECT id FROM ended`)) as Row[];
     return updated.length ? { ok: true } : { ok: false, error: 'Someone else changed this partner a moment ago. Reload to see the latest.' };
 }
 
@@ -263,14 +277,13 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
     let extended = 0;
     const live = (await db.execute(sql`
         SELECT id, user_id, status, activity_pause_days, activity_pause_anchor::text AS pause_anchor, activity_pause_last_day::text AS last_day,
-               COALESCE(approved_at, decided_at, created_at)::text AS approved_at,
-               COALESCE(partner_since, approved_at, decided_at, created_at)::text AS since,
+               approved_at::text AS approved_at, partner_since::text AS since,
                inactivity_notice_at::text AS notice_at, inactivity_notice_ends::text AS notice_ends
-          FROM partners WHERE status IN ('approved', 'suspended')`)) as Row[];
+          FROM partners WHERE status IN ('approved', 'suspended') AND partner_since IS NOT NULL`)) as Row[];
     for (const p of live) {
         const since = toDate(p.since)!;
         const last = await lastQualifying(db, p.id, since);
-        const start = clockStart(toDate(p.approved_at)!, last);
+        const start = clockStart(clockBase(since, toDate(p.approved_at))!, last);
         let days = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), start);
         const pausedToday = p.status === 'suspended' || (p.status === 'approved' && registrationLocked);
         const notCountedToday = !p.last_day || String(p.last_day).slice(0, 10) < today;
@@ -321,15 +334,18 @@ export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promis
     if (now.getTime() < deadline.getTime()) return { ended: 0 };
     // Approved partners only: a suspended partner is under investigation, and ending them here would give them a
     // run-off a breach ending (7.4(b)) would not — an admin decides their case.
+    // One statement (review of #838): ending and removing any waiting special rate land together.
     const rows = (await db.execute(sql`
-        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
+        WITH ended AS (UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
                decided_at = ${now.toISOString()}::timestamp,
                decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
                inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
          WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
            -- the partner's own 60 days from their latest approval (declinedChangeDeadline)
            AND COALESCE(approved_at, decided_at, created_at) <= ${new Date(now.getTime() - DECLINED_CHANGE_DAYS * DAY_MS).toISOString()}::timestamp
-         RETURNING id, terms_version`)) as Row[];
+         RETURNING id, terms_version),
+        dropped AS (DELETE FROM partner_pending_rates WHERE partner_id IN (SELECT id FROM ended))
+        SELECT id, terms_version FROM ended`)) as Row[];
     for (const r of rows) {
         // A system decision: an audit row with no admin, and the partner is told (Terms 12.2 — notice by email).
         await db.execute(sql`

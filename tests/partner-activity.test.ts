@@ -103,7 +103,8 @@ check('an ended partner\'s link earns no refer-a-friend tokens (7.4)', () => {
 check('admin decisions set the clock, partnership start and end reason; inactivity has its own two steps', () => {
     const a = read('netlify/functions/admin-partners.ts');
     assert.ok(a.includes("? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,"), 'any approval restarts the clock and clears an old notice');
-    assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }"));
+    // Owner 2026-11-24: approval no longer sets partner_since — accepting the terms starts it (tests/partner-start.test.ts).
+    assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }"));
     assert.ok(a.includes("rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null }"), 'suspending clears a notice');
     assert.ok(a.includes("['closure', 'left', 'breach', 'other'].includes(String(body.endReason))"), 'inactivity cannot be chosen on a plain end');
     assert.ok(a.includes("body.action === 'inactivity_notice' || body.action === 'end_inactivity'"));
@@ -141,7 +142,7 @@ console.log('review #820 fixes');
 check('End is only possible once the active date has passed AND the notice has run out', () => {
     const a = read('src/utils/partner-activity.ts');
     assert.ok(a.includes("canEnd: p.status === 'approved' && !!notice && !qualifiedSinceNotice && pastDate && now.getTime() >= notice.endsAt.getTime(),"));
-    assert.ok(a.includes('sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null'), 'a notice from before the latest approval is ignored');
+    assert.ok(a.includes('sentAt.getTime() >= base.getTime() ? { sentAt, endsAt } : null'), 'a notice from before the clock base (start / reinstatement) is ignored');
 });
 check('a Qualifying Customer: first payment not while suspended, first commission not voided', () => {
     const a = read('src/utils/partner-activity.ts');

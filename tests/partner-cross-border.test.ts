@@ -199,10 +199,12 @@ check('third review of #823: first annual payment carries a 12-month period; run
 
 check('fifth review of #823: idempotent accept, UK-only VAT confirmation, honest banner', () => {
     const hub = read('netlify/functions/partner-hub.ts');
-    assert.ok(hub.includes('if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });'));
+    // Already on this version: no second log row or copy email — only a (safe) retry of the start (review of #838).
+    const early = hub.slice(hub.indexOf('if (!needsAcceptance({ status: p.status, terms_version: p.termsVersion'), hub.indexOf('const moved ='));
+    assert.ok(early.length > 0 && !early.includes('recordTermsAcceptance'), 'no second acceptance record');
     assert.ok(read('netlify/functions/admin-partners.ts').includes('if (!isUkVatNumber(expected)) return json(400'));
     assert.ok(read('admin.html').includes('outside the UK — reverse charge, no VAT added'));
-    assert.ok(read('partner-content.html').includes('If you accepted an earlier version, your commission is still paid (Partner Terms 8.1)'));
+    assert.ok(read('partner-content.html').includes('Your commission is still worked out and paid under the version you accepted (Partner Terms 8.1).'))  // started partners on an older version (owner 2026-11-24 wording);
     assert.ok(hub.includes('pendingCheck: isUkVatNumber(vat) && !registered') && hub.includes('pendingCheck: isUkVatNumber(p.vatNumber) && !p.vatRegistered'), 'only UK numbers wait for an HMRC check');
 });
 
