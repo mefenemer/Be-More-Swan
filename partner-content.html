@@ -30,7 +30,7 @@
   <!-- Partner Terms not accepted (admin-added partners, or a new version) -->
   <div id="pt-terms-banner" class="hidden bg-white border-2 border-pink-300 rounded-xl p-5 space-y-3">
     <p class="font-bold text-gray-900">Please accept the Partner Terms</p>
-    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. Your Partner Assistant can’t draft for you until you accept. If you accepted an earlier version, your commission is still paid (Partner Terms 8.1); if you’ve never accepted, it keeps building up but we can’t pay it until you do. <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
+    <p class="text-sm text-gray-600">They explain how you earn and get paid, and how to promote Be More Swan — including labelling your posts as ads. Your Partner Assistant can’t draft for you until you accept. <span id="pt-terms-money">Your partnership starts the moment you accept — customers who first pay before then don’t earn you commission, so please accept before you share your link.</span> <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read the Partner Terms</a> (<span id="pt-terms-version"></span>).</p>
     <p id="pt-terms-active" class="text-xs text-gray-600">Please read section 7.5 (<a href="/partner-terms.html#staying-active" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Staying active</a>): if 6 months go by without a new paying customer through you, we may end your partnership. On the standard 12-month commission period you keep earning on your existing customers until each one’s period ends.</p>
     <button type="button" onclick="window.partnerPage.acceptTerms()" id="pt-terms-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">I accept the Partner Terms</button>
   </div>
@@ -321,6 +321,11 @@
     const listOpen = !!data.onboarding && !(data.onboarding.folded && !welcomeShown);
     show('pt-terms-banner', (status === 'approved' || status === 'suspended' || status === 'ended') && !!data.partnerTerms && !data.partnerTerms.accepted && !listOpen);
     if (data.partnerTerms) document.getElementById('pt-terms-version').textContent = `version ${data.partnerTerms.version}, ${data.partnerTerms.updated}`;
+    // Owner 2026-11-24: before the start nothing builds up; only a STARTED partner on an older version keeps earning (8.1).
+    const moneyEl = document.getElementById('pt-terms-money');
+    if (moneyEl) moneyEl.textContent = data.partnerSince
+      ? 'Your commission is still worked out and paid under the version you accepted (Partner Terms 8.1).'
+      : 'Your partnership starts the moment you accept — customers who first pay before then don’t earn you commission, so please accept before you share your link.';
     if (status === 'approved' || status === 'suspended' || status === 'ended') { render(); loadKit(); }
     const cap = await (window.checkCapacity ? window.checkCapacity() : null);
     show('pt-upsell', !!cap?.noPlan && status !== 'applied');
@@ -373,7 +378,7 @@
     document.getElementById('pt-pending').textContent = money(s.pending_pence);
     const min = data.payoutRules?.minPayoutPence ?? 0;
     document.getElementById('pt-payable-note').textContent = !s.payable_pence ? 'Nothing to pay yet.'
-      : data.partnerTerms && !data.partnerTerms.accepted ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) so we can pay you.'
+      : data.partnerTerms && !data.partnerTerms.accepted && !data.partnerSince ? 'Accept the Partner Terms (step 1 of your first-week list, or the banner at the top) to start your partnership.'
       : (s.payable_pence >= min ? (data.payout.display ? 'Included in the next monthly payout.' : 'Add your payout details below so we can pay you.')
         : `${money(min - s.payable_pence)} more to reach the ${money(min)} minimum — it rolls over until then, or is paid once it has waited 6 months and is at least £10.`);
     // Partner Terms 1.3 §7.5(g): the date your Active Period ends, and any notice.

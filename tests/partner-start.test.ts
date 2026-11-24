@@ -104,4 +104,11 @@ check('admin "terms accepted" uses the same rule as the Partner page', () => {
     assert.ok(read('netlify/functions/admin-partners.ts').includes('termsAccepted: !needsAcceptance({ status: r.status'));
 });
 
+check('the Partner page never tells a not-started partner that commission "keeps building up"', () => {
+    const page = read('partner-content.html');
+    assert.ok(!page.includes('it keeps building up but we can’t pay it until you do'));
+    assert.ok(page.includes("if (moneyEl) moneyEl.textContent = data.partnerSince"), 'started on an older version → 8.1 wording; not started → starts on acceptance');
+    assert.ok(page.includes('to start your partnership.'));
+});
+
 console.log(`\n${passed} passed`);

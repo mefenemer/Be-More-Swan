@@ -5,7 +5,8 @@
 //   • The 6-month activity clock (partner-activity.ts) starts then.
 //   • Any pending special rate (partner_pending_rates, agreed with no dates) becomes a dated rate period: it starts that
 //     moment and ends window_months later.
-// Called after an approval (if the current terms were already accepted) and after an acceptance (if already approved).
+// Called when the partner accepts the terms after approval (partner-hub accept_terms), and on Partner page load to
+// retry a start that failed. NOT called at approval: approval sets approved_at = now, so it needs a NEW acceptance.
 // Idempotent: a partnership that has started is never re-started (partner_since stays put).
 
 import { sql } from 'drizzle-orm';
