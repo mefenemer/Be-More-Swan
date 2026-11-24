@@ -315,15 +315,17 @@ export default withLambda(async (event) => {
                 ...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }
             : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null }
             : rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
-        const updated = await db.update(partners)
-            .set({ status: rule.to, decidedBy: adminId, decidedAt: now, decisionNote: note, updatedAt: now, ...activity })
-            .where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))
-            .returning({ id: partners.id });
+        // One transaction (review of #838): a reject / end and removing any waiting special rate land together.
+        const updated = await db.transaction(async (tx) => {
+            const u = await tx.update(partners)
+                .set({ status: rule.to, decidedBy: adminId, decidedAt: now, decisionNote: note, updatedAt: now, ...activity })
+                .where(and(eq(partners.id, partnerId), eq(partners.status, before.status)))
+                .returning({ id: partners.id });
+            if (u.length && (rule.to === 'rejected' || rule.to === 'ended')) await tx.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);
+            return u;
+        });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
         await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
-        // Rejected or ended: a special rate still waiting to start goes too, so it can't start on a later approval
-        // without anyone being asked (review of #838).
-        if (rule.to === 'rejected' || rule.to === 'ended') await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);
         // No start here: approval sets approved_at = now, and the start needs an acceptance AFTER approval (owner
         // 2026-11-24). A not-yet-started partner — new, re-approved or reinstated — is asked on their Partner page.
         // Approving tells them: a welcome if they have an account, a private account link if not.

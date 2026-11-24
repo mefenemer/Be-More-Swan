@@ -38,6 +38,7 @@ check('the Partner page asks an approved, not-started partner to accept again un
     assert.strictEqual(needsAcceptance({ ...base, terms_accepted_at: d('2026-12-03') }), false);
     assert.strictEqual(needsAcceptance({ ...base, partner_since: '2026-12-03', terms_accepted_at: d('2026-11-20') }), false, 'started: no re-ask');
     assert.strictEqual(needsAcceptance({ ...base, terms_version: '1.2', terms_accepted_at: d('2026-12-03') }), true, 'older version always asks');
+    assert.strictEqual(needsAcceptance({ ...base, status: 'suspended', terms_accepted_at: d('2026-11-20') }), true, 'suspended before ever starting: the assistant waits too');
 });
 check('a waiting special rate runs from acceptance for its window (Angela: 12 months)', () => {
     assert.deepStrictEqual(pendingWindow(d('2026-12-03'), 12), { startsAt: d('2026-12-03'), endsAt: d('2027-12-03') });
@@ -117,14 +118,22 @@ check('every gate uses the same "accepted" rule: Monday summary, Partner Assista
     assert.ok(read('netlify/functions/partner-hub.ts').includes("if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });"));
 });
 check('a waiting special rate is removed when the application is rejected or the partnership ends', () => {
-    assert.ok(read('netlify/functions/admin-partners.ts').includes("if (rule.to === 'rejected' || rule.to === 'ended') await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);"));
+    // Atomic with the status change (review of #838).
+    assert.ok(read('netlify/functions/admin-partners.ts').includes("if (u.length && (rule.to === 'rejected' || rule.to === 'ended')) await tx.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);"));
     const act = read('src/utils/partner-activity.ts');
-    assert.ok(act.includes('DELETE FROM partner_pending_rates WHERE partner_id = ${r.id}'), 'declined-change sweep');
-    assert.ok(act.includes('if (updated.length) await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);'), 'end for inactivity');
+    assert.strictEqual((act.match(/dropped AS \(DELETE FROM partner_pending_rates WHERE partner_id IN \(SELECT id FROM ended\)\)/g) || []).length, 2, 'declined-change sweep and end for inactivity, each one statement');
 });
 check('the Partner page retries a failed start BEFORE working out the rate', () => {
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.indexOf('if (!impersonating && canStart({') < hub.indexOf('const periods = await db.select().from(partnerRatePeriods)'));
+});
+
+check('Terms 1.3 say the partnership starts on acceptance after approval (2.3), matching the code', () => {
+    const t = read('partner-terms.html');
+    assert.ok(t.includes('<strong>2.3 — When your partnership starts.</strong>'));
+    assert.ok(t.includes('with their first payment that takes money made on or after your start date (section 2.3)'));
+    assert.ok(t.includes('(i) your start date (section 2.3), or the date we last reinstated you if that is later'));
+    assert.ok(t.includes('so that we can review your application, and again on your Partner page once we approve you'));
 });
 
 console.log(`\n${passed} passed`);

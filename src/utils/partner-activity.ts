@@ -250,11 +250,14 @@ export async function endForInactivity(db: Db, partnerId: number, adminId: numbe
         const ext = await extendForFreePeriods(db, partnerId, row.user_id ?? null, toDate(row.since)!, a.notice.endsAt);
         if (ext) return { ok: false, error: `Someone signed up through their link and is still in their free period, so the notice now runs until ${ukDate(ext)} (Partner Terms 7.5(e)).` };
     }
+    // One statement (review of #838): the end and removing any waiting special rate land together.
     const updated = (await db.execute(sql`
-        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'inactivity', decided_by = ${adminId}, decided_at = ${now.toISOString()}::timestamp,
-               decision_note = 'Ended for inactivity (Partner Terms 7.5)', inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
-         WHERE id = ${partnerId} AND status = 'approved' RETURNING id`)) as Row[];
-    if (updated.length) await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);   // review of #838
+        WITH ended AS (
+            UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'inactivity', decided_by = ${adminId}, decided_at = ${now.toISOString()}::timestamp,
+                   decision_note = 'Ended for inactivity (Partner Terms 7.5)', inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
+             WHERE id = ${partnerId} AND status = 'approved' RETURNING id),
+        dropped AS (DELETE FROM partner_pending_rates WHERE partner_id IN (SELECT id FROM ended))
+        SELECT id FROM ended`)) as Row[];
     return updated.length ? { ok: true } : { ok: false, error: 'Someone else changed this partner a moment ago. Reload to see the latest.' };
 }
 
@@ -331,18 +334,19 @@ export async function endDeclinedChanges(db: Db, now: Date = new Date()): Promis
     if (now.getTime() < deadline.getTime()) return { ended: 0 };
     // Approved partners only: a suspended partner is under investigation, and ending them here would give them a
     // run-off a breach ending (7.4(b)) would not — an admin decides their case.
+    // One statement (review of #838): ending and removing any waiting special rate land together.
     const rows = (await db.execute(sql`
-        UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
+        WITH ended AS (UPDATE partners SET status = 'ended', ended_at = ${now.toISOString()}::timestamp, end_reason = 'change_declined',
                decided_at = ${now.toISOString()}::timestamp,
                decision_note = ${`Did not accept Partner Terms v${PARTNER_TERMS_VERSION} within ${DECLINED_CHANGE_DAYS} days (Terms 8.1)`},
                inactivity_notice_at = NULL, inactivity_notice_ends = NULL, updated_at = now()
          WHERE status = 'approved' AND terms_version IS NOT NULL AND terms_version <> ${PARTNER_TERMS_VERSION}
            -- the partner's own 60 days from their latest approval (declinedChangeDeadline)
            AND COALESCE(approved_at, decided_at, created_at) <= ${new Date(now.getTime() - DECLINED_CHANGE_DAYS * DAY_MS).toISOString()}::timestamp
-         RETURNING id, terms_version`)) as Row[];
+         RETURNING id, terms_version),
+        dropped AS (DELETE FROM partner_pending_rates WHERE partner_id IN (SELECT id FROM ended))
+        SELECT id, terms_version FROM ended`)) as Row[];
     for (const r of rows) {
-        // An ended partner's special rate still waiting to start goes too (as on an admin end — review of #838).
-        await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${r.id}`);
         // A system decision: an audit row with no admin, and the partner is told (Terms 12.2 — notice by email).
         await db.execute(sql`
             INSERT INTO admin_audit_log (admin_id, action, target_type, target_id, previous_state, new_state)

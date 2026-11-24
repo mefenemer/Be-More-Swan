@@ -38,7 +38,8 @@ export function acceptedForUse(p: { status: string; termsVersion: string | null;
 /** Does the Partner page still need to ask them to accept? (Approved and not started, but no acceptance since approval.) */
 export function needsAcceptance(p: { status: string; terms_version: string | null; partner_since: unknown; terms_accepted_at: Date | null; approved_at: Date | null }): boolean {
     if (p.terms_version !== PARTNER_TERMS_VERSION) return true;
-    if (p.status !== 'approved' || p.partner_since) return false;
+    // Suspended before ever starting counts too (review of #838): nothing can earn until reinstated + accepted again.
+    if (!['approved', 'suspended'].includes(p.status) || p.partner_since) return false;
     return !p.terms_accepted_at || (!!p.approved_at && p.terms_accepted_at.getTime() < p.approved_at.getTime());
 }
 
