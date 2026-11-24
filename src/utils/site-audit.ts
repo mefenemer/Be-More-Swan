@@ -497,7 +497,10 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             eq(siteAuditRuns.status, 'done'),
             sql`${siteAuditRuns.scores} IS NOT NULL`,
         )).orderBy(desc(siteAuditRuns.id)).limit(1);
-        const prevScores = (prevScored?.scores ?? {}) as { answers?: AuditInput['previousAnswers']; outcomes?: AuditInput['previousOutcomes'] };
+        const prevScoresRaw = (prevScored?.scores ?? {}) as { answers?: AuditInput['previousAnswers']; outcomes?: AuditInput['previousOutcomes']; url?: string };
+        // Only a run on THIS page: the audited URL is stored with its answers (review on PR #856 — a thin read right after
+        // a page switch saves new hashes, while the last scored run is still the old page's).
+        const prevScores = prevScoresRaw.url && normaliseSiteUrl(prevScoresRaw.url) === normaliseSiteUrl(audit.url) ? prevScoresRaw : {};
 
         let productsBlock: string | null = null;
         try { productsBlock = await loadProductsBlock(db, orgId); } catch { /* no products is fine */ }
@@ -614,7 +617,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             status: 'done',
             charged: true,
             overallScore: outcome.score.overall,
-            scores: { overall: outcome.score.overall, lenses: outcome.score.lenses, outcomes: outcome.score.outcomes, answers: outcome.answers },
+            scores: { overall: outcome.score.overall, lenses: outcome.score.lenses, outcomes: outcome.score.outcomes, answers: outcome.answers, url: audit.url },
             pages: outcome.pages,
             changes: outcome.report.competitorChanges,
             report: { ...outcome.report, fixes: outcome.fixes },

@@ -108,6 +108,12 @@ const brief = { url: SITE, icp: 'Small business owners', conversionGoal: 'Start 
     assert.ok(fFewer.calls.includes('compete'), 'one competitor fewer: compete re-asked');
     assert.ok(!fFewer.calls.includes('clarity') && !fFewer.calls.includes('ai'), 'the owner\'s page lenses still reused');
 
+    // Review on PR #856 (second round): stored answers carry the audited URL, and only a run on the same URL is used —
+    // a thin read just after a page switch saves new hashes while the last scored run is still the old page's.
+    const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src/utils/site-audit.ts'), 'utf8') as string;
+    assert.ok(src.includes('answers: outcome.answers, url: audit.url }'), 'the URL is stored with the answers');
+    assert.ok(src.includes('normaliseSiteUrl(prevScoresRaw.url) === normaliseSiteUrl(audit.url) ? prevScoresRaw : {}'), 'and must match the page audited now');
+
     // The pure pieces.
     const prev = [{ id: 'a', yes: true, evidence: '' }, { id: 'b', yes: true, evidence: '' }];
     assert.deepStrictEqual(flippedIds(prev, [{ id: 'a', yes: false, evidence: '' }, { id: 'b', yes: true, evidence: '' }]), ['a']);
