@@ -6717,7 +6717,7 @@ export const partners = pgTable("partners", {
   uniqueIndex("partners_invite_token_uq").on(t.inviteTokenHash).where(sql`invite_token_hash IS NOT NULL`),
   uniqueIndex("partners_promo_code_uq").on(sql`upper(${t.promoCode})`).where(sql`promo_code IS NOT NULL`),
   uniqueIndex("partners_payout_pending_token_uq").on(t.payoutPendingTokenHash).where(sql`payout_pending_token_hash IS NOT NULL`),
-  check("partners_status_check", sql`${t.status} IN ('applied','approved','rejected','suspended')`),
+  check("partners_status_check", sql`${t.status} IN ('applied','approved','rejected','suspended','ended')`),   // matches db/z-affiliate-partner-ended.sql
   check("partners_payout_method_check", sql`${t.payoutMethod} IN ('wise','paypal','bank','us_bank','eu_bank')`),
 ]);
 

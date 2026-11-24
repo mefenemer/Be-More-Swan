@@ -136,4 +136,24 @@ check('Terms 1.3 say the partnership starts on acceptance after approval (2.3), 
     assert.ok(t.includes('so that we can review your application, and again on your Partner page once we approve you'));
 });
 
+check('no invite link (or partner code) until the partnership starts; the page says why', () => {
+    assert.ok(read('netlify/functions/partner-hub.ts').includes('link: code && p.partnerSince ? {'));
+    const page = read('partner-content.html');
+    assert.ok(page.includes('Your invite link appears here once you accept the Partner Terms.'));
+    assert.ok(page.includes("show('pt-link-block', !!l);") && page.includes("show('pt-link-locked', !l && data.partner.status !== 'ended');"));
+    assert.ok(page.includes("data.partner.status === 'approved' && !!data.link;"), 'invite page card only after the start');
+});
+
+check('the link can\'t be reached any other way before the start: first-week list, Partner Assistant, Referrals page (GET/POST), email a friend', () => {
+    assert.ok(read('partner-content.html').includes("|| ((k === 'share' || k === 'invite_page') && !data.link);"));
+    const a = read('netlify/functions/partner-assistant.ts');
+    assert.ok(a.includes('const code = p.partnerSince ? await ensureReferralCode(db, userId) : null;'));
+    assert.ok(a.includes("if (p.status === 'approved' && !p.partnerSince && acceptedForUse(p)) return json(409"), 'assistant waits for a start that is still going through');
+    const r = read('netlify/functions/referral.ts');
+    assert.ok(r.includes('const notStarted = await partnerLinkBlocked(db, callerId);') && r.includes('referralCode: notStarted ? null : user.referralCode,'), 'GET: no code or link');
+    assert.ok(r.includes("if (await partnerLinkBlocked(db, callerId)) return { statusCode: 409"), 'POST: no code generated / returned');
+    assert.ok(read('netlify/functions/referral-share.ts').includes('if (await partnerLinkBlocked(db, callerId)) {'), 'email a friend refused');
+    assert.ok(read('referral-content.html').includes('if (data.partnerNotStarted) {'));
+});
+
 console.log(`\n${passed} passed`);
