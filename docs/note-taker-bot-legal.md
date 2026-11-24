@@ -4,6 +4,8 @@
 
 **Updated 2026-11-21** after Recall's reply of 20 November (§10): Recall's transcription is run by AssemblyAI, and Recall staff in the US can reach customer data for support. §2, §3, §4, §7.1 and §8 now say so.
 
+**Updated 2026-11-24** after Recall's second reply (§10): AssemblyAI may keep audio for up to 3 days if its deletion fails; EU meeting content is processed and stored in the EU. Owner decision: keep accuracy mode with language detection (no Zero Data Retention), and set an explicit 48-hour Recall retention as a backstop. §2, §3, §4, §8 and §10 updated.
+
 **Owner decisions, 2026-11-19:**
 - **One DPA 1.2 covers both** the Note Taker bot and the Email Assistant (whose 1.2 text was agreed on 12 November, `docs/email-assistant-phase0.md` §5), so customers accept once.
 - **Terms 2.5 is drafted now and published at launch**, not bumped now, so users re-accept once, when the bot exists.
@@ -26,7 +28,7 @@ Insert after the fal.ai row:
 
 | Sub-Processor | Purpose | Location | DPA / Security |
 |---|---|---|---|
-| Recall.ai | Meeting bot for the Note Taker: joins the Google Meet, Microsoft Teams or Zoom calls you send it to, makes the transcript (using its own sub-processor AssemblyAI, which deletes the audio once it has been turned into text), and deletes the recording once we have saved the transcript | Recordings and transcripts: EU (Frankfurt) for UK and EU workspaces; US for US workspaces. Recall support staff in the US may access data when needed | `recall.ai/data-processing-agreement` (UK Addendum included) |
+| Recall.ai | Meeting bot for the Note Taker: joins the Google Meet, Microsoft Teams or Zoom calls you send it to, makes the transcript (using its own sub-processor AssemblyAI, which deletes the audio once it has been turned into text, within 3 days at most), and deletes the recording once we have saved the transcript | Recordings and transcripts: EU (Frankfurt) for UK and EU workspaces; US for US workspaces. Recall support staff in the US may access data when needed | `recall.ai/data-processing-agreement` (UK Addendum included) |
 
 AssemblyAI goes in Recall's row, not a row of its own: we contract with Recall, and Recall's DPA covers its sub-processors (their list is linked from Recall's trust centre). We name AssemblyAI anyway, because it hears the meeting audio.
 
@@ -36,7 +38,7 @@ AssemblyAI goes in Recall's row, not a row of its own: we contract with Recall, 
 
 **§5 AI processing**, add a bullet after "Media generation":
 
-> **Meetings the Note Taker joins.** When you send the Note Taker to an online meeting, a bot from our provider Recall.ai joins the call under the name "Note Taker for ⟨your business⟩" and posts a notice in the meeting chat. It records the call only to make a transcript, with each person's display name taken from the meeting service. Recall.ai's transcription provider, AssemblyAI, turns the audio into text and then deletes the audio. As soon as the transcript is saved in your workspace, the recording is deleted at Recall.ai. The transcript is then written up into minutes, which wait for a person to approve them. Anyone in the meeting can see the bot, and the host can remove it at any time. Your business decides which meetings to send it to, and is responsible for telling the people in them.
+> **Meetings the Note Taker joins.** When you send the Note Taker to an online meeting, a bot from our provider Recall.ai joins the call under the name "Note Taker for ⟨your business⟩" and posts a notice in the meeting chat. It records the call only to make a transcript, with each person's display name taken from the meeting service. Recall.ai's transcription provider, AssemblyAI, turns the audio into text and then deletes the audio (within 3 days at most). As soon as the transcript is saved in your workspace, the recording is deleted at Recall.ai. The transcript is then written up into minutes, which wait for a person to approve them. Anyone in the meeting can see the bot, and the host can remove it at any time. Your business decides which meetings to send it to, and is responsible for telling the people in them.
 
 **§6 If you are a contact, lead or prospect**, add a paragraph:
 
@@ -46,7 +48,7 @@ AssemblyAI goes in Recall's row, not a row of its own: we contract with Recall, 
 
 | Data | Retention |
 |---|---|
-| Meeting recordings made by the Note Taker | Deleted at our provider as soon as the transcript is saved; at most 24 hours if making the transcript fails. The transcription provider deletes the audio once it has been processed |
+| Meeting recordings made by the Note Taker | Deleted at our provider as soon as the transcript is saved; at most 24 hours if making the transcript fails, and our provider deletes anything left after 48 hours. The transcription provider deletes the audio once it has been processed, within 3 days at most |
 | Meeting transcripts | 30 days, then deleted automatically. You can delete one sooner |
 | Meeting minutes (summary, decisions, tasks, follow-up email) | Until you delete the meeting or your account |
 
@@ -108,7 +110,7 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 >
 > We're telling you, as our Data Processing Agreement promises, that from ⟨L⟩ we will use a new sub-processor: **Recall.ai**.
 >
-> **What it does:** when you send your Note Taker to a Google Meet, Microsoft Teams or Zoom call, Recall.ai's bot joins the call, makes the transcript and then deletes the recording. Recall.ai uses AssemblyAI to turn the audio into text; AssemblyAI deletes the audio once that is done. It is only used when you choose to send the Note Taker to a meeting.
+> **What it does:** when you send your Note Taker to a Google Meet, Microsoft Teams or Zoom call, Recall.ai's bot joins the call, makes the transcript and then deletes the recording. Recall.ai uses AssemblyAI to turn the audio into text; AssemblyAI deletes the audio once that is done, within 3 days at most. It is only used when you choose to send the Note Taker to a meeting.
 >
 > **Where:** recordings and transcripts for UK and EU workspaces are made and stored in the EU (Frankfurt); for US workspaces, in the US. Recall.ai's support staff in the US may access data when they need to, to support or fix the service. Recall.ai's data processing agreement includes the standard contractual clauses and the UK Addendum that cover this.
 >
@@ -138,9 +140,9 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 | People recorded without knowing | Medium / high | Bot's name says what it is; chat notice on joining (proven in Phase 0 on Meet and Teams); host must admit it and can remove it; Terms 9.3; reminder in the send dialog | Low |
 | All-party consent laws (US states) broken | Medium / high | Terms 9.3 puts the duty on the customer; help article names it; the in-call notice supports consent | Medium (customer's duty) |
 | Special category data in what is said | Medium / medium | DPA 13 exception limits use to transcript and minutes; prompt never infers or labels a category; meetings for medical or disciplinary purposes excluded; transcript deleted at 30 days | Low |
-| Recording kept longer than needed | Low / high | `delete_media` straight after the transcript is saved (proven in Phase 0); failed jobs deleted within 24 hours | Low |
-| Transfer to the US | Medium / medium | UK and EU workspaces on Recall's EU region, where recordings, transcripts and backups stay and AssemblyAI transcribes in the EU; US workspaces stay in the US. Recall support staff in the US may access data when needed (least privilege, multi-factor sign-in), covered by the SCCs and UK Addendum in Recall's DPA. Recall's logs and webhooks can hold meeting links, join times and participant names, never audio or video | Low |
-| Transcription provider keeps meeting audio or text | Low / medium | AssemblyAI deletes the audio once processed; billing and log details may remain. Whether it keeps transcripts without Zero Data Retention is open (§10) | Low, pending §10 |
+| Recording kept longer than needed | Low / high | `delete_media` straight after the transcript is saved (proven in Phase 0); failed jobs deleted within 24 hours; every bot is sent with a 48-hour Recall retention, so a failed delete cannot leave media at Recall for good (Recall's default is to keep it forever) | Low |
+| Transfer to the US | Medium / medium | UK and EU workspaces on Recall's EU region, where recordings, transcripts and backups stay and AssemblyAI transcribes in the EU; US workspaces stay in the US. Recall support staff in the US may access data when needed (least privilege, multi-factor sign-in), covered by the SCCs and UK Addendum in Recall's DPA. Recall confirmed (24 November) that the DPA's "primary processing in the United States" (§6.1) is general wording for the whole service: for our eu-central-1 workspace, meeting content is processed and stored in the EU. Recall's logs and webhooks can hold meeting links, join times and participant names, never audio or video | Low |
+| Transcription provider keeps meeting audio or text | Low / medium | AssemblyAI deletes the audio once processed, keeping it up to 3 days only if that deletion fails; billing and log details may remain. Zero Data Retention would remove this, but only in English low-latency mode and with no transcript stored to fetch after the call (§10); owner chose accuracy mode with language detection instead | Low |
 | Bot joins the wrong meeting | Low / medium | Sent only by a person pasting a link or approving a chat card; duplicate-send guard; Remove from call / Cancel | Low |
 | Vendor breach | Low / high | Recall SOC 2 Type II and ISO 27001; recordings deleted at once, so little is held | Low |
 
@@ -161,10 +163,14 @@ Recall support replied on 20 November 2026 to our questions about transcription 
 - EU workspace: recordings, transcripts, personal data from meetings and backups stay in the region where the meeting was captured. Logs and request metadata (resource IDs, meeting links, join times, custom metadata, participant identifiers) go to Recall's logging and webhook sub-processors, never audio or video.
 - Recall staff in the US may access customer data to support, debug or maintain the service (least privilege, multi-factor sign-in).
 
-**Still to ask Recall (before the Trust row goes up at L − 14):**
-1. Does AssemblyAI keep transcripts when Zero Data Retention is off, and for how long?
-2. Can Zero Data Retention be switched on for a pay-as-you-go account, and at what price?
-3. Does `prioritize_low_latency` support automatic language detection, or only some languages? (Decides whether switching to it is worth it.)
-4. How does the DPA's "primary processing in the United States" fit the EU region? (The reply covered storage, not this sentence.)
+**Recall's second reply (24 November 2026), to the four questions we sent on 21 November:**
+1. **Audio retention without Zero Data Retention:** AssemblyAI deletes the audio once processed, but may keep it for up to 3 days if the deletion fails. (Transcripts were not mentioned separately; Recall's docs say the same "up to 3 days" for the transcription provider in accuracy mode.)
+2. **Zero Data Retention on pay-as-you-go:** available, no extra charge; set `recording_config.retention` to `null` in each Create Bot request.
+3. **`prioritize_low_latency`:** English only (`language_code: "en"`). `prioritize_accuracy` with `language_code: "auto"` keeps automatic language detection. Only low-latency with Zero Data Retention keeps no audio or transcript at Recall or AssemblyAI.
+4. **"Primary processing in the United States":** the DPA (§6.1) is written for the whole service, since customers choose their region. For our eu-central-1 workspace, meeting content is processed and stored in the EU; the exceptions (operational logs, service metadata, support access) are covered by the SCCs in the DPA. Logs never include audio or video; support access only as needed.
 
-If Zero Data Retention with `prioritize_low_latency` turns out to be available and good enough, switching the bot to it is a one-line code change, and the "Transcription provider keeps" row in §8 drops to Low.
+**Recall's docs (read 24 November, `docs.recall.ai/docs/zero-data-retention` and `storage-and-playback`):** with `retention: null` nothing is written to disk, transcripts included, so there is no transcript to download after the call. It must be received live (`transcript.data` events), cannot be replayed, and delivery is not guaranteed. Low-latency mode also drops decimal points and has no custom vocabulary. Leaving `retention` out means Recall's default, which for accounts made after 12 June 2025 is to keep media forever.
+
+**Decision (owner, 24 November 2026):** keep `prioritize_accuracy` with `language_code: 'auto'`. Switching would mean rebuilding how transcripts come in and English-only meetings, for a gain of at most 3 days' backstop storage at AssemblyAI. Every bot is now sent with `retention: { type: 'timed', hours: 48 }` (`RECALL_RETENTION_HOURS`, `src/utils/meeting-bot.ts`), longer than our own 24-hour delete so it never cuts off a transcript the writer still needs.
+
+Nothing is left to ask Recall for the Trust row.
