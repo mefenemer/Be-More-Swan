@@ -46,8 +46,12 @@ const CATALOG = [
         category: 'Administration',
         iconKey: 'mail',
         iconColor: 'blue',
-        comingSoon: true,
-        isActive: false,   // retired — the Email Assistant (email_assistant) does this job (Fix pipeline #60, owner 2026-11-15; db/z-retire-inbox-assistant.sql)
+        // Retired (columnsFor('retired') in src/utils/assistant-go-live.ts): the Email Assistant (email_assistant) does this job
+        // (Fix pipeline #60, owner 2026-11-15). The live row is retired in Admin ▸ Assistants (the one status path); this
+        // seed inserts only missing rows, so it only decides what a FRESH database gets.
+        comingSoon: false,
+        isActive: false,
+        lifecycleState: 'archived',
     },
     {
         roleKey: 'calendar_coordinator',

@@ -9,18 +9,20 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(__dirname, '..');
-const seedJson = JSON.parse(readFileSync(join(root, 'seed/data/master_assistants.json'), 'utf8')) as Array<{ roleKey: string; isActive: boolean }>;
-assert.strictEqual(seedJson.find((r) => r.roleKey === 'inbox_manager')?.isActive, false, 'seed JSON: Inbox Assistant inactive');
+const seedJson = JSON.parse(readFileSync(join(root, 'seed/data/master_assistants.json'), 'utf8')) as Array<{ roleKey: string; isActive: boolean; comingSoon: boolean }>;
+const inbox = seedJson.find((r) => r.roleKey === 'inbox_manager');
+assert.strictEqual(inbox?.isActive, false, 'seed JSON: Inbox Assistant not active');
+assert.strictEqual(inbox?.comingSoon, false, 'seed JSON: not "Coming soon" either');
 
+// The seed catalog writes the RETIRED columns (columnsFor('retired') in assistant-go-live.ts), not a hidden/coming-soon mix.
 const catalog = readFileSync(join(root, 'db/seed-catalog.ts'), 'utf8');
 const entry = catalog.slice(catalog.indexOf("roleKey: 'inbox_manager'"), catalog.indexOf("roleKey: 'calendar_coordinator'"));
-assert.ok(/isActive: false/.test(entry), 'seed catalog: Inbox Assistant inactive');
+assert.ok(/comingSoon: false/.test(entry) && /isActive: false/.test(entry) && /lifecycleState: 'archived'/.test(entry), 'seed catalog: retired columns');
+const status = readFileSync(join(root, 'src/utils/assistant-go-live.ts'), 'utf8');
+assert.ok(status.includes("case 'retired':     return { isActive: false, comingSoon: false, lifecycleState: 'archived' };"), 'the same columns the Retired status writes');
 
-const sql = readFileSync(join(root, 'db/z-retire-inbox-assistant.sql'), 'utf8');
-assert.ok(/UPDATE master_assistants\s+SET is_active = false/.test(sql), 'the SQL switches the live row off');
-assert.ok(/WHERE role_key = 'inbox_manager'/.test(sql), 'only that row');
-assert.ok(/NOT EXISTS \(SELECT 1 FROM ai_assistants/.test(sql), 'never one somebody has hired');
-assert.ok(!/DELETE|DROP|TRUNCATE/i.test(sql.replace(/--.*$/gm, '')), 'nothing deleted');
+// The live row is retired through Admin ▸ Assistants (the one status path, audit-logged) — no SQL in this change.
+assert.ok(!require('node:fs').existsSync(join(root, 'db/z-retire-inbox-assistant.sql')), 'no hand SQL');
 
 const listing = readFileSync(join(root, 'netlify/functions/master-assistants.ts'), 'utf8');
 assert.ok(listing.includes('.where(eq(masterAssistants.isActive, true))'), 'the Hire catalogue lists active rows only');
