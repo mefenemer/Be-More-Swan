@@ -53,9 +53,14 @@ check('no typed price or task allowance', () => {
 check('connectors named as working are Live on connections.html, and the Coming-soon ones say so', () => {
     const conn = read('connections.html');
     const live = (name: string) => new RegExp(`<h4>${name}</h4><span class="cx-pill cx-live">`).test(conn);
-    for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Google Search Console', 'Canva']) {
+    for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Canva']) {
         assert.ok(live(name), `${name} is Live on connections.html`);
     }
+    // Google Search Console: Coming soon until its Google OAuth client is set (Fix pipeline #67, 2026-11-24 —
+    // no SEARCHCONSOLE_CLIENT_ID in Netlify, so every connect failed). Not named as working anywhere public.
+    assert.ok(/<h4>Google Search Console<\/h4><span class="cx-pill cx-soon">/.test(conn), 'Search Console is Coming soon');
+    assert.ok(/Google Search Console, HubSpot, Salesforce and Xero are coming soon/.test(faq), 'the homepage FAQ says Search Console is coming soon');
+    assert.ok(!/connect today to[^.]*Search Console/.test(faq), 'and does not name it as working');
     // YouTube: Google approved the project's verification on 2026-11-05, so the YouTube card is Live again.
     // One card since 2026-11-10: the Video Producer's copy was removed — it posts nothing, the Social
     // Media Assistant does (connection-map.ts gives video_producer Canva only).
