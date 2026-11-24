@@ -207,16 +207,24 @@ export default withLambda(async (event) => {
     }
     if (body.action === 'accept_terms') {
         // A double click or retry: already on the current version — no second log row or copy email (review of #823).
-        if (p.termsVersion === PARTNER_TERMS_VERSION) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        // Still try to start (review of #838): a start that failed before (DB blip) is retried here — it's idempotent.
+        if (p.termsVersion === PARTNER_TERMS_VERSION) {
+            const retry = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry failed:', err); return { started: false }; });
+            return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: retry.started });
+        }
         const moved = await db.update(partners).set({ termsVersion: PARTNER_TERMS_VERSION, termsAcceptedAt: new Date(), updatedAt: new Date() })
             .where(and(eq(partners.id, p.id), sql`${partners.termsVersion} IS DISTINCT FROM ${PARTNER_TERMS_VERSION}`)).returning({ id: partners.id });
-        if (!moved.length) return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        if (!moved.length) {
+            const retry = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry failed:', err); return { started: false }; });
+            return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: retry.started });
+        }
         // Terms 1.2: keep the acceptance (append-only) and email a copy. Best-effort — the acceptance stands.
         const [me] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
         await recordTermsAcceptance(db, { partnerId: p.id, userId, channel: 'partner_page', email: me?.email ?? null, firstName: me?.firstName ?? null })
             .catch((err) => console.error('[partner-hub] acceptance record failed:', err));
         // Accepting (after approval) STARTS the partnership: Partner since, the activity clock, any pending special rate.
-        const start = await startPartnershipIfReady(db, p.id);
+        // A failure here must not lose the acceptance: it's saved; accepting again (or the next approval) retries the start.
+        const start = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start after acceptance failed — partner can retry by accepting again:', err); return { started: false }; });
         return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: start.started });
     }
     if (body.action === 'onboarding') {

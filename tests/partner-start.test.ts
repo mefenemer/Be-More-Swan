@@ -41,11 +41,14 @@ console.log('wiring');
 check('approval no longer sets a start date; it starts the partnership only if the current terms were already accepted', () => {
     const a = read('netlify/functions/admin-partners.ts');
     assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }"));
-    assert.ok(a.includes("if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now);"), 'every move to approved, incl. reinstatement');
+    assert.ok(a.includes("if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now).catch("), 'every move to approved, incl. reinstatement');
     assert.ok(!a.includes('approvedAt: new Date(), partnerSince: new Date()'), 'admin-added partners also wait for acceptance');
 });
 check('accepting on the Partner page starts it', () => {
-    assert.ok(read('netlify/functions/partner-hub.ts').includes('const start = await startPartnershipIfReady(db, p.id);'));
+    const hub = read('netlify/functions/partner-hub.ts');
+    assert.ok(hub.includes('const start = await startPartnershipIfReady(db, p.id).catch('), 'a failed start never loses the acceptance');
+    assert.strictEqual((hub.match(/const retry = await startPartnershipIfReady\(db, p\.id\)/g) || []).length, 2, 'accepting again retries a failed start (review of #838)');
+    assert.ok(read('netlify/functions/admin-partners.ts').includes("await startPartnershipIfReady(db, partnerId, now).catch((err) =>"), 'approval email still goes out if the start fails');
 });
 check('starting is conditional (approved, current terms, not started) and turns the waiting rate into a dated period', () => {
     const s = read('src/utils/partner-start.ts');
