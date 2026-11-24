@@ -58,17 +58,22 @@ const DOING_VERB = '(?:drafting|writing up|putting together|creating|scheduling)
  */
 const REVISE_VERB = '(?:rewritten|rewrote|revised|redrafted|reworked)';
 
+/** First person, rewriting an existing post: "I've rewritten the Ipswich post", "I revised it" (#78). */
+const CLAIMS_REVISION = new RegExp(`\\bi(?:'|’)?(?:ve|\\s+have)?\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\b`, 'i');
+
 /**
  * A condition, not a report: "articles only publish WHEN THEY'RE SCHEDULED in Blog Studio" explains how
  * publishing works. Fix pipeline #71 (2026-11-16): the content-predicate pattern read "they're scheduled" in that
  * sentence as a claim, and an honest answer to "what does this button do?" was swapped for "Sorry — I said that
- * was done". The clause from the conjunction to the next comma is dropped before the claim patterns run; a claim
- * outside it ("When you asked, I've drafted it") still counts.
+ * was done". Only the conditional verb phrase itself is dropped ("when they're scheduled", "once it is saved", "until
+ * they are approved and scheduled"), so a claim elsewhere in the sentence still counts, comma or none: "Once again
+ * I've drafted your posts", "If all goes well it's scheduled for Thursday".
  */
-/** First person, rewriting an existing post: "I've rewritten the Ipswich post", "I revised it" (#78). */
-const CLAIMS_REVISION = new RegExp(`\\bi(?:'|’)?(?:ve|\\s+have)?\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\b`, 'i');
-
-const CONDITION_CLAUSE = /\b(?:when|whenever|if|once|until|unless)\b[^,;:]*/gi;
+const CONDITION_CLAUSE = new RegExp(
+    `\\b(?:when|whenever|if|once|until|unless)\\s+(?:it|they|these|those|posts?|articles?|drafts?|captions?|pieces?|issues?)`
+    + `\\s*(?:is|are|was|were|has been|have been|(?:'|’)s|(?:'|’)re)\\s+(?:now\\s+|already\\s+)?(?:\\w+\\s+and\\s+)?${DONE_VERB}\\b`,
+    'gi',
+);
 
 /**
  * Phrasings that assert a post EXISTS, or is being made right now. Each one requires the

@@ -57,3 +57,10 @@ console.log('repro-issue-71-78: conditions are not claims; rewrites are ✓');
 // In the post editor's chat the rewrite is on the card under the reply, so "I've rewritten it" is honest there.
 assert.strictEqual(replyClaimsPostSaved("I've rewritten the caption with a stronger opening.", { revisions: false }), false, 'editor chat: a rewrite on the card is not an unbacked claim');
 assert.strictEqual(replyClaimsPostSaved("I've saved it to your post.", { revisions: false }), true, 'editor chat: a SAVE claim is still caught');
+
+// A condition is only the conditional verb phrase: a claim elsewhere in the sentence still counts, comma or none.
+for (const s of [
+    'Once again I\'ve drafted your three posts.',
+    'Unless you object I\'ve scheduled all three for Monday.',
+    'If all goes well it\'s scheduled for Thursday.',
+]) assert.strictEqual(replyClaimsPostSaved(s), true, `claim beside a condition word: ${s}`);
