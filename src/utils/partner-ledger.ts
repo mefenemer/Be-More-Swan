@@ -221,7 +221,9 @@ export async function recordPartnerPayment(db: Db, payment: PartnerPayment): Pro
         return { recorded: false, reason: 'suspended' };
     }
     // §7.5(i): after re-approval, only customers who first pay in the current partnership earn.
-    if (ref.partnerSince && terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' };
+    // No start date yet (approved but hasn't accepted the Partner Terms — owner 2026-11-24): nothing is earned; and
+    // after re-approval only customers who first pay in the current partnership earn.
+    if (!ref.partnerSince || terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' };
     if (!isWithinCommissionWindow(terms.subscribedAt, terms.durationMonths, payment.paidAt)) {
         return { recorded: false, reason: 'outside_window' };
     }

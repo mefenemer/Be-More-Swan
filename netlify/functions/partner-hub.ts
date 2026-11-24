@@ -34,6 +34,7 @@ import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { getPartnerActivity } from '../../src/utils/partner-activity';
+import { startPartnershipIfReady } from '../../src/utils/partner-start';
 import { recordTermsAcceptance } from '../../src/utils/partner-terms-acceptance';
 import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml, isUkVatNumber } from '../../src/utils/partner-statements';
 import { checkRateLimit } from '../../src/utils/rate-limit';
@@ -143,7 +144,13 @@ export default withLambda(async (event) => {
                 // Partner Terms have no fixed term, so with no end date it runs until changed on 30 days' notice (8.1).
                 renewsOn: current.endsAt ?? null,
             } : null,
-            partnerSince: p.decidedAt ?? null,
+            // Set when they accepted the Partner Terms after approval (partner-start.ts); null until then.
+            partnerSince: p.partnerSince ?? null,
+            // A special rate agreed with no dates yet: it starts when they accept the Partner Terms (partner-start.ts).
+            pendingRate: await (async () => {
+                const [r] = (await db.execute(sql`SELECT rate_bps, cost_deduction_bps, duration_months, window_months FROM partner_pending_rates WHERE partner_id = ${p.id}`)) as unknown as Array<Record<string, any>>;
+                return r ? { rateBps: Number(r.rate_bps), costDeductionBps: Number(r.cost_deduction_bps), durationMonths: r.duration_months == null ? null : Number(r.duration_months), windowMonths: Number(r.window_months) } : null;
+            })(),
             stats, commissions: commissions.map((c) => ({
                 id: c.id, kind: c.kind, status: c.status, amountPence: c.commission_pence, rateBps: c.rate_bps, costDeductionBps: c.cost_deduction_bps ?? 0,
                 availableAt: c.available_at, createdAt: c.created_at, paidAt: c.paid_at, voidReason: c.void_reason,
@@ -208,7 +215,9 @@ export default withLambda(async (event) => {
         const [me] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
         await recordTermsAcceptance(db, { partnerId: p.id, userId, channel: 'partner_page', email: me?.email ?? null, firstName: me?.firstName ?? null })
             .catch((err) => console.error('[partner-hub] acceptance record failed:', err));
-        return json(200, { ok: true, version: PARTNER_TERMS_VERSION });
+        // Accepting (after approval) STARTS the partnership: Partner since, the activity clock, any pending special rate.
+        const start = await startPartnershipIfReady(db, p.id);
+        return json(200, { ok: true, version: PARTNER_TERMS_VERSION, started: start.started });
     }
     if (body.action === 'onboarding') {
         const mark = String(body.mark || '') as PageMark;

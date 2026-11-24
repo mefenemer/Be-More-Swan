@@ -12332,7 +12332,12 @@ function _partnersRenderList() {
           <button type="button" onclick="partnerOpenRate({ mode: 'add', partnerId: ${p.id} })" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Add special rate</button>
         </div>
         <p class="text-[11px] text-gray-500 mb-2">For the dates set, this partner's new customers get this rate instead of the programme rate.</p>
-        ${p.rates.length ? `<table class="w-full text-sm"><tbody>${_partnersRateRows(p.rates, p.id)}</tbody></table>` : '<p class="text-xs text-gray-500">None — they are on the programme rate.</p>'}
+        <p class="text-[11px] mb-2 ${p.partnerSince ? 'text-gray-500' : 'text-amber-700 font-semibold'}">${p.partnerSince ? `Partnership started ${_pDate(p.partnerSince)} (when they accepted the Partner Terms).` : 'Not started yet — the partnership, its activity clock and any waiting special rate start when they accept the Partner Terms after approval.'}</p>
+        ${p.pendingRate ? `<div class="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-gray-800 flex items-center justify-between gap-2">
+            <span><strong>Waiting to start:</strong> ${_pPct(p.pendingRate.rateBps)} after ${_pPct(p.pendingRate.costDeductionBps)} costs, ${p.pendingRate.durationMonths == null ? 'lifetime' : p.pendingRate.durationMonths + ' months'} per customer, for customers who first pay in the ${p.pendingRate.windowMonths} months after they accept${p.pendingRate.label ? ` · <em>${_pEsc(p.pendingRate.label)}</em>` : ''}</span>
+            <button type="button" onclick="partnerPendingRateDelete(${p.id})" class="btn-destructive px-2 py-0.5 text-[11px] font-bold rounded-lg border">Remove</button></div>` : ''}
+        ${!p.partnerSince && !p.pendingRate && ['applied', 'approved'].includes(p.status) ? `<button type="button" onclick="partnerPendingRate(${p.id})" class="btn-utility px-2 py-0.5 text-[11px] font-bold rounded-lg mb-2">Add special rate that starts when they accept</button>` : ''}
+        ${p.rates.length ? `<table class="w-full text-sm"><tbody>${_partnersRateRows(p.rates, p.id)}</tbody></table>` : (p.pendingRate ? '' : '<p class="text-xs text-gray-500">None — they are on the programme rate.</p>')}
       </div>
     </td></tr>`;
     return main + detail;
@@ -12570,6 +12575,36 @@ async function partnerDecide(id, decision) {
   try {
     const d = await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', partnerId: id, decision, note, endReason }) });
     window.showToast?.({ approve: _partnerEmailedLine('Partner approved.', d.emailed), reject: 'Application rejected.', suspend: 'Partner suspended.', reinstate: 'Partner reinstated.', end: 'Partnership ended.' }[decision]);
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// A special rate with no dates (owner 2026-11-24): it starts the day the partner accepts the Partner Terms after approval
+// and runs for the window chosen here. "Director-signed agreement" lifts the Terms 3.5 caps (e.g. Angela, D4).
+async function partnerPendingRate(id) {
+  const p = _partners.data.partners.find((x) => x.id === id);
+  if (!p) return;
+  const ask = async (msg, value, title) => window.promptModal(msg, { title, value: String(value), inputType: 'number', confirmLabel: 'Next' });
+  const rate = await ask('Commission rate (%) after costs:', 25, 'Special rate — 1 of 4'); if (rate === null) return;
+  const months = await ask('Paid for how many months of each customer? (1–120)', 12, 'Special rate — 2 of 4'); if (months === null) return;
+  const windowM = await ask('For customers who first pay in how many months after they accept? (1–60)', 12, 'Special rate — 3 of 4'); if (windowM === null) return;
+  const director = await window.choiceModal('Is this covered by a director-signed agreement that overrides Partner Terms 3.5?', [
+    { value: 'no', label: 'No — keep within Terms 3.5', description: 'At most 40% after a 20% minimum, at most 24 months.' },
+    { value: 'yes', label: 'Yes — signed agreement', description: 'The 3.5 caps don’t apply. Make sure the agreement is signed first.' },
+  ], { title: 'Special rate — 4 of 4' });
+  if (!director) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'pending_rate', partnerId: id, rateBps: Math.round(Number(rate) * 100), costDeductionBps: 2000,
+      durationMonths: Number(months), windowMonths: Number(windowM), directorAgreement: director === 'yes' }) });
+    window.showToast?.('Special rate saved — it starts when they accept the Partner Terms.');
+    loadPartners();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+async function partnerPendingRateDelete(id) {
+  if (!(await window.confirmModal('Remove the waiting special rate? They’ll be on the programme rate when they start.', { title: 'Remove special rate', confirmLabel: 'Remove' }))) return;
+  try {
+    await api(PARTNERS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pending_rate_delete', partnerId: id }) });
     loadPartners();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }

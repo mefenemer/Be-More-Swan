@@ -63,8 +63,9 @@ async function main() {
         await sql.unsafe(`INSERT INTO partner_rate_periods (partner_id, rate_bps, duration_months, starts_at, ends_at)
                           VALUES (NULL, 2500, 12, '2026-10-18', '2026-12-01'), (NULL, 2000, 12, '2026-12-01', NULL)`);
         // Users: 100 approved partner, 101 suspended partner, 102 ordinary customer.
-        const [p1] = await sql.unsafe(`INSERT INTO partners (user_id, status) VALUES (100, 'approved') RETURNING id`);
-        await sql.unsafe(`INSERT INTO partners (user_id, status) VALUES (101, 'suspended')`);
+        // partner_since: the partnership has started (they accepted the terms after approval — owner 2026-11-24).
+        const [p1] = await sql.unsafe(`INSERT INTO partners (user_id, status, partner_since) VALUES (100, 'approved', '2026-01-01') RETURNING id`);
+        await sql.unsafe(`INSERT INTO partners (user_id, status, partner_since) VALUES (101, 'suspended', '2026-01-01')`);
         // Referred customers: 200, 201 (by partner 100), 202 (by suspended 101), 203 (by customer 102).
         await sql.unsafe(`INSERT INTO user_referrals (referrer_id, referred_user_id, referral_code) VALUES
                           (100, 200, 'p1'), (100, 201, 'p1'), (101, 202, 'p2'), (102, 203, 'c1'), (100, 204, 'p1')`);

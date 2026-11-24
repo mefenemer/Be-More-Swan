@@ -127,7 +127,16 @@ function toDate(v: unknown): Date | null {
     return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
 }
 
-/** The clock's start (§7.5(c)): the later of the latest approval and the latest Qualifying Customer. */
+/**
+ * Where the clock counts from (owner 2026-11-24): the partnership's START — when the partner accepted the Partner
+ * Terms after approval (partner_since) — or a later reinstatement (approved_at). Null = not started: no clock at all.
+ */
+export function clockBase(partnerSince: Date | null, approvedAt: Date | null): Date | null {
+    if (!partnerSince) return null;
+    return approvedAt && approvedAt.getTime() > partnerSince.getTime() ? approvedAt : partnerSince;
+}
+
+/** The clock's start (§7.5(c)): the later of the clock base and the latest Qualifying Customer. */
 function clockStart(approvedAt: Date, last: Date | null): Date {
     return last && last.getTime() > approvedAt.getTime() ? last : approvedAt;
 }
@@ -148,15 +157,16 @@ export async function getPartnerActivity(db: Db, partnerId: number, now: Date = 
     const p = rows[0];
     const empty: PartnerActivity = { activeUntil: null, lastQualifyingAt: null, pauseDays: 0, notice: null, noticeMonths: 1, canSendNotice: false, canEnd: false };
     if (!p || !['approved', 'suspended'].includes(p.status)) return empty;
-    const approvedAt = toDate(p.approved_at) ?? toDate(p.decided_at) ?? toDate(p.created_at)!;
-    const since = toDate(p.partner_since) ?? approvedAt;
+    const since = toDate(p.partner_since);
+    const base = clockBase(since, toDate(p.approved_at));
+    if (!since || !base) return empty;   // not started: they haven't accepted the Partner Terms since approval
     const last = await lastQualifying(db, partnerId, since);
-    const pauseDays = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), clockStart(approvedAt, last));
-    const until = activeUntil(approvedAt, last, pauseDays);
+    const pauseDays = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), clockStart(base, last));
+    const until = activeUntil(base, last, pauseDays);
     const sentAt = toDate(p.notice_at);
     const endsAt = toDate(p.notice_ends);
     // A notice from before the latest approval is stale (approvals clear it; this is belt and braces).
-    const notice = sentAt && endsAt && sentAt.getTime() >= approvedAt.getTime() ? { sentAt, endsAt } : null;
+    const notice = sentAt && endsAt && sentAt.getTime() >= base.getTime() ? { sentAt, endsAt } : null;
     const qualifiedSinceNotice = !!(notice && last && last.getTime() >= notice.sentAt.getTime());
     const pastDate = now.getTime() >= until.getTime();
     return {
@@ -263,14 +273,13 @@ export async function sweepPartnerActivity(db: Db, now: Date = new Date(), regis
     let extended = 0;
     const live = (await db.execute(sql`
         SELECT id, user_id, status, activity_pause_days, activity_pause_anchor::text AS pause_anchor, activity_pause_last_day::text AS last_day,
-               COALESCE(approved_at, decided_at, created_at)::text AS approved_at,
-               COALESCE(partner_since, approved_at, decided_at, created_at)::text AS since,
+               approved_at::text AS approved_at, partner_since::text AS since,
                inactivity_notice_at::text AS notice_at, inactivity_notice_ends::text AS notice_ends
-          FROM partners WHERE status IN ('approved', 'suspended')`)) as Row[];
+          FROM partners WHERE status IN ('approved', 'suspended') AND partner_since IS NOT NULL`)) as Row[];
     for (const p of live) {
         const since = toDate(p.since)!;
         const last = await lastQualifying(db, p.id, since);
-        const start = clockStart(toDate(p.approved_at)!, last);
+        const start = clockStart(clockBase(since, toDate(p.approved_at))!, last);
         let days = pauseDaysFor(Number(p.activity_pause_days) || 0, toDate(p.pause_anchor), start);
         const pausedToday = p.status === 'suspended' || (p.status === 'approved' && registrationLocked);
         const notCountedToday = !p.last_day || String(p.last_day).slice(0, 10) < today;

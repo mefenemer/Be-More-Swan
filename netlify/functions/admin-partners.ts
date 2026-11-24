@@ -15,6 +15,9 @@
 //   POST { action: 'decide', partnerId, decision: 'approve'|'reject'|'suspend'|'reinstate'|'end', note?, endReason? }
 //        endReason (end only) = 'closure'|'left'|'breach'|'other' — decides the run-off (Terms 1.3 §7.2 / §7.4)
 //   POST { action: 'inactivity_notice', partnerId } | { action: 'end_inactivity', partnerId }   → Terms 1.3 §7.5
+//   POST { action: 'pending_rate', partnerId, rateBps, costDeductionBps?, durationMonths|null, windowMonths, directorAgreement?, label? }
+//        → a special rate with NO dates; it starts when the partner accepts the terms after approval (partner-start.ts)
+//   POST { action: 'pending_rate_delete', partnerId }
 //   POST { action: 'confirm_vat', partnerId, vatNumber }  → Terms 4.5(b): UK VAT is added only after this (HMRC check done)
 //   POST { action: 'create', email, note? }               → an existing BMS user becomes an approved partner
 //   POST { action: 'resend_invite', partnerId }          → a fresh account link for an approved applicant with no account
@@ -41,7 +44,7 @@ import { getDb } from '../../db/client';
 import { partnerProgrammeSettings, partnerRatePeriods, partners, users } from '../../db/schema';
 import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { DEFAULT_COST_DEDUCTION_BPS, ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from '../../src/utils/partner-rate-periods';
+import { DEFAULT_COST_DEDUCTION_BPS, periodShapeErrors, ukMidnightUtc, validatePeriodChanges, type PeriodChange, type RatePeriod } from '../../src/utils/partner-rate-periods';
 import { listPartnersWithNumbers } from '../../src/utils/partner-ops';
 import { sendApprovalEmail } from '../../src/utils/partner-applications';
 import { setPartnerCode } from '../../src/utils/invite-codes';
@@ -51,6 +54,7 @@ import { deletePhoto, invitePageView, inviteProfileState, orphanedKeys, type Inv
 import { createNotification } from '../../src/utils/notify';
 import { isUkVatNumber } from '../../src/utils/partner-statements';
 import { endForInactivity, getPartnerActivity, sendInactivityNotice } from '../../src/utils/partner-activity';
+import { startPartnershipIfReady } from '../../src/utils/partner-start';
 import { addBonus, voidCommission, batchLines, buildExport, cancelBatch, createBatch, listBatches, listLedger, markBatchPaid, markExported, previewPayout, type ExportFormat } from '../../src/utils/partner-payout-batches';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -162,6 +166,12 @@ export default withLambda(async (event) => {
         const [settings] = await db.select().from(partnerProgrammeSettings).where(eq(partnerProgrammeSettings.id, 1)).limit(1);
         const periods = await db.select().from(partnerRatePeriods).orderBy(asc(partnerRatePeriods.startsAt));
         const rows = await listPartnersWithNumbers(db);   // shared with the Partner Ops chat
+        // Special rates agreed with no dates yet — they start when the partner accepts the terms (partner-start.ts).
+        const pendingRows = (await db.execute(sql`SELECT * FROM partner_pending_rates`)) as unknown as Array<Record<string, any>>;
+        const pendingById = new Map(pendingRows.map((r) => [Number(r.partner_id), {
+            rateBps: Number(r.rate_bps), costDeductionBps: Number(r.cost_deduction_bps), durationMonths: r.duration_months == null ? null : Number(r.duration_months),
+            windowMonths: Number(r.window_months), label: r.label ?? null,
+        }]));
         // Terms 1.3 §7.5: the activity clock for approved / suspended partners (a few queries each; partners are few).
         const activityById = new Map<number, Awaited<ReturnType<typeof getPartnerActivity>>>();
         for (const r of rows) if (r.status === 'approved' || r.status === 'suspended') activityById.set(r.id, await getPartnerActivity(db, r.id));
@@ -189,6 +199,8 @@ export default withLambda(async (event) => {
                 endedAt: r.ended_at ?? null, endReason: r.end_reason ?? null,
                 vatNumber: r.vat_number ?? null, vatConfirmed: !!r.vat_registered,
                 activity: activityById.get(r.id) ?? null,
+                partnerSince: r.partner_since ?? null,
+                pendingRate: pendingById.get(Number(r.id)) ?? null,
             })),
         });
     }
@@ -288,7 +300,9 @@ export default withLambda(async (event) => {
         const activity = rule.to === 'approved'
             // Any approval restarts the 6 months: no old notice or paused days carry over (§7.5(c), (g)).
             ? { approvedAt: now, inactivityNoticeAt: null, inactivityNoticeEnds: null, activityPauseDays: 0, activityPauseAnchor: now,
-                ...(before.status !== 'suspended' ? { partnerSince: now, endedAt: null, endReason: null } : {}) }
+                // A new partnership has NO start date until the partner accepts the Partner Terms (owner 2026-11-24):
+                // partner_since is set by startPartnershipIfReady below, or when they accept on their Partner page.
+                ...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }
             : rule.to === 'ended' ? { endedAt: now, endReason, inactivityNoticeAt: null, inactivityNoticeEnds: null }
             : rule.to === 'suspended' ? { inactivityNoticeAt: null, inactivityNoticeEnds: null } : {};
         const updated = await db.update(partners)
@@ -297,6 +311,8 @@ export default withLambda(async (event) => {
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
         await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
+        // Approved and the current terms already accepted (e.g. at application)? Then the partnership starts now.
+        if (rule.to === 'approved' && before.status !== 'suspended') await startPartnershipIfReady(db, partnerId, now);
         // Approving tells them: a welcome if they have an account, a private account link if not.
         // Best-effort — the approval stands, and "Resend account link" is there if the email failed.
         let emailed: Awaited<ReturnType<typeof sendApprovalEmail>> | null = null;
@@ -304,6 +320,45 @@ export default withLambda(async (event) => {
             emailed = await sendApprovalEmail(db, partnerId).catch((err) => { console.error('[admin-partners] approval email failed', err); return null; });
         }
         return json(200, { ok: true, status: rule.to, emailed });
+    }
+
+    // ── A special rate with NO dates: it starts the day the partner accepts the terms after approval ──────
+    // (owner 2026-11-24; partner-start.ts). directorAgreement = covered by a director-signed agreement that overrides
+    // Terms 3.5, so the 3.5 caps (40% rate, 20% minimum deduction, 24 months) don't apply — the wide limits still do.
+    if (body.action === 'pending_rate' || body.action === 'pending_rate_delete') {
+        const partnerId = Number(body.partnerId);
+        const [p] = (await db.execute(sql`SELECT id, status, partner_since FROM partners WHERE id = ${partnerId}`)) as unknown as Array<Record<string, any>>;
+        if (!p) return json(404, { error: 'That partner no longer exists.' });
+        if (body.action === 'pending_rate_delete') {
+            const del = (await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId} RETURNING partner_id`)) as unknown as unknown[];
+            if (!del.length) return json(404, { error: 'There is no waiting special rate for this partner.' });
+            await audit('partner_rates_change', partnerId, { pendingRate: true }, { pendingRate: null });
+            return json(200, { ok: true });
+        }
+        if (p.partner_since) return json(409, { error: 'This partnership has already started — add a dated special rate instead.' });
+        if (!['applied', 'approved'].includes(p.status)) return json(409, { error: `This partner is ${p.status}.` });
+        const rateBps = Number(body.rateBps), costDeductionBps = Number(body.costDeductionBps ?? DEFAULT_COST_DEDUCTION_BPS);
+        const durationMonths = body.durationMonths == null || body.durationMonths === '' ? null : Number(body.durationMonths);
+        const windowMonths = Number(body.windowMonths ?? 12);
+        const director = body.directorAgreement === true;
+        const errors: string[] = [];
+        if (!Number.isInteger(windowMonths) || windowMonths < 1 || windowMonths > 60) errors.push('The window must be 1–60 months.');
+        // Same checks as a dated period; a director-signed agreement lifts only the Terms 3.5 caps.
+        const probe = { partnerId, rateBps, costDeductionBps, durationMonths, startsAt: new Date(Date.now() + 86_400_000), endsAt: null };
+        errors.push(...periodShapeErrors(probe, !director));
+        if (!director && durationMonths === null) errors.push('Lifetime needs a director-signed agreement (Terms 3.5).');
+        if (errors.length) return json(400, { error: errors.join(' ') });
+        const [dated] = (await db.execute(sql`SELECT id FROM partner_rate_periods WHERE partner_id = ${partnerId} AND (ends_at IS NULL OR ends_at > now()) LIMIT 1`)) as unknown as unknown[];
+        if (dated) return json(409, { error: 'This partner already has a current or upcoming dated special rate — end it first.' });
+        const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 200)
+            : (director ? 'Director-signed agreement (overrides Terms 3.5)' : null);
+        await db.execute(sql`
+            INSERT INTO partner_pending_rates (partner_id, rate_bps, cost_deduction_bps, duration_months, window_months, label, created_by)
+            VALUES (${partnerId}, ${rateBps}, ${costDeductionBps}, ${durationMonths}, ${windowMonths}, ${label}, ${adminId})
+            ON CONFLICT (partner_id) DO UPDATE SET rate_bps = EXCLUDED.rate_bps, cost_deduction_bps = EXCLUDED.cost_deduction_bps,
+                duration_months = EXCLUDED.duration_months, window_months = EXCLUDED.window_months, label = EXCLUDED.label, created_by = EXCLUDED.created_by, created_at = now()`);
+        await audit('partner_rates_change', partnerId, undefined, { pendingRate: { rateBps, costDeductionBps, durationMonths, windowMonths, directorAgreement: director } });
+        return json(200, { ok: true });
     }
 
     // ── Terms 4.5(b): an admin confirms a partner's UK VAT number (checked with HMRC) before VAT is added ─
@@ -409,7 +464,7 @@ export default withLambda(async (event) => {
         if (!user) return json(404, { error: 'No Be More Swan account uses that email address. They need an account first.' });
         const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) || null : null;
         const inserted = await db.insert(partners)
-            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), approvedAt: new Date(), partnerSince: new Date(), decisionNote: note, application: { addedByAdmin: true } })
+            .values({ userId: user.id, status: 'approved', decidedBy: adminId, decidedAt: new Date(), approvedAt: new Date(), decisionNote: note, application: { addedByAdmin: true } })
             .onConflictDoNothing()
             .returning({ id: partners.id });
         if (!inserted.length) return json(409, { error: 'That person is already on the partner list.' });

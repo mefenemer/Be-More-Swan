@@ -355,8 +355,11 @@
         ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Partner Terms</a>';
     }
     // Their agreement: partner since, and the renewal date = when the rate they're on now ends.
-    const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>` : '';
-    const renew = !t ? '' : t.renewsOn
+    // Owner 2026-11-24: a partnership has no start date until they accept the Partner Terms after approval.
+    const pr = data.pendingRate;
+    const since = data.partnerSince ? `Partner since <strong>${esc(day(data.partnerSince))}</strong>`
+      : `<span class="text-amber-800 font-semibold">Your partnership starts when you accept the Partner Terms</span>${pr ? ` — your special rate of ${Math.round(pr.rateBps * (10000 - pr.costDeductionBps) / 10000) / 100}% of each plan payment (at most) then applies to customers who first pay in the following ${pr.windowMonths} months, ${pr.durationMonths == null ? 'for as long as they stay' : 'for ' + pr.durationMonths + ' months each'}` : ''}`;
+    const renew = !t || !data.partnerSince ? '' : t.renewsOn
       ? `Renewal date <strong>${esc(day(t.renewsOn))}</strong>${t.special ? ' — when your special commission ends; customers who first paid before then keep it' : ' — when this commission ends'}`
       : 'Renewal date: <strong>none set</strong> — your commission continues until we give you notice of a change: 30 days, or 60 days for a cut (Partner Terms 3.3 and 8.1)';
     document.getElementById('pt-agreement').innerHTML = [since, renew].filter(Boolean).join(' · ');
