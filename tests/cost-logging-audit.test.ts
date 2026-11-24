@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RenderCostMeter } from '../src/utils/render-cost';
+import { RenderCostMeter, logOrphanedRenderCost, renderSessionId } from '../src/utils/render-cost';
 import { recallCostDue } from '../src/utils/meeting-bot';
 import { untrackedRecallHours } from '../src/utils/meeting-bot-db';
 import type { RenderProgress, StartedRender } from '../src/lib/remotion-lambda';
@@ -192,6 +192,57 @@ checkAsync('a render started while another is open logs the first before followi
         await m.started(R2);
     }, async () => prog({ costUsd: 0.02 }));
     assert.deepStrictEqual(logged, [0.02]);
+});
+
+checkAsync('each render\'s row carries its own session id (so a sweep can tell it was logged)', async () => {
+    const ids: Array<string | null | undefined> = [];
+    const m = new RenderCostMeter({ workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: 0.02 }), async (_c, ctx) => { ids.push(ctx?.sessionId); });
+    await m.started(R1);
+    await m.seen(prog({ done: true, error: 'No frame found', costUsd: 0.01 }));
+    await m.started(R2);
+    await m.abandon();
+    assert.deepStrictEqual(ids, ['post-render:r1', 'post-render:r2']);
+    assert.strictEqual(renderSessionId(null, 'abc'), 'remotion-render:abc');
+});
+
+/** A db stand-in for the one read logOrphanedRenderCost makes: select().from().where().limit() → rows. */
+const stubDb = (rows: unknown[]) => ({ select: () => ({ from: () => ({ where: () => ({ limit: async () => rows }) }) }) }) as never;
+
+checkAsync('a killed worker\'s render is logged from Remotion\'s cost — once', async () => {
+    const logged: Array<[number | null | undefined, string | null | undefined]> = [];
+    const log = async (c: number | null | undefined, ctx?: { sessionId?: string | null }) => { logged.push([c, ctx?.sessionId]); };
+    // Not logged before: Remotion's figure, under the render's own session id.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ done: true, costUsd: 0.09 }), log), true);
+    // The worker logged it before dying: nothing more.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([{ id: 1 }]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: 0.09 }), log), false);
+    // Remotion can't say (or is unreachable): nothing, and no throw.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: null }), log), false);
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => { throw new Error('S3'); }, log), false);
+    assert.deepStrictEqual(logged, [[0.09, 'post-render:r1']]);
+});
+
+check('the stuck sweeps log a killed render, only from the UPDATE that claims the row', () => {
+    const vp = read('src/utils/video-producer.ts');
+    const sweep = vp.slice(vp.indexOf('export async function sweepStuckProjects('), vp.indexOf('const stuck = await db.select('));
+    assert.ok(/const killed = await db\.update\(videoProjects\)[\s\S]{0,300}eq\(videoProjects\.status, 'rendering'\)[\s\S]{0,260}\.returning\(/.test(sweep), 'the video sweep no longer returns the rows it claims');
+    assert.ok(/o\.renderId !== 'starting'/.test(sweep) && /await logOrphanedRenderCost\(db, \{ renderId: k\.renderId!/.test(sweep) && /workspaceId: orgId/.test(sweep), 'a killed Video Producer render is not logged');
+    assert.ok(/await import\('\.\/render-cost'\)/.test(sweep), 'keep Remotion\'s client out of video-producer.ts\'s static imports');
+    // Only recent ones are logged (a backlog from before this logging existed would land in the wrong month).
+    assert.ok(/gt\(videoProjects\.updatedAt, new Date\(now\.getTime\(\) - ORPHAN_RENDER_LOG_WITHIN_MS\)\)/.test(sweep), 'old stuck projects would log today');
+    // At most ORPHAN_RENDER_LOGS_PER_SWEEP per sweep (it runs inside user requests); the rest wait, never failed unlogged.
+    assert.ok(/orphans\.slice\(0, ORPHAN_RENDER_LOGS_PER_SWEEP\)/.test(sweep) && /notInArray\(videoProjects\.id, waitForNext\)/.test(sweep) && /logNow\.has\(k\.id\)/.test(sweep), 'the video sweep must log a bounded number and leave the rest for the next sweep');
+    const w = read('netlify/functions/render-post-video-background.ts');
+    const pw = w.slice(w.indexOf('export async function sweepKilledPostRenders('), w.indexOf('export default withLambda'));
+    assert.ok(/set\(\{ status: 'failed'[\s\S]{0,200}eq\(postRenderJobs\.status, 'rendering'\)\)\)\s*\.returning\(\);\s*if \(!job\) continue;/.test(pw), 'the post sweep must log only for a row it moved out of rendering');
+    assert.ok(/await logOrphanedRenderCost\(db, \{ renderId: job\.renderId[\s\S]{0,200}workspaceId: job\.organisationId/.test(pw), 'a killed post render is not logged');
+    // After the worker's own render, so a burst of killed jobs can't eat that render's time.
+    assert.ok(/return await handleRenderJob\(event\);\s*\} finally \{[\s\S]{0,120}await sweepKilledPostRenders\(getDb\(\)\);/.test(w), 'the worker no longer sweeps killed renders after its own render');
+    assert.ok(/const KILLED_SWEEP_LIMIT = 5;/.test(w), 'the post sweep must stay small (it runs inside the worker\'s 15 minutes)');
+    // A post a newer job has taken over is not failed under it.
+    assert.ok(/eq\(scheduledPosts\.renderStatus, 'rendering'\),\s*sql`NOT EXISTS \(SELECT 1 FROM post_render_jobs n WHERE n\.post_id = \$\{job\.postId\} AND n\.id > \$\{job\.id\}\)`/.test(pw), 'the sweep would fail a post whose newer render is running');
+    // The Remotion read in the orphan logger is time-limited (the video sweep runs inside user requests).
+    assert.ok(/Promise\.race\(\[\s*progressOf\(r\),[\s\S]{0,200}ORPHAN_PROGRESS_TIMEOUT_MS/.test(read('src/utils/render-cost.ts')), 'a hung Remotion read could hold a user request');
+    assert.ok(/gt\(postRenderJobs\.updatedAt, new Date\(now\.getTime\(\) - KILLED_WITHIN_MS\)\)/.test(pw), 'the post sweep would fail the whole pre-existing backlog');
 });
 
 check('both render loops go through the meter: started, every poll, and every way out', () => {
