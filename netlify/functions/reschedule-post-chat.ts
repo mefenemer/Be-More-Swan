@@ -100,7 +100,7 @@ export default withLambda(async (event) => {
         // Natural-language path — parsed against the assistant's timezone resolved above.
         let parsed: Date | null = null;
         try {
-            parsed = await parseScheduleInstruction(instruction, now, timezone);
+            parsed = await parseScheduleInstruction(instruction, now, timezone, { workspaceId: organisationId, userId, sessionId: 'reschedule-post' });
         } catch (err) {
             console.error('[reschedule-post-chat] LLM parse error', err);
             return { statusCode: 502, body: JSON.stringify({ error: 'The assistant could not reach the AI service. Please try again.' }) };

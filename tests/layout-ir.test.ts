@@ -516,7 +516,7 @@ await check('a redraft does not pile a second set of stock photographs onto a po
 
 await check('stock search accepts keywords instead of deriving them with a model call', () => {
     const pexels = read('src/utils/pexels.ts');
-    assert.match(pexels, /const keywords = given\?\.trim\(\) \|\| await generateImageKeywords\(context\)/);
+    assert.match(pexels, /const keywords = given\?\.trim\(\) \|\| await generateImageKeywords\(context[,)]/);
     // Both searches, so stock video gets the same treatment when the blog reaches for it.
     assert.strictEqual((pexels.match(/given\?\.trim\(\) \|\| await generateImageKeywords/g) || []).length, 2);
     // And the blog can now mint a stock VIDEO, not only a photograph (plan §4 Phase 5.2).
