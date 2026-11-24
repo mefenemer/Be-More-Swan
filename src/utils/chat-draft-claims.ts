@@ -51,6 +51,37 @@ const CONTENT_NOUN = /\b(?:posts?|articles?|blogs?|drafts?|captions?|pieces?|iss
 /** The verbs that describe making a draft. Split by tense — they are gated differently below. */
 const DONE_VERB = '(?:drafted|saved|scheduled|created|queued|added)';
 const DOING_VERB = '(?:drafting|writing up|putting together|creating|scheduling)';
+/**
+ * Rewriting an existing post. Only ever first-person: "I've rewritten the Ipswich post" claims a new version
+ * exists; "your rewritten homepage" does not. Fix pipeline #78 (2026-11-18): that reply went out with no card and
+ * nothing saved, and the user went looking for it.
+ */
+const REVISE_VERB = '(?:rewritten|revised|redrafted|reworked)';
+
+/**
+ * First person, present perfect, about a piece of content: "I've rewritten the Ipswich post", "I have revised your
+ * caption" (#78). Not "I revised my advice: post on Tuesdays" or "last week I rewrote the post, and it went out" —
+ * past tense or about something else is not a claim that a new draft exists now (review on PR #832).
+ */
+const CLAIMS_REVISION = new RegExp(
+    `\\bi(?:(?:'|’)ve|\\s+have)\\s+(?:just\\s+|now\\s+|already\\s+)?${REVISE_VERB}\\s+(?:(?:it|them)\\b|[^.!?:;]{0,30}?`
+    + `\\b(?:posts?|articles?|blogs?|captions?|drafts?|newsletters?|issues?|pieces?)\\b)`,
+    'i',
+);
+
+/**
+ * A condition, not a report: "articles only publish WHEN THEY'RE SCHEDULED in Blog Studio" explains how
+ * publishing works. Fix pipeline #71 (2026-11-16): the content-predicate pattern read "they're scheduled" in that
+ * sentence as a claim, and an honest answer to "what does this button do?" was swapped for "Sorry — I said that
+ * was done". Only the conditional verb phrase itself is dropped ("when they're scheduled", "once it is saved", "until
+ * they are approved and scheduled"), so a claim elsewhere in the sentence still counts, comma or none: "Once again
+ * I've drafted your posts", "If all goes well it's scheduled for Thursday".
+ */
+const CONDITION_CLAUSE = new RegExp(
+    `\\b(?:when|whenever|if|once|until|unless)\\s+(?:it|they|these|those|posts?|articles?|drafts?|captions?|pieces?|issues?)`
+    + `\\s*(?:is|are|was|were|has been|have been|(?:'|’)s|(?:'|’)re)\\s+(?:now\\s+|already\\s+)?(?:\\w+\\s+and\\s+)?${DONE_VERB}\\b`,
+    'gi',
+);
 
 /**
  * Phrasings that assert a post EXISTS, or is being made right now. Each one requires the
@@ -127,13 +158,18 @@ function sentences(text: string): string[] {
  * So are sentences that ask the user for the very input the promise depends on. The caller is
  * responsible for only asking when persistence genuinely produced nothing.
  */
-export function replyClaimsPostSaved(reply: string): boolean {
+export function replyClaimsPostSaved(reply: string, opts: { revisions?: boolean } = {}): boolean {
+    // "I've rewritten it" counts as a claim unless the caller says otherwise: in the post editor's chat the
+    // rewrite IS on the card below the reply, and nothing there is ever saved on its own, so it is honest.
+    const revisions = opts.revisions !== false;
     if (!reply || !reply.trim()) return false;
     return sentences(reply).some((s) => {
         if (s.endsWith('?')) return false;          // asking, not asserting
         if (OFFER_OPENER.test(s)) return false;     // offering, not asserting
         if (NEGATED.test(s)) return false;          // denying, not asserting
-        if (ASSERTS_EXISTS.some(re => re.test(s))) return true;
+        const stated = s.replace(CONDITION_CLAUSE, ' ').trim();   // "…when they're scheduled" is a condition (#71)
+        if (ASSERTS_EXISTS.some(re => re.test(stated))) return true;
+        if (revisions && CLAIMS_REVISION.test(stated)) return true;
         return PROMISES_TO_WRITE.test(s) && !ASKS_USER_FOR_INPUT.test(s);
     });
 }
