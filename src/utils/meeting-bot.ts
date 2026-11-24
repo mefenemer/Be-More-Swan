@@ -176,6 +176,15 @@ export type BotStatus = 'scheduled' | 'joining' | 'waiting_room' | 'in_call' | '
 export const OPEN_BOT_STATUSES: readonly BotStatus[] = ['scheduled', 'joining', 'waiting_room', 'in_call', 'ended'];
 export const FINAL_BOT_STATUSES: readonly BotStatus[] = ['done', 'not_admitted', 'removed', 'cancelled', 'failed'];
 
+/**
+ * Whether a saved status change is when Recall's charge for the bot is logged: only on the way INTO a final state, so
+ * once per bot (a status update only wins from the state it was worked out from, and final → final, e.g. removed →
+ * done, isn't logged again). Pure.
+ */
+export function recallCostDue(before: string, after: string): boolean {
+    return FINAL_BOT_STATUSES.includes(after as BotStatus) && !FINAL_BOT_STATUSES.includes(before as BotStatus);
+}
+
 /** What the GUI and chat say for each state (plan §3: say which one stopped it, never leave it silent). */
 export const BOT_STATUS_WORDS: Record<BotStatus, string> = {
     scheduled: 'Booked',
