@@ -65,6 +65,8 @@ const USER_FIX_STATUSES = ['accepted', 'dismissed', 'open', 'done'] as const;
 const RUN_SUMMARY = {
     id: siteAuditRuns.id, kind: siteAuditRuns.kind, status: siteAuditRuns.status, overallScore: siteAuditRuns.overallScore,
     error: siteAuditRuns.error, createdAt: siteAuditRuns.createdAt, finishedAt: siteAuditRuns.finishedAt,
+    // Why the score moved (Fix pipeline #63) — every past check says it, not only the latest summary.
+    scoreChanges: sql<unknown>`${siteAuditRuns.report} -> 'scoreChanges'`,
 };
 
 export default withLambda(async (event) => {

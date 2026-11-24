@@ -36,12 +36,13 @@ import { loadAlreadyCovered, type CoveredItem } from './site-audit-covered';
 import { confirmPassedChecks } from './site-audit-check-work';
 import {
     buildLensPrompt, buildSummaryPrompt, HANDOFF_TARGETS, rejectedFixesBlock, sanitiseSummary, type AuditBrief, type Handoff, type HandoffTarget, type Priority,
+    type ScoreChanges,
 } from './site-audit-prompts';
 import {
     describeChanges, diffSitePages, extractSitePage, pickSecondaryPages, siteContentHash, normaliseText, type SitePage,
 } from './site-extract';
 import {
-    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, suggestionIsLive, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
+    groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, suggestionIsLive, type AuditScore, type CheckOutcome, type Lens, type RubricAnswer, type SuggestedFix,
 } from './site-score';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import { recordPlatformIncident } from './platform-incident';
@@ -113,6 +114,13 @@ export interface AuditInput {
     previousScore: number | null;
     /** What the other assistants already have, so ideas aren't repeated (site-audit-covered.ts). */
     covered?: CoveredItem[];
+    /**
+     * The last SCORED run's rubric answers and check results (site_audit_runs.scores). Keeps scores steady
+     * (Fix pipeline #63): a lens whose pages are unchanged reuses its answers; a flipped answer must be
+     * confirmed. Absent on a first run, or one made before answers were stored.
+     */
+    previousAnswers?: Partial<Record<Lens, RubricAnswer[]>>;
+    previousOutcomes?: Array<Pick<CheckOutcome, 'id' | 'lens' | 'label' | 'result'>>;
 }
 
 export interface AuditReport {
@@ -124,6 +132,10 @@ export interface AuditReport {
     competitorsUnread: Array<{ url: string; message: string }>;
     /** Lenses whose model call failed this time (scored on code checks only). */
     partialLenses: Lens[];
+    /** Why the score moved since the last scored check (Fix pipeline #63). Null on a first check. */
+    scoreChanges?: ScoreChanges | null;
+    /** Lenses answered from the last check because their pages had not changed. */
+    reusedLenses?: Lens[];
 }
 
 export type AuditOutcome =
@@ -138,6 +150,8 @@ export type AuditOutcome =
         fixes: SuggestedFix[];
         report: AuditReport;
         groundingDropped: number;
+        /** The rubric answers this score was made from — stored, so the next run can keep them steady. */
+        answers: Partial<Record<Lens, RubricAnswer[]>>;
     };
 
 /** The key the user's own page is stored under in pages/hashes. */
@@ -237,9 +251,22 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     }));
 
     const lenses: Lens[] = readable.length ? ['clarity', 'compete', 'ai'] : ['clarity', 'ai'];
-    const results = await Promise.all(lenses.map(async (lens) => {
-        const prompt = buildLensPrompt(lens, input.brief, own.page,
-            readable.map((r, i) => ({ page: r.page, changes: competitorChanges[i].changes })));
+    // Steady scores (Fix pipeline #63): what each lens reads, and whether all of it is as it was last time.
+    // Only answers about THIS page count. A baseline, or a run after the audited page was switched (upsertAudit keeps the
+    // audit row but clears lastHashes), has no previous read of it: nothing is reused, compared or confirmed against the
+    // old page's answers (review on PR #856).
+    const samePageAsBefore = input.kind !== 'baseline' && !!input.lastHashes[SITE_KEY];
+    const previousAnswers = samePageAsBefore ? input.previousAnswers : undefined;
+    const previousOutcomes = samePageAsBefore ? input.previousOutcomes : undefined;
+    const ownSame = samePageAsBefore && input.lastHashes[SITE_KEY] === hashes[SITE_KEY];
+    // Compete also needs the SAME competitors, all read and unchanged — one removed in Settings, or unreadable or thin
+    // this week, means the comparison is a different one (review on PR #856).
+    const lastCompetitors = Object.keys(input.lastHashes).filter((k) => k !== SITE_KEY).sort();
+    const sameCompetitors = readable.length > 0 && competitorsUnread.length === 0
+        && JSON.stringify(readable.map((r) => r.url).sort()) === JSON.stringify(lastCompetitors);
+    const lensPagesSame = (lens: Lens) => ownSame && (lens !== 'compete'
+        || (sameCompetitors && readable.every((r) => input.lastHashes[r.url] === hashes[r.url])));
+    const askLens = async (lens: Lens, prompt: ReturnType<typeof buildLensPrompt>) => {
         // Two tries. "Part of this check couldn't be completed (AI search readiness)" was the first
         // try's reply coming back unusable — most likely cut off: that lens asks 14 questions and
         // quotes the most evidence, and a reply cut at the token limit is not valid JSON. The second
@@ -252,12 +279,29 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
                 const a = sanitiseRubricAnswers(raw.answers, lens, own.page);
                 const f = groundFixes(raw.fixes, lens, own.page);
                 if (!a.answers.length) { console.error('[site-audit] lens reply had no usable answer', { lens, maxTokens }); continue; }
-                return { lens, answers: a.answers, fixes: f.fixes, dropped: a.dropped + f.dropped };
+                return { answers: a.answers, fixes: f.fixes, dropped: a.dropped + f.dropped };
             } catch (err) {
                 console.error('[site-audit] lens call failed', { lens, maxTokens, message: err instanceof Error ? err.message : String(err) });
             }
         }
         return null;
+    };
+    const results = await Promise.all(lenses.map(async (lens) => {
+        const previous = previousAnswers?.[lens] ?? [];
+        // Nothing this lens reads has changed: last time's answers stand — asking again could only add noise.
+        if (previous.length && lensPagesSame(lens)) {
+            const kept = sanitiseRubricAnswers(previous, lens, own.page);
+            if (kept.answers.length) return { lens, answers: kept.answers, fixes: [] as SuggestedFix[], dropped: 0, reused: true };
+        }
+        const prompt = buildLensPrompt(lens, input.brief, own.page,
+            readable.map((r, i) => ({ page: r.page, changes: competitorChanges[i].changes })));
+        const first = await askLens(lens, prompt);
+        if (!first) return null;
+        // An answer that flipped since last time stands only if asking again agrees (steadyAnswers).
+        const flipped = flippedIds(previous, first.answers);
+        if (!flipped.length) return { lens, ...first, reused: false };
+        const second = await askLens(lens, prompt);
+        return { lens, answers: steadyAnswers(previous, first.answers, second?.answers ?? null, own.page), fixes: first.fixes, dropped: first.dropped, reused: false };
     }));
 
     const answered = results.filter((r): r is NonNullable<typeof r> => r !== null);
@@ -271,7 +315,11 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     const fixes = oneFixPerText(answered.flatMap((r) => r.fixes));
     const groundingDropped = answered.reduce((n, r) => n + r.dropped, 0);
 
-    const summaryInput = { brief: input.brief, score, previousScore: input.previousScore, fixes, competitorChanges, covered: input.covered };
+    const scoreChanges = scoreChangesFrom(previousOutcomes, score.outcomes, {
+        ownPageChanged: !!input.lastHashes[SITE_KEY] && !ownSame,
+        competitorsChanged: competitorChanges.some((c) => c.changes.length > 0),
+    });
+    const summaryInput = { brief: input.brief, score, previousScore: input.previousScore, fixes, competitorChanges, covered: input.covered, scoreChanges };
     let summaryRaw: unknown = null;
     try {
         summaryRaw = parseModelJson(await deps.callModel({ ...buildSummaryPrompt(summaryInput), maxTokens: SUMMARY_MAX_TOKENS }));
@@ -292,8 +340,53 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
             competitorChanges,
             competitorsUnread,
             partialLenses: lenses.filter((l) => !answers[l]),
+            scoreChanges,
+            reusedLenses: answered.filter((r) => r.reused).map((r) => r.lens),
         },
+        answers,
     };
+}
+
+// ── Steady scores (Fix pipeline #63) ────────────────────────────────────────────────────────────
+
+/** Ids answered one way last time and the other way now. Pure. */
+export function flippedIds(previous: readonly RubricAnswer[], now: readonly RubricAnswer[]): string[] {
+    const before = new Map(previous.map((a) => [a.id, a.yes]));
+    return now.filter((a) => before.has(a.id) && before.get(a.id) !== a.yes).map((a) => a.id);
+}
+
+/**
+ * A flipped answer stands only when a second asking agrees with it; otherwise last time's answer is kept (with its
+ * quote when that is still on the page). On 16 Nov two competitor questions flipped and flipped back a week later
+ * with the owner's page unchanged — noise, not news. With no second answer (that call failed), the new answers stand
+ * as before. Pure.
+ */
+export function steadyAnswers(
+    previous: readonly RubricAnswer[], first: readonly RubricAnswer[], second: readonly RubricAnswer[] | null, page: SitePage,
+): RubricAnswer[] {
+    if (!second) return [...first];
+    const before = new Map(previous.map((a) => [a.id, a]));
+    const again = new Map(second.map((a) => [a.id, a.yes]));
+    return first.map((a) => {
+        const prev = before.get(a.id);
+        if (!prev || prev.yes === a.yes) return a;            // not a flip
+        if (again.get(a.id) === a.yes) return a;              // confirmed: a real change
+        return { id: a.id, yes: prev.yes, evidence: prev.evidence && isGrounded(prev.evidence, page) ? prev.evidence : '' };
+    });
+}
+
+/** What changed since the last scored check: which checks now pass or fail, and where the pages changed. Pure. */
+export function scoreChangesFrom(
+    previous: ReadonlyArray<Pick<CheckOutcome, 'id' | 'lens' | 'label' | 'result'>> | undefined,
+    now: readonly CheckOutcome[],
+    where: { ownPageChanged: boolean; competitorsChanged: boolean },
+): ScoreChanges | null {
+    if (!previous?.length) return null;
+    const before = new Map(previous.map((o) => [o.id, o.result]));
+    const flipped = now
+        .filter((o) => o.result !== 'na' && before.has(o.id) && before.get(o.id) !== 'na' && before.get(o.id) !== o.result)
+        .map((o) => ({ id: o.id, lens: o.lens, label: o.label, now: o.result as 'pass' | 'fail' }));
+    return { ...where, flipped };
 }
 
 /**
@@ -398,6 +491,17 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             sql`${siteAuditRuns.pages} IS NOT NULL`,
         )).orderBy(desc(siteAuditRuns.id)).limit(1);
 
+        // The last SCORED run: its answers keep this score steady, its results say what moved (Fix pipeline #63).
+        const [prevScored] = await db.select({ scores: siteAuditRuns.scores }).from(siteAuditRuns).where(and(
+            eq(siteAuditRuns.auditId, audit.id),
+            eq(siteAuditRuns.status, 'done'),
+            sql`${siteAuditRuns.scores} IS NOT NULL`,
+        )).orderBy(desc(siteAuditRuns.id)).limit(1);
+        const prevScoresRaw = (prevScored?.scores ?? {}) as { answers?: AuditInput['previousAnswers']; outcomes?: AuditInput['previousOutcomes']; url?: string };
+        // Only a run on THIS page: the audited URL is stored with its answers (review on PR #856 — a thin read right after
+        // a page switch saves new hashes, while the last scored run is still the old page's).
+        const prevScores = prevScoresRaw.url && normaliseSiteUrl(prevScoresRaw.url) === normaliseSiteUrl(audit.url) ? prevScoresRaw : {};
+
         let productsBlock: string | null = null;
         try { productsBlock = await loadProductsBlock(db, orgId); } catch { /* no products is fine */ }
         // The user's Rules reach the rewrites (registry rulesScope 'audit' says so on the Rules tab).
@@ -435,6 +539,8 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             previousPages: ((prev?.pages ?? {}) as Record<string, SitePage>),
             previousScore: audit.currentScore,
             covered,
+            previousAnswers: prevScores.answers && typeof prevScores.answers === 'object' ? prevScores.answers : undefined,
+            previousOutcomes: Array.isArray(prevScores.outcomes) ? prevScores.outcomes : undefined,
         }, {
             fetchPage: fetchSitePageLive,
             // The Mystery Shopper role's model (Admin ▸ Assistants ▸ Model & rules); {} = the gateway's
@@ -511,7 +617,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             status: 'done',
             charged: true,
             overallScore: outcome.score.overall,
-            scores: { overall: outcome.score.overall, lenses: outcome.score.lenses, outcomes: outcome.score.outcomes },
+            scores: { overall: outcome.score.overall, lenses: outcome.score.lenses, outcomes: outcome.score.outcomes, answers: outcome.answers, url: audit.url },
             pages: outcome.pages,
             changes: outcome.report.competitorChanges,
             report: { ...outcome.report, fixes: outcome.fixes },

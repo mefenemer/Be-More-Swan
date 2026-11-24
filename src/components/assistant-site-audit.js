@@ -794,12 +794,23 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${goalBlock(audit)}
       ${state.settingsOpen ? card(`<h3 class="text-sm font-black text-gray-900 mb-3">Settings</h3>${settingsForm(audit)}`) : ''}
       ${state.pastOpen && runs.length ? card(`<h3 class="text-sm font-black text-gray-900">Past checks</h3><ul class="mt-2 space-y-1 list-disc pl-5">${runs.map((r) => `
-        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}</li>`).join('')}</ul>`) : ''}
+        <li class="text-xs text-gray-600">${esc(when(r.createdAt))} · ${esc(KIND_WORDS[r.kind] || r.kind)} · ${esc(RUN_WORDS[r.status] || r.status)}${r.overallScore !== null && r.overallScore !== undefined ? ` · ${esc(r.overallScore)}/100` : ''}${r.error ? ` — ${esc(r.error)}` : ''}${scoreChangesLine(r.scoreChanges) ? `<span class="block text-gray-500">${esc(scoreChangesLine(r.scoreChanges))}</span>` : ''}</li>`).join('')}</ul>`) : ''}
       ${latest?.report?.summary ? card(`
         <div class="flex flex-wrap items-baseline justify-between gap-2"><h3 class="text-sm font-black text-gray-900">What the last check said</h3>${lastAt ? `<span class="text-xs text-gray-500">${esc(when(lastAt))}</span>` : ''}</div>
         <p class="text-sm text-gray-700 mt-2">${esc(latest.report.summary)}</p>
         ${(latest.report.partialLenses || []).length ? `<p class="text-xs text-amber-700 mt-2">The ${esc(latest.report.partialLenses.map((k) => (LENSES.find((l) => l[0] === k) || [k, k])[1]).join(' and '))} part didn't come back from the AI in a usable form this time, so it was scored on the automatic checks alone (the ones that don't need AI) and may read lower than it should. Nothing extra was charged, and the next check tries it again.</p>` : ''}`) : ''}
       ${latest ? card(missingBlock(latest) || '<p class="text-xs text-gray-500">Every check passed at the last look.</p>') : ''}`;
+  }
+
+  // Why a past check's score moved (site-audit-prompts.ts scoreChangesLine, same words; Fix pipeline #63).
+  function scoreChangesLine(c) {
+    if (!c || typeof c !== 'object') return '';
+    const flipped = Array.isArray(c.flipped) ? c.flipped : [];
+    const lensName = (k) => (LENSES.find((l) => l[0] === k) || [k, k])[1];
+    const where = c.ownPageChanged ? 'Your page changed.' : c.competitorsChanged ? 'Your page didn’t change; a competitor’s did.' : 'Nothing on the pages changed.';
+    if (!flipped.length) return c.ownPageChanged || c.competitorsChanged ? `${where} No check changed result.` : '';
+    const one = (f) => `${lensName(f.lens)} — ${f.now === 'pass' ? 'now passes' : 'now fails'}: “${f.label}”`;
+    return `${where} ${flipped.slice(0, 4).map(one).join('; ')}${flipped.length > 4 ? `; and ${flipped.length - 4} more` : ''}.`;
   }
 
   function render() {
