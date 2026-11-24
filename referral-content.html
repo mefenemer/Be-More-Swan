@@ -249,7 +249,12 @@
     // Hide skeleton
     document.getElementById('ref-link-skeleton').classList.add('hidden');
 
-    if (data.referralCode) {
+    if (data.partnerNotStarted) {
+      // A partner's code is their partner link: hidden until their partnership starts (owner 2026-11-24).
+      const row = document.getElementById('ref-no-code-row');
+      row.classList.remove('hidden');
+      row.textContent = 'Your partner link appears once you accept the Partner Terms on your Partner page — your partnership starts then.';
+    } else if (data.referralCode) {
       document.getElementById('ref-link-input').value = data.shareLink;
       document.getElementById('ref-link-row').classList.remove('hidden');
       document.getElementById('ref-share-row').classList.remove('hidden');

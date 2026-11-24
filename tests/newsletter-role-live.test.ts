@@ -106,7 +106,10 @@ function liveRoles(): string[] {
     const re = /roleKey: '([a-z0-9_]+)',[\s\S]{0,1200}?comingSoon: (true|false)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(CATALOG))) {
-        if (m[2] === 'false') out.push(m[1]);
+        // A RETIRED role (lifecycleState 'archived', e.g. inbox_manager, Fix pipeline #60) is not live. Roles seeded
+        // inactive and switched on in Admin still count, as before.
+        const entry = CATALOG.slice(m.index, CATALOG.indexOf('\n    },', m.index));
+        if (m[2] === 'false' && !/lifecycleState: 'archived'/.test(entry)) out.push(m[1]);
     }
     assert.ok(out.includes(ROLE), 'the newsletter role should be among the live ones');
     assert.ok(out.length >= 3, 'the parse should find every live role, not just one');

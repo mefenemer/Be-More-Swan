@@ -301,6 +301,21 @@ export default withLambda(async (event) => {
                 .where(and(eq(workspaceIntegrations.organisationId, organisationId), eq(workspaceIntegrations.provider, other), eq(workspaceIntegrations.status, 'active'))).limit(1);
             if (taken) return redirect(`/workspace.html?view=assets&tab=bookings&oauth_error=calendar_already_connected&provider=${provider}`);
         }
+        // One sending mailbox at a time (Fix pipeline #72, owner 2026-11-17): every sender tries Gmail first
+        // (mailbox-connected.ts, meeting-followup-send.ts), so a second mailbox would never send anything and only looks
+        // like a choice. Disconnect one to use the other. Back to the assistant the connect started from, when it named one.
+        if (provider === 'gmail' || provider === 'outlook') {
+            const other = provider === 'gmail' ? 'outlook' : 'gmail';
+            const [taken] = await db.select({ id: workspaceIntegrations.id }).from(workspaceIntegrations)
+                .where(and(eq(workspaceIntegrations.organisationId, organisationId), eq(workspaceIntegrations.provider, other), eq(workspaceIntegrations.status, 'active'))).limit(1);
+            if (taken) {
+                const rawAid = event.queryStringParameters?.assistantId;
+                const aid = rawAid && /^\d+$/.test(rawAid) && Number(rawAid) > 0 ? rawAid : null;
+                return redirect(aid
+                    ? `/workspace.html?oauth_error=mailbox_already_connected&platform=${provider}&assistantId=${aid}`
+                    : `/integrations.html?oauth_error=mailbox_already_connected&provider=${provider}`);
+            }
+        }
 
         // Zendesk's authorize endpoint lives on the customer's subdomain, so the connect
         // link must carry it. It travels to the callback inside the CSRF vault entry.

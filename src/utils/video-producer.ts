@@ -21,7 +21,7 @@
 // ⚠️ Still scenes need a Remotion bundle from 2026-10-31 or later — redeploy both sites first.
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, like, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, organisations, scheduledPosts, videoProjects } from '../../db/schema';
 import { videoResults, type ResultRow } from '../lib/video-results';
@@ -1590,6 +1590,10 @@ export async function videoResultsFor(db: Db, orgId: number, assistantId: number
 
 /** Longer than any honest plan or build runs (the worker's own ceiling is 15 minutes). */
 export const STUCK_AFTER_MS = 20 * 60 * 1000;
+/** A killed render's cost is logged only when its project was last touched this recently (see sweepStuckProjects). */
+export const ORPHAN_RENDER_LOG_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
+/** At most this many killed renders are logged per sweep: it runs inside user requests (see sweepStuckProjects). */
+export const ORPHAN_RENDER_LOGS_PER_SWEEP = 2;
 
 /**
  * A worker killed mid-way (Lambda's ceiling, a deploy) leaves its project mid-step with credits held.
@@ -1599,9 +1603,34 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
     const cutoff = new Date(now.getTime() - STUCK_AFTER_MS);
     // A render nobody finished: the video was made and paid for, only the file is missing — say so,
     // and offer "Try the render again" rather than failing the whole video.
-    await db.update(videoProjects)
+    // A render id still on a stuck project means its worker died with a render in flight: Lambda kept going, so the
+    // render's cost is logged here, once (render-cost.ts skips it if the worker logged before dying). Only renders cut off
+    // in the last ORPHAN_RENDER_LOG_WITHIN_MS: an older backlog would date old costs to today, into the wrong month's
+    // partner check (review of #844). This runs inside user requests (the Videos tab, each chat turn), so at most
+    // ORPHAN_RENDER_LOGS_PER_SWEEP are logged per sweep. The rest are left 'rendering' for the next sweep, never failed
+    // unlogged. Read BEFORE the update, which moves updated_at. 'starting' is the claim placeholder (no render started).
+    const orphans = (await db.select({ id: videoProjects.id, renderId: videoProjects.renderId }).from(videoProjects).where(and(
+        eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff),
+        gt(videoProjects.updatedAt, new Date(now.getTime() - ORPHAN_RENDER_LOG_WITHIN_MS)),
+        isNotNull(videoProjects.renderBucket), isNotNull(videoProjects.renderId),
+    ))).filter((o) => o.renderId !== 'starting');
+    const logNow = new Set(orphans.slice(0, ORPHAN_RENDER_LOGS_PER_SWEEP).map((o) => o.id));
+    const waitForNext = orphans.slice(ORPHAN_RENDER_LOGS_PER_SWEEP).map((o) => o.id);
+    const killed = await db.update(videoProjects)
         .set({ status: 'render_failed', note: 'The finished video took too long to render. Press “Try the render again”.', updatedAt: now })
-        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff)));
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff),
+            ...(waitForNext.length ? [notInArray(videoProjects.id, waitForNext)] : [])))
+        .returning({ id: videoProjects.id, renderId: videoProjects.renderId, renderBucket: videoProjects.renderBucket, renderRegion: videoProjects.renderRegion, createdBy: videoProjects.createdBy, aiAssistantId: videoProjects.aiAssistantId });
+    // Only rows THIS update moved out of 'rendering' are logged, so two sweeps can't both log one. Lazy import: Remotion's
+    // client stays out of every function that imports this file.
+    const orphaned = killed.filter((k) => logNow.has(k.id) && k.renderId && k.renderBucket);
+    if (orphaned.length) {
+        const { logOrphanedRenderCost } = await import('./render-cost');
+        for (const k of orphaned) {
+            await logOrphanedRenderCost(db, { renderId: k.renderId!, bucketName: k.renderBucket!, region: k.renderRegion ?? '' },
+                { workspaceId: orgId, userId: k.createdBy, assistantId: k.aiAssistantId ?? null, sessionId: 'video-producer-render' });
+        }
+    }
     const stuck = await db.select({ id: videoProjects.id, creditHold: videoProjects.creditHold, createdBy: videoProjects.createdBy })
         .from(videoProjects)
         .where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.status, ['reviewing', 'planning', 'building']), lt(videoProjects.updatedAt, cutoff)));

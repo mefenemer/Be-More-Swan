@@ -139,7 +139,9 @@ export default withLambda(async (event) => {
                 const a = await getPartnerActivity(db, p.id);
                 return a.activeUntil ? { activeUntil: a.activeUntil, notice: a.notice } : null;
             })() : null,
-            link: code ? {
+            // Owner 2026-11-24: no invite link (or partner code) until the partnership starts — customers who first pay
+            // before the start never earn, so the link is shown only once they've accepted the terms after approval.
+            link: code && p.partnerSince ? {
                 code, inviteUrl: `${baseUrl()}/invite/${code}`, signupUrl: `${baseUrl()}/register.html?ref=${code}`,
                 // A memorable partner code, if an admin has set one (invite-codes.ts) — works like the link.
                 partnerCode: p.status === 'approved' ? p.promoCode : null,

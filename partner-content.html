@@ -75,6 +75,8 @@
         </div>
         <span class="text-xs text-gray-500">Code <span id="pt-code" class="font-mono font-bold text-gray-800"></span></span>
       </div>
+      <p id="pt-link-locked" class="hidden text-sm rounded-lg px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900" style="display:none">Your invite link appears here once you accept the Partner Terms. Your partnership starts then — customers who first pay before it don’t earn you commission.</p>
+      <div id="pt-link-block" class="space-y-3">
       <div class="flex gap-2">
         <label for="pt-link" class="sr-only">Your invite link</label>
         <input id="pt-link" readonly class="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono bg-gray-50">
@@ -85,6 +87,7 @@
         <span class="text-gray-500">— easy to say out loud. It works just like your link.</span>
       </div>
       <p class="text-xs text-gray-500">People you invite get a 14-day free trial, then their first month free. If someone hears about us from you without the link, they can type your code into the “Invited by” box when they sign up, or into “Have an invite code?” when they choose a plan.</p>
+      </div>
     </div>
 
     <!-- Their own invite page (docs/partner-onboarding-plan.md §3.3): photo + headline + words on /invite/<code>.
@@ -344,6 +347,9 @@
     show('pt-invite-card', data.partner.status !== 'ended');
     show('pt-assistant-card', data.partner.status !== 'ended');
     const l = data.link, t = data.terms, s = data.stats || {};
+    // No link until the partnership starts (owner 2026-11-24): show why instead.
+    show('pt-link-block', !!l);
+    show('pt-link-locked', !l && data.partner.status !== 'ended');
     document.getElementById('pt-link').value = l ? l.inviteUrl : '';
     document.getElementById('pt-code').textContent = l ? l.code : '—';
     show('pt-partner-code', !!l?.partnerCode);
@@ -470,7 +476,7 @@
   const ip = { photo: 'none', dataUrl: null, filled: false };
   function renderInvitePage() {
     const v = data.invitePage;
-    const editable = !!v && data.partner.status === 'approved';
+    const editable = !!v && data.partner.status === 'approved' && !!data.link;   // after the start only (no link before)
     show('pt-invitepage-card', editable);
     if (!editable) return;
     document.getElementById('pt-ip-open').href = data.link?.inviteUrl || '#';
@@ -590,7 +596,9 @@
     const first = data.partner.firstName;
     document.getElementById('pt-welcome-title').textContent = first ? `Welcome to the partner team, ${first}` : 'Welcome to the partner team';
     // The Terms hold the rules for promoting us, so drafting and sharing wait for step 1 (review of #813).
-    const termsLocked = (k) => (k === 'first_draft' || k === 'share' || k === 'invite_page') && data.partnerTerms && !data.partnerTerms.accepted;
+    // …and sharing waits for the link itself, which only exists once the partnership has started (review of #850).
+    const termsLocked = (k) => ((k === 'first_draft' || k === 'share' || k === 'invite_page') && data.partnerTerms && !data.partnerTerms.accepted)
+      || ((k === 'share' || k === 'invite_page') && !data.link);
     document.getElementById('pt-steps').innerHTML = o.steps.map((st, i) => {
       const mark = st.done
         ? '<span aria-hidden="true" style="display:inline-flex;width:1.5rem;height:1.5rem;border-radius:9999px;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:.8rem;font-weight:700;flex-shrink:0">✓</span>'

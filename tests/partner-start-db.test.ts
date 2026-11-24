@@ -7,7 +7,7 @@
 import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { startPartnershipIfReady } from '../src/utils/partner-start';
+import { partnerLinkBlocked, startPartnershipIfReady } from '../src/utils/partner-start';
 import { PARTNER_TERMS_VERSION } from '../src/config/partner-terms';
 
 let passed = 0;
@@ -79,6 +79,15 @@ async function main() {
             assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-10'))).started, false, 'the old acceptance predates the reinstatement');
             await sql`UPDATE partners SET terms_accepted_at = '2026-12-11' WHERE id = 4`;
             assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-11'))).started, true, 'accepted again after reinstatement → starts');
+        });
+        await check('partnerLinkBlocked: an approved/suspended partner with no start date can\'t get their link; started or not approved/suspended can (review of #850)', async () => {
+            await sql.unsafe(`INSERT INTO partners (id, user_id, status, partner_since) VALUES
+                (11, 501, 'approved', NULL), (12, 502, 'suspended', NULL), (13, 503, 'approved', '2026-12-01'), (14, 504, 'rejected', NULL)`);
+            assert.strictEqual(await partnerLinkBlocked(db, 501), true);
+            assert.strictEqual(await partnerLinkBlocked(db, 502), true);
+            assert.strictEqual(await partnerLinkBlocked(db, 503), false);
+            assert.strictEqual(await partnerLinkBlocked(db, 504), false, 'not approved/suspended (CI schema check has no \'ended\'; same branch)');
+            assert.strictEqual(await partnerLinkBlocked(db, 999), false, 'not a partner (ordinary customer)');
         });
     } finally {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => {});

@@ -929,6 +929,10 @@ function _mailboxCard(m) {
     const meta = MAILBOX_CATALOG[m.provider];
     if (!meta) return '';
     const connected = !!m.connected;
+    // One sending mailbox at a time (Fix pipeline #72): with the other one connected, this one cannot be connected —
+    // senders always try Gmail first, so a second would never send. The server refuses it too (oauth-integrations.ts).
+    const other = !connected ? _mailboxProviders.find((o) => o && o.provider !== m.provider && o.connected) : null;
+    const otherLabel = other ? (MAILBOX_CATALOG[other.provider]?.label || 'the other mailbox') : '';
     const connectUrl = _withAssistantId(`/api/oauth/${encodeURIComponent(m.provider)}/connect`);
     const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer';
 
@@ -967,11 +971,14 @@ function _mailboxCard(m) {
             key: `mailbox-${m.provider}`, iconBg: meta.iconBg, iconText: meta.iconText, emoji: meta.emoji,
             label: meta.label,
             sub: connected ? (m.accountName ? `Sending as ${_esc(m.accountName)}` : 'Connected')
+                : other ? `One mailbox at a time — disconnect ${_esc(otherLabel)} to use ${_esc(meta.label)}`
                 : broken ? 'Needs reconnecting' : `Send email from ${_esc(meta.account)}`,
-            subTone: broken ? 'warn' : '',
+            subTone: broken && !other ? 'warn' : '',
             control: connected
                 ? _rowPill('Connected')
-                : `<a href="${connectUrl}" class="${_ROW_BTN} btn-primary border-transparent">${broken ? 'Reconnect' : 'Connect'}</a>`,
+                : other
+                    ? `<button type="button" disabled aria-disabled="true" title="Disconnect ${_esc(otherLabel)} first" class="${_ROW_BTN} btn-secondary border opacity-60 cursor-not-allowed">Connect</button>`
+                    : `<a href="${connectUrl}" class="${_ROW_BTN} btn-primary border-transparent">${broken ? 'Reconnect' : 'Connect'}</a>`,
             manageHtml: connected
                 ? `<div class="flex items-center gap-2 flex-wrap">
                        <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
@@ -996,7 +1003,9 @@ function _mailboxCard(m) {
           ${meta.note && !connected ? `<p class="text-xs text-gray-400 mt-1.5">${_esc(meta.note)}</p>` : ''}
           ${accountChip}
         </div>
-        ${connected ? '' : `<a href="${connectUrl}" class="${primaryBtn}">Connect ${_esc(meta.label)}</a>`}
+        ${connected ? '' : other
+            ? `<p class="text-xs font-semibold text-gray-500">One mailbox at a time — disconnect ${_esc(otherLabel)} to use ${_esc(meta.label)}.</p>`
+            : `<a href="${connectUrl}" class="${primaryBtn}">Connect ${_esc(meta.label)}</a>`}
         ${manage}
       </div>`;
 }

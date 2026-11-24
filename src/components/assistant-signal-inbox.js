@@ -599,11 +599,10 @@
    * them: this state used to say "create a saved search" to a user who had just created one in
    * chat, and the fix was to make the empty state describe the actual situation.
    */
-  // Per-viewer: dismissing the social upsell is a preference, not workspace state.
-  const SOCIAL_HINT_KEY = 'bms.signalInbox.socialHintDismissed';
-  function socialHintDismissed() {
-    try { return localStorage.getItem(SOCIAL_HINT_KEY) === '1'; } catch { return false; }
-  }
+  // Fix pipeline #65 (owner, 2026-11-16): the line offering social signals (comments, direct messages, mentions) with a
+  // Social Media Assistant promised something that was never built (hasSocialFeed only checks that a Social Media assistant
+  // exists; nothing turns comments, DMs or mentions into signals, and Meta's messaging permissions are still in review).
+  // Removed until it exists. Put it back in the commit that builds the social feed.
 
   function emptyState() {
     return `<div class="p-8 text-center">
@@ -638,15 +637,7 @@
         about: 'Each search describes the companies you are after. Your assistant runs it on a schedule and adds the matches to All leads.',
         right: `${window._tabSecBtn('Review lead ideas', 'data-si-lead-ideas')}${window._tabFullBtn?.('signals') || ''}${window._tabNewBtn('New search', 'data-si-new-search')}`,
       })}
-      ${state.savedSearches.length && (state.hasSocialFeed || socialHintDismissed()) ? '' : `<div data-no-fold class="tab-card mb-4">
-        ${state.savedSearches.length ? '' : emptyState()}
-        ${!state.hasSocialFeed && !socialHintDismissed() ? `
-        <div class="p-4 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3" data-si-social-hint>
-          <p class="text-xs text-gray-500 mr-auto">Also capture comments, DMs and mentions as signals &mdash; needs a Social Media Assistant.</p>
-          <button type="button" data-si-social-hire class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">See the Social Media Assistant</button>
-          <button type="button" data-si-social-dismiss class="btn-utility min-h-[44px] sm:min-h-0 px-2 py-1 text-xs font-bold rounded-lg">Hide this</button>
-        </div>` : ''}
-      </div>`}
+      ${state.savedSearches.length ? '' : `<div data-no-fold class="tab-card mb-4">${emptyState()}</div>`}
 
       ${searchesPanel()}`;
   }
@@ -781,12 +772,6 @@
     // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
     h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
     h.querySelector('[data-si-lead-ideas]')?.addEventListener('click', openLeadIdeas);
-    // The social upsell had no way forward and no way to close it (review, 2026-10-22).
-    h.querySelector('[data-si-social-hire]')?.addEventListener('click', () => window.loadView?.('catalog'));
-    h.querySelector('[data-si-social-dismiss]')?.addEventListener('click', () => {
-      try { localStorage.setItem(SOCIAL_HINT_KEY, '1'); } catch { /* the hint just comes back next time */ }
-      h.querySelector('[data-si-social-hint]')?.remove();
-    });
     // "Review plan" opens the same brief screen the Find New Leads panel shows — what this search
     // will actually run, what it can reach, and the offer to split it by area. This tab could
     // start a search but never read its plan first.

@@ -1086,14 +1086,16 @@ function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCo
             label: 'Where should action items go?',
             type: 'dropdown',
             required: true,
-            placeholder: 'Choose your tool…',
+            placeholder: 'Choose one…',
+            // Two choices, not a tool list (Fix pipeline #69, owner 2026-11-16). Which external tool is decided by the
+            // connection switched on in Connections (Asana, Jira or Notion), not here; the old answers notion / jira /
+            // asana still read as "external" (meeting-minutes.ts meetingDestinationLabel).
             options: [
-              { value: 'notion', label: 'Notion' },
-              { value: 'jira', label: 'Jira' },
-              { value: 'asana', label: 'Asana' },
-              // Monday.com removed 2026-10-09: sync-action has no Monday handler, so choosing it gave a
-              // sync button that could only fail. Restore it in the commit that adds the handler.
+              { value: 'be_more_swan', label: 'In Be More Swan' },
+              { value: 'external', label: 'In an external system' },
             ],
+            // Answers saved under the old tool list show as "In an external system" (assistants.js _schemaLegacyValue).
+            legacy: { notion: 'external', jira: 'external', asana: 'external', monday: 'external' },
           },
         ],
       },

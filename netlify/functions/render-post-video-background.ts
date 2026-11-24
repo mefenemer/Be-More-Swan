@@ -15,7 +15,7 @@
 // far worse here than a visible failure, which the reviewer can see and retry.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
@@ -24,7 +24,7 @@ import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, read
 import { editChangesMedia, editHasStills } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { RenderCostMeter } from '../../src/utils/render-cost';
+import { RenderCostMeter, logOrphanedRenderCost } from '../../src/utils/render-cost';
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // under the 15-min background ceiling, room for one retry
@@ -34,7 +34,53 @@ const SOURCE_URL_TTL_SEC = 3600;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-export default withLambda(async (event: HandlerEvent) => {
+/** Longer than any worker can run (Netlify's 15-minute background ceiling): a job still 'rendering' after this was cut off. */
+export const KILLED_AFTER_MS = 20 * 60 * 1000;
+/** Only jobs cut off this recently: older ones are a backlog from before this sweep existed (review of #844), and failing
+ *  them now would surprise their owners and date their render costs to a month they don't belong to. */
+export const KILLED_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
+// Small: the sweep runs after this worker's own render, inside its 15-minute ceiling (review of #844).
+const KILLED_SWEEP_LIMIT = 5;
+
+/**
+ * Jobs whose worker was killed mid-render (a deploy, a platform fault) sit 'rendering' with nothing left to finish them.
+ * Each worker run sweeps them AFTER its own render (so a burst can't eat that render's time): fail the job and its post's render gate, the same as a failed render, so the post
+ * isn't held forever. If a render id is on the row, log what that render cost (render-cost.ts: once, and not if the
+ * worker logged before dying). Only the UPDATE that moves the row out of 'rendering' logs, so two workers can't both.
+ * Never throws.
+ */
+export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: Date = new Date()): Promise<number> {
+    try {
+        const stale = await db.select({ id: postRenderJobs.id }).from(postRenderJobs)
+            .where(and(eq(postRenderJobs.status, 'rendering'), lt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_AFTER_MS)),
+                gt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_WITHIN_MS))))
+            .limit(KILLED_SWEEP_LIMIT);
+        let swept = 0;
+        for (const { id } of stale) {
+            const [job] = await db.update(postRenderJobs)
+                .set({ status: 'failed', errorMessage: 'The render stopped before it finished. Try again.', updatedAt: now })
+                .where(and(eq(postRenderJobs.id, id), eq(postRenderJobs.status, 'rendering')))
+                .returning();
+            if (!job) continue;
+            swept++;
+            // Only when no newer job has taken the post over since: a re-approval queues a new job that sets 'rendering'
+            // again, and failing the post under it would offer a retry (a third, paid render) while it runs (review of #844).
+            await db.update(scheduledPosts).set({ renderStatus: 'failed', updatedAt: now })
+                .where(and(eq(scheduledPosts.id, job.postId), eq(scheduledPosts.renderStatus, 'rendering'),
+                    sql`NOT EXISTS (SELECT 1 FROM post_render_jobs n WHERE n.post_id = ${job.postId} AND n.id > ${job.id})`));
+            if (job.renderId && job.bucketName) {
+                await logOrphanedRenderCost(db, { renderId: job.renderId, bucketName: job.bucketName, region: job.region ?? '' },
+                    { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
+            }
+        }
+        return swept;
+    } catch (err) {
+        console.error('[render-post-video-background] killed-render sweep failed:', err instanceof Error ? err.message : err);
+        return 0;
+    }
+}
+
+async function handleRenderJob(event: HandlerEvent) {
     let jobId: number;
     try { jobId = Number(JSON.parse(event.body || '{}').jobId); }
     catch { return { statusCode: 400, body: 'Invalid JSON' }; }
@@ -331,5 +377,14 @@ export default withLambda(async (event: HandlerEvent) => {
         console.error(`[render-post-video-background] job ${jobId} failed:`, err);
         await fail(err instanceof Error ? err.message : 'The render failed unexpectedly.').catch(() => {});
         return { statusCode: 200, body: 'Failed' };
+    }
+}
+
+export default withLambda(async (event: HandlerEvent) => {
+    try {
+        return await handleRenderJob(event);
+    } finally {
+        // Killed jobs from other runs, after this run's own render is done (never throws).
+        await sweepKilledPostRenders(getDb());
     }
 });
