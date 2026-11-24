@@ -7,8 +7,12 @@
 //
 // So a score is a weighted sum over two kinds of check, and nothing else:
 //   · DETERMINISTIC checks — read straight off the SitePage (site-extract.ts). Same page, same result.
-//   · RUBRIC questions — fixed yes/no questions a model answers at temperature 0, each with quoted
-//     evidence. The model answers questions; it never picks the number.
+//   · RUBRIC questions — fixed yes/no questions a model answers, each with quoted evidence. The model
+//     answers questions; it never picks the number. ⚠️ Not "at temperature 0": today's models take no
+//     temperature and Opus always thinks, so the same question can come back the other way (Fix pipeline
+//     #63: 90 → 80 → 90 with the owner's page unchanged). site-audit.ts keeps answers steady instead — a
+//     lens whose pages are unchanged keeps last run's answers, and a flipped answer must be confirmed by
+//     asking again (`steadyAnswers`).
 // Same answers in any order → same score, always (tests/site-score.test.ts pins this).
 //
 // Evidence is GROUNDED: a quote that is not on the page is not evidence (`isGrounded`). An answer

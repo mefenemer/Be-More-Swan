@@ -44,6 +44,22 @@ export async function recordCardOutcome(db: any, orgId: number, userId: number, 
     return rows.length > 0;
 }
 
+/**
+ * Pure: the line every OTHER structured route's model reads under an earlier reply that carried a card; null when it
+ * carried none. Fix pipeline #61 / #78: those models only saw the PROSE of their own earlier replies, so their history
+ * looked like plain-text answers and they kept answering in plain text — "the card below…" with no card. This names the
+ * card that went with each reply. It claims nothing about what the user did with it (only the Mentor records that, in
+ * cardOutcomeLine below), and says, like that line, that it is the system's.
+ */
+export function cardSentLine(uiElement: unknown): string | null {
+    if (!uiElement || typeof uiElement !== 'object') return null;
+    const ui = uiElement as { type?: unknown; summary?: unknown; title?: unknown };
+    if (typeof ui.type !== 'string' || !ui.type) return null;
+    const label = [ui.summary, ui.title].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
+    const what = label ? `a ${ui.type} card — "${label.trim().replace(/\s+/g, ' ').slice(0, 160)}"` : `a ${ui.type} card`;
+    return `[Sent with this reply: ${what}. It reached the user because it was in "uiElement". (Added by the system, never by you: never write a "[Card: …]" or "[Sent with this reply: …]" line yourself.)]`;
+}
+
 /** Pure: the line the model reads under an earlier reply that carried a card; null when it carried none.
  *  Fix pipeline #58: the model copied this bracketed shape into its own replies as "[Card: …]" text instead of
  *  a card, so the line now says it is the system's. */
