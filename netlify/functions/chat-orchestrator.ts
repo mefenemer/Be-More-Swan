@@ -30,7 +30,7 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
-import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, videoProjects, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -158,7 +158,7 @@ import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
 import { buildPillarChatBlock, pillarRequestFromUiElement, resolvePillarProposal, settingsPlaceFor, type PillarCard } from '../../src/utils/chat-pillar-card';
 import { pillarProfileFor } from '../../src/utils/pillar-profiles';
-import { buildTakeMeThereCard } from '../../src/config/take-me-there';
+import { buildTakeMeThereCard, TAKE_ME_THERE_TEAM_CAP, takeMeThereAssistantPromptLine } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
@@ -3746,6 +3746,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // could never be drawn, and telling it otherwise made it claim on staging (2026-10-25) that it could
     // change its own settings. Its own cards are added deliberately (docs/business-mentor-plan.md §3.3–3.7).
     const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;
+    // "Take Me There" on every assistant's chat, not only the Mentor's (Fix pipeline #68): the workspace's assistants
+    // by id, so the card can open one's page. The Mentor has its own line (mentor-cards.ts). Never throws.
+    // Its role too, so a "Topics & themes" button opens the card that assistant really has. Itself is always on it,
+    // ahead of the cap, so the others named are at most TAKE_ME_THERE_TEAM_CAP — the same number the line names.
+    const takeMeThereTeam: Array<{ id: number; name: string; job?: string | null; roleKey: string | null }> = offersOwnCards
+        ? await db.select({ id: aiAssistants.id, name: aiAssistants.name, job: aiAssistants.aiAssistantJobRole, roleKey: masterAssistants.roleKey })
+            .from(aiAssistants).leftJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
+            .where(and(eq(aiAssistants.organisationId, orgId), isNull(aiAssistants.archivedAt), sql`${aiAssistants.id} <> ${session.aiAssistantId}`))
+            .limit(TAKE_ME_THERE_TEAM_CAP)
+            .catch(() => [] as Array<{ id: number; name: string; job: string | null; roleKey: string | null }>)
+        : [];
+    if (offersOwnCards) takeMeThereTeam.unshift({ id: session.aiAssistantId, name: assistantRow.name || 'This assistant', roleKey: assistantRow.roleKey ?? null });
+    const takeMeThereBlock = offersOwnCards
+        ? takeMeThereAssistantPromptLine({ id: session.aiAssistantId, name: assistantRow.name || 'This assistant' }, takeMeThereTeam)
+        : null;
     const settingsBlock = await buildAssistantSettingsSnapshot(db, orgId, session.aiAssistantId, assistantRow.roleKey);
     const settingsCardBlock = offersOwnCards ? assistantSettingsPromptBlock(assistantRow.roleKey) : null;
     // Its Do's and don'ts by id, and the card that adds, rewords, switches or deletes one
@@ -3824,7 +3839,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, searchTrendsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, searchQueriesBlock, searchTrendsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, takeMeThereBlock, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -4114,6 +4129,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const card = mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (card && 'error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
             else if (card) { supportCard = { ...card, from: assistantRow.jobRole || assistantRow.name || 'Assistant' }; uiElement = supportCard; }
+        }
+        // "Take Me There" on every other structured route (Fix pipeline #68): checked against the closed list exactly as
+        // on the Mentor's route, taken now and put back with the support card, because each route's list would drop it.
+        let takeMeThereCard: Record<string, unknown> | null = null;
+        if (offersOwnCards && (uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
+            const card = buildTakeMeThereCard(uiElement as Record<string, unknown>, takeMeThereTeam);
+            if ('error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
+            else { takeMeThereCard = card as unknown as Record<string, unknown>; uiElement = takeMeThereCard; }
         }
         // Tracked search terms (src/utils/chat-search-terms-card.ts): the Mentor's and the Blog Writer's card, the
         // same action as Business Information ▸ What People Search. Taken now and put back with the support card,
@@ -4755,6 +4778,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
 
         if (supportCard) uiElement = supportCard;
+        if (takeMeThereCard) uiElement = takeMeThereCard;
         if (searchTermsCard) uiElement = searchTermsCard;
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
