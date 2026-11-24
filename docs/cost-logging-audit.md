@@ -39,13 +39,15 @@ tests/usage-writes-awaited.test.ts), so writes that were started but never finis
 | **Stripe** card fees | Stripe balance transactions | Separately (`card_fee_pence`) | Per payment | Stripe's actual fee | Not in `ai_usage_log` by design (PR #827) |
 | Pexels, Companies House, Reed, social / CRM / Google APIs, R2 | many | n/a | n/a | Free APIs, or fixed / storage fees not per call | None |
 
-## Known small gaps (accepted)
+## Edge cases (fixed 2026-11-24, after the #831 reviews)
 
-Each needs an unusual failure and costs cents. Listed so nobody is surprised:
+- **Recall bot we can't follow and couldn't take back.** Recall accepted it, but its id never reached the row (`not_saved_bot_still_sent`), or the row closed while Recall was answering. Its events will never match a row, so it's logged at the most it can run (`untrackedRecallHours`): 10 min waiting room + its length limit in the call + 2 min alone, with the transcript for the length limit. This overstates, which is the safe error.
+- **Recall bot removed while the row still says `scheduled`** (a missed webhook). `removeMeetingBot` and `withdrawMeetingBots` now log every bot they cancel, timed from `join_at`. A bot booked for later gives 0 hours, so nothing is written.
+- **Recall withdrawal that fails** (`withdrawMeetingBots`). Already covered: the row stays open with its Recall id, so the bot's own final event logs it. The one exception is a deleted workspace. Its rows go with it, but there's no customer left to bill, and the partner sweep checks an orphaned referral at the minimum with no costs.
+- **"Logged once" is tested by running the rule:** `recallCostDue` (meeting-bot.ts) runs against every real status path.
 
-- **Recall bot whose id never saved:** Recall accepted the bot, saving its id failed, and taking it back failed too (`not_saved_bot_still_sent`). The row has no `recallBotId`, so no cost is logged.
-- **Recall bot removed while the row still says `scheduled`:** a missed webhook left the row behind the bot. `removeMeetingBot` treats it as booked and logs nothing.
-- **Recall withdrawal that fails:** in `withdrawMeetingBots`, if `removeRecallBot` fails, the bot may keep running and nothing is logged.
+## Still not logged
+
 - **Remotion render in a killed function:** a function killed outright can't log. The 12-minute poll limit keeps clear of Netlify's 15-minute ceiling.
 
 ## Left unattributed on purpose (system work)
