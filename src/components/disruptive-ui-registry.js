@@ -4983,7 +4983,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('ActionItemAssignmentCard', renderActionItemAssignmentCard);
 
   // ── Built-in: Meeting Action Proposal Card (Meeting Note Taker chat) ─────────
-  // { type: 'meeting_action_proposal', action: 'approve'|'add_email'|'edit_followup'|'reject', recordId,
+  // { type: 'meeting_action_proposal', action: 'approve'|'add_email'|'edit_followup'|'reject'|'send_to', recordId, target?, targetLabel?, targetWhat?, tasksLeft?,
   //   assistantId, title, approvalStatus, blocked, settled?, dataHash, to?, noMailbox?, taskTool?, missing?, tasks?,
   //   attendeeName?, email?, attendees?, before?, followupEmail?, note? }
   //
@@ -4996,6 +4996,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     add_email: { head: 'Add an attendee’s email', button: 'Save the address', busy: 'Saving…', done: 'Saved. They’ll get the follow-up when the meeting is approved.' },
     edit_followup: { head: 'Change the follow-up email', button: 'Save the new email', busy: 'Saving…', done: 'Saved. This is the email attendees get when the meeting is approved.' },
     reject: { head: 'Reject this meeting', button: 'Reject', busy: 'Rejecting…', done: 'Rejected. Nothing was sent.' },
+    // Fix pipeline #73: one approved meeting to one switched-on tool, through the same runner as approval.
+    send_to: { head: 'Send this meeting', button: 'Send', busy: 'Sending…', done: 'Queued — it goes within a few minutes. The Inbox card says when it has.' },
   };
 
   function meetingActionPatch(ui) {
@@ -5004,6 +5006,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (ui.action === 'add_email') return { id, dataMerge: { attendees: Array.isArray(ui.attendees) ? ui.attendees : [] } };
     if (ui.action === 'edit_followup') return { id, dataMerge: { followupEmail: ui.followupEmail } };
     if (ui.action === 'reject') return { id, approvalStatus: 'rejected', ...(ui.note ? { feedback: ui.note } : {}) };
+    if (ui.action === 'send_to' && typeof ui.target === 'string') return { id, sendTo: ui.target };
     return null;
   }
 
@@ -5034,6 +5037,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       detail = `<p class="text-sm text-gray-700 mt-2"><span class="font-bold">${esc(ui.attendeeName || 'Attendee')}</span> · <span class="break-all">${esc(ui.email || '')}</span></p>`;
     } else if (ui.action === 'edit_followup') {
       detail = `${emailBox(ui.before, 'Now')}${emailBox(ui.followupEmail, 'Will be')}`;
+    } else if (ui.action === 'send_to' && !blocked) {
+      const left = Number(ui.tasksLeft);
+      detail = `<p class="text-sm text-gray-700 mt-2">Sends ${esc(ui.targetWhat || `it to ${ui.targetLabel || 'that tool'}`)} now${Number.isFinite(left) && left > 0 ? ` — ${esc(String(left))} action item${left === 1 ? '' : 's'} not already there` : ''}.</p>
+        <p class="text-xs text-gray-600 mt-1">Only what hasn’t gone already is sent, so nothing arrives twice.</p>`;
     } else if (ui.action === 'reject') {
       detail = `<p class="text-sm text-gray-700 mt-2">Nothing from this meeting is sent.${ui.note ? ' What was wrong is kept as a rule for future minutes:' : ''}</p>
         ${ui.note ? `<p class="text-sm text-gray-900 mt-1 italic break-words">“${esc(ui.note)}”</p>` : ''}`;
@@ -5042,7 +5049,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
     el.setAttribute('data-meeting-action', ui.action);
     el.innerHTML = `
-      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(ui.action === 'send_to' && ui.targetLabel ? `Send to ${ui.targetLabel}` : copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
       <p class="font-bold text-gray-900 mt-1 break-words">${esc(ui.title || `Meeting #${ui.recordId}`)}</p>
       ${detail}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : `
