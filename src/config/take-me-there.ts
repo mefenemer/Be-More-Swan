@@ -119,6 +119,11 @@ export function buildTakeMeThereCard(
             else if (!prof) key = 'assistant_how_i_work';
             place = TAKE_ME_THERE_PLACES[key];
         }
+        // Blog Studio is the Blog Writer's: a button that opens it "for" a Social assistant would open a studio that
+        // assistant has no part in (review on PR #839). Refused when the role is known and isn't the Blog Writer.
+        if (place.studio && who.roleKey !== undefined && who.roleKey !== 'blog_writer') {
+            return { error: 'That button opens a Blog Writer\'s Blog Studio, so it needs your Blog Writer.' };
+        }
         return {
             type: 'mentor_take_me_there', summary, place: key,
             label: place.label.replace(/^the assistant's|^the Brand Designer's|^the Website Assistant's|^the Video Producer's|^the Blog Writer's|^your Business Mentor's/, `${who.name}'s`),
