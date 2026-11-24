@@ -238,6 +238,10 @@ check('the stuck sweeps log a killed render, only from the UPDATE that claims th
     // After the worker's own render, so a burst of killed jobs can't eat that render's time.
     assert.ok(/return await handleRenderJob\(event\);\s*\} finally \{[\s\S]{0,120}await sweepKilledPostRenders\(getDb\(\)\);/.test(w), 'the worker no longer sweeps killed renders after its own render');
     assert.ok(/const KILLED_SWEEP_LIMIT = 5;/.test(w), 'the post sweep must stay small (it runs inside the worker\'s 15 minutes)');
+    // A post a newer job has taken over is not failed under it.
+    assert.ok(/eq\(scheduledPosts\.renderStatus, 'rendering'\),\s*sql`NOT EXISTS \(SELECT 1 FROM post_render_jobs n WHERE n\.post_id = \$\{job\.postId\} AND n\.id > \$\{job\.id\}\)`/.test(pw), 'the sweep would fail a post whose newer render is running');
+    // The Remotion read in the orphan logger is time-limited (the video sweep runs inside user requests).
+    assert.ok(/Promise\.race\(\[\s*progressOf\(r\),[\s\S]{0,200}ORPHAN_PROGRESS_TIMEOUT_MS/.test(read('src/utils/render-cost.ts')), 'a hung Remotion read could hold a user request');
     assert.ok(/gt\(postRenderJobs\.updatedAt, new Date\(now\.getTime\(\) - KILLED_WITHIN_MS\)\)/.test(pw), 'the post sweep would fail the whole pre-existing backlog');
 });
 

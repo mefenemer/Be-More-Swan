@@ -15,7 +15,7 @@
 // far worse here than a visible failure, which the reviewer can see and retry.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, eq, gt, inArray, lt, ne } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
@@ -63,8 +63,11 @@ export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: 
                 .returning();
             if (!job) continue;
             swept++;
+            // Only when no newer job has taken the post over since: a re-approval queues a new job that sets 'rendering'
+            // again, and failing the post under it would offer a retry (a third, paid render) while it runs (review of #844).
             await db.update(scheduledPosts).set({ renderStatus: 'failed', updatedAt: now })
-                .where(and(eq(scheduledPosts.id, job.postId), eq(scheduledPosts.renderStatus, 'rendering')));
+                .where(and(eq(scheduledPosts.id, job.postId), eq(scheduledPosts.renderStatus, 'rendering'),
+                    sql`NOT EXISTS (SELECT 1 FROM post_render_jobs n WHERE n.post_id = ${job.postId} AND n.id > ${job.id})`));
             if (job.renderId && job.bucketName) {
                 await logOrphanedRenderCost(db, { renderId: job.renderId, bucketName: job.bucketName, region: job.region ?? '' },
                     { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });

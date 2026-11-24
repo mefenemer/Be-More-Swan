@@ -22,6 +22,9 @@ import { logRenderCost, type AiUsageParams } from './ai-usage';
 type UsageCtx = Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'>;
 type Db = ReturnType<typeof getDb>;
 
+/** How long a sweep waits for Remotion to say what a killed render cost. */
+export const ORPHAN_PROGRESS_TIMEOUT_MS = 5_000;
+
 /** The session id one render's cost row carries: the caller's label plus Remotion's render id. Pure. */
 export function renderSessionId(base: string | null | undefined, renderId: string): string {
     return `${base || 'remotion-render'}:${renderId}`.slice(0, 255);
@@ -41,7 +44,12 @@ export async function logOrphanedRenderCost(
         const sessionId = renderSessionId(ctx.sessionId, r.renderId);
         const [already] = await db.select({ id: aiUsageLog.id }).from(aiUsageLog).where(eq(aiUsageLog.sessionId, sessionId)).limit(1);
         if (already) return false;
-        const p = await progressOf(r);
+        // Bounded: the Video Producer sweep runs inside user requests, and a hung Remotion read must not hold them (review of #844).
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const p = await Promise.race([
+            progressOf(r),
+            new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Remotion progress read timed out')), ORPHAN_PROGRESS_TIMEOUT_MS); }),
+        ]).finally(() => clearTimeout(timer));
         if (p.costUsd == null) return false;
         await log(p.costUsd, { ...ctx, sessionId });
         return true;
