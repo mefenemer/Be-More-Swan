@@ -49,12 +49,12 @@ const KILLED_SWEEP_LIMIT = 5;
  * worker logged before dying). Only the UPDATE that moves the row out of 'rendering' logs, so two workers can't both.
  * Never throws.
  */
-export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: Date = new Date()): Promise<number> {
+export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: Date = new Date(), limit: number = KILLED_SWEEP_LIMIT): Promise<number> {
     try {
         const stale = await db.select({ id: postRenderJobs.id }).from(postRenderJobs)
             .where(and(eq(postRenderJobs.status, 'rendering'), lt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_AFTER_MS)),
                 gt(postRenderJobs.updatedAt, new Date(now.getTime() - KILLED_WITHIN_MS))))
-            .limit(KILLED_SWEEP_LIMIT);
+            .limit(limit);
         let swept = 0;
         for (const { id } of stale) {
             const [job] = await db.update(postRenderJobs)
