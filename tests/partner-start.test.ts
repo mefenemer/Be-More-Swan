@@ -111,4 +111,17 @@ check('the Partner page never tells a not-started partner that commission "keeps
     assert.ok(page.includes('to start your partnership.'));
 });
 
+check('every gate uses the same "accepted" rule: Monday summary, Partner Assistant, invite page (review of #838)', () => {
+    assert.ok(read('netlify/functions/partner-weekly-nudge.ts').includes('termsAccepted: acceptedForUse(p), payoutSet:'));
+    assert.ok(read('netlify/functions/partner-assistant.ts').includes('if (!acceptedForUse(p)) return json(403'));
+    assert.ok(read('netlify/functions/partner-hub.ts').includes("if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });"));
+});
+check('a waiting special rate is removed when the application is rejected or the partnership ends', () => {
+    assert.ok(read('netlify/functions/admin-partners.ts').includes("if (rule.to === 'rejected' || rule.to === 'ended') await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);"));
+});
+check('the Partner page retries a failed start BEFORE working out the rate', () => {
+    const hub = read('netlify/functions/partner-hub.ts');
+    assert.ok(hub.indexOf('if (!impersonating && canStart({') < hub.indexOf('const periods = await db.select().from(partnerRatePeriods)'));
+});
+
 console.log(`\n${passed} passed`);

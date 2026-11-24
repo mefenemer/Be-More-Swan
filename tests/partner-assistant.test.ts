@@ -118,7 +118,8 @@ check('hand-off briefs carry the rules: label first + link (posts, emails), cons
 });
 
 check('no drafting until the CURRENT Partner Terms are accepted (admin-added partners included)', () => {
-    const gate = ep.indexOf('if (!hasAcceptedCurrentTerms(p.termsVersion)) return json(403');
+    // Owner 2026-11-24: current version AND accepted since approval (acceptedForUse, partner-start.ts).
+    const gate = ep.indexOf('if (!acceptedForUse(p)) return json(403');
     assert.ok(gate > 0 && gate < ep.indexOf("checkRateLimit(db, 'partner_assistant'"), 'checked before any message is spent');
 });
 

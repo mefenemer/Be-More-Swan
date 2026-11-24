@@ -34,7 +34,7 @@ import { ensureReferralCode } from '../../src/utils/referral-code';
 import { resolveImpersonation } from '../../src/utils/impersonation';
 import { PARTNER_TERMS_UPDATED, PARTNER_TERMS_VERSION } from '../../src/config/partner-terms';
 import { getPartnerActivity } from '../../src/utils/partner-activity';
-import { canStart, needsAcceptance, startPartnershipIfReady } from '../../src/utils/partner-start';
+import { acceptedForUse, canStart, needsAcceptance, startPartnershipIfReady } from '../../src/utils/partner-start';
 import { recordTermsAcceptance } from '../../src/utils/partner-terms-acceptance';
 import { isUkVatRegistered, listPartnerPayouts, loadStatement, normaliseVatNumber, statementHtml, isUkVatNumber } from '../../src/utils/partner-statements';
 import { checkRateLimit } from '../../src/utils/rate-limit';
@@ -85,6 +85,12 @@ export default withLambda(async (event) => {
         const code = live && p.status !== 'ended'
             ? impersonating ? await readReferralCode(db, userId) : await ensureReferralCode(db, userId)
             : null;
+        // BEFORE working out the rate, so this load already shows a special rate the start creates (review of #838).
+        // Ready but not started (a start that failed earlier)? Start now — idempotent; never while impersonating (GET stays a read).
+        if (!impersonating && canStart({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt })) {
+            const r = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry on load failed:', err); return { started: false }; });
+            if (r.started) { const [fresh] = await db.select({ partnerSince: partners.partnerSince }).from(partners).where(eq(partners.id, p.id)).limit(1); p.partnerSince = fresh?.partnerSince ?? p.partnerSince; }
+        }
         const periods = await db.select().from(partnerRatePeriods).where(or(isNull(partnerRatePeriods.partnerId), eq(partnerRatePeriods.partnerId, p.id)));
         const now = new Date();
         const current = resolvePeriodAt(periods, p.id, now);
@@ -93,11 +99,6 @@ export default withLambda(async (event) => {
         const [u] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
         // Accepted = the current version AND (for an approved partner who hasn't started) accepted since approval.
         const termsAccepted = !needsAcceptance({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt });
-        // Ready but not started (a start that failed earlier)? Start now — idempotent; never while impersonating (GET stays a read).
-        if (!impersonating && canStart({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt })) {
-            const r = await startPartnershipIfReady(db, p.id).catch((err) => { console.error('[partner-hub] start retry on load failed:', err); return { started: false }; });
-            if (r.started) { const [fresh] = await db.select({ partnerSince: partners.partnerSince }).from(partners).where(eq(partners.id, p.id)).limit(1); p.partnerSince = fresh?.partnerSince ?? p.partnerSince; }
-        }
         // The first-week card and the Partner Assistant's opening words (docs/partner-onboarding-plan.md §2).
         // Built from data, never a model call (owner decision D2). Not for 'ended' partners — no link, no assistant.
         let onboarding: Record<string, unknown> | null = null;
@@ -259,7 +260,7 @@ export default withLambda(async (event) => {
     if (body.action === 'invite_profile_submit' || body.action === 'invite_profile_withdraw') {
         if (p.status !== 'approved') return json(403, { error: 'Your invite page can be changed while your partnership is active.' });
         // The page carries their words under our name: the Terms (5.1–5.3) come first.
-        if (p.termsVersion !== PARTNER_TERMS_VERSION) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
+        if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — step 1 of your first-week list.' });
         const pending = p.inviteProfilePending as InviteProfile | null;
         const liveKey = (p.inviteProfile as InviteProfile | null)?.photoKey ?? null;
         // Saves are conditional on what was read: if an admin approved (or sent back) a moment ago, the photo

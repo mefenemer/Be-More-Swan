@@ -30,6 +30,11 @@ export function canStart(p: { status: string; terms_version: string | null; part
         && !!p.terms_accepted_at && (!p.approved_at || p.terms_accepted_at.getTime() >= p.approved_at.getTime());
 }
 
+/** The same rule from a Drizzle `partners` row (camelCase) — every gate uses this so they can't drift (review of #838). */
+export function acceptedForUse(p: { status: string; termsVersion: string | null; partnerSince: Date | null; termsAcceptedAt: Date | null; approvedAt: Date | null }): boolean {
+    return !needsAcceptance({ status: p.status, terms_version: p.termsVersion, partner_since: p.partnerSince, terms_accepted_at: p.termsAcceptedAt, approved_at: p.approvedAt });
+}
+
 /** Does the Partner page still need to ask them to accept? (Approved and not started, but no acceptance since approval.) */
 export function needsAcceptance(p: { status: string; terms_version: string | null; partner_since: unknown; terms_accepted_at: Date | null; approved_at: Date | null }): boolean {
     if (p.terms_version !== PARTNER_TERMS_VERSION) return true;

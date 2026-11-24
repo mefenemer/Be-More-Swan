@@ -322,6 +322,9 @@ export default withLambda(async (event) => {
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
         await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
+        // Rejected or ended: a special rate still waiting to start goes too, so it can't start on a later approval
+        // without anyone being asked (review of #838).
+        if (rule.to === 'rejected' || rule.to === 'ended') await db.execute(sql`DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}`);
         // No start here: approval sets approved_at = now, and the start needs an acceptance AFTER approval (owner
         // 2026-11-24). A not-yet-started partner — new, re-approved or reinstated — is asked on their Partner page.
         // Approving tells them: a welcome if they have an account, a private account link if not.
