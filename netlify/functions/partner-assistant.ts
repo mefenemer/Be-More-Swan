@@ -127,6 +127,9 @@ export default withLambda(async (event) => {
     // The Terms hold the rules for promoting us (labelling ads, no spam) — no drafting before they're accepted.
     // …and, for a partner who hasn't started, accepted SINCE approval (owner 2026-11-24): drafts carry their link, and
     // customers who first pay before the start never earn — so the assistant waits for the start too.
+    // Accepted but the start hasn't gone through yet (rare — retried on the next Partner page load): wait for it, so
+    // drafts always carry their link (review of #850).
+    if (p.status === 'approved' && !p.partnerSince && acceptedForUse(p)) return json(409, { error: 'Your partnership is just starting — reload your Partner page and try again.' });
     if (!acceptedForUse(p)) return json(403, { error: 'Please accept the Partner Terms first — it’s step 1 of your first-week list on this page (or the banner at the top, if you’ve hidden the list). They include the rules for promoting Be More Swan.' });
 
     let body: { messages?: Array<{ role?: unknown; content?: unknown }> };

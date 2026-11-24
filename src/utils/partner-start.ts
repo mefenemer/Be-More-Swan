@@ -77,3 +77,15 @@ export async function startPartnershipIfReady(db: Db, partnerId: number, now: Da
         return { started: true, specialRate: w };
     });
 }
+
+/**
+ * Is this user a partner whose partnership hasn't started yet? Then their referral code — which IS their partner
+ * link — must not be handed out anywhere (Partner page, Referrals page, "email a friend", assistant drafts): a
+ * customer who first pays before the start never earns them commission (owner 2026-11-24; review of #850).
+ */
+export async function partnerLinkBlocked(db: Db, userId: number): Promise<boolean> {
+    const rows = (await db.execute(sql`
+        SELECT 1 FROM partners WHERE user_id = ${userId} AND status IN ('approved', 'suspended') AND partner_since IS NULL LIMIT 1`)) as Row[];
+    return rows.length > 0;
+}
+export const PARTNER_LINK_BLOCKED_MESSAGE = 'Your partner link appears once you accept the Partner Terms on your Partner page — your partnership starts then.';

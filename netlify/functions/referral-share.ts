@@ -9,6 +9,7 @@
  * and is handled in the UI (greyed), not here.
  */
 
+import { partnerLinkBlocked, PARTNER_LINK_BLOCKED_MESSAGE } from '../../src/utils/partner-start';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
@@ -59,7 +60,11 @@ export default withLambda(async (event) => {
     if (!user.referralCode) {
         return { statusCode: 409, body: JSON.stringify({ error: 'Generate your referral link first.', code: 'NO_REFERRAL_CODE' }) };
     }
-    // Don't let users email their own link to themselves.
+    // A partner who hasn't started can't email their link yet (owner 2026-11-24; review of #850).
+    if (await partnerLinkBlocked(db, callerId)) {
+        return { statusCode: 409, body: JSON.stringify({ error: PARTNER_LINK_BLOCKED_MESSAGE, code: 'PARTNER_NOT_STARTED' }) };
+    }
+        // Don't let users email their own link to themselves.
     if (friendEmail.toLowerCase() === (user.email || '').toLowerCase()) {
         return { statusCode: 400, body: JSON.stringify({ error: "That's your own email — enter a friend's address." }) };
     }

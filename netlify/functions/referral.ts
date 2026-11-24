@@ -10,9 +10,10 @@
 import { generateReferralCode } from '../../src/utils/referral-code';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, desc, and, count, inArray, isNull } from 'drizzle-orm';
+import { eq, desc, and, count } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites, partners } from '../../db/schema';
+import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites } from '../../db/schema';
+import { partnerLinkBlocked, PARTNER_LINK_BLOCKED_MESSAGE } from '../../src/utils/partner-start';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { getReferralTokenState, freeMonthFor } from '../../src/utils/referral-tokens';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -95,8 +96,7 @@ export default withLambda(async (event) => {
         const totalRewarded = referrals.filter(r => r.status === 'rewarded').length;
         // A partner's referral code IS their partner link: hide it here too until their partnership starts
         // (owner 2026-11-24; review of #850). Ordinary customers are unaffected.
-        const [notStarted] = await db.select({ id: partners.id }).from(partners)
-            .where(and(eq(partners.userId, callerId), inArray(partners.status, ['approved', 'suspended']), isNull(partners.partnerSince))).limit(1);
+        const notStarted = await partnerLinkBlocked(db, callerId);
         const shareLink = user.referralCode && !notStarted
             ? `${BASE_URL}/register.html?ref=${user.referralCode}`
             : null;
@@ -165,7 +165,9 @@ export default withLambda(async (event) => {
             statusCode: 200,
             body: JSON.stringify({
                 hasActivePlan: true,
-                referralCode: user.referralCode,
+                // A partner who hasn't started gets no code or link here (review of #850): the page shows why instead.
+                referralCode: notStarted ? null : user.referralCode,
+                partnerNotStarted: notStarted,
                 shareLink,
                 rewardGbp: REWARD_GBP,
                 totalRewarded,
@@ -203,6 +205,7 @@ export default withLambda(async (event) => {
             .from(users).where(eq(users.id, callerId)).limit(1);
 
         if (!user) return { statusCode: 404, body: JSON.stringify({ error: 'User not found.' }) };
+        if (await partnerLinkBlocked(db, callerId)) return { statusCode: 409, body: JSON.stringify({ error: PARTNER_LINK_BLOCKED_MESSAGE, code: 'PARTNER_NOT_STARTED' }) };
 
         let code = user.referralCode;
         if (!code) {
