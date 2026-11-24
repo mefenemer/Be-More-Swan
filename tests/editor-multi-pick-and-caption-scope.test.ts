@@ -76,7 +76,7 @@ check('the inline caption box says where it saves and offers "only this one"', (
 });
 
 check('the save still follows the one checkbox the side panel uses', () => {
-    assert.ok(html.includes("const applyAll = _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;"));
+    assert.ok(html.includes("const applyAll = !onlyThis && _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;"));
 });
 
 console.log(`\n${passed} passed`);
