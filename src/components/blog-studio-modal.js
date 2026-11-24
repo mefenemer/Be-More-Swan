@@ -2778,9 +2778,23 @@
       });
     });
 
-    // Search Console connect (OAuth redirect) / disconnect for the content-decay loop.
+    // Search Console connect / disconnect for the content-decay loop.
+    // Fix pipeline #66: Connect went straight into the OAuth redirect with no assistant, so every outcome
+    // landed on the workspace-wide integrations page. Search Console has its row on the assistant's
+    // Connections tab (Assistant Settings, down the right), so on that assistant's page open it there.
+    // Anywhere else (the standalone page, the Calendar) start the connect WITH the assistant, so the
+    // callback returns to that assistant's Connections tab (oauth-integrations.ts, state.assistantId).
     el('bs-gsc-connect').addEventListener('click', function () {
-      window.location.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect';
+      var aid = state.assistantId;
+      var onThisAssistant = aid != null && typeof window._openBriefDrawer === 'function'
+        && Number(window._currentAssistantId) === Number(aid);
+      if (onThisAssistant) {
+        if (!setupTab.host) closeBlogStudio();   // the Blog setup TAB stays; the modal steps aside
+        window._openBriefDrawer('platforms');
+        return;
+      }
+      window.location.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect'
+        + (aid != null ? '&assistantId=' + encodeURIComponent(aid) : '');
     });
     el('bs-gsc-disconnect').addEventListener('click', function () {
       api('oauth-integrations?provider=searchconsole&action=disconnect', { method: 'POST' }).then(function () { loadSearchConsole(); });

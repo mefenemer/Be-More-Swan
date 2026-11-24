@@ -11837,7 +11837,9 @@ async function _loadBlogMetrics(assistantId) {
         if (!show) { cta?.remove(); return; }
         if (cta) return;
         cta = document.createElement('a');
-        cta.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect';
+        // With the assistant, so the callback returns to its Connections tab, not integrations.html (#66).
+        cta.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect'
+            + (window._currentAssistantId ? `&assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
         cta.className = 'kpi-gsc-cta btn-secondary inline-flex items-center min-h-[44px] sm:min-h-0 mt-2 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
         cta.textContent = 'Connect Google Search Console';
         line.after(cta);
