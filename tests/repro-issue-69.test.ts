@@ -32,4 +32,18 @@ assert.ok(ext.includes('your connected task tool') && ext.includes('Asana, Jira 
 assert.strictEqual(meetingDestinationLabel('jira'), 'Jira');
 assert.strictEqual(meetingDestinationLabel('notion'), 'Notion');
 
+// Review on PR #846: a Note Taker set up before this change (one on each database, 'notion') shows its answer as
+// "In an external system" in Settings, not a raw value with nothing selected. Runs the real assistants.js helpers.
+const field = JSON.parse(/("key":"taskDestination".*?"legacy":\{[^}]*\})/.exec(flat)![0].replace(/^/, '{') + '}');
+assert.deepStrictEqual(field.legacy, { notion: 'external', jira: 'external', asana: 'external', monday: 'external' });
+const aj = readFileSync(join(__dirname, '..', 'assistants.js'), 'utf8');
+const grab = (name: string) => { const st = aj.indexOf(`function ${name}(`); let i = aj.indexOf('{', st), d = 0; for (; i < aj.length; i++) { if (aj[i] === '{') d++; else if (aj[i] === '}' && --d === 0) break; } return aj.slice(st, i + 1); };
+const hctx: any = { window: {} };
+vm.createContext(hctx);
+vm.runInContext(`${grab('_schemaLegacyValue')}\n${grab('_formatSchemaAnswer')}\nthis.f = _formatSchemaAnswer;`, hctx);
+const fullField = { ...field, type: 'dropdown', options };
+assert.strictEqual(hctx.f(fullField, 'notion'), 'In an external system', 'an old answer reads as external');
+assert.strictEqual(hctx.f(fullField, 'be_more_swan'), 'In Be More Swan');
+assert.ok(aj.includes('const v = _schemaLegacyValue(f, ctx[f.key]);'), 'and the edit control shows it selected');
+
 console.log('repro-issue-69: two choices for where action items go ✓');

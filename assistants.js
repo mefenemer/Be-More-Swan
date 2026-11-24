@@ -7915,7 +7915,14 @@ function _roleSchemaFields(roleKey) {
 
 // Human-readable value for a schema answer (option label for radio/dropdown,
 // Yes/No for toggles). '' means "not answered" and the row is omitted.
+// A field may map answers saved under an older option list onto today's options (schema `legacy`), so the
+// edit control shows them selected and the profile shows a real label (Fix pipeline #69: notion/jira/asana → external).
+function _schemaLegacyValue(field, value) {
+    const m = field && field.legacy;
+    return m && value != null && Object.prototype.hasOwnProperty.call(m, String(value)) ? m[String(value)] : value;
+}
 function _formatSchemaAnswer(field, value) {
+    value = _schemaLegacyValue(field, value);
     if (field.type === 'toggle') return (value === undefined || value === null) ? '' : (value ? 'Yes' : 'No');
     if (value === undefined || value === null || String(value).trim() === '') return '';
     if (field.picker === 'voice') return window.VoicePicker?.describe(value) || String(value);
@@ -7936,7 +7943,7 @@ function _onboardingFieldControl(f, ctx, idPrefix) {
     const esc = _escapeHtml;
     const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
     const common = `id="${esc(idPrefix + f.key)}" data-onboarding-key="${esc(f.key)}"`;
-    const v = ctx[f.key];
+    const v = _schemaLegacyValue(f, ctx[f.key]);
     // Chosen by ear / with a live sample (voice-picker.js, caption-style.js): a hidden input the
     // autosave reads, which those components set and dispatch `change` on.
     if (f.picker === 'voice' && window.VoicePicker) return window.VoicePicker.fieldHtml({ attrs: common, value: v ?? '' });

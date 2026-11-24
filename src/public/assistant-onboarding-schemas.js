@@ -1094,6 +1094,8 @@ function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCo
               { value: 'be_more_swan', label: 'In Be More Swan' },
               { value: 'external', label: 'In an external system' },
             ],
+            // Answers saved under the old tool list show as "In an external system" (assistants.js _schemaLegacyValue).
+            legacy: { notion: 'external', jira: 'external', asana: 'external', monday: 'external' },
           },
         ],
       },
