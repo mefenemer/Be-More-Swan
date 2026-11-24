@@ -33,7 +33,7 @@ tests/usage-writes-awaited.test.ts), so writes that were started but never finis
 | **Serper** (search) | `discovery-search.ts` | Yes | Yes (tested) | $0.001 / search | None |
 | **Hunter** (emails) | `discovery-enrich-provider.ts` | Yes | Yes (tested) | $0.0285 / credit | None |
 | **DataForSEO** (Google Trends) | `search-trends.ts` | Yes | Live chat look-up: yes. Weekly refresh: **no, on purpose** | DataForSEO's own `cost` per task | Weekly refresh stays **unattributed**: one task serves every workspace that tracks the term (≈ $0.0027 a task). |
-| **Remotion Lambda** (renders) | `video-render.ts`, `render-post-video-background.ts` | Yes, finished renders | Yes | Remotion's `costs.accruedSoFar` | Residual: a render that FAILS after spending compute isn't logged (`if (progress.done)`). Small; left as a follow-up. |
+| **Remotion Lambda** (renders) | `video-render.ts`, `render-post-video-background.ts` | **Partly.** Finished and fatally failed renders yes (both report `done`). Renders we gave up on, after a poll timeout or an error mid-render, logged nothing while Lambda kept spending | Yes | Remotion's `costs.accruedSoFar` | **Fixed:** both loops go through `RenderCostMeter` (`src/utils/render-cost.ts`). It logs each render once: when it reports done, or, when we give up on it, with what Remotion says it has spent (or the last figure we saw if Remotion can't be reached). An abandoned render may still be running, so that figure can understate the final bill. A function killed outright (past Netlify's 15-minute limit) can't log; the 12-minute poll limit keeps clear of that. |
 | **Gemini / OpenAI** (AI Visibility) | `ai-visibility-fetch-background.ts` | Claude part via gateway; Gemini/OpenAI not | **No, on purpose** | — | Admin-only monthly check of Be More Swan itself. System cost, not a customer's. |
 | **Headless Chrome** (site import) | `site-js-render.ts` (`@sparticuz/chromium` inside our own function) | n/a | n/a | No outside vendor, no per-call charge (Netlify compute) | None. No Apify or browserless is used. |
 | **Stripe** card fees | Stripe balance transactions | Separately (`card_fee_pence`) | Per payment | Stripe's actual fee | Not in `ai_usage_log` by design (PR #827) |
@@ -61,6 +61,7 @@ tests/cost-logging-audit.test.ts names each of these, so adding a new unattribut
   - Resend outbound email is logged.
   - **Every gateway call passes a workspace, or is on the system list.**
   - No direct log call is missing a workspace unless it is system work.
+  - Remotion: every render is logged once, whether it finishes, fails, is retried or is abandoned (unit tests on the meter, plus checks that both render loops use it).
 - `tests/ai-usage-coverage.test.ts` (existing) checks that every direct SDK call logs, that every Claude and media model has a price, and covers fal, Stability, Serper, Hunter and Voyage.
 - `tests/usage-writes-awaited.test.ts` (existing) checks that every write is awaited.
 
