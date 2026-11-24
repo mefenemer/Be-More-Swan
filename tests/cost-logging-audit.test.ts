@@ -224,16 +224,20 @@ checkAsync('a killed worker\'s render is logged from Remotion\'s cost — once',
 check('the stuck sweeps log a killed render, only from the UPDATE that claims the row', () => {
     const vp = read('src/utils/video-producer.ts');
     const sweep = vp.slice(vp.indexOf('export async function sweepStuckProjects('), vp.indexOf('const stuck = await db.select('));
-    assert.ok(/const killed = await db\.update\(videoProjects\)[\s\S]{0,300}eq\(videoProjects\.status, 'rendering'\)[\s\S]{0,120}\.returning\(/.test(sweep), 'the video sweep no longer returns the rows it claims');
-    assert.ok(/k\.renderId !== 'starting'/.test(sweep) && /await logOrphanedRenderCost\(db, \{ renderId: k\.renderId!/.test(sweep) && /workspaceId: orgId/.test(sweep), 'a killed Video Producer render is not logged');
+    assert.ok(/const killed = await db\.update\(videoProjects\)[\s\S]{0,300}eq\(videoProjects\.status, 'rendering'\)[\s\S]{0,260}\.returning\(/.test(sweep), 'the video sweep no longer returns the rows it claims');
+    assert.ok(/o\.renderId !== 'starting'/.test(sweep) && /await logOrphanedRenderCost\(db, \{ renderId: k\.renderId!/.test(sweep) && /workspaceId: orgId/.test(sweep), 'a killed Video Producer render is not logged');
     assert.ok(/await import\('\.\/render-cost'\)/.test(sweep), 'keep Remotion\'s client out of video-producer.ts\'s static imports');
     // Only recent ones are logged (a backlog from before this logging existed would land in the wrong month).
-    assert.ok(/gt\(videoProjects\.updatedAt, new Date\(now\.getTime\(\) - ORPHAN_RENDER_LOG_WITHIN_MS\)\)/.test(sweep) && /recent\.has\(k\.id\)/.test(sweep), 'old stuck projects would log today');
+    assert.ok(/gt\(videoProjects\.updatedAt, new Date\(now\.getTime\(\) - ORPHAN_RENDER_LOG_WITHIN_MS\)\)/.test(sweep), 'old stuck projects would log today');
+    // At most ORPHAN_RENDER_LOGS_PER_SWEEP per sweep (it runs inside user requests); the rest wait, never failed unlogged.
+    assert.ok(/orphans\.slice\(0, ORPHAN_RENDER_LOGS_PER_SWEEP\)/.test(sweep) && /notInArray\(videoProjects\.id, waitForNext\)/.test(sweep) && /logNow\.has\(k\.id\)/.test(sweep), 'the video sweep must log a bounded number and leave the rest for the next sweep');
     const w = read('netlify/functions/render-post-video-background.ts');
     const pw = w.slice(w.indexOf('export async function sweepKilledPostRenders('), w.indexOf('export default withLambda'));
     assert.ok(/set\(\{ status: 'failed'[\s\S]{0,200}eq\(postRenderJobs\.status, 'rendering'\)\)\)\s*\.returning\(\);\s*if \(!job\) continue;/.test(pw), 'the post sweep must log only for a row it moved out of rendering');
     assert.ok(/await logOrphanedRenderCost\(db, \{ renderId: job\.renderId[\s\S]{0,200}workspaceId: job\.organisationId/.test(pw), 'a killed post render is not logged');
-    assert.ok(/const db = getDb\(\);\s*await sweepKilledPostRenders\(db\);/.test(w), 'the worker no longer sweeps killed renders');
+    // After the worker's own render, so a burst of killed jobs can't eat that render's time.
+    assert.ok(/return await handleRenderJob\(event\);\s*\} finally \{[\s\S]{0,120}await sweepKilledPostRenders\(getDb\(\)\);/.test(w), 'the worker no longer sweeps killed renders after its own render');
+    assert.ok(/const KILLED_SWEEP_LIMIT = 5;/.test(w), 'the post sweep must stay small (it runs inside the worker\'s 15 minutes)');
     assert.ok(/gt\(postRenderJobs\.updatedAt, new Date\(now\.getTime\(\) - KILLED_WITHIN_MS\)\)/.test(pw), 'the post sweep would fail the whole pre-existing backlog');
 });
 

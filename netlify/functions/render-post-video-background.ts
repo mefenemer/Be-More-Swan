@@ -39,11 +39,12 @@ export const KILLED_AFTER_MS = 20 * 60 * 1000;
 /** Only jobs cut off this recently: older ones are a backlog from before this sweep existed (review of #844), and failing
  *  them now would surprise their owners and date their render costs to a month they don't belong to. */
 export const KILLED_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
-const KILLED_SWEEP_LIMIT = 20;
+// Small: the sweep runs after this worker's own render, inside its 15-minute ceiling (review of #844).
+const KILLED_SWEEP_LIMIT = 5;
 
 /**
  * Jobs whose worker was killed mid-render (a deploy, a platform fault) sit 'rendering' with nothing left to finish them.
- * Each worker run sweeps them first: fail the job and its post's render gate, the same as a failed render, so the post
+ * Each worker run sweeps them AFTER its own render (so a burst can't eat that render's time): fail the job and its post's render gate, the same as a failed render, so the post
  * isn't held forever. If a render id is on the row, log what that render cost (render-cost.ts: once, and not if the
  * worker logged before dying). Only the UPDATE that moves the row out of 'rendering' logs, so two workers can't both.
  * Never throws.
@@ -76,14 +77,13 @@ export async function sweepKilledPostRenders(db: ReturnType<typeof getDb>, now: 
     }
 }
 
-export default withLambda(async (event: HandlerEvent) => {
+async function handleRenderJob(event: HandlerEvent) {
     let jobId: number;
     try { jobId = Number(JSON.parse(event.body || '{}').jobId); }
     catch { return { statusCode: 400, body: 'Invalid JSON' }; }
     if (!Number.isInteger(jobId)) return { statusCode: 400, body: 'Missing jobId' };
 
     const db = getDb();
-    await sweepKilledPostRenders(db);
 
     const [job] = await db.select().from(postRenderJobs).where(eq(postRenderJobs.id, jobId)).limit(1);
     if (!job) return { statusCode: 200, body: 'No such job' };
@@ -374,5 +374,14 @@ export default withLambda(async (event: HandlerEvent) => {
         console.error(`[render-post-video-background] job ${jobId} failed:`, err);
         await fail(err instanceof Error ? err.message : 'The render failed unexpectedly.').catch(() => {});
         return { statusCode: 200, body: 'Failed' };
+    }
+}
+
+export default withLambda(async (event: HandlerEvent) => {
+    try {
+        return await handleRenderJob(event);
+    } finally {
+        // Killed jobs from other runs, after this run's own render is done (never throws).
+        await sweepKilledPostRenders(getDb());
     }
 });
