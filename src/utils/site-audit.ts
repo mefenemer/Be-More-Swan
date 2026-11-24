@@ -252,9 +252,20 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
 
     const lenses: Lens[] = readable.length ? ['clarity', 'compete', 'ai'] : ['clarity', 'ai'];
     // Steady scores (Fix pipeline #63): what each lens reads, and whether all of it is as it was last time.
-    const ownSame = !!input.lastHashes[SITE_KEY] && input.lastHashes[SITE_KEY] === hashes[SITE_KEY];
+    // Only answers about THIS page count. A baseline, or a run after the audited page was switched (upsertAudit keeps the
+    // audit row but clears lastHashes), has no previous read of it: nothing is reused, compared or confirmed against the
+    // old page's answers (review on PR #856).
+    const samePageAsBefore = input.kind !== 'baseline' && !!input.lastHashes[SITE_KEY];
+    const previousAnswers = samePageAsBefore ? input.previousAnswers : undefined;
+    const previousOutcomes = samePageAsBefore ? input.previousOutcomes : undefined;
+    const ownSame = samePageAsBefore && input.lastHashes[SITE_KEY] === hashes[SITE_KEY];
+    // Compete also needs the SAME competitors, all read and unchanged — one removed in Settings, or unreadable or thin
+    // this week, means the comparison is a different one (review on PR #856).
+    const lastCompetitors = Object.keys(input.lastHashes).filter((k) => k !== SITE_KEY).sort();
+    const sameCompetitors = readable.length > 0 && competitorsUnread.length === 0
+        && JSON.stringify(readable.map((r) => r.url).sort()) === JSON.stringify(lastCompetitors);
     const lensPagesSame = (lens: Lens) => ownSame && (lens !== 'compete'
-        || (readable.length > 0 && readable.every((r) => input.lastHashes[r.url] && input.lastHashes[r.url] === hashes[r.url])));
+        || (sameCompetitors && readable.every((r) => input.lastHashes[r.url] === hashes[r.url])));
     const askLens = async (lens: Lens, prompt: ReturnType<typeof buildLensPrompt>) => {
         // Two tries. "Part of this check couldn't be completed (AI search readiness)" was the first
         // try's reply coming back unusable — most likely cut off: that lens asks 14 questions and
@@ -276,7 +287,7 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
         return null;
     };
     const results = await Promise.all(lenses.map(async (lens) => {
-        const previous = input.previousAnswers?.[lens] ?? [];
+        const previous = previousAnswers?.[lens] ?? [];
         // Nothing this lens reads has changed: last time's answers stand — asking again could only add noise.
         if (previous.length && lensPagesSame(lens)) {
             const kept = sanitiseRubricAnswers(previous, lens, own.page);
@@ -304,7 +315,7 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
     const fixes = oneFixPerText(answered.flatMap((r) => r.fixes));
     const groundingDropped = answered.reduce((n, r) => n + r.dropped, 0);
 
-    const scoreChanges = scoreChangesFrom(input.previousOutcomes, score.outcomes, {
+    const scoreChanges = scoreChangesFrom(previousOutcomes, score.outcomes, {
         ownPageChanged: !!input.lastHashes[SITE_KEY] && !ownSame,
         competitorsChanged: competitorChanges.some((c) => c.changes.length > 0),
     });

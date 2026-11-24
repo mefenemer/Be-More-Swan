@@ -87,6 +87,27 @@ const brief = { url: SITE, icp: 'Small business owners', conversionGoal: 'Start 
     assert.deepStrictEqual(fOwn.calls.filter((c) => c !== 'summary').sort(), ['ai', 'clarity', 'compete'], 'every lens re-read');
     if (own.status === 'done') assert.strictEqual(own.report.scoreChanges?.ownPageChanged, true);
 
+    // Review on PR #856: the audited page was switched (lastHashes cleared, kind baseline). The old page's answers are
+    // not reused, compared or confirmed, and no "what changed" line is made against a different page.
+    const fSwitch = fake({ [SITE]: body('Pricing for small teams'), [RIVAL]: rivalPage('Version one.') }, { compete: [FLIP, []] });
+    const switched = await runAuditCore(weekAfter({ kind: 'baseline', lastHashes: {}, previousScore: null }), fSwitch.deps);
+    assert.ok(switched.status === 'done');
+    assert.deepStrictEqual(fSwitch.calls.filter((c) => c !== 'summary').sort(), ['ai', 'clarity', 'compete'], 'every lens asked once; no confirming against the old page');
+    if (switched.status === 'done') {
+        assert.strictEqual(switched.report.scoreChanges, null, 'no comparison with a different page');
+        assert.deepStrictEqual(switched.report.reusedLenses, []);
+    }
+
+    // Review on PR #856: a competitor removed (or unreadable this week) is a different comparison: compete is asked again.
+    const nov9b = await runAuditCore({ kind: 'baseline', brief, competitorUrls: [RIVAL, 'https://second.example/'], lastHashes: {}, previousPages: {}, previousScore: null },
+        fake({ [SITE]: body('Made in Britain.'), [RIVAL]: rivalPage('Version one.'), 'https://second.example/': rivalPage('Another rival.') }).deps);
+    if (nov9b.status !== 'done') throw new Error('baseline with two competitors');
+    const fFewer = fake({ [SITE]: body('Made in Britain.'), [RIVAL]: rivalPage('Version one.') });
+    await runAuditCore({ kind: 'weekly', brief, competitorUrls: [RIVAL], lastHashes: nov9b.hashes, previousPages: nov9b.pages, previousScore: nov9b.score.overall,
+        previousAnswers: nov9b.answers, previousOutcomes: nov9b.score.outcomes }, fFewer.deps);
+    assert.ok(fFewer.calls.includes('compete'), 'one competitor fewer: compete re-asked');
+    assert.ok(!fFewer.calls.includes('clarity') && !fFewer.calls.includes('ai'), 'the owner\'s page lenses still reused');
+
     // The pure pieces.
     const prev = [{ id: 'a', yes: true, evidence: '' }, { id: 'b', yes: true, evidence: '' }];
     assert.deepStrictEqual(flippedIds(prev, [{ id: 'a', yes: false, evidence: '' }, { id: 'b', yes: true, evidence: '' }]), ['a']);
