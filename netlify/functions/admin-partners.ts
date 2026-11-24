@@ -361,11 +361,19 @@ export default withLambda(async (event) => {
         if (dated) return json(409, { error: 'This partner already has a current or upcoming dated special rate — end it first.' });
         const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 200)
             : (director ? 'Director-signed agreement (overrides Terms 3.5)' : null);
-        await db.execute(sql`
-            INSERT INTO partner_pending_rates (partner_id, rate_bps, cost_deduction_bps, duration_months, window_months, label, created_by)
-            VALUES (${partnerId}, ${rateBps}, ${costDeductionBps}, ${durationMonths}, ${windowMonths}, ${label}, ${adminId})
-            ON CONFLICT (partner_id) DO UPDATE SET rate_bps = EXCLUDED.rate_bps, cost_deduction_bps = EXCLUDED.cost_deduction_bps,
-                duration_months = EXCLUDED.duration_months, window_months = EXCLUDED.window_months, label = EXCLUDED.label, created_by = EXCLUDED.created_by, created_at = now()`);
+        // Locked against the start (review of #838): saved only while the partnership still hasn't started, so a
+        // partner accepting at the same moment can't strand it.
+        const saved = await db.transaction(async (tx) => {
+            const [still] = (await tx.execute(sql`SELECT id FROM partners WHERE id = ${partnerId} AND partner_since IS NULL FOR UPDATE`)) as unknown as unknown[];
+            if (!still) return false;
+            await tx.execute(sql`
+                INSERT INTO partner_pending_rates (partner_id, rate_bps, cost_deduction_bps, duration_months, window_months, label, created_by)
+                VALUES (${partnerId}, ${rateBps}, ${costDeductionBps}, ${durationMonths}, ${windowMonths}, ${label}, ${adminId})
+                ON CONFLICT (partner_id) DO UPDATE SET rate_bps = EXCLUDED.rate_bps, cost_deduction_bps = EXCLUDED.cost_deduction_bps,
+                    duration_months = EXCLUDED.duration_months, window_months = EXCLUDED.window_months, label = EXCLUDED.label, created_by = EXCLUDED.created_by, created_at = now()`);
+            return true;
+        });
+        if (!saved) return json(409, { error: 'This partnership has just started — add a dated special rate instead.' });
         await audit('partner_rates_change', partnerId, undefined, { pendingRate: { rateBps, costDeductionBps, durationMonths, windowMonths, directorAgreement: director } });
         return json(200, { ok: true });
     }

@@ -34,8 +34,11 @@ async function main() {
         await sql.unsafe(`SET search_path TO ${schema}`);
         const db = drizzle({ client: sql }) as never;
         const v = PARTNER_TERMS_VERSION;
-        await sql.unsafe(`INSERT INTO partners (id, status, terms_version) VALUES
-            (1, 'approved', '${v}'), (2, 'approved', '1.2'), (3, 'approved', '${v}'), (4, 'suspended', '${v}')`);
+        // approved_at 1 Dec, accepted 2 Dec (after approval) — except partner 5: only the application tick (before approval).
+        await sql.unsafe(`INSERT INTO partners (id, status, terms_version, approved_at, terms_accepted_at) VALUES
+            (1, 'approved', '${v}', '2026-12-01', '2026-12-02'), (2, 'approved', '1.2', '2026-12-01', '2026-12-02'),
+            (3, 'approved', '${v}', '2026-12-01', '2026-12-02'), (4, 'suspended', '${v}', '2026-12-01', '2026-12-02'),
+            (5, 'approved', '${v}', '2026-12-01', '2026-11-20')`);
         await sql.unsafe(`INSERT INTO partner_pending_rates (partner_id, rate_bps, cost_deduction_bps, duration_months, window_months) VALUES
             (1, 5000, 2000, 12, 12), (3, 4000, 2000, 12, 12)`);
         // Partner 3 already has a dated special rate covering the window → the waiting rate must NOT start (no overlap).
@@ -67,7 +70,10 @@ async function main() {
             assert.strictEqual((await sql`SELECT 1 FROM partner_rate_periods WHERE partner_id = 3`).length, 1, 'no overlapping period created');
             assert.strictEqual((await sql`SELECT 1 FROM partner_pending_rates WHERE partner_id = 3`).length, 1, 'waiting rate kept');
         });
-        await check('suspended: does not start; once reinstated (approved) it does', async () => {
+        await check('only the application tick (accepted before approval): does not start', async () => {
+            assert.strictEqual((await startPartnershipIfReady(db, 5, d('2026-12-03'))).started, false);
+        });
+                await check('suspended: does not start; once reinstated (approved) it does', async () => {
             assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-03'))).started, false);
             await sql`UPDATE partners SET status = 'approved' WHERE id = 4`;
             assert.strictEqual((await startPartnershipIfReady(db, 4, d('2026-12-10'))).started, true);

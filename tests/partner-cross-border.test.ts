@@ -200,7 +200,7 @@ check('third review of #823: first annual payment carries a 12-month period; run
 check('fifth review of #823: idempotent accept, UK-only VAT confirmation, honest banner', () => {
     const hub = read('netlify/functions/partner-hub.ts');
     // Already on this version: no second log row or copy email — only a (safe) retry of the start (review of #838).
-    const early = hub.slice(hub.indexOf('if (p.termsVersion === PARTNER_TERMS_VERSION) {'), hub.indexOf('const moved ='));
+    const early = hub.slice(hub.indexOf('if (!needsAcceptance({ status: p.status, terms_version: p.termsVersion'), hub.indexOf('const moved ='));
     assert.ok(early.length > 0 && !early.includes('recordTermsAcceptance'), 'no second acceptance record');
     assert.ok(read('netlify/functions/admin-partners.ts').includes('if (!isUkVatNumber(expected)) return json(400'));
     assert.ok(read('admin.html').includes('outside the UK — reverse charge, no VAT added'));

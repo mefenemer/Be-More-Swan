@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canStart, pendingWindow } from '../src/utils/partner-start';
+import { canStart, needsAcceptance, pendingWindow } from '../src/utils/partner-start';
 import { clockBase } from '../src/utils/partner-activity';
 import { PARTNER_TERMS_VERSION } from '../src/config/partner-terms';
 
@@ -21,12 +21,23 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const d = (s: string) => new Date(`${s}T00:00:00Z`);
 
-check('starts only when approved AND the current terms accepted AND not already started', () => {
-    assert.strictEqual(canStart({ status: 'approved', terms_version: PARTNER_TERMS_VERSION, partner_since: null }), true);
-    assert.strictEqual(canStart({ status: 'applied', terms_version: PARTNER_TERMS_VERSION, partner_since: null }), false, 'not approved');
-    assert.strictEqual(canStart({ status: 'approved', terms_version: '1.2', partner_since: null }), false, 'older terms');
-    assert.strictEqual(canStart({ status: 'approved', terms_version: null, partner_since: null }), false, 'never accepted');
-    assert.strictEqual(canStart({ status: 'approved', terms_version: PARTNER_TERMS_VERSION, partner_since: '2027-01-01' }), false, 'already started');
+check('starts only when approved, not started, and the CURRENT terms accepted AFTER approval (application tick doesn\'t count)', () => {
+    const v = PARTNER_TERMS_VERSION;
+    const base = { status: 'approved', terms_version: v, partner_since: null, approved_at: d('2026-12-01') };
+    assert.strictEqual(canStart({ ...base, terms_accepted_at: d('2026-12-03') }), true, 'accepted after approval');
+    assert.strictEqual(canStart({ ...base, terms_accepted_at: d('2026-11-20') }), false, 'only the application tick (before approval)');
+    assert.strictEqual(canStart({ ...base, status: 'applied', terms_accepted_at: d('2026-12-03') }), false, 'not approved');
+    assert.strictEqual(canStart({ ...base, terms_version: '1.2', terms_accepted_at: d('2026-12-03') }), false, 'older terms');
+    assert.strictEqual(canStart({ ...base, terms_accepted_at: null }), false, 'never accepted');
+    assert.strictEqual(canStart({ ...base, partner_since: '2027-01-01', terms_accepted_at: d('2026-12-03') }), false, 'already started');
+});
+check('the Partner page asks an approved, not-started partner to accept again until they do', () => {
+    const v = PARTNER_TERMS_VERSION;
+    const base = { status: 'approved', terms_version: v, partner_since: null, approved_at: d('2026-12-01') };
+    assert.strictEqual(needsAcceptance({ ...base, terms_accepted_at: d('2026-11-20') }), true);
+    assert.strictEqual(needsAcceptance({ ...base, terms_accepted_at: d('2026-12-03') }), false);
+    assert.strictEqual(needsAcceptance({ ...base, partner_since: '2026-12-03', terms_accepted_at: d('2026-11-20') }), false, 'started: no re-ask');
+    assert.strictEqual(needsAcceptance({ ...base, terms_version: '1.2', terms_accepted_at: d('2026-12-03') }), true, 'older version always asks');
 });
 check('a waiting special rate runs from acceptance for its window (Angela: 12 months)', () => {
     assert.deepStrictEqual(pendingWindow(d('2026-12-03'), 12), { startsAt: d('2026-12-03'), endsAt: d('2027-12-03') });
@@ -48,6 +59,8 @@ check('accepting on the Partner page starts it', () => {
     const hub = read('netlify/functions/partner-hub.ts');
     assert.ok(hub.includes('const start = await startPartnershipIfReady(db, p.id).catch('), 'a failed start never loses the acceptance');
     assert.strictEqual((hub.match(/const retry = await startPartnershipIfReady\(db, p\.id\)/g) || []).length, 2, 'accepting again retries a failed start (review of #838)');
+    assert.ok(hub.includes("if (!impersonating && canStart({"), 'opening the Partner page retries a failed start (never while impersonating)');
+    assert.ok(read('src/utils/partner-start.ts').includes('AND terms_accepted_at IS NOT NULL AND (approved_at IS NULL OR terms_accepted_at >= approved_at)'), 'the SQL start needs acceptance after approval');
     assert.ok(read('netlify/functions/admin-partners.ts').includes("await startPartnershipIfReady(db, partnerId, now).catch((err) =>"), 'approval email still goes out if the start fails');
 });
 check('starting is conditional (approved, current terms, not started) and turns the waiting rate into a dated period', () => {
@@ -68,6 +81,7 @@ check('admins can add a special rate that waits for acceptance; a director agree
     assert.ok(a.includes("body.action === 'pending_rate' || body.action === 'pending_rate_delete'"));
     assert.ok(a.includes('errors.push(...periodShapeErrors(probe, !director));'));
     assert.ok(a.includes("if (p.partner_since) return json(409"), 'only before the partnership starts');
+    assert.ok(a.includes('SELECT id FROM partners WHERE id = ${partnerId} AND partner_since IS NULL FOR UPDATE'), 'saved under a lock, never after the start');
     assert.ok(read('admin.html').includes('Add special rate that starts when they accept'));
     assert.ok(a.includes('This partner has a special rate waiting to start when they accept the Partner Terms.'), 'no dated rate while one is waiting');
     assert.ok(read('db/z-partner-start-on-acceptance.sql').includes('CREATE TABLE IF NOT EXISTS partner_pending_rates ('));

@@ -20,9 +20,20 @@ export function pendingWindow(start: Date, windowMonths: number): { startsAt: Da
     return { startsAt: start, endsAt: addMonthsUtc(start, windowMonths) };
 }
 
-/** Has this partner's current partnership started? (Approved, current terms accepted, partner_since set.) */
-export function canStart(p: { status: string; terms_version: string | null; partner_since: unknown }): boolean {
-    return p.status === 'approved' && p.terms_version === PARTNER_TERMS_VERSION && !p.partner_since;
+/**
+ * Ready to start: approved, not started, and the CURRENT terms accepted AFTER the latest approval (owner 2026-11-24:
+ * ticking the box on the application doesn't count — they accept again on their Partner page once approved).
+ */
+export function canStart(p: { status: string; terms_version: string | null; partner_since: unknown; terms_accepted_at: Date | null; approved_at: Date | null }): boolean {
+    return p.status === 'approved' && !p.partner_since && p.terms_version === PARTNER_TERMS_VERSION
+        && !!p.terms_accepted_at && (!p.approved_at || p.terms_accepted_at.getTime() >= p.approved_at.getTime());
+}
+
+/** Does the Partner page still need to ask them to accept? (Approved and not started, but no acceptance since approval.) */
+export function needsAcceptance(p: { status: string; terms_version: string | null; partner_since: unknown; terms_accepted_at: Date | null; approved_at: Date | null }): boolean {
+    if (p.terms_version !== PARTNER_TERMS_VERSION) return true;
+    if (p.status !== 'approved' || p.partner_since) return false;
+    return !p.terms_accepted_at || (!!p.approved_at && p.terms_accepted_at.getTime() < p.approved_at.getTime());
 }
 
 export async function startPartnershipIfReady(db: Db, partnerId: number, now: Date = new Date()): Promise<{ started: boolean; specialRate: { startsAt: Date; endsAt: Date } | null; rateConflict?: true }> {
@@ -33,6 +44,7 @@ export async function startPartnershipIfReady(db: Db, partnerId: number, now: Da
         const started = (await tx.execute(sql`
             UPDATE partners SET partner_since = ${nowIso}::timestamp, activity_pause_days = 0, activity_pause_anchor = ${nowIso}::timestamp, updated_at = now()
              WHERE id = ${partnerId} AND status = 'approved' AND partner_since IS NULL AND terms_version = ${PARTNER_TERMS_VERSION}
+               AND terms_accepted_at IS NOT NULL AND (approved_at IS NULL OR terms_accepted_at >= approved_at)
              RETURNING id`)) as Row[];
         if (!started.length) return { started: false, specialRate: null };
 
