@@ -325,6 +325,7 @@
     const moneyEl = document.getElementById('pt-terms-money');
     if (moneyEl) moneyEl.textContent = data.partnerSince
       ? 'Your commission is still worked out and paid under the version you accepted (Partner Terms 8.1).'
+      : !['approved', 'suspended'].includes(data.partner.status) ? ''
       : 'Your partnership starts the moment you accept — customers who first pay before then don’t earn you commission, so please accept before you share your link.';
     if (status === 'approved' || status === 'suspended' || status === 'ended') { render(); loadKit(); }
     const cap = await (window.checkCapacity ? window.checkCapacity() : null);
