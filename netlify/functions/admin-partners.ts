@@ -215,6 +215,13 @@ export default withLambda(async (event) => {
         if (partnerId !== null) {
             const [p] = await db.select({ id: partners.id }).from(partners).where(eq(partners.id, partnerId)).limit(1);
             if (!p) return json(404, { error: 'That partner no longer exists.' });
+            // A waiting special rate (starts when they accept) and a NEW dated one would overlap once it starts
+            // (review of #838). Ending / editing existing periods is still allowed.
+            const creating = Array.isArray(body.changes) && (body.changes as Array<Record<string, any>>).some((c) => c?.op === 'create');
+            if (creating) {
+                const [waiting] = (await db.execute(sql`SELECT partner_id FROM partner_pending_rates WHERE partner_id = ${partnerId}`)) as unknown as unknown[];
+                if (waiting) return json(409, { error: 'This partner has a special rate waiting to start when they accept the Partner Terms. Remove it first, or wait until it has started.' });
+            }
         }
         if (!Array.isArray(body.changes) || !body.changes.length || body.changes.length > 10) return json(400, { error: 'Nothing to change.' });
 
@@ -311,8 +318,9 @@ export default withLambda(async (event) => {
             .returning({ id: partners.id });
         if (!updated.length) return json(409, { error: 'Someone else changed this partner a moment ago. Reload to see the latest.' });
         await audit('partner_decision', partnerId, { status: before.status }, { status: rule.to, note, ...(endReason ? { endReason } : {}) });
-        // Approved and the current terms already accepted (e.g. at application)? Then the partnership starts now.
-        if (rule.to === 'approved' && before.status !== 'suspended') await startPartnershipIfReady(db, partnerId, now);
+        // On EVERY move to approved (incl. reinstatement — review of #838: a partner suspended before accepting must still
+        // be able to start): if the current terms are accepted and it hasn't started, it starts now. Idempotent.
+        if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now);
         // Approving tells them: a welcome if they have an account, a private account link if not.
         // Best-effort — the approval stands, and "Resend account link" is there if the email failed.
         let emailed: Awaited<ReturnType<typeof sendApprovalEmail>> | null = null;

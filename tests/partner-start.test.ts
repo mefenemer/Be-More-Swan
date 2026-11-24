@@ -41,7 +41,7 @@ console.log('wiring');
 check('approval no longer sets a start date; it starts the partnership only if the current terms were already accepted', () => {
     const a = read('netlify/functions/admin-partners.ts');
     assert.ok(a.includes("...(before.status !== 'suspended' ? { partnerSince: null, endedAt: null, endReason: null } : {}) }"));
-    assert.ok(a.includes("if (rule.to === 'approved' && before.status !== 'suspended') await startPartnershipIfReady(db, partnerId, now);"));
+    assert.ok(a.includes("if (rule.to === 'approved') await startPartnershipIfReady(db, partnerId, now);"), 'every move to approved, incl. reinstatement');
     assert.ok(!a.includes('approvedAt: new Date(), partnerSince: new Date()'), 'admin-added partners also wait for acceptance');
 });
 check('accepting on the Partner page starts it', () => {
@@ -51,6 +51,8 @@ check('starting is conditional (approved, current terms, not started) and turns 
     const s = read('src/utils/partner-start.ts');
     assert.ok(s.includes("WHERE id = ${partnerId} AND status = 'approved' AND partner_since IS NULL AND terms_version = ${PARTNER_TERMS_VERSION}"));
     assert.ok(s.includes('INSERT INTO partner_rate_periods') && s.includes('DELETE FROM partner_pending_rates WHERE partner_id = ${partnerId}'));
+    assert.ok(s.includes('return db.transaction(async (tx: Db) => {') && s.includes('FOR UPDATE'), 'one transaction (review of #838)');
+    assert.ok(s.includes('rateConflict: true as const'), 'never inserts an overlapping period (behaviour in partner-start-db.test.ts)');
 });
 check('nothing is earned before the start; the clock and sweep skip partners who have not started', () => {
     assert.ok(read('src/utils/partner-ledger.ts').includes("if (!ref.partnerSince || terms.subscribedAt.getTime() < ref.partnerSince.getTime()) return { recorded: false, reason: 'before_partnership' };"));
@@ -64,6 +66,7 @@ check('admins can add a special rate that waits for acceptance; a director agree
     assert.ok(a.includes('errors.push(...periodShapeErrors(probe, !director));'));
     assert.ok(a.includes("if (p.partner_since) return json(409"), 'only before the partnership starts');
     assert.ok(read('admin.html').includes('Add special rate that starts when they accept'));
+    assert.ok(a.includes('This partner has a special rate waiting to start when they accept the Partner Terms.'), 'no dated rate while one is waiting');
     assert.ok(read('db/z-partner-start-on-acceptance.sql').includes('CREATE TABLE IF NOT EXISTS partner_pending_rates ('));
 });
 check('the Partner page says the partnership starts on acceptance', () => {
