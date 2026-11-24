@@ -15,6 +15,8 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RenderCostMeter } from '../src/utils/render-cost';
+import type { RenderProgress, StartedRender } from '../src/lib/remotion-lambda';
 import { MEDIA_LIST_PRICE_USD, SERVICE_UNIT_PRICE_USD, mediaCostUsd, recallBotBilling, recallBotHours, serviceUnitPriceUsd } from '../src/utils/ai-usage';
 
 let passed = 0;
@@ -90,6 +92,82 @@ check('Recall bot: logged once, on its first final state, against the bot\'s wor
     // The only Recall caller stays the only one: a new one must log too. (meeting-bot.ts only DEFINES RECALL_HOSTS.)
     const direct = sources.filter((f) => !['src/utils/meeting-bot-recall.ts', 'src/utils/meeting-bot.ts'].includes(f) && /recall\.ai\/api|RECALL_HOSTS/.test(read(f)));
     assert.deepStrictEqual(direct, [], `these call Recall directly:\n    ${direct.join('\n    ')}`);
+});
+
+console.log('\nRemotion renders — logged once, however they end');
+
+async function meterRun(steps: (m: RenderCostMeter) => Promise<void>, progressOf: (r: StartedRender) => Promise<RenderProgress>): Promise<Array<number | null | undefined>> {
+    const logged: Array<number | null | undefined> = [];
+    const m = new RenderCostMeter({ workspaceId: 7 }, progressOf, async (cost) => { logged.push(cost); });
+    await steps(m);
+    return logged;
+}
+const R1: StartedRender = { renderId: 'r1', bucketName: 'b', region: 'eu-west-2' };
+const R2: StartedRender = { renderId: 'r2', bucketName: 'b', region: 'eu-west-2' };
+const prog = (over: Partial<RenderProgress>): RenderProgress => ({ done: false, progress: 0.5, outputUrl: null, error: null, costUsd: null, ...over });
+const asyncChecks: Array<Promise<void>> = [];
+function checkAsync(name: string, fn: () => Promise<void>): void {
+    asyncChecks.push(fn().then(() => { passed++; console.log(`  ✓ ${name}`); }, (err) => { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }));
+}
+
+checkAsync('a finished render is logged once, with Remotion\'s cost', async () => {
+    const logged = await meterRun(async (m) => {
+        await m.started(R1);
+        await m.seen(prog({ costUsd: 0.01 }));
+        await m.seen(prog({ done: true, outputUrl: 'x', costUsd: 0.03 }));
+        await m.seen(prog({ done: true, outputUrl: 'x', costUsd: 0.03 }));
+        await m.abandon();
+    }, async () => { throw new Error('not asked'); });
+    assert.deepStrictEqual(logged, [0.03]);
+});
+
+checkAsync('a fatal error then a retry: both renders logged, once each', async () => {
+    const logged = await meterRun(async (m) => {
+        await m.started(R1);
+        await m.seen(prog({ done: true, error: 'No frame found', costUsd: 0.02 }));
+        await m.started(R2);
+        await m.seen(prog({ done: true, outputUrl: 'x', costUsd: 0.04 }));
+    }, async () => { throw new Error('not asked'); });
+    assert.deepStrictEqual(logged, [0.02, 0.04]);
+});
+
+checkAsync('an abandoned render (timeout / throw) is logged with what Remotion says it spent', async () => {
+    const logged = await meterRun(async (m) => {
+        await m.started(R1);
+        await m.seen(prog({ costUsd: 0.05 }));
+        await m.abandon();
+        await m.abandon();
+    }, async () => prog({ costUsd: 0.08 }));
+    assert.deepStrictEqual(logged, [0.08]);
+});
+
+checkAsync('Remotion unreachable on abandon: the last cost we saw', async () => {
+    const logged = await meterRun(async (m) => {
+        await m.started(R1);
+        await m.seen(prog({ costUsd: 0.05 }));
+        await m.abandon();
+    }, async () => { throw new Error('network'); });
+    assert.deepStrictEqual(logged, [0.05]);
+});
+
+checkAsync('a render started while another is open logs the first before following the second', async () => {
+    const logged = await meterRun(async (m) => {
+        await m.started(R1);
+        await m.seen(prog({ costUsd: 0.01 }));
+        await m.started(R2);
+    }, async () => prog({ costUsd: 0.02 }));
+    assert.deepStrictEqual(logged, [0.02]);
+});
+
+check('both render loops go through the meter: started, every poll, and every way out', () => {
+    for (const f of ['src/utils/video-render.ts', 'netlify/functions/render-post-video-background.ts']) {
+        const s = read(f);
+        assert.ok(!/logRenderCost\(/.test(s), `${f} logs a render cost itself — use RenderCostMeter so it is once per render`);
+        assert.strictEqual((s.match(/await startRender\([^)]*\);\s*await meter\.started\(started\);/g) ?? []).length, 2, `${f}: the first render and the retry must both be metered`);
+        assert.ok(/const progress = await renderProgress\(started\);[\s\S]{0,120}await meter\.seen\(progress\);/.test(s), `${f}: a poll is not metered`);
+        assert.ok(/Date\.now\(\) > deadline\)\s*\{\s*await meter\.abandon\(\);/.test(s), `${f}: a timed-out render logs nothing`);
+        assert.ok(/\} catch \(err\) \{\s*await meter\.abandon\(\);/.test(s), `${f}: a render cut short by an error logs nothing`);
+    }
 });
 
 check('Read Aloud: a fresh reading logs its speech cost against the workspace', () => {
@@ -194,4 +272,4 @@ check('direct log calls with no workspace are only system work', () => {
     assert.deepStrictEqual(bare, [], `these log a cost charged to nobody — pass workspaceId:\n    ${bare.join('\n    ')}`);
 });
 
-console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
+void Promise.all(asyncChecks).then(() => console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`));
