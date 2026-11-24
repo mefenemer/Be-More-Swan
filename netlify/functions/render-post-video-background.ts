@@ -24,7 +24,7 @@ import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, read
 import { editChangesMedia, editHasStills } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { logRenderCost } from '../../src/utils/ai-usage';
+import { RenderCostMeter } from '../../src/utils/render-cost';
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // under the 15-min background ceiling, room for one retry
@@ -69,6 +69,8 @@ export default withLambda(async (event: HandlerEvent) => {
         .set({ renderStatus: 'rendering', updatedAt: new Date() })
         .where(eq(scheduledPosts.id, job.postId));
 
+    // Every render that ran spent AWS compute: logged once when it ends, or when we give up on it (render-cost.ts).
+    const meter = new RenderCostMeter({ workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
     try {
         // post_render_jobs.user_id is ON DELETE SET NULL but content_assets.user_id is NOT NULL, so a
         // user deleted between queueing and rendering would surface as an opaque constraint violation
@@ -195,6 +197,7 @@ export default withLambda(async (event: HandlerEvent) => {
             ...meta,
         };
         let started: StartedRender = await startRender(renderProps);
+        await meter.started(started);
         await db.update(postRenderJobs)
             .set({ renderId: started.renderId, bucketName: started.bucketName, region: started.region, updatedAt: new Date() })
             .where(eq(postRenderJobs.id, jobId));
@@ -205,7 +208,7 @@ export default withLambda(async (event: HandlerEvent) => {
         while (true) {
             const progress = await renderProgress(started);
             // Every render that ran spent AWS compute — a failed one before its retry included.
-            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
+            await meter.seen(progress);
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 // Remotion's "No frame found at position…" hit two of six renders on 2026-11-01, on
                 // intact Pexels clips (all frames present, probed locally), and both passed when the
@@ -214,6 +217,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 retried = true;
                 console.warn(`[render-post-video-background] job ${jobId}: retrying once after: ${progress.error.slice(0, 160)}`);
                 started = await startRender(renderProps);
+                await meter.started(started);
                 await db.update(postRenderJobs)
                     .set({ renderId: started.renderId, bucketName: started.bucketName, region: started.region, updatedAt: new Date() })
                     .where(eq(postRenderJobs.id, jobId));
@@ -225,7 +229,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 outputUrl = progress.outputUrl;
                 break;
             }
-            if (Date.now() > deadline) { await fail('The render took too long and was abandoned.'); return { statusCode: 200, body: 'Timed out' }; }
+            if (Date.now() > deadline) { await meter.abandon(); await fail('The render took too long and was abandoned.'); return { statusCode: 200, body: 'Timed out' }; }
             await sleep(POLL_INTERVAL_MS);
         }
 
@@ -323,6 +327,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         return { statusCode: 200, body: 'Done' };
     } catch (err) {
+        await meter.abandon();
         console.error(`[render-post-video-background] job ${jobId} failed:`, err);
         await fail(err instanceof Error ? err.message : 'The render failed unexpectedly.').catch(() => {});
         return { statusCode: 200, body: 'Failed' };

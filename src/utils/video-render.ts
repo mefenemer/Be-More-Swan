@@ -24,7 +24,7 @@ import { persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { RENDER_FPS, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, shouldRetryRender, type VideoBase } from '../lib/post-render';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../lib/remotion-lambda';
 import { recordPlatformIncident } from './platform-incident';
-import { logRenderCost } from './ai-usage';
+import { RenderCostMeter } from './render-cost';
 import type { ProjectTimeline } from './video-producer';
 import { SOURCE_POST_NOTES, attachVideoToSourcePost, placeVideoOnCampaignPost } from './video-post-media';
 import type { Storyboard } from '../lib/storyboard';
@@ -97,6 +97,8 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             .where(eq(videoProjects.id, projectId));
     };
 
+    // Every render that ran spent AWS compute: logged once when it ends, or when we give up on it (render-cost.ts).
+    const meter = new RenderCostMeter({ workspaceId: orgId, userId: p.createdBy, assistantId: p.aiAssistantId ?? null, sessionId: 'video-producer-render' });
     try {
         if (p.createdBy == null) return await fail('The person who made this video no longer has an account.');
         if (!remotionConfigured()) return await fail('Video rendering is not set up in this environment.');
@@ -137,6 +139,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         };
 
         let started: StartedRender = await startRender(props);
+        await meter.started(started);
         await db.update(videoProjects).set({ renderId: started.renderId, renderBucket: started.bucketName, renderRegion: started.region, updatedAt: new Date() })
             .where(eq(videoProjects.id, projectId));
         const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -145,10 +148,11 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         while (true) {
             const progress = await renderProgress(started);
             // Every render that ran spent AWS compute — a failed one before its retry included.
-            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: orgId, userId: p.createdBy, assistantId: p.aiAssistantId ?? null, sessionId: 'video-producer-render' });
+            await meter.seen(progress);
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 retried = true;
                 started = await startRender(props);
+                await meter.started(started);
                 await db.update(videoProjects).set({ renderId: started.renderId, renderBucket: started.bucketName, renderRegion: started.region, updatedAt: new Date() })
                     .where(eq(videoProjects.id, projectId));
                 continue;
@@ -159,7 +163,10 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
                 outputUrl = progress.outputUrl;
                 break;
             }
-            if (Date.now() > deadline) return await fail('The finished video took too long to render. Try the render again.');
+            if (Date.now() > deadline) {
+                await meter.abandon();
+                return await fail('The finished video took too long to render. Try the render again.');
+            }
             // Keeps the project "fresh" for the stuck sweep while a long render is genuinely running.
             await db.update(videoProjects).set({ updatedAt: new Date() }).where(eq(videoProjects.id, projectId));
             await sleep(POLL_INTERVAL_MS);
@@ -191,6 +198,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         await db.update(videoProjects).set({ status: 'ready', outputAssetId: asset.id, renderId: null, note, updatedAt: new Date() })
             .where(eq(videoProjects.id, projectId));
     } catch (err) {
+        await meter.abandon();
         console.error(`[video-render] project ${projectId} failed:`, err);
         await fail('The finished video couldn’t be rendered. Try the render again.', err).catch(() => {});
     }
