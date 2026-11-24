@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RenderCostMeter } from '../src/utils/render-cost';
+import { RenderCostMeter, logOrphanedRenderCost, renderSessionId } from '../src/utils/render-cost';
 import { recallCostDue } from '../src/utils/meeting-bot';
 import { untrackedRecallHours } from '../src/utils/meeting-bot-db';
 import type { RenderProgress, StartedRender } from '../src/lib/remotion-lambda';
@@ -192,6 +192,46 @@ checkAsync('a render started while another is open logs the first before followi
         await m.started(R2);
     }, async () => prog({ costUsd: 0.02 }));
     assert.deepStrictEqual(logged, [0.02]);
+});
+
+checkAsync('each render\'s row carries its own session id (so a sweep can tell it was logged)', async () => {
+    const ids: Array<string | null | undefined> = [];
+    const m = new RenderCostMeter({ workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: 0.02 }), async (_c, ctx) => { ids.push(ctx?.sessionId); });
+    await m.started(R1);
+    await m.seen(prog({ done: true, error: 'No frame found', costUsd: 0.01 }));
+    await m.started(R2);
+    await m.abandon();
+    assert.deepStrictEqual(ids, ['post-render:r1', 'post-render:r2']);
+    assert.strictEqual(renderSessionId(null, 'abc'), 'remotion-render:abc');
+});
+
+/** A db stand-in for the one read logOrphanedRenderCost makes: select().from().where().limit() → rows. */
+const stubDb = (rows: unknown[]) => ({ select: () => ({ from: () => ({ where: () => ({ limit: async () => rows }) }) }) }) as never;
+
+checkAsync('a killed worker\'s render is logged from Remotion\'s cost — once', async () => {
+    const logged: Array<[number | null | undefined, string | null | undefined]> = [];
+    const log = async (c: number | null | undefined, ctx?: { sessionId?: string | null }) => { logged.push([c, ctx?.sessionId]); };
+    // Not logged before: Remotion's figure, under the render's own session id.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ done: true, costUsd: 0.09 }), log), true);
+    // The worker logged it before dying: nothing more.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([{ id: 1 }]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: 0.09 }), log), false);
+    // Remotion can't say (or is unreachable): nothing, and no throw.
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => prog({ costUsd: null }), log), false);
+    assert.strictEqual(await logOrphanedRenderCost(stubDb([]), R1, { workspaceId: 7, sessionId: 'post-render' }, async () => { throw new Error('S3'); }, log), false);
+    assert.deepStrictEqual(logged, [[0.09, 'post-render:r1']]);
+});
+
+check('the stuck sweeps log a killed render, only from the UPDATE that claims the row', () => {
+    const vp = read('src/utils/video-producer.ts');
+    const sweep = vp.slice(vp.indexOf('export async function sweepStuckProjects('), vp.indexOf('const stuck = await db.select('));
+    assert.ok(/const killed = await db\.update\(videoProjects\)[\s\S]{0,300}eq\(videoProjects\.status, 'rendering'\)[\s\S]{0,120}\.returning\(/.test(sweep), 'the video sweep no longer returns the rows it claims');
+    assert.ok(/k\.renderId !== 'starting'/.test(sweep) && /await logOrphanedRenderCost\(db, \{ renderId: k\.renderId!/.test(sweep) && /workspaceId: orgId/.test(sweep), 'a killed Video Producer render is not logged');
+    assert.ok(/await import\('\.\/render-cost'\)/.test(sweep), 'keep Remotion\'s client out of video-producer.ts\'s static imports');
+    const w = read('netlify/functions/render-post-video-background.ts');
+    const pw = w.slice(w.indexOf('export async function sweepKilledPostRenders('), w.indexOf('export default withLambda'));
+    assert.ok(/set\(\{ status: 'failed'[\s\S]{0,200}eq\(postRenderJobs\.status, 'rendering'\)\)\)\s*\.returning\(\);\s*if \(!job\) continue;/.test(pw), 'the post sweep must log only for a row it moved out of rendering');
+    assert.ok(/await logOrphanedRenderCost\(db, \{ renderId: job\.renderId[\s\S]{0,200}workspaceId: job\.organisationId/.test(pw), 'a killed post render is not logged');
+    assert.ok(/const db = getDb\(\);\s*await sweepKilledPostRenders\(db\);/.test(w), 'the worker no longer sweeps killed renders');
 });
 
 check('both render loops go through the meter: started, every poll, and every way out', () => {

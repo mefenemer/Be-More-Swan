@@ -1599,9 +1599,22 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
     const cutoff = new Date(now.getTime() - STUCK_AFTER_MS);
     // A render nobody finished: the video was made and paid for, only the file is missing — say so,
     // and offer "Try the render again" rather than failing the whole video.
-    await db.update(videoProjects)
+    const killed = await db.update(videoProjects)
         .set({ status: 'render_failed', note: 'The finished video took too long to render. Press “Try the render again”.', updatedAt: now })
-        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff)));
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff)))
+        .returning({ id: videoProjects.id, renderId: videoProjects.renderId, renderBucket: videoProjects.renderBucket, renderRegion: videoProjects.renderRegion, createdBy: videoProjects.createdBy, aiAssistantId: videoProjects.aiAssistantId });
+    // A render id still on the row means the worker died with a render in flight: the render ran (Lambda kept going), so
+    // its cost is logged here, once. Only this sweep's UPDATE returned the row; render-cost.ts skips it if the worker
+    // logged before dying. 'starting' is the claim placeholder (no render was started). Lazy import: Remotion's client
+    // stays out of every function that imports this file.
+    const orphaned = killed.filter((k) => k.renderId && k.renderId !== 'starting' && k.renderBucket);
+    if (orphaned.length) {
+        const { logOrphanedRenderCost } = await import('./render-cost');
+        for (const k of orphaned) {
+            await logOrphanedRenderCost(db, { renderId: k.renderId!, bucketName: k.renderBucket!, region: k.renderRegion ?? '' },
+                { workspaceId: orgId, userId: k.createdBy, assistantId: k.aiAssistantId ?? null, sessionId: 'video-producer-render' });
+        }
+    }
     const stuck = await db.select({ id: videoProjects.id, creditHold: videoProjects.creditHold, createdBy: videoProjects.createdBy })
         .from(videoProjects)
         .where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.status, ['reviewing', 'planning', 'building']), lt(videoProjects.updatedAt, cutoff)));

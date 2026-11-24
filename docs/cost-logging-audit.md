@@ -33,7 +33,7 @@ tests/usage-writes-awaited.test.ts), so writes that were started but never finis
 | **Serper** (search) | `discovery-search.ts` | Yes | Yes (tested) | $0.001 / search | None |
 | **Hunter** (emails) | `discovery-enrich-provider.ts` | Yes | Yes (tested) | $0.0285 / credit | None |
 | **DataForSEO** (Google Trends) | `search-trends.ts` | Yes | Live chat look-up: yes. Weekly refresh: **no, on purpose** | DataForSEO's own `cost` per task | Weekly refresh stays **unattributed**: one task serves every workspace that tracks the term (≈ $0.0027 a task). |
-| **Remotion Lambda** (renders) | `video-render.ts`, `render-post-video-background.ts` | **Partly.** Finished and fatally failed renders yes (both report `done`). Renders we gave up on, after a poll timeout or an error mid-render, logged nothing while Lambda kept spending | Yes | Remotion's `costs.accruedSoFar` | **Fixed:** both loops go through `RenderCostMeter` (`src/utils/render-cost.ts`). It logs each render once: when it reports done, or, when we give up on it, with what Remotion says it has spent (or the last figure we saw if Remotion can't be reached). An abandoned render may still be running, so that figure can understate the final bill. A function killed outright (past Netlify's 15-minute limit) can't log; the 12-minute poll limit keeps clear of that. |
+| **Remotion Lambda** (renders) | `video-render.ts`, `render-post-video-background.ts` | **Partly.** Finished and fatally failed renders yes (both report `done`). Renders we gave up on, after a poll timeout or an error mid-render, logged nothing while Lambda kept spending | Yes | Remotion's `costs.accruedSoFar` | **Fixed:** both loops go through `RenderCostMeter` (`src/utils/render-cost.ts`). It logs each render once: when it reports done, or, when we give up on it, with what Remotion says it has spent (or the last figure we saw if Remotion can't be reached). An abandoned render may still be running, so that figure can understate the final bill. A worker killed outright is logged by the stuck sweeps (see "Killed render workers"). |
 | **Gemini / OpenAI** (AI Visibility) | `ai-visibility-fetch-background.ts` | Claude part via gateway; Gemini/OpenAI not | **No, on purpose** | — | Admin-only monthly check of Be More Swan itself. System cost, not a customer's. |
 | **Headless Chrome** (site import) | `site-js-render.ts` (`@sparticuz/chromium` inside our own function) | n/a | n/a | No outside vendor, no per-call charge (Netlify compute) | None. No Apify or browserless is used. |
 | **Stripe** card fees | Stripe balance transactions | Separately (`card_fee_pence`) | Per payment | Stripe's actual fee | Not in `ai_usage_log` by design (PR #827) |
@@ -47,9 +47,14 @@ tests/usage-writes-awaited.test.ts), so writes that were started but never finis
 - **Recall withdrawal that fails** (`withdrawMeetingBots`). Already covered: the row stays open with its Recall id, so the bot's own final event logs it. The one exception is a deleted workspace. Its rows go with it, but there's no customer left to bill, and the partner sweep checks an orphaned referral at the minimum with no costs.
 - **"Logged once" is tested by running the rule:** `recallCostDue` (meeting-bot.ts) runs against every real status path.
 
-## Still not logged
+## Killed render workers (fixed 2026-11-24)
 
-- **Remotion render in a killed function:** a function killed outright can't log. The 12-minute poll limit keeps clear of Netlify's 15-minute ceiling.
+A worker killed outright (a deploy, a platform fault) can't log its render. Its job row is left `rendering`, with the render's id on it:
+
+- **Video Producer:** the existing stuck sweep (`sweepStuckProjects`, run when the Videos tab or chat reads projects) now logs the cost of any render id left on a project it marks `render_failed`.
+- **Post renders:** previously nothing swept a killed job, so its post stayed gated at `rendering` for good. Each worker run now first calls `sweepKilledPostRenders`. It fails jobs still `rendering` after 20 minutes, and their post's render gate, the same as a failed render, then logs the render's cost.
+- **Once:** only the UPDATE that moves the row out of `rendering` logs. Every render's row carries its own session id (`<label>:<renderId>`), so a render the worker logged before dying isn't logged again. The cost is Remotion's own figure, read from the finished render's progress. A render Remotion can't report on logs nothing.
+- **Timing:** the sweep runs when the next render starts (any workspace) or the projects are next read. So the row can be dated later than the render, and can land in the next month's partner check.
 
 ## Left unattributed on purpose (system work)
 
