@@ -606,7 +606,9 @@
       const a = STEP_ACTION[st.key];
       const btn = !st.done && a && !termsLocked(st.key)
         ? `<button type="button" onclick="${a.run}" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">${esc(a.label)}</button>`
-        : termsLocked(st.key) && !st.done ? '<span class="text-xs text-gray-400">after step 1</span>'
+        // Locked because step 1 isn't done → "after step 1"; locked only because the partnership hasn't started yet
+        // (terms accepted, start still going through) → say so instead.
+        : termsLocked(st.key) && !st.done ? `<span class="text-xs text-gray-400">${data.partnerTerms && !data.partnerTerms.accepted ? 'after step 1' : !data.partnerSince ? 'once your partnership starts' : 'no link yet'}</span>`
         : st.automatic && !st.done ? '<span class="text-xs text-gray-400">ticks itself</span>' : '';
       return `<li class="flex items-center gap-3">${mark}<span class="flex-1 text-sm ${st.done ? 'text-gray-400 line-through' : 'text-gray-800'}">${esc(st.label)}${st.key === 'terms' && !st.done ? ' <a href="/partner-terms.html" target="_blank" rel="noopener" class="text-pink-700 font-semibold underline">Read them</a>' : ''}<span class="sr-only">${st.done ? ' (done)' : ''}</span></span>${btn}</li>`;
     }).join('');
