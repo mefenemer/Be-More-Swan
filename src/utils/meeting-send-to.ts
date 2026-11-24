@@ -38,28 +38,64 @@ export function meetingSendLabel(target: MeetingSendTarget): string {
     return MEETING_SEND_TARGETS[target].label;
 }
 
-/** The per-task ledger summary the records GET attaches (assistant-records.ts attachActionItemSync). */
-export interface ActionItemSyncSummary { total?: number; synced?: number; failed?: number }
+/**
+ * The per-task ledger summary: the records GET attaches it with `items` (assistant-records.ts attachActionItemSync);
+ * the chat snapshot passes `syncedBy` (synced count per provider). Synced items count only for the tool they went to,
+ * so items filed in Jira never read as "sent to Asana" after the assistant switches tools (review on PR #853).
+ */
+export interface ActionItemSyncSummary {
+    total?: number; synced?: number; failed?: number;
+    items?: ReadonlyArray<{ syncStatus?: string | null; provider?: string | null }>;
+    syncedBy?: Record<string, number>;
+}
 
-export type MeetingSendState = { sent: boolean; partly: boolean; sentAt: string | null };
+/** 'jira' / 'asana' for the two ticket targets (action_items.provider), else null. */
+export function taskProvider(target: MeetingSendTarget): string | null {
+    return target === 'jira_create_tasks' ? 'jira' : target === 'asana_create_tasks' ? 'asana' : null;
+}
+
+/** Just approved, or claimed by a run: the approval's own job is (probably) sending it now. */
+export const SENDING_WINDOW_MINUTES = { claimed: 15, approved: 5 } as const;
+
+export type MeetingSendState = { sent: boolean; partly: boolean; sentAt: string | null; sending: boolean };
 
 /**
  * Pure: whether this meeting has gone to this target. Slack/Notion/email: the once-per-meeting stamp
  * (data.handoffs[actionType].sentAt; for the email, also the older data.followupSentAt). Jira/Asana: every action
  * item in the ledger synced (partly = some are).
  */
-export function meetingSendState(target: MeetingSendTarget, data: unknown, sync?: ActionItemSyncSummary | null): MeetingSendState {
+export function meetingSendState(
+    target: MeetingSendTarget, data: unknown, sync?: ActionItemSyncSummary | null,
+    opts: { approvedRecently?: boolean; now?: number } = {},
+): MeetingSendState {
     const d = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+    const now = opts.now ?? Date.now();
     if (MEETING_TASK_TARGETS.has(target)) {
         const total = Number(sync?.total ?? 0);
-        const synced = Number(sync?.synced ?? 0);
-        return { sent: total > 0 && synced >= total, partly: synced > 0 && synced < total, sentAt: null };
+        const provider = taskProvider(target);
+        const synced = Array.isArray(sync?.items)
+            ? sync!.items!.filter((i) => i && i.syncStatus === 'synced' && (i.provider ?? provider) === provider).length
+            : sync?.syncedBy ? Number(sync.syncedBy[provider ?? ''] ?? 0)
+            : Number(sync?.synced ?? 0);
+        const sent = total > 0 && synced >= total;
+        // Approved a moment ago and nothing filed yet: the approval's job is filing them.
+        return { sent, partly: synced > 0 && synced < total, sentAt: null, sending: !sent && synced === 0 && !!opts.approvedRecently };
     }
     const h = d.handoffs && typeof d.handoffs === 'object' ? (d.handoffs as Record<string, unknown>)[target] : null;
     const stamped = h && typeof h === 'object' && typeof (h as { sentAt?: unknown }).sentAt === 'string' ? (h as { sentAt: string }).sentAt : null;
     const legacy = target === 'email_meeting_followup' && typeof d.followupSentAt === 'string' ? d.followupSentAt : null;
     const sentAt = stamped ?? legacy;
-    return { sent: !!sentAt, partly: false, sentAt };
+    const claimedAt = h && typeof h === 'object' && typeof (h as { claimedAt?: unknown }).claimedAt === 'string' ? Date.parse((h as { claimedAt: string }).claimedAt) : NaN;
+    const claimedRecently = Number.isFinite(claimedAt) && now - claimedAt < SENDING_WINDOW_MINUTES.claimed * 60_000;
+    const notSentForGood = target === 'email_meeting_followup' && !!d.followupNotSent;
+    return { sent: !!sentAt, partly: false, sentAt, sending: !sentAt && !notSentForGood && (claimedRecently || (!!opts.approvedRecently && !h)) };
+}
+
+/** Pure: approved (and last changed) within the last few minutes — its hand-offs are probably still running. */
+export function approvedRecently(approvalStatus: unknown, updatedAt: unknown, now = Date.now()): boolean {
+    if (approvalStatus !== 'approved' && approvalStatus !== 'scheduled') return false;
+    const t = updatedAt instanceof Date ? updatedAt.getTime() : typeof updatedAt === 'string' ? Date.parse(updatedAt) : NaN;
+    return Number.isFinite(t) && now - t < SENDING_WINDOW_MINUTES.approved * 60_000;
 }
 
 /** Pure: how many action items a meeting carries (data.tasks). */

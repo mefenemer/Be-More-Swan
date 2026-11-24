@@ -43,7 +43,7 @@ import { keepServerOwnedMeetingKeys } from '../../src/utils/meeting-handoff-once
 import { NO_MAILBOX_MESSAGE, connectedMailbox } from '../../src/utils/mailbox-connected';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
-import { isMeetingSendTarget, loadMeetingSendTargets, MEETING_TASK_TARGETS, meetingSendLabel, meetingSendState, meetingTaskCount, type ActionItemSyncSummary } from '../../src/utils/meeting-send-to';
+import { approvedRecently, isMeetingSendTarget, loadMeetingSendTargets, MEETING_TASK_TARGETS, meetingSendLabel, meetingSendState, meetingTaskCount, type ActionItemSyncSummary } from '../../src/utils/meeting-send-to';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
@@ -668,7 +668,8 @@ export default withLambda(async (event) => {
                     records: enriched.map((r) => r.recordType !== 'meeting' ? r : {
                         ...r,
                         // Per tool: sent / partly (some action items) / not yet — the same rule the server enforces.
-                        sendState: Object.fromEntries(targets.map((t) => [t, meetingSendState(t, r.data, (r as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null)])),
+                        sendState: Object.fromEntries(targets.map((t) => [t, meetingSendState(t, r.data, (r as { actionItemSync?: ActionItemSyncSummary }).actionItemSync ?? null,
+                            { approvedRecently: approvedRecently((r as { approvalStatus?: unknown }).approvalStatus, (r as { updatedAt?: unknown }).updatedAt) })])),
                     }),
                     sendTargets: targets.map((t) => ({ actionType: t, label: meetingSendLabel(t), tasks: MEETING_TASK_TARGETS.has(t) })),
                 });

@@ -129,16 +129,19 @@ export async function taskToolOn(db: Db, organisationId: number, aiAssistantId: 
 }
 
 /** Per meeting: how many of its action items are in the ledger, and how many synced. {} on a read failure. */
-async function taskSyncByMeeting(db: Db, organisationId: number, ids: number[]): Promise<Record<number, { total: number; synced: number }>> {
+type TaskSync = { total: number; synced: number; syncedBy: Record<string, number> };
+async function taskSyncByMeeting(db: Db, organisationId: number, ids: number[]): Promise<Record<number, TaskSync>> {
     if (!ids.length) return {};
     try {
         const rows = await db.select({
             id: actionItems.meetingRecordId,
             total: sql<number>`count(*)::int`,
             synced: sql<number>`count(*) FILTER (WHERE ${actionItems.syncStatus} = 'synced')::int`,
+            jira: sql<number>`count(*) FILTER (WHERE ${actionItems.syncStatus} = 'synced' AND ${actionItems.provider} = 'jira')::int`,
+            asana: sql<number>`count(*) FILTER (WHERE ${actionItems.syncStatus} = 'synced' AND ${actionItems.provider} = 'asana')::int`,
         }).from(actionItems).where(and(eq(actionItems.organisationId, organisationId), inArray(actionItems.meetingRecordId, ids)))
             .groupBy(actionItems.meetingRecordId);
-        return Object.fromEntries(rows.map((r) => [r.id, { total: Number(r.total), synced: Number(r.synced) }]));
+        return Object.fromEntries(rows.map((r) => [r.id, { total: Number(r.total), synced: Number(r.synced), syncedBy: { jira: Number(r.jira), asana: Number(r.asana) } }]));
     } catch {
         return {};
     }
@@ -154,7 +157,7 @@ function pickedUpLabel(d: Record<string, unknown>): string {
 export function formatMeetingsSnapshot(
     total: number, waiting: number,
     rows: { id: number; title: string; approvalStatus: string; data: unknown; updatedAt: Date | string | null }[],
-    send?: { targets: MeetingSendTarget[]; sync: Record<number, { total: number; synced: number }> },
+    send?: { targets: MeetingSendTarget[]; sync: Record<number, { total: number; synced: number; syncedBy?: Record<string, number> }> },
 ): string {
     if (!total) return `YOUR MEETINGS RIGHT NOW: none yet. Nothing is waiting for approval.${send ? toolsLine(send.targets) : ''}`;
     let shown = 0;
@@ -190,7 +193,7 @@ function toolsLine(targets: MeetingSendTarget[]): string {
 }
 
 /** Pure: where one approved meeting has gone, of the switched-on tools. */
-function sentWords(targets: MeetingSendTarget[], d: Record<string, unknown>, sync?: { total: number; synced: number }): string {
+function sentWords(targets: MeetingSendTarget[], d: Record<string, unknown>, sync?: { total: number; synced: number; syncedBy?: Record<string, number> }): string {
     if (!targets.length) return '';
     const sent: string[] = []; const notYet: string[] = [];
     for (const t of targets) {
@@ -345,7 +348,7 @@ export async function resolveMeetingActionProposal(
             const on = await loadMeetingSendTargets(db, organisationId, aiAssistantId);
             const sync = (await taskSyncByMeeting(db, organisationId, [rec.id]))[rec.id];
             card.blocked = sendToBlock(card.target, on, rec.data, sync);
-            if (MEETING_TASK_TARGETS.has(card.target)) card.tasksLeft = sync ? Math.max(0, sync.total - sync.synced) : meetingTaskCount(rec.data);
+            if (MEETING_TASK_TARGETS.has(card.target)) card.tasksLeft = sync ? Math.max(0, sync.total - Number(sync.syncedBy?.[card.target === 'jira_create_tasks' ? 'jira' : 'asana'] ?? sync.synced)) : meetingTaskCount(rec.data);
         }
         if (card.action === 'approve' && !card.blocked) {
             card.noMailbox = await followupBlockedByNoMailbox(db, organisationId, aiAssistantId);
@@ -359,7 +362,7 @@ export async function resolveMeetingActionProposal(
 }
 
 /** Pure: why a send_to can't go now, or null. Same rules as the server's `sendTo` (assistant-records.ts). */
-export function sendToBlock(target: MeetingSendTarget, on: MeetingSendTarget[], data: unknown, sync?: { total: number; synced: number }): string | null {
+export function sendToBlock(target: MeetingSendTarget, on: MeetingSendTarget[], data: unknown, sync?: { total: number; synced: number; syncedBy?: Record<string, number> }): string | null {
     const label = MEETING_SEND_TARGETS[target].label;
     if (!on.includes(target)) return `${label} isn’t switched on for this assistant. Switch it on in Assistant Settings ▸ Connections, then ask me again.`;
     if (MEETING_TASK_TARGETS.has(target)) {

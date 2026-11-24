@@ -2539,6 +2539,8 @@ function _rqMeetingSendTo(r) {
         const s = st[t.actionType] || {};
         const isEmail = t.actionType === 'email_meeting_followup';
         if (s.sent) return `<span class="${chip}">✓ ${isEmail ? 'Follow-up email sent' : `Sent to ${_rqEsc(t.label)}`}</span>`;
+        // The approval's own job is sending it (just approved, or claimed by a run): no button that would queue it again.
+        if (s.sending) return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">Sending to ${_rqEsc(t.label)}…</span>`;
         // The amber "Follow-up not sent" box above already carries its own button.
         if (isEmail && d.followupNotSent && !d.followupSentVia) return '';
         const words = isEmail ? 'Send the follow-up email' : `${s.partly ? 'Send the rest to' : 'Send to'} ${_rqEsc(t.label)}`;

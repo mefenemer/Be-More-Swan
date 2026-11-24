@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { isMeetingSendTarget, meetingSendState } from '../src/utils/meeting-send-to';
+import { approvedRecently, isMeetingSendTarget, meetingSendState } from '../src/utils/meeting-send-to';
 import { buildMeetingActionCard, meetingActionFromUiElement, sendToBlock } from '../src/utils/chat-meeting-action';
 
 const root = join(__dirname, '..');
@@ -17,7 +17,22 @@ const data = { tasks: [{ description: 'a' }, { description: 'b' }], handoffs: { 
 assert.ok(meetingSendState('slack_post_summary', data).sent, 'Slack stamped sent');
 assert.ok(!meetingSendState('notion_create_page', data).sent, 'Notion only claimed, not sent');
 assert.ok(meetingSendState('email_meeting_followup', data).sent, 'an older followupSentAt counts');
-assert.deepStrictEqual(meetingSendState('jira_create_tasks', data, { total: 2, synced: 1 }), { sent: false, partly: true, sentAt: null });
+assert.deepStrictEqual(meetingSendState('jira_create_tasks', data, { total: 2, synced: 1 }), { sent: false, partly: true, sentAt: null, sending: false });
+
+// Review on PR #853: synced items count only for the tool they went to — items in Jira are not "sent to Asana".
+const inJira = { total: 2, items: [{ syncStatus: 'synced', provider: 'jira' }, { syncStatus: 'synced', provider: 'jira' }] };
+assert.ok(meetingSendState('jira_create_tasks', data, inJira).sent, 'in Jira');
+assert.ok(!meetingSendState('asana_create_tasks', data, inJira).sent, 'not in Asana');
+assert.ok(!meetingSendState('asana_create_tasks', data, { total: 2, synced: 2, syncedBy: { jira: 2, asana: 0 } }).sent, 'the chat snapshot counts by tool too');
+assert.match(sendToBlock('asana_create_tasks', ['asana_create_tasks'], data, { total: 2, synced: 2, syncedBy: { jira: 2, asana: 0 } }) ?? 'can go', /can go/, 'so Asana can still be sent');
+
+// Review on PR #853: just approved, the approval's own job is sending — "Sending…", not another button.
+const now = Date.parse('2026-11-24T10:00:00Z');
+assert.ok(approvedRecently('approved', '2026-11-24T09:58:00Z', now) && !approvedRecently('approved', '2026-11-24T09:40:00Z', now) && !approvedRecently('pending_approval', '2026-11-24T09:59:00Z', now));
+assert.ok(meetingSendState('notion_create_page', {}, null, { approvedRecently: true, now }).sending, 'just approved: sending');
+assert.ok(meetingSendState('notion_create_page', { handoffs: { notion_create_page: { claimedAt: '2026-11-24T09:55:00Z' } } }, null, { now }).sending, 'claimed 5 minutes ago: sending');
+assert.ok(!meetingSendState('notion_create_page', { handoffs: { notion_create_page: { claimedAt: '2026-11-24T09:00:00Z' } } }, null, { now }).sending, 'an old claim: offer the button again');
+assert.ok(!meetingSendState('email_meeting_followup', { followupNotSent: true }, null, { approvedRecently: true, now }).sending, 'a follow-up held for no mailbox is not "sending"');
 assert.ok(meetingSendState('asana_create_tasks', data, { total: 2, synced: 2 }).sent);
 assert.ok(!isMeetingSendTarget('hubspot_update_record') && isMeetingSendTarget('slack_post_summary'));
 
@@ -53,6 +68,8 @@ const live = row(T, { recordType: 'meeting', approvalStatus: 'approved', data, s
 assert.ok(live.includes('✓ Sent to Slack'), 'what has gone');
 assert.ok(live.includes("sendTo:notion_create_page") && live.includes('Send to Notion'), 'a button for what has not');
 assert.ok(live.includes('Send the rest to Jira'), 'and the rest of the action items');
+const sending = row(T, { recordType: 'meeting', approvalStatus: 'approved', data: {}, sendState: { slack_post_summary: { sending: true }, notion_create_page: {}, jira_create_tasks: {} } });
+assert.ok(sending.includes('Sending to Slack…') && !sending.includes('sendTo:slack_post_summary'), 'while it is being sent: no button');
 assert.ok(row(T, { recordType: 'meeting', approvalStatus: 'pending_approval', data: {} }).includes('Approving sends it to: Slack, Notion, Jira'), 'before approval: where it will go');
 assert.ok(row([], { recordType: 'meeting', approvalStatus: 'approved', data: {} }).includes("_openBriefDrawer?.('platforms')"), 'nothing on: where to switch one on');
 
