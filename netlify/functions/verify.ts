@@ -12,6 +12,7 @@ import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findReferralOffer } from '../../src/utils/referral-offer';
 import { startTrialIfEligible } from '../../src/utils/trial';
 import { sendNewTrialAlert } from '../../src/utils/founder-alerts';
+import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
 import { recordLogin } from '../../src/utils/login-events';
 import { isSameLoginBrowser, maskEmail, readLoginRef, sessionUserId } from '../../src/utils/login-link';
 import jwt from 'jsonwebtoken';
@@ -134,6 +135,17 @@ export default withLambda(async (event) => {
                 if (t.started && t.endsAt) trialEndsAt = t.endsAt;
                 // #91: a trial never reaches Stripe, so tell the founder here (never throws).
                 if (t.started) await sendNewTrialAlert({ db, userId: user.id, organisationId: user.organisationId, endsAt: t.endsAt ?? null });
+                // Beta sign-up: register.ts already gave THIS person's new workspace the free beta plan, so no
+                // trial and no Stripe either. Their own plan row is the test: a person joining an existing
+                // workspace has none, so they are not announced as a new beta tester.
+                else if (t.reason === 'has_plan') {
+                    const [beta] = await db.select({ planName: plans.planName }).from(plans).where(and(
+                        eq(plans.organisationId, user.organisationId),
+                        eq(plans.userId, user.id),
+                        eq(plans.planType, BETA_PLAN_TYPE),
+                    )).limit(1);
+                    if (beta) await sendNewTrialAlert({ db, userId: user.id, organisationId: user.organisationId, endsAt: null, planName: beta.planName, kind: 'beta' });
+                }
             } catch (err) {
                 console.error('[verify] could not start the free trial (non-blocking)', { userId: user.id, err });
             }
