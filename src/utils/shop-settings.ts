@@ -184,7 +184,7 @@ export function cancellationFormHtml(s: ShopSettings): string {
 }
 
 /** The whole Delivery & returns page body (site-serve.ts draws it in the site's own shell). */
-export function shopTermsHtml(s: ShopSettings): string {
+export function shopTermsHtml(s: ShopSettings, deliveryChoices: string | null = null): string {
     const postage = s.returnPostage === 'seller'
         ? 'We pay the cost of sending the goods back to us.'
         : 'You pay the cost of sending the goods back to us.';
@@ -194,7 +194,7 @@ export function shopTermsHtml(s: ShopSettings): string {
     return '<section><div class="w n">'
         + '<h1>Delivery &amp; returns</h1>'
         + `<h2>Who you're buying from</h2>${traderBlockHtml(s)}`
-        + `<h2>Delivery</h2>${para(s.deliveryText || '')}<p>We deliver to addresses in the United Kingdom. Any delivery charge is shown before you pay.</p>`
+        + `<h2>Delivery</h2>${para(s.deliveryText || '')}${deliveryChoices ? `<p><strong>Delivery choices and costs:</strong> ${esc(deliveryChoices)}.</p>` : ''}<p>We deliver to addresses in the United Kingdom. Any delivery charge is shown before you pay.</p>`
         + `<h2>Your right to cancel</h2><p>You can cancel your order within ${s.returnsDays} days of the day you (or someone you name) receive the goods, without giving any reason. If your order arrives in several parts, the time runs from the day the last part arrives.</p>`
         + `<p>To cancel, tell us clearly — by email to <a href="mailto:${esc(s.contactEmail || '')}">${esc(s.contactEmail || '')}</a>, or by post to the address above. You can use the form below, but you don't have to.</p>`
         + `<p>Send the goods back within 14 days of telling us. ${postage}</p>`

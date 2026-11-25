@@ -12,13 +12,15 @@
  *    Same server action as the chat's product_stock card (shop.ts product_stock, shop-stock.ts).
  *    Options (Phase 1): under each product, one group of choices ("Size": Small / Large), each with its own
  *    price and stock. Same server action as the chat's product_options card (shop.ts product_options).
+ * Delivery (Phase 1): up to 5 UK delivery choices buyers pick from at checkout (basket shops), each optionally
+ *    free over an order total, plus "Collect in person". Same server action as the chat's delivery_rates card.
  * 4. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -123,9 +125,9 @@
   function optionRow(o) {
     const v = (x) => (x == null ? '' : esc(x));
     return `<div class="flex flex-wrap items-end gap-2 mt-2" data-opt-row data-opt-id="${o && o.id ? esc(o.id) : ''}">
-      <label class="block text-[11px] font-bold text-gray-600">Option<input type="text" maxlength="60" data-opt-label value="${v(o && o.label)}" placeholder="e.g. Large" class="${inputCls} mt-1" style="max-width:10rem"></label>
-      <label class="block text-[11px] font-bold text-gray-600">Price<input type="text" inputmode="decimal" data-opt-price value="${v(o ? majorOf(o.priceAmount) : '')}" placeholder="Same" class="${inputCls} mt-1" style="max-width:6rem"></label>
-      <label class="block text-[11px] font-bold text-gray-600">In stock<input type="number" min="0" max="100000" step="1" data-opt-stock value="${v(o && o.stock)}" placeholder="Not tracked" class="${inputCls} mt-1" style="max-width:7rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Option</span><input type="text" maxlength="60" data-opt-label value="${v(o && o.label)}" placeholder="e.g. Large" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Price</span><input type="text" inputmode="decimal" data-opt-price value="${v(o ? majorOf(o.priceAmount) : '')}" placeholder="Same" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">In stock</span><input type="number" min="0" max="100000" step="1" data-opt-stock value="${v(o && o.stock)}" placeholder="Not tracked" class="${inputCls} mt-1" style="max-width:7rem"></label>
       ${btn('data-opt-remove aria-label="Remove this option"', 'Remove')}
     </div>`;
   }
@@ -172,6 +174,31 @@
       ${state.stockError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.stockError)}</p>` : ''}`);
   }
 
+  const poundsOf = (p) => (p == null ? '' : (p / 100).toFixed(2).replace(/\.00$/, ''));
+  function deliveryRow(r) {
+    const v = (x) => (x == null ? '' : esc(x));
+    return `<div class="flex flex-wrap items-end gap-2 mt-2" data-del-row>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Name</span><input type="text" maxlength="50" data-del-name value="${v(r && r.name)}" placeholder="e.g. Royal Mail Tracked 48" class="${inputCls} mt-1" style="max-width:14rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Price (£)</span><input type="text" inputmode="decimal" data-del-price value="${v(r ? poundsOf(r.price) : '')}" placeholder="3.95" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Free over (£)</span><input type="text" inputmode="decimal" data-del-free value="${v(r ? poundsOf(r.freeOver) : '')}" placeholder="Never" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">How long</span><input type="text" maxlength="40" data-del-days value="${v(r && r.days)}" placeholder="2–3 working days" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      ${btn('data-del-remove aria-label="Remove this delivery choice"', 'Remove')}
+    </div>`;
+  }
+  /** Delivery: the UK choices buyers pick from on Stripe's page (basket checkouts). Saving replaces the list. */
+  function deliveryCard(d) {
+    const s = d.delivery || { rates: [], collect: { on: false, note: null } };
+    const canEdit = !!d.canEdit;
+    return card(`<p class="text-sm font-black text-gray-900">Delivery</p>
+      <p class="text-xs text-gray-500 mt-1">The choices buyers pick from when they check out their basket, with the cost added before they pay. UK addresses only for now, priced in pounds (a basket priced in another currency checks out without them). Up to 5 choices in all.</p>
+      <div data-del-rows>${s.rates.map(deliveryRow).join('')}</div>
+      <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-del-collect ${s.collect.on ? 'checked' : ''} ${canEdit ? '' : 'disabled'} class="mt-0.5"> Buyers can collect in person (free)</label>
+      <label class="block text-[11px] font-bold text-gray-600 mt-1"><span class="block">Where and when to collect (optional)</span><input type="text" maxlength="120" data-del-collect-note value="${esc(s.collect.note || '')}" placeholder="e.g. 12 Mill Lane, Tue–Sat 10–4" class="${inputCls} mt-1"></label>
+      ${canEdit ? `<div class="flex flex-wrap gap-2 mt-3">${btn('data-del-add', '+ Add delivery choice')}${btn('data-del-save', 'Save delivery', true)}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change these.</p>'}
+      ${state.deliverySaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.deliverySaved)}</p>` : ''}
+      ${state.deliveryError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.deliveryError)}</p>` : ''}`);
+  }
+
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
@@ -189,6 +216,7 @@
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
           ${((d.orderLines || {})[o.id] || []).length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5" data-order-lines>${d.orderLines[o.id].map((l) => `<li>${esc(l.qty)} × ${esc(l.name)} · ${esc(money(l.unit * l.qty, o.currency))}</li>`).join('')}</ul>` : ''}
+          ${((d.orderDelivery || {})[o.id]) ? `<p class="text-xs text-gray-600 mt-1" data-order-delivery>Delivery: ${esc(d.orderDelivery[o.id].name || 'chosen at checkout')}${d.orderDelivery[o.id].amount != null ? ` · ${esc(d.orderDelivery[o.id].amount === 0 ? 'free' : money(d.orderDelivery[o.id].amount, o.currency))}` : ''}</p>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
           ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
         </li>`;
@@ -201,7 +229,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${stockCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -271,6 +299,24 @@
         state.data = await post({ action: 'product_options', productId: Number(optSave.dataset.optSave), group: ed.querySelector('[data-opt-group]').value, options });
         state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
       } catch (err) { state.stockError = err.message; }
+      render();
+      return;
+    }
+    if (t('[data-del-add]')) { document.querySelector('[data-del-rows]').insertAdjacentHTML('beforeend', deliveryRow(null)); return; }
+    if (t('[data-del-remove]')) { t('[data-del-row]').remove(); return; }
+    const delSave = t('[data-del-save]');
+    if (delSave) {
+      const root = delSave.closest('.rounded-2xl') || document;
+      const rates = [...root.querySelectorAll('[data-del-row]')].map((row) => ({
+        name: row.querySelector('[data-del-name]').value, price: row.querySelector('[data-del-price]').value,
+        freeOver: row.querySelector('[data-del-free]').value, days: row.querySelector('[data-del-days]').value,
+      })).filter((r) => r.name.trim() || r.price.trim() || r.freeOver.trim() || r.days.trim());
+      const collect = { on: !!root.querySelector('[data-del-collect]').checked, note: root.querySelector('[data-del-collect-note]').value };
+      state.deliverySaved = null; state.deliveryError = null; delSave.disabled = true;
+      try {
+        state.data = await post({ action: 'delivery_rates', rates, collect });
+        state.deliverySaved = (state.data.warnings || [])[0] || 'Saved.';
+      } catch (err) { state.deliveryError = err.message; }
       render();
       return;
     }

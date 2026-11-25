@@ -187,7 +187,13 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    what was charged is kept per Stripe session; the paid order gets its lines, each line's stock is taken, the basket is
    emptied; both emails list the items. A page carrying `?b=` keeps it in links and is never shared-cached; /basket is
    never cached or indexed. Week-old baskets swept daily. Tests: `tests/shop-basket.test.ts`.
-5. UK delivery rates (`weight_band`, zone `uk`) — next.
+5. **UK delivery rates — built 2026-11-25** (`feat/shop-delivery`): basket checkouts (Shopkeeper workspaces). Up to 5
+   choices buyers pick on Stripe's page: the business's own rates, each optionally free over an order total, plus
+   "Collect in person". **Flat per order in this first version — no weight bands yet** (add `weight_band` per product
+   later if sellers ask). Stored as `shop_settings.delivery = { zones: { uk: … } }` so EU/US zones add without a
+   reshape (Phase 3); the paid order records `delivery_name` / `delivery_amount` (db/z-shop-delivery.sql, raw SQL in
+   `shop-delivery.ts`). Shown on the basket page and the Delivery & returns page before paying. Shop tab Delivery card +
+   chat card `delivery_rates` → `shop.ts delivery_rates` (owner/admin). Tests: `tests/shop-delivery.test.ts`.
 6. Order statuses (posted + tracking email), CSV export.
 7. Shop page for a business with no Be More Swan website.
 

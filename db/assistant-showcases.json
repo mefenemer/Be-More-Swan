@@ -708,7 +708,7 @@
       },
       {
         "q": "Can buyers put several things in a basket?",
-        "a": "Yes. With the Shopkeeper, your Buy buttons become Add to basket: buyers add several things, change quantities, and pay once on Stripe. Delivery rates aren't there yet. Stock levels and options (sizes, colours) are: your website shows Sold out at 0. The Shopkeeper will tell you plainly what it can't do."
+        "a": "Yes. With the Shopkeeper, your Buy buttons become Add to basket: buyers add several things, change quantities, and pay once on Stripe. You set the UK delivery choices (with free delivery over an amount, or collection), and buyers pick one before they pay. Stock levels and options (sizes, colours) are there too: your website shows Sold out at 0. The Shopkeeper will tell you plainly what it can't do."
       },
       {
         "q": "Is this legal advice?",

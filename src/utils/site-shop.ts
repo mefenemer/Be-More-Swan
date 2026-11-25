@@ -45,8 +45,9 @@ import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBl
 import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, STOCK_NOT_UPDATED_LINE, type StockTaken } from './shop-stock';
 import { loadProductOptions, optionItemName, optionPence, takeOptionStock, type ProductOptions } from './shop-options';
 import { productPagePath } from './site-product-page';
+import { deliveryApplies, deliveryOptionsFor, loadDelivery, recordOrderDelivery, stripeShippingOptions, type DeliverySetup } from './shop-delivery';
 import {
-    addItem, basketOn, checkoutBlocker, checkoutLinesFor, emptyBasket, loadBasket, markBasketCheckout, orderSummaryName, priceBasket,
+    addItem, basketOn, basketTotal, checkoutBlocker, checkoutLinesFor, emptyBasket, loadBasket, markBasketCheckout, orderSummaryName, priceBasket,
     saveBasket, setQty, withBasket, writeOrderLines, BASKET_PATH, type CheckoutLine, type OrderLine, type PricedLine,
 } from './shop-basket';
 import type { SiteRow } from './site-store';
@@ -283,7 +284,7 @@ export const NEW_BASKET_LIMIT = { maxAttempts: 30, windowSecs: 3600 };
 async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip', limit = BUY_LIMIT): Promise<BuyOutcome | null> {
     try {
         const limited = await checkRateLimit(db, key, ip, limit);
-        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: 'Too many checkouts were started from here just now.', backPath: back };
+        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: key === 'site_basket_ip' ? 'Too many baskets were started from here just now.' : 'Too many checkouts were started from here just now.', backPath: back };
     } catch (err) {
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
     }
@@ -324,8 +325,11 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
 export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
 
 /** The Checkout Session for a whole basket — pure. Quantities were chosen on the basket page. */
-export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null }): Stripe.Checkout.SessionCreateParams {
+export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null }): Stripe.Checkout.SessionCreateParams {
     const back = basketPagePath(req.basketId);
+    // UK delivery rates (shop-delivery.ts): the buyer picks one on Stripe's page; a rate is free over its threshold.
+    // In pounds only: a basket priced in another currency is checked out without them (Stripe needs one currency).
+    const shipping = deliveryApplies(req.delivery, req.lines) ? stripeShippingOptions(deliveryOptionsFor(req.delivery, basketTotal(req.lines))) : [];
     return {
         mode: 'payment',
         line_items: req.lines.map((l) => {
@@ -339,7 +343,8 @@ export function basketCheckoutParams(req: { origin: string; site: SiteRow; baske
                 },
             };
         }),
-        ...(req.collectAddress ? { shipping_address_collection: { allowed_countries: SHIPPING_COUNTRIES } } : {}),
+        ...(req.collectAddress || shipping.length ? { shipping_address_collection: { allowed_countries: SHIPPING_COUNTRIES } } : {}),
+        ...(shipping.length ? { shipping_options: shipping } : {}),
         ...(req.shop ? { custom_text: { submit: { message: checkoutNote(req.shop, `${req.origin}${SHOP_TERMS_PATH}`) } } } : {}),
         success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent('/')}`,
         cancel_url: `${req.origin}${back}`,
@@ -394,7 +399,7 @@ async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOu
     const collectAddress = priced.lines.some((l) => { const s = sections.find((x) => x.id === l.sectionId); return s?.type === 'products' && s.props.collectAddress; });
     try {
         const session = await (await stripeClient()).checkout.sessions.create(
-            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl }),
+            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId) }),
             { stripeAccount: ready.account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');
@@ -470,6 +475,9 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     let stockLine: string | null;
     let orderLines: OrderLine[] | null = null;
     let linesFailed = false;
+    // The delivery the buyer chose on Stripe (shop-delivery.ts): its name from the shipping rate, its cost.
+    const delivery = await chosenDelivery(accountId, session);
+    if (delivery) await recordOrderDelivery(db, order.id, delivery.name, delivery.amount);
     if (lines) {
         // A basket: its lines, each line's stock, and the basket emptied.
         // One statement (all lines or none); if it fails the owner is told, since a repeated webhook never comes back here.
@@ -517,6 +525,7 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             subject: `New order from your website: ${order.itemName} (${total})`,
             html: `<p>${esc(order.customerName || 'Someone')} paid <strong>${esc(total)}</strong> for ${orderLines ? 'these items:' : `${order.quantity} × ${esc(order.itemName)}.`}</p>
 ${orderLines ? orderLinesHtml(orderLines, order.currency) : ''}
+${delivery ? `<p><strong>Delivery:</strong> ${esc(deliveryLine(delivery, order.currency))}</p>` : ''}
 ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}</p>` : ''}
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
@@ -524,13 +533,36 @@ ${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
-    await sendBuyerConfirmation(db, order, site, total, orderLines).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
+    await sendBuyerConfirmation(db, order, site, total, orderLines, delivery).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
     return true;
 }
 
 type OrderRow = typeof siteOrders.$inferSelect;
 
-/** "Order confirmed" — from the business, to the buyer (CCR 2013: confirmation in a durable form). */
+/** "Royal Mail Tracked 48 — £3.95" / "Collect in person — free". Pure. */
+export function deliveryLine(d: { name: string | null; amount: number | null }, currency: string): string {
+    const cost = d.amount == null ? '' : d.amount === 0 ? 'free' : formatMoney(d.amount, currency);
+    return [d.name || 'Delivery', cost].filter(Boolean).join(' — ');
+}
+
+/** The delivery chosen on Stripe's page: its amount from the session; its name from the shipping rate (an id in
+ *  the webhook, so it is read from the connected account; on failure the amount alone is recorded). */
+async function chosenDelivery(accountId: string, session: Stripe.Checkout.Session): Promise<{ name: string | null; amount: number | null } | null> {
+    const cost = session.shipping_cost;
+    if (!cost) return null;
+    const rate = cost.shipping_rate;
+    let name: string | null = typeof rate === 'object' && rate ? (rate.metadata?.bms_delivery || rate.display_name || null) : null;
+    if (!name && typeof rate === 'string') {
+        try {
+            const r = await (await stripeClient()).shippingRates.retrieve(rate, {}, { stripeAccount: accountId });
+            name = r.metadata?.bms_delivery || r.display_name || null;
+        } catch (err) {
+            console.error('[site-shop] shipping rate not read', err instanceof Error ? err.message : err);
+        }
+    }
+    return { name, amount: cost.amount_total ?? null };
+}
+
 /** The owner's email when a basket order's items couldn't be saved on the order (the email still lists them). */
 export const ORDER_LINES_NOT_SAVED_LINE = 'We couldn\'t save this order\'s items on your Shop tab. They are listed above and in your Stripe dashboard.';
 
@@ -539,7 +571,8 @@ export function orderLinesHtml(lines: OrderLine[], currency: string): string {
     return `<ul>${lines.map((l) => `<li>${l.qty} × ${esc(l.name)} — ${esc(formatMoney(l.unit * l.qty, currency))}</li>`).join('')}</ul>`;
 }
 
-export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: string; termsUrl: string | null; lines?: OrderLine[] | null }): { subject: string; html: string } {
+/** "Order confirmed" — from the business, to the buyer (CCR 2013: confirmation in a durable form). */
+export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: string; termsUrl: string | null; lines?: OrderLine[] | null; delivery?: { name: string | null; amount: number | null } | null }): { subject: string; html: string } {
     const { order, shop } = o;
     const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
     const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
@@ -550,6 +583,7 @@ export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: stri
 <p>Thank you for your order. We've received your payment of <strong>${esc(o.total)}</strong>${shop.vatNumber ? ' (including VAT)' : ''}.</p>
 ${o.lines?.length ? `<p><strong>Your order</strong> (reference ${order.id}):</p>${orderLinesHtml(o.lines, order.currency)}` : `<p><strong>Your order:</strong> ${order.quantity} × ${esc(order.itemName)}<br><strong>Order reference:</strong> ${order.id}</p>`}
 ${addrLines.length ? `<p><strong>Delivering to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
+${o.delivery ? `<p><strong>Delivery chosen:</strong> ${esc(deliveryLine(o.delivery, order.currency))}</p>` : ''}
 <p><strong>Delivery:</strong> ${esc(shop.deliveryText || '')}</p>
 <p><strong>Changed your mind?</strong> ${esc(returnsSummaryText(shop))} To cancel, reply to this email.${o.termsUrl ? ` Full details and a cancellation form: <a href="${esc(o.termsUrl)}">${esc(o.termsUrl)}</a>` : ''}</p>
 <p><strong>Sold by:</strong></p>${traderBlockHtml(shop)}
@@ -557,12 +591,12 @@ ${addrLines.length ? `<p><strong>Delivering to:</strong><br>${addrLines.map((l) 
     };
 }
 
-async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null): Promise<void> {
+async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null, delivery: { name: string | null; amount: number | null } | null = null): Promise<void> {
     if (!order.customerEmail) return;
     const shop = await loadShopSettings(db, site.organisationId);
     if (!shop || !shopReady(shop)) return;   // never sell without these; an old open checkout is the only way here
     const termsUrl = site.slug ? `${(await import('./site-hosting')).siteOrigin(site.slug)}${SHOP_TERMS_PATH}` : null;
-    const mail = buyerEmail({ order, shop, total, termsUrl, lines });
+    const mail = buyerEmail({ order, shop, total, termsUrl, lines, delivery });
     await sendEmail({
         to: order.customerEmail,
         from: `${(shop.traderName || 'Your order').replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
