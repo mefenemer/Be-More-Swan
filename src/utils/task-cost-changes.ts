@@ -153,23 +153,44 @@ export async function listChanges(db: Db, limit = 30): Promise<ChangeRow[]> {
     return (rows as unknown as RawChange[]).map(mapChange);
 }
 
-/** A draft, or an announced change still to start. Only one at a time: a second would quote stale "from" figures. */
-export async function openChange(db: Db): Promise<ChangeRow | null> {
+/**
+ * The draft (at most one) and every announced change still to start. Several announced changes may wait at once, but
+ * never two on the SAME cost: a second change to a cost would quote stale "from" figures (owner 2026-11-25: the Note
+ * Taker charge had to be announced while the AI presenter change was still waiting). Soonest start first.
+ */
+export async function openChanges(db: Db): Promise<{ draft: ChangeRow | null; announced: ChangeRow[] }> {
     const rows = await db.execute<RawChange>(sql`
         SELECT ${CHANGE_COLUMNS} FROM task_cost_changes c
          WHERE c.status = 'draft' OR (c.status = 'announced' AND c.effective_from > (now() AT TIME ZONE 'UTC'))
-         ORDER BY c.id DESC LIMIT 1`);
-    const row = (rows as unknown as RawChange[])[0];
-    return row ? mapChange(row) : null;
+         ORDER BY c.effective_from ASC, c.id ASC`);
+    const all = (rows as unknown as RawChange[]).map(mapChange);
+    const drafts = all.filter((c) => c.status === 'draft');
+    return { draft: drafts[drafts.length - 1] ?? null, announced: all.filter((c) => c.status === 'announced') };
 }
 
-/** The announced change still to start, for chat to mention. Null when there is none, or on a fault. */
-export async function upcomingChange(db: Db): Promise<ChangeRow | null> {
+/** Costs an announced, not-yet-started change already moves: a new change may not touch them. Pure. */
+export function lockedCostKeys(announced: readonly ChangeRow[]): Map<CostKey, string> {
+    const out = new Map<CostKey, string>();
+    for (const c of announced) for (const i of c.items) if (isCostKey(i.key) && !out.has(i.key)) out.set(i.key, c.effectiveDate);
+    return out;
+}
+
+/** The first cost in `items` an announced change already moves, as an error for the admin; null when none. Pure. */
+export function clashWithAnnounced(items: readonly { key: CostKey }[], announced: readonly ChangeRow[]): string | null {
+    const locked = lockedCostKeys(announced);
+    for (const i of items) {
+        const date = locked.get(i.key);
+        if (date) return `${COST_KEY_LABELS[i.key]} already has a change announced for ${longDate(date)}. Wait for it to start, or cancel it, before changing that cost again.`;
+    }
+    return null;
+}
+
+/** Every announced change still to start, soonest first, for chat to mention. Empty when there are none, or on a fault. */
+export async function upcomingChanges(db: Db): Promise<ChangeRow[]> {
     try {
-        const open = await openChange(db);
-        return open?.status === 'announced' ? open : null;
+        return (await openChanges(db)).announced;
     } catch {
-        return null;
+        return [];
     }
 }
 

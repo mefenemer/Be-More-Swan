@@ -4708,17 +4708,18 @@ async function loadTaskCostsAdmin() {
 }
 
 function tcPaintCosts() {
-  const announced = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'announced');
-  const draft = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'draft');
+  // Several announced changes can wait at once, never two on the same cost: costs an announced change moves are locked.
+  const locked = tcState.lockedKeys || {};
+  const draft = (tcState.changes || []).find((c) => c.id === tcState.draftChangeId && c.status === 'draft');
   const draftValue = (key) => { const i = draft && draft.items.find((x) => x.key === key); return i ? i.newUnits : null; };
   const rows = tcState.costs.map((c) => {
     const set = draftValue(c.key);
-    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${set ?? c.value}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${announced ? 'disabled' : ''}>`;
+    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${set ?? c.value}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${locked[c.key] ? 'disabled' : ''}>${locked[c.key] ? `<span class="block text-xs text-gray-500 mt-1">Changing on ${bcEsc(tcLongDate(locked[c.key]))}</span>` : ''}`;
     return `<tr class="border-t border-gray-100">
       <td class="px-4 py-2.5 text-gray-800">${bcEsc(c.label)}</td>
       <td class="px-4 py-2.5 text-gray-600">${bcEsc(c.text)}</td>
       <td class="px-4 py-2.5">${input}</td>
-      <td class="px-4 py-2.5">${c.inUse ? '' : `<button type="button" data-tc-unused="${bcEsc(c.key)}" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg" ${announced ? 'disabled' : ''}>Save</button> <span class="text-xs text-gray-500">Nobody is charged this yet, so no notice is needed.</span>`}</td>
+      <td class="px-4 py-2.5">${c.inUse ? '' : `<button type="button" data-tc-unused="${bcEsc(c.key)}" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg" ${locked[c.key] ? 'disabled' : ''}>Save</button> <span class="text-xs text-gray-500">Nobody is charged this yet, so no notice is needed.</span>`}</td>
     </tr>`;
   }).join('');
   document.getElementById('tc-costs').innerHTML = `
@@ -4728,7 +4729,7 @@ function tcPaintCosts() {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    ${announced ? `<p class="text-sm text-gray-500 mt-3">A change is already announced. Wait for it to start, or cancel it, before setting another.</p>` : `
+    ${Object.keys(locked).length ? `<p class="text-sm text-gray-500 mt-3">Costs with an announced change are locked until it starts. You can still change the others.</p>` : ''}
     <div class="bg-white rounded-2xl border border-gray-200 p-5 mt-4 space-y-3">
       <label class="block text-sm font-semibold text-gray-700">Starts on
         <input type="date" id="tc-date" value="${bcEsc(draft ? draft.effectiveDate : tcState.earliest.rise)}" min="${bcEsc(tcState.earliest.reduction)}" class="block mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">
@@ -4739,7 +4740,7 @@ function tcPaintCosts() {
       </label>
       <button type="button" id="tc-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${draft ? 'Update the draft' : 'Save as a draft'}</button>
       <p class="text-xs text-gray-500">A draft changes nothing and tells nobody.</p>
-    </div>`}`;
+    </div>`;
   document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
   document.getElementById('tc-save')?.addEventListener('click', tcSaveDraft);
 }
@@ -4775,8 +4776,15 @@ async function tcSaveUnused(btn) {
 
 function tcPaintOpen() {
   const box = document.getElementById('tc-open');
-  const c = (tcState.changes || []).find((x) => x.id === tcState.openChangeId);
-  if (!c) { box.innerHTML = ''; return; }
+  const ids = tcState.openChangeIds || [];
+  const open = ids.map((id) => (tcState.changes || []).find((x) => x.id === id)).filter(Boolean);
+  if (!open.length) { box.innerHTML = ''; return; }
+  // Announced changes first (soonest start first), then the draft, each in its own card.
+  box.innerHTML = open.map((c) => `<div data-tc-card="${c.id}" class="mb-4"></div>`).join('');
+  open.forEach((c) => tcPaintChange(c, box.querySelector(`[data-tc-card="${c.id}"]`)));
+}
+
+function tcPaintChange(c, box) {
   const items = c.items.map((i) => `<li>${tcItemText(c, i)}</li>`).join('');
   if (c.status === 'draft') {
     box.innerHTML = `
@@ -4814,12 +4822,12 @@ function tcPaintOpen() {
       <ul class="text-sm text-gray-600 mt-1 list-disc list-inside">${items}</ul>
       ${tcStatsHtml(c, a)}
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${c.waiting ? `<button type="button" id="tc-resend" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send to the ${c.waiting} still waiting</button>` : ''}
-        <button type="button" id="tc-cancel" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Cancel this change</button>
+        ${c.waiting ? `<button type="button" data-tc-resend class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send to the ${c.waiting} still waiting</button>` : ''}
+        <button type="button" data-tc-cancel class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Cancel this change</button>
       </div>
     </div>`;
-  document.getElementById('tc-resend')?.addEventListener('click', (e) => tcRun(e.currentTarget, 'resend', { id: c.id, expected: c.waiting }, (d) => `Sending to ${d.waiting} people in the background.`));
-  document.getElementById('tc-cancel').addEventListener('click', async (e) => {
+  box.querySelector('[data-tc-resend]')?.addEventListener('click', (e) => tcRun(e.currentTarget, 'resend', { id: c.id, expected: c.waiting }, (d) => `Sending to ${d.waiting} people in the background.`));
+  box.querySelector('[data-tc-cancel]').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (!(await window.confirmModal('The costs stay as they are, and everyone who had the notice is told it is not going ahead.', { title: 'Cancel this change?', confirmLabel: 'Cancel the change', cancelLabel: 'Keep it' }))) return;
     tcRun(btn, 'cancel', { id: c.id }, (d) => d.noticeError ? `Cancelled, but the notice could not start: ${d.noticeError}` : 'Cancelled. Telling everyone who had the notice.');
@@ -4834,7 +4842,8 @@ function tcStatsHtml(c, a) {
 }
 
 function tcPaintHistory() {
-  const past = (tcState.changes || []).filter((c) => c.id !== tcState.openChangeId);
+  const openIds = new Set(tcState.openChangeIds || []);
+  const past = (tcState.changes || []).filter((c) => !openIds.has(c.id));
   document.getElementById('tc-history').innerHTML = past.length ? `
     <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Past changes</p>
     <div class="space-y-3">${past.map((c) => `

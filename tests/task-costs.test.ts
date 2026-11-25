@@ -18,7 +18,7 @@ import {
     COST_KEYS, DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS, costValue, formatCost, isCostRise, type CostKey,
 } from '../src/config/task-weights';
 import { resolveTaskCosts, type CostRow } from '../src/utils/task-costs';
-import { changeSummary, costInUse, earliestStart, noticeContext, noticeKey, validateChange } from '../src/utils/task-cost-changes';
+import { changeSummary, clashWithAnnounced, costInUse, earliestStart, lockedCostKeys, noticeContext, noticeKey, validateChange, type ChangeRow } from '../src/utils/task-cost-changes';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 import { TEMPLATE_DEFAULTS } from '../src/utils/email-templates-catalog';
 import { hasPermission } from '../src/utils/rbac';
@@ -254,6 +254,41 @@ check('the admin page is reachable: section, nav and loader', () => {
     assert.match(html, /id="view-task-costs"/);
     assert.match(html, /view: 'task-costs'.*perm: 'manage_task_costs'/);
     assert.match(html, /view === 'task-costs'\)\s+loadTaskCostsAdmin\(\)/);
+});
+
+check('several announced changes may wait at once, but never two on the same cost (owner 2026-11-25)', () => {
+    const presenter: ChangeRow = { id: 3, status: 'announced', effectiveDate: '2026-12-19', reason: 'x', announcedAt: null, createdAt: '', items: [{ key: 'ai_presenter', oldUnits: 0, newUnits: 2 }] };
+    const locked = lockedCostKeys([presenter]);
+    assert.strictEqual(locked.get('ai_presenter'), '2026-12-19');
+    assert.strictEqual(locked.size, 1);
+    assert.strictEqual(clashWithAnnounced([{ key: 'meeting_bot_call' }], [presenter]), null, 'a different cost can be announced while the presenter change waits');
+    const clash = clashWithAnnounced([{ key: 'meeting_bot_call' }, { key: 'ai_presenter' }], [presenter]);
+    assert.ok(clash && /AI presenter/.test(clash) && /19 December 2026/.test(clash), clash ?? '');
+    assert.strictEqual(clashWithAnnounced([{ key: 'ai_presenter' }], []), null);
+    const fn = read('netlify/functions/admin-task-costs.ts');
+    const save = fn.slice(fn.indexOf("if (resource === 'save')"), fn.indexOf("if (resource === 'set_unused')"));
+    assert.ok(save.includes('clashWithAnnounced(checked.items, open.announced)'), 'save refuses a clash');
+    assert.ok(!/A change is already announced for/.test(fn), 'the old one-at-a-time refusal is gone');
+    const ann = fn.slice(fn.indexOf("if (resource === 'announce')"), fn.indexOf("if (resource === 'resend')"));
+    assert.ok(ann.indexOf('clashWithAnnounced(') > 0 && ann.indexOf('clashWithAnnounced(') < ann.indexOf("SET status = 'announced'"), 'announce re-checks before flipping');
+    assert.match(fn, /openChangeIds: \[\.\.\.open\.announced\.map\(\(c\) => c\.id\), \.\.\.\(open\.draft \? \[open\.draft\.id\] : \[\]\)\]/);
+    const html = read('admin.html');
+    assert.ok(html.includes('${locked[c.key] ? \'disabled\' : \'\'}'), 'only locked costs are disabled');
+    assert.ok(!html.includes('tcState.openChangeId)'), 'no single-change assumptions left');
+    assert.match(html, /open\.forEach\(\(c\) => tcPaintChange\(c, box\.querySelector/);
+    assert.ok(!/id="tc-cancel"|id="tc-resend"/.test(html), 'each announced card has its own buttons');
+});
+
+check('chat lists EVERY waiting change, and a failed announce never stays announced with no notice (review of #874)', () => {
+    const snap = read('src/utils/chat-plan-snapshot.ts');
+    assert.match(snap, /\(f\.upcoming \?\? \[\]\)\.map\(\(u\) => `\\n- A change to these starts on \$\{longDate\(u\.effectiveDate\)\}/);
+    assert.match(snap, /upcomingChanges\(db\)/);
+    assert.ok(!/upcomingChange\(/.test(snap));
+    const fn = read('netlify/functions/admin-task-costs.ts');
+    const fail = fn.slice(fn.indexOf('if (failed) {'), fn.indexOf("await audit('task_cost_announced'"));
+    assert.ok(fail.indexOf("SET status = 'draft'") > 0 && fail.indexOf("SET status = 'cancelled'") > fail.indexOf("SET status = 'draft'"), 'back to a draft, else cancelled');
+    assert.match(fail, /catch \{/);
+    assert.match(fail, /the change \$\{state\}/, 'the admin is told the real state');
 });
 
 console.log(`\n✓ task-costs: ${passed} checks passed`);
