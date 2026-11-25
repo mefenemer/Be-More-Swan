@@ -24,7 +24,7 @@ import { sites } from '../../db/schema';
 import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay, renderSiteShell, renderSiteProduct, renderSiteBasket } from '../../src/utils/site-render';
 import { productPagePath, productRoute, productSections } from '../../src/utils/site-product-page';
 import { basketCount, basketOn, loadBasket, priceBasket, withBasket, BASKET_PATH } from '../../src/utils/shop-basket';
-import { deliveryApplies, deliveryWords, hasDelivery, loadDelivery } from '../../src/utils/shop-delivery';
+import { deliveryApplies, deliveryWords, loadDelivery, poundsPriced, termsDeliveryChoices } from '../../src/utils/shop-delivery';
 import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
 import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
@@ -296,7 +296,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (path === SHOP_TERMS_PATH && !definition.pages.some((p) => `/${p.slug}` === SHOP_TERMS_PATH)) {
         const shop = await loadShopSettings(db, site.organisationId);
         if (!shopReady(shop)) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
-        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSiteShell(definition, ctx, 'Delivery & returns', shopTermsHtml(shop!, await basketOn(db, site.organisationId) ? await loadDelivery(db, site.organisationId).then((d) => (hasDelivery(d) ? deliveryWords(d) : null)) : null)) };
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSiteShell(definition, ctx, 'Delivery & returns', shopTermsHtml(shop!, await basketOn(db, site.organisationId) ? termsDeliveryChoices(await loadDelivery(db, site.organisationId), await poundsPriced(db, site.organisationId)) : null)) };
     }
     if (path === REVIEW_PATH) {
         const r = await reviewPage({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));

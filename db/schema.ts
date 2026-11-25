@@ -6608,7 +6608,8 @@ export const siteOrders = pgTable("site_orders", {
   index("site_orders_site_idx").on(t.siteId, t.createdAt),
   index("site_orders_org_idx").on(t.organisationId),
   index("site_orders_pi_idx").on(t.paymentIntentId),
-  check("site_orders_status_check", sql`${t.status} IN ('paid','done','refunded')`),
+  // 'posted': db/z-shop-orders.sql (its columns stay raw SQL in shop-orders.ts).
+  check("site_orders_status_check", sql`${t.status} IN ('paid','posted','done','refunded')`),
 ]);
 
 // Shop baskets (online shop Phase 1, db/z-shop-basket.sql): mirrored for the data inventories only; the app reads

@@ -194,7 +194,16 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    reshape (Phase 3); the paid order records `delivery_name` / `delivery_amount` (db/z-shop-delivery.sql, raw SQL in
    `shop-delivery.ts`). Shown on the basket page and the Delivery & returns page before paying. Shop tab Delivery card +
    chat card `delivery_rates` → `shop.ts delivery_rates` (owner/admin). Tests: `tests/shop-delivery.test.ts`.
-6. Order statuses (posted + tracking email), CSV export.
+6. **Order statuses + CSV — built 2026-11-25** (`feat/shop-orders`): New → **Posted** (optional tracking number and/or
+   link) → Dealt with; refunded (from Stripe) never changes; "Mark as new" goes back to Posted if it was posted.
+   Posting emails the buyer "on its way" **from the owner's own Gmail or Outlook** (owner rule 2026-11-17: never a
+   Be More Swan sender for a customer's email); with neither connected the order is still posted and the owner is told
+   the buyer wasn't emailed. Same tracking again = no second email. `site_orders.posted_at` / `tracking_number` /
+   `tracking_url` / `buyer_posted_emailed_at` and 'posted' in the status CHECK (db/z-shop-orders.sql, raw SQL in
+   `shop-orders.ts`; "manual" to the pipeline only because it widens the CHECK). **Download CSV** of every order
+   (owner/admin; formula cells made plain text). Shop tab buttons + chat card `order_update` → `shop.ts order_update`.
+   Also: the Delivery & returns page hides pound delivery choices when nothing is priced in pounds. Tests:
+   `tests/shop-orders.test.ts`.
 7. Shop page for a business with no Be More Swan website.
 
 ## 7. Costs and fees model
