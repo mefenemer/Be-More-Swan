@@ -180,9 +180,16 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    size" and links to its page, where each option has its own Buy button. Checkout charges the option's price,
    names the order "Product — Option" and takes the option's stock. Shop tab Options editor + chat card
    `product_options` → `shop.ts product_options`. Tests: `tests/shop-options.test.ts`.
-4. Basket + UK delivery rates (`weight_band`, zone `uk`) — next.
-5. Order statuses (posted + tracking email), CSV export.
-6. Shop page for a business with no Be More Swan website.
+4. **Basket — built 2026-11-25** (`feat/shop-basket`): Shopkeeper workspaces only (decision 5). Carried in the address as
+   `?b=<id>` (the sites host passes no cookies and allows posts only to /_form, /_buy, /_book), so every action posts to
+   `/_buy` with `_a` = add / set / remove / checkout. `site_baskets` + `site_order_lines` (db/z-shop-basket.sql, raw SQL in
+   `shop-basket.ts`). Every line priced again from Business Information; one Stripe Checkout for the lot; the snapshot of
+   what was charged is kept per Stripe session; the paid order gets its lines, each line's stock is taken, the basket is
+   emptied; both emails list the items. A page carrying `?b=` keeps it in links and is never shared-cached; /basket is
+   never cached or indexed. Week-old baskets swept daily. Tests: `tests/shop-basket.test.ts`.
+5. UK delivery rates (`weight_band`, zone `uk`) — next.
+6. Order statuses (posted + tracking email), CSV export.
+7. Shop page for a business with no Be More Swan website.
 
 ## 7. Costs and fees model
 

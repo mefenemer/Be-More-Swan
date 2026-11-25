@@ -104,6 +104,7 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     // The map of their website every assistant reads (site-directory.ts), and the pages they left out.
     websitePages: s.siteDirectories,
     websiteOrders: s.siteOrders,
+    websiteOrderLines: s.siteOrderLines,
     shopSettings: s.shopSettings,
     productOptions: s.productOptions,
     bookings: s.bookings,

@@ -148,7 +148,7 @@ check('the buyer email: order, total, delivery, how to cancel, the page link and
 check('recordPaidCheckout stores the payment and emails the buyer; a refund is matched back by it', () => {
     const shopTs = read('src/utils/site-shop.ts');
     assert.ok(shopTs.includes('paymentIntentId: typeof session.payment_intent'));
-    assert.ok(shopTs.includes('await sendBuyerConfirmation(db, order, site, total)'));
+    assert.ok(shopTs.includes('await sendBuyerConfirmation(db, order, site, total, orderLines)'));
     assert.ok(shopTs.includes("...(refunded >= order.amountTotal && order.amountTotal > 0 ? { status: 'refunded' } : {})"));
     assert.ok(shopTs.includes("ne(siteOrders.status, 'refunded')"), 'Mark as done never hides a refund');
     const hook = read('netlify/functions/stripe-connect-webhook.ts');
