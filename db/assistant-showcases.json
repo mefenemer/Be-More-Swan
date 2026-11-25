@@ -708,7 +708,7 @@
       },
       {
         "q": "Can buyers put several things in a basket?",
-        "a": "Not yet. Each Buy button sells one product, and stock levels and delivery rates aren't there yet either. The Shopkeeper will tell you plainly what it can't do."
+        "a": "Not yet. Each Buy button sells one product, and delivery rates aren't there yet either. Stock levels are: set how many you have on the Shop tab or in the chat, and your website shows Sold out at 0. The Shopkeeper will tell you plainly what it can't do."
       },
       {
         "q": "Is this legal advice?",

@@ -2914,6 +2914,57 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('shop_settings', renderShopSettingsCard);
 
+  // { type: 'product_stock', productId, productName, stock?, lowStockAt? } — a product's stock level
+  // (online shop Phase 1, shop-stock.ts): shop.ts product_stock, the Shop tab Stock card's same save.
+  // Only the keys the chat sends are changed; null clears (not tracked / no warning). Nothing is saved
+  // until they click.
+  function renderProductStockCard(data) {
+    const d = data || {};
+    const has = (k) => Object.prototype.hasOwnProperty.call(d, k);
+    const productId = Number(d.productId);
+    const words = (v, none) => (v == null || v === '' ? none : `${Number(v)}`);
+    const rows = [];
+    if (has('stock')) rows.push(['In stock', d.stock === 0 ? '0 (shows as Sold out)' : words(d.stock, 'Not tracked (always buyable)')]);
+    if (has('lowStockAt')) rows.push(['Warn me at', words(d.lowStockAt, 'No warning')]);
+    const ok = Number.isInteger(productId) && productId > 0 && rows.length;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Stock</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${escapeHtml(d.productName || 'Product')}</p>
+      <dl class="mt-2 space-y-1">${rows.map(([k, v]) => `<div class="flex gap-2"><dt class="text-xs font-bold text-gray-700">${escapeHtml(k)}:</dt><dd class="text-xs text-gray-900">${escapeHtml(v)}</dd></div>`).join('') || '<p class="text-xs text-gray-500">Nothing to save.</p>'}</dl>
+      <p class="text-xs text-gray-600 mt-2">At 0 your website shows Sold out. Stock goes down by itself when an order is paid.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pst-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${ok ? '' : 'disabled'}>Save stock</button>
+        <button type="button" data-pst-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pst-status role="status"></p>`;
+    const status = el.querySelector('[data-pst-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pst-cancel]')) { setBusy(true); say('Nothing saved.'); return; }
+      if (!e.target.closest('[data-pst-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      const change = { productId };
+      if (has('stock')) change.stock = d.stock;
+      if (has('lowStockAt')) change.lowStockAt = d.lowStockAt;
+      el.dispatchEvent(new CustomEvent('shop:productStock', {
+        bubbles: true,
+        detail: {
+          change,
+          respond({ ok: done, error, message }) {
+            if (!done) { setBusy(false); say(error || 'That didn\'t work — nothing was saved.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('product_stock', renderProductStockCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
