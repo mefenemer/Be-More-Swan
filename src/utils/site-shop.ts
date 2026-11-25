@@ -45,6 +45,10 @@ import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBl
 import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, STOCK_NOT_UPDATED_LINE, type StockTaken } from './shop-stock';
 import { loadProductOptions, optionItemName, optionPence, takeOptionStock, type ProductOptions } from './shop-options';
 import { productPagePath } from './site-product-page';
+import {
+    addItem, basketOn, checkoutBlocker, checkoutLinesFor, emptyBasket, loadBasket, markBasketCheckout, orderSummaryName, priceBasket,
+    saveBasket, setQty, withBasket, writeOrderLines, BASKET_PATH, type CheckoutLine, type OrderLine, type PricedLine,
+} from './shop-basket';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -226,7 +230,11 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
     };
 }
 
-export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome> {
+type Resolved = { kind: 'ok'; section: Extract<SiteDefinition['pages'][number]['sections'][number], { type: 'products' }>; sectionId: string; product: SiteProduct; optionId: number | null };
+
+/** The product (or option) a Buy / Add to basket form names, checked against the PUBLISHED site and
+ *  Business Information: offered by that section, still for sale, the name and price the visitor saw, in stock. */
+async function resolveBuy(db: Db, req: BuyRequest): Promise<Resolved | BuyOutcome> {
     const back = req.backPath;
     const sectionId = String(req.body.get('_s') || '');
     const productId = Number(req.body.get('_pid'));
@@ -256,17 +264,45 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     if (product.stock != null && product.stock <= 0) return soldOut;
     // The price the visitor saw must be the price they pay.
     if (Number(req.body.get('_v')) !== product.buyPence) return changed;
-    const account = await connectAccountFor(db, req.site.organisationId);
-    const shop = await loadShopSettings(db, req.site.organisationId);
+    return { kind: 'ok', section, sectionId, product, optionId };
+}
+
+/** Stripe can take payments AND the Delivery & returns details are filled in; else the buyer is told so. */
+async function readyToSell(db: Db, orgId: number, back: string): Promise<{ account: ConnectRow; shop: ShopSettings } | BuyOutcome> {
+    const account = await connectAccountFor(db, orgId);
+    const shop = await loadShopSettings(db, orgId);
     if (!account?.chargesEnabled || !shopReady(shop)) {
         return { kind: 'error', status: 503, title: 'Online payments aren\'t available right now', message: 'Please get in touch with the business to buy this.', backPath: back };
     }
+    return { account, shop: shop! };
+}
+
+/** Baskets a visitor may START in an hour (each Add without a basket makes one; adding to one is free). */
+export const NEW_BASKET_LIMIT = { maxAttempts: 30, windowSecs: 3600 };
+
+async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip', limit = BUY_LIMIT): Promise<BuyOutcome | null> {
     try {
-        const limited = await checkRateLimit(db, 'site_buy_ip', req.ip, BUY_LIMIT);
+        const limited = await checkRateLimit(db, key, ip, limit);
         if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: 'Too many checkouts were started from here just now.', backPath: back };
     } catch (err) {
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
     }
+    return null;
+}
+
+export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome> {
+    // A basket action (shop-basket.ts): add / set / remove / checkout, all posted to /_buy.
+    const act = String(req.body.get('_a') || '');
+    if (act) return basketAction(db, req, act);
+    const back = req.backPath;
+    const r = await resolveBuy(db, req);
+    if (r.kind !== 'ok') return r;
+    const { section, sectionId, product, optionId } = r;
+    const ready = await readyToSell(db, req.site.organisationId, back);
+    if ('kind' in ready) return ready;
+    const { account, shop } = ready;
+    const limited = await rateLimited(db, req.ip, back);
+    if (limited) return limited;
     try {
         const session = await (await stripeClient()).checkout.sessions.create(
             checkoutParams({
@@ -280,6 +316,93 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     } catch (err) {
         console.error('[site-shop] checkout failed', { siteId: req.site.id, message: err instanceof Error ? err.message : String(err) });
         return { kind: 'error', status: 503, title: 'Checkout couldn\'t be started', message: 'Nothing was charged. Please try again in a minute.', backPath: back };
+    }
+}
+
+// ── The basket (Shopkeeper workspaces, shop-basket.ts) ─────────────────────────────────────────
+
+export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
+
+/** The Checkout Session for a whole basket — pure. Quantities were chosen on the basket page. */
+export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null }): Stripe.Checkout.SessionCreateParams {
+    const back = basketPagePath(req.basketId);
+    return {
+        mode: 'payment',
+        line_items: req.lines.map((l) => {
+            const picture = l.imageAssetId ? req.imageUrl?.(l.imageAssetId) ?? null : null;
+            return {
+                quantity: l.qty,
+                price_data: {
+                    currency: l.currency.toLowerCase(),
+                    unit_amount: l.unit,
+                    product_data: { name: l.name, ...(picture && picture.startsWith('https://') ? { images: [picture] } : {}) },
+                },
+            };
+        }),
+        ...(req.collectAddress ? { shipping_address_collection: { allowed_countries: SHIPPING_COUNTRIES } } : {}),
+        ...(req.shop ? { custom_text: { submit: { message: checkoutNote(req.shop, `${req.origin}${SHOP_TERMS_PATH}`) } } } : {}),
+        success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent('/')}`,
+        cancel_url: `${req.origin}${back}`,
+        metadata: {
+            bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_basket: req.basketId,
+            bms_item_name: orderSummaryName(req.lines), bms_page: BASKET_PATH,
+        },
+    };
+}
+
+/**
+ * add      { _s, _pid, _n, _v, _o?, _q?, _b? } → checked exactly like a Buy, then into the basket (a new one when
+ *                                                 `_b` isn't this site's fresh basket) → the basket page
+ * set      { _b, _i, _q }  → change a line's quantity (0 removes it)          remove { _b, _i }
+ * checkout { _b }          → every line priced again, then one Stripe Checkout for all of it
+ */
+async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOutcome> {
+    const back = req.backPath;
+    const orgId = req.site.organisationId;
+    if (!(await basketOn(db, orgId))) return { kind: 'error', status: 404, title: 'There\'s no basket here', message: 'Go back and use the Buy button instead.', backPath: back };
+    const basket = await loadBasket(db, req.site.id, req.body.get('_b'));
+    if (act === 'add') {
+        const r = await resolveBuy(db, req);
+        // A refused Add keeps the buyer's basket in its "Go back" link, so their next Add goes into it.
+        if (r.kind !== 'ok') return basket && r.kind === 'error' ? { ...r, backPath: withBasket(r.backPath, basket.id) } : r;
+        if (!basket) {
+            const limited = await rateLimited(db, req.ip, back, 'site_basket_ip', NEW_BASKET_LIMIT);
+            if (limited) return limited;
+        }
+        const qty = Math.max(1, Math.floor(Number(req.body.get('_q') || 1)) || 1);
+        const added = addItem(basket?.items ?? [], { productId: r.product.id, optionId: r.optionId, sectionId: r.sectionId, qty });
+        if (added.error) return { kind: 'error', status: 409, title: 'Your basket is full', message: added.error, backPath: basket ? basketPagePath(basket.id) : back };
+        const id = await saveBasket(db, { id: basket?.id ?? null, siteId: req.site.id, orgId, items: added.items });
+        return { kind: 'redirect', location: basketPagePath(id) };
+    }
+    if (!basket) return { kind: 'error', status: 404, title: 'Your basket has expired', message: 'Baskets are kept for a day. Please add your items again.', backPath: '/' };
+    if (act === 'set' || act === 'remove') {
+        const items = setQty(basket.items, Number(req.body.get('_i')), act === 'remove' ? 0 : Number(req.body.get('_q')));
+        const id = await saveBasket(db, { id: basket.id, siteId: req.site.id, orgId, items });
+        return { kind: 'redirect', location: basketPagePath(id) };
+    }
+    if (act !== 'checkout') return { kind: 'error', status: 400, title: 'That didn\'t work', message: 'Please go back and try again.', backPath: basketPagePath(basket.id) };
+    const priced = priceBasket(basket.items, await loadSiteProducts(db, orgId, req.definition), req.definition);
+    const blocker = priced.dropped.length ? 'Some items are no longer for sale: they have been taken out. Check your basket, then check out.' : checkoutBlocker(priced.lines);
+    if (priced.dropped.length) await saveBasket(db, { id: basket.id, siteId: req.site.id, orgId, items: basket.items.filter((_, n) => priced.lines.some((l) => l.index === n)) });
+    if (blocker) return { kind: 'error', status: 409, title: 'Please check your basket', message: blocker, backPath: basketPagePath(basket.id) };
+    const ready = await readyToSell(db, orgId, basketPagePath(basket.id));
+    if ('kind' in ready) return ready;
+    const limited = await rateLimited(db, req.ip, basketPagePath(basket.id));
+    if (limited) return limited;
+    const sections = req.definition.pages.flatMap((p) => p.sections);
+    const collectAddress = priced.lines.some((l) => { const s = sections.find((x) => x.id === l.sectionId); return s?.type === 'products' && s.props.collectAddress; });
+    try {
+        const session = await (await stripeClient()).checkout.sessions.create(
+            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl }),
+            { stripeAccount: ready.account.stripeAccountId },
+        );
+        if (!session.url) throw new Error('Stripe returned no checkout address');
+        await markBasketCheckout(db, basket.id, req.site.id, priced.lines.map((l) => ({ productId: l.productId, optionId: l.optionId, name: l.name, unit: l.unit, qty: l.qty })), session.id);
+        return { kind: 'redirect', location: session.url };
+    } catch (err) {
+        console.error('[site-shop] basket checkout failed', { siteId: req.site.id, message: err instanceof Error ? err.message : String(err) });
+        return { kind: 'error', status: 503, title: 'Checkout couldn\'t be started', message: 'Nothing was charged. Please try again in a minute.', backPath: basketPagePath(basket.id) };
     }
 }
 
@@ -306,9 +429,14 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         return false;
     }
 
+    // A basket (shop-basket.ts): its lines are the snapshot saved for THIS session when the buyer checked out.
+    const basketId = session.metadata?.bms_basket || null;
+    const lines = basketId ? await checkoutLinesFor(db, site.organisationId, basketId, session.id) : null;
+    if (basketId && !lines) console.error('[site-shop] basket order without its saved lines', { siteId, session: session.id });
     const unit = Number(session.metadata?.bms_unit);
-    // One line, no shipping charge: the subtotal is the unit price times the quantity chosen.
-    const quantity = unit > 0 && session.amount_subtotal ? Math.max(1, Math.round(session.amount_subtotal / unit)) : 1;
+    // One product: the subtotal is the unit price times the quantity chosen. A basket: the lines' quantities.
+    const quantity = lines ? Math.max(1, lines.reduce((n, l) => n + l.qty, 0))
+        : unit > 0 && session.amount_subtotal ? Math.max(1, Math.round(session.amount_subtotal / unit)) : 1;
     const shipping = session.collected_information?.shipping_details ?? null;
     const [order] = await db.insert(siteOrders).values({
         siteId: site.id, organisationId: site.organisationId, stripeAccountId: accountId, checkoutSessionId: session.id,
@@ -325,23 +453,48 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     // Take it from stock — once, here, because only the first delivery of this webhook inserts the order.
     // A blip is tried once more; if it still fails, the owner is told to check the count (a repeat
     // webhook never gets here, so nothing else would correct it).
-    let taken: StockTaken | null = null;
-    let stockFailed = false;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-            // An option has its own stock (shop-options.ts); otherwise the product's.
-            const optionId = Number(session.metadata?.bms_option);
-            taken = Number.isInteger(optionId) && optionId > 0
-                ? await takeOptionStock(db, site.organisationId, optionId, order.quantity)
-                : await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
-            stockFailed = false;
-            break;
-        } catch (err) {
-            stockFailed = true;
-            console.error('[site-shop] stock update failed', { orderId: order.id, attempt, message: err instanceof Error ? err.message : String(err) });
+    // An option has its own stock (shop-options.ts); otherwise the product's.
+    const takeOne = async (productId: number, optionId: number | null, qty: number): Promise<{ taken: StockTaken | null; failed: boolean }> => {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const taken = optionId && optionId > 0
+                    ? await takeOptionStock(db, site.organisationId, optionId, qty)
+                    : await takeStock(db, site.organisationId, productId, qty);
+                return { taken, failed: false };
+            } catch (err) {
+                console.error('[site-shop] stock update failed', { orderId: order.id, attempt, message: err instanceof Error ? err.message : String(err) });
+            }
         }
+        return { taken: null, failed: true };
+    };
+    let stockLine: string | null;
+    let orderLines: OrderLine[] | null = null;
+    let linesFailed = false;
+    if (lines) {
+        // A basket: its lines, each line's stock, and the basket emptied.
+        // One statement (all lines or none); if it fails the owner is told, since a repeated webhook never comes back here.
+        await writeOrderLines(db, order.id, site.organisationId, lines).catch((err) => {
+            linesFailed = true;
+            console.error('[site-shop] order lines failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) });
+        });
+        orderLines = lines.map((l) => ({ name: l.name, unit: l.unit, qty: l.qty }));
+        const notes: string[] = [];
+        let failed = false;
+        for (const l of lines) {
+            const r = await takeOne(l.productId, l.optionId, l.qty);
+            failed ||= r.failed;
+            const note = stockAfterOrderLine(r.taken, l.qty);
+            if (note) notes.push(`${l.name}: ${note}`);
+        }
+        stockLine = failed ? STOCK_NOT_UPDATED_LINE : notes.length ? notes.join(' ') : null;
+        if (basketId) await emptyBasket(db, basketId, site.organisationId).catch(() => undefined);
+    } else if (basketId) {
+        stockLine = STOCK_NOT_UPDATED_LINE;   // the saved lines couldn't be read: the owner checks Stripe and the counts
+    } else {
+        const optionId = Number(session.metadata?.bms_option);
+        const r = await takeOne(Number(session.metadata?.bms_product), Number.isInteger(optionId) && optionId > 0 ? optionId : null, order.quantity);
+        stockLine = r.failed ? STOCK_NOT_UPDATED_LINE : stockAfterOrderLine(r.taken, order.quantity);
     }
-    const stockLine = stockFailed ? STOCK_NOT_UPDATED_LINE : stockAfterOrderLine(taken, order.quantity);
 
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
         .from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId))
@@ -362,21 +515,31 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             to: owner.email,
             ...(order.customerEmail ? { replyTo: order.customerEmail } : {}),
             subject: `New order from your website: ${order.itemName} (${total})`,
-            html: `<p>${esc(order.customerName || 'Someone')} paid <strong>${esc(total)}</strong> for ${order.quantity} × ${esc(order.itemName)}.</p>
+            html: `<p>${esc(order.customerName || 'Someone')} paid <strong>${esc(total)}</strong> for ${orderLines ? 'these items:' : `${order.quantity} × ${esc(order.itemName)}.`}</p>
+${orderLines ? orderLinesHtml(orderLines, order.currency) : ''}
 ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}</p>` : ''}
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
+${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
-    await sendBuyerConfirmation(db, order, site, total).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
+    await sendBuyerConfirmation(db, order, site, total, orderLines).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
     return true;
 }
 
 type OrderRow = typeof siteOrders.$inferSelect;
 
 /** "Order confirmed" — from the business, to the buyer (CCR 2013: confirmation in a durable form). */
-export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: string; termsUrl: string | null }): { subject: string; html: string } {
+/** The owner's email when a basket order's items couldn't be saved on the order (the email still lists them). */
+export const ORDER_LINES_NOT_SAVED_LINE = 'We couldn\'t save this order\'s items on your Shop tab. They are listed above and in your Stripe dashboard.';
+
+/** A basket order's lines, for the owner's and the buyer's emails. */
+export function orderLinesHtml(lines: OrderLine[], currency: string): string {
+    return `<ul>${lines.map((l) => `<li>${l.qty} × ${esc(l.name)} — ${esc(formatMoney(l.unit * l.qty, currency))}</li>`).join('')}</ul>`;
+}
+
+export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: string; termsUrl: string | null; lines?: OrderLine[] | null }): { subject: string; html: string } {
     const { order, shop } = o;
     const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
     const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
@@ -385,7 +548,7 @@ export function buyerEmail(o: { order: OrderRow; shop: ShopSettings; total: stri
         subject: `Order confirmed — ${business}`,
         html: `<p>Hi ${esc(order.customerName || 'there')},</p>
 <p>Thank you for your order. We've received your payment of <strong>${esc(o.total)}</strong>${shop.vatNumber ? ' (including VAT)' : ''}.</p>
-<p><strong>Your order:</strong> ${order.quantity} × ${esc(order.itemName)}<br><strong>Order reference:</strong> ${order.id}</p>
+${o.lines?.length ? `<p><strong>Your order</strong> (reference ${order.id}):</p>${orderLinesHtml(o.lines, order.currency)}` : `<p><strong>Your order:</strong> ${order.quantity} × ${esc(order.itemName)}<br><strong>Order reference:</strong> ${order.id}</p>`}
 ${addrLines.length ? `<p><strong>Delivering to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 <p><strong>Delivery:</strong> ${esc(shop.deliveryText || '')}</p>
 <p><strong>Changed your mind?</strong> ${esc(returnsSummaryText(shop))} To cancel, reply to this email.${o.termsUrl ? ` Full details and a cancellation form: <a href="${esc(o.termsUrl)}">${esc(o.termsUrl)}</a>` : ''}</p>
@@ -394,12 +557,12 @@ ${addrLines.length ? `<p><strong>Delivering to:</strong><br>${addrLines.map((l) 
     };
 }
 
-async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string): Promise<void> {
+async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null): Promise<void> {
     if (!order.customerEmail) return;
     const shop = await loadShopSettings(db, site.organisationId);
     if (!shop || !shopReady(shop)) return;   // never sell without these; an old open checkout is the only way here
     const termsUrl = site.slug ? `${(await import('./site-hosting')).siteOrigin(site.slug)}${SHOP_TERMS_PATH}` : null;
-    const mail = buyerEmail({ order, shop, total, termsUrl });
+    const mail = buyerEmail({ order, shop, total, termsUrl, lines });
     await sendEmail({
         to: order.customerEmail,
         from: `${(shop.traderName || 'Your order').replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,

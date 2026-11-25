@@ -24,6 +24,7 @@ import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type Site
 import { productHomePage, productPagePath, productSections } from './site-product-page';
 import { allOptionsSoldOut, optionPence, type ProductOptions } from './shop-options';
 import { formatMoney } from './product-price';
+import { BASKET_PATH, basketTotal, checkoutBlocker, type PricedLine } from './shop-basket';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
 import { describeCancellation } from './stay-quote';
@@ -147,6 +148,8 @@ export interface RenderContext {
     stays?: SiteRenderStays | null;
     /** The page's query string (without '?') on the live site — a listings section's ?category= filter. */
     query?: string;
+    /** The basket (shop-basket.ts): on for a Shopkeeper workspace; id/count when this address carries ?b=. */
+    basket?: { on: boolean; id: string | null; count: number } | null;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -282,7 +285,7 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
 .ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
 .li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
-.pr .opts{list-style:none;padding:0;margin:12px 0 20px;display:grid;gap:10px}.pr .opts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:var(--r);background:rgba(0,0,0,.04)}.pr .opts form{margin:0}
+.pr .opts{list-style:none;padding:0;margin:12px 0 20px;display:grid;gap:10px}.pr .opts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:var(--r);background:rgba(0,0,0,.04)}.pr .opts form{margin:0}.pr .basket li{align-items:flex-start}.pr .basket .qty select{margin:0 6px}.basket-link{margin-top:16px}
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .st .facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 18px;padding:14px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.st .facts span{white-space:nowrap}.st .price{font-weight:700;font-size:1.1rem}
 .st .pics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.st .pics img{border-radius:var(--r);width:100%;aspect-ratio:3/2;object-fit:cover}.st .pics img:first-child{grid-column:1/-1}@media(min-width:700px){.st .pics{grid-template-columns:2fr 1fr 1fr}.st .pics img:first-child{grid-column:auto;grid-row:span 2;height:100%}}.st .fm{margin-bottom:36px}.st h2{margin-top:1.6em}
@@ -577,7 +580,7 @@ ${formButton(p.buttonLabel)}
             // Before paying, a buyer can read who sells, delivery and the right to cancel (CCR 2013).
             const terms = !formState.preview && formState.canSell && buyable
                 ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
-            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div>${terms}</div></section>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${note}<div class="grid">${cards.join('')}</div>${viewBasketHtml()}${terms}</div></section>`;
         }
         case 'reviews': {
             // The customers' words from Business Information; the summary is the honest average of all.
@@ -879,6 +882,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     // ?category= reaches here inside the path (the preview) or as the live site's query string.
     try { listingPicked = new URLSearchParams(path.includes('?') ? path.split('?')[1].split('#')[0] : (ctx.query || '')).get('category')?.slice(0, 40) || null; } catch { listingPicked = null; }
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
+    setBasketState(ctx);
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {
         return { status: 404, html: documentHtml(def, null, ctx, `<section><div class="w n"><h1>Page not found</h1><p>That page isn't here. <a href="${esc(href('/'))}">Go to the home page</a>.</p></div></section>`) };
@@ -924,6 +928,7 @@ export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: 
 }
 
 function startRender(def: SiteDefinition, ctx: RenderContext): void {
+    setBasketState(ctx);
     mapPath = ctx.pagePath ?? ((p) => p);
     setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
@@ -990,6 +995,13 @@ ${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li
 
 const SOLD_OUT_HTML = '<p class="price" data-sold-out><strong>Sold out</strong></p>';
 
+/** The basket this render draws for (RenderContext.basket); off = the one-product Buy button. */
+let basketState: { on: boolean; id: string | null; count: number } = { on: false, id: null, count: 0 };
+const setBasketState = (ctx: RenderContext) => { basketState = ctx.basket?.on && !ctx.preview ? { on: true, id: ctx.basket.id, count: ctx.basket.count } : { on: false, id: null, count: 0 }; };
+const basketHref = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
+/** "View basket (3)" under a products section or on a product page, once this address carries a basket. */
+const viewBasketHtml = () => (basketState.on && basketState.id && basketState.count > 0 ? `<p class="basket-link"><a class="btn s" href="${esc(basketHref(basketState.id))}" data-view-basket>View basket (${basketState.count})</a></p>` : '');
+
 const availability = (stock: number | null | undefined) => (stock != null ? { availability: stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {});
 /** schema.org offers for a product: one per option when it has options (each its own price and stock), else one. */
 function productOffers(pr: SiteRenderProduct, siteName: string, url: string | null): { offers?: unknown } {
@@ -1006,7 +1018,10 @@ function productOffers(pr: SiteRenderProduct, siteName: string, url: string | nu
 
 /** The Buy form: which section and product, and the name and price the visitor SAW (checked at the click). */
 function buyFormHtml(sectionId: string, pr: SiteRenderProduct, label: string, backPath: string, option?: { id: number; pence: number }): string {
-    return `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}">${option ? `<input type="hidden" name="_o" value="${option.id}">` : ''}<input type="hidden" name="_v" value="${option ? option.pence : pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
+    // A Shopkeeper workspace adds to the basket instead (shop-basket.ts); the same checks run on both.
+    const basket = basketState.on ? `<input type="hidden" name="_a" value="add">${basketState.id ? `<input type="hidden" name="_b" value="${esc(basketState.id)}">` : ''}` : '';
+    if (basketState.on) label = 'Add to basket';
+    return `<form method="post" action="${BUY_ACTION}">${basket}<input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}">${option ? `<input type="hidden" name="_o" value="${option.id}">` : ''}<input type="hidden" name="_v" value="${option ? option.pence : pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
 }
 
 /** A product's options on its page: each with its own price and its own Buy button (or Sold out). */
@@ -1052,7 +1067,7 @@ export function renderSiteProduct(def: SiteDefinition, ctx: RenderContext, pr: S
 <h1>${esc(pr.name)}</h1>
 ${img ? `<img class="hero-img" src="${esc(img)}" alt="${esc(pr.name)}">` : ''}
 ${pr.price ? `<p class="price"><strong>${esc(pr.price)}</strong></p>` : ''}
-${buy}${terms}
+${buy}${viewBasketHtml()}${terms}
 ${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
 </div></section></article>`;
     const offer = productOffers(pr, s.siteName, pageUrl);
@@ -1061,6 +1076,49 @@ ${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
         description: pr.description ? pr.description.replace(/\s+/g, ' ').slice(0, 160) : null,
         canonical: pageUrl, pageUrl, robots: null, ogType: 'website', image: img || null, menuId: home?.id ?? '',
         ld: [{ '@context': 'https://schema.org', '@type': 'Product', name: pr.name, url: pageUrl, ...(pr.description ? { description: pr.description } : {}), ...(img ? { image: img } : {}), ...offer }],
+    });
+}
+
+export interface BasketPageView { id: string | null; lines: PricedLine[]; dropped: string[]; canSell: boolean; continuePath: string }
+
+/**
+ * /basket?b=<id> — the buyer's basket (shop-basket.ts): every line priced from Business Information again,
+ * a quantity box and Remove for each, the total, and Check out. No script: every change is a small form to
+ * /_buy that comes back here. Never indexed, never cached (site-serve.ts).
+ */
+export function renderSiteBasket(def: SiteDefinition, ctx: RenderContext, v: BasketPageView): string {
+    startRender(def, ctx);
+    const s = def.settings;
+    const hid = (n: string, val: string | number) => `<input type="hidden" name="${n}" value="${esc(String(val))}">`;
+    const bid = v.id ? hid('_b', v.id) : '';
+    const back = hid('_p', BASKET_PATH);
+    const notes = v.dropped.length ? `<div class="facts">${v.dropped.map((d) => `<p>${esc(d)}: taken out of your basket.</p>`).join('')}</div>` : '';
+    let body: string;
+    if (!v.id || !v.lines.length) {
+        body = `<h1>Your basket</h1>${notes}<p>Your basket is empty.</p><p><a class="btn" href="${esc(href(v.continuePath))}">Continue shopping</a></p>`;
+    } else {
+        const currency = v.lines[0].currency;
+        const rows = v.lines.map((l) => {
+            const qtyOpts = Array.from({ length: Math.max(1, l.max) }, (_, i) => `<option value="${i + 1}"${i + 1 === Math.min(l.qty, Math.max(1, l.max)) ? ' selected' : ''}>${i + 1}</option>`).join('');
+            const qty = l.max > 0
+                ? `<form method="post" action="${BUY_ACTION}" class="qty">${hid('_a', 'set')}${bid}${back}${hid('_i', l.index)}<label>Quantity <select name="_q">${qtyOpts}</select></label> <button class="btn s" type="submit">Update</button></form>`
+                : '';
+            const remove = `<form method="post" action="${BUY_ACTION}">${hid('_a', 'remove')}${bid}${back}${hid('_i', l.index)}<button class="btn s" type="submit">Remove</button></form>`;
+            return `<li data-basket-line="${l.index}"><span><strong>${esc(l.name)}</strong> · ${esc(formatMoney(l.unit, l.currency))} each${l.problem ? ` · <strong data-line-problem>${esc(l.problem)}</strong>` : ''}</span><span>${esc(formatMoney(l.unit * l.qty, l.currency))}</span>${qty}${remove}</li>`;
+        }).join('');
+        const blocker = checkoutBlocker(v.lines) ?? (v.canSell ? null : 'Online payments aren\'t available right now. Please get in touch with the business to buy these.');
+        const checkout = blocker
+            ? `<p class="fine" data-basket-blocked>${esc(blocker)}</p>`
+            : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<button class="btn" type="submit">Check out</button></form>`;
+        body = `<h1>Your basket</h1>${notes}<ul class="opts basket">${rows}</ul>
+<p class="price"><strong>Total: ${esc(formatMoney(basketTotal(v.lines), currency))}</strong></p>
+<p class="fine">Delivery and your right to cancel are on our <a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a> page. You pay securely on Stripe's page.</p>
+${checkout}
+<p><a href="${esc(href(v.continuePath))}">← Continue shopping</a></p>`;
+    }
+    const pageUrl = `${ctx.origin}${BASKET_PATH}`;
+    return documentHtml(def, null, ctx, `<section><div class="w art pr">${body}</div></section>`, {
+        title: `Your basket | ${s.siteName}`, description: null, canonical: pageUrl, pageUrl, robots: 'noindex, nofollow', ogType: 'website', image: null, menuId: '', ld: [],
     });
 }
 

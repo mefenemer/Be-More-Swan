@@ -6611,6 +6611,33 @@ export const siteOrders = pgTable("site_orders", {
   check("site_orders_status_check", sql`${t.status} IN ('paid','done','refunded')`),
 ]);
 
+// Shop baskets (online shop Phase 1, db/z-shop-basket.sql): mirrored for the data inventories only; the app reads
+// and writes them with raw SQL in src/utils/shop-basket.ts. Not exported: a basket is an anonymous buyer's.
+export const siteBaskets = pgTable("site_baskets", {
+  id: text().primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  items: jsonb().notNull().default([]),
+  checkoutLines: jsonb("checkout_lines"),
+  checkoutSessionId: text("checkout_session_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// A paid basket order's lines (online shop Phase 1, db/z-shop-basket.sql). Mirrored here ONLY for the workspace
+// data export; the app reads and writes it with raw SQL in src/utils/shop-basket.ts (missing table = no lines).
+export const siteOrderLines = pgTable("site_order_lines", {
+  id: serial().primaryKey(),
+  orderId: integer("order_id").notNull().references(() => siteOrders.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  productId: integer("product_id"),
+  optionId: integer("option_id"),
+  itemName: text("item_name").notNull(),
+  unitAmount: integer("unit_amount").notNull(),
+  quantity: integer().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // What UK consumer law needs a buyer to see (db/z-shop-settings.sql, src/utils/shop-settings.ts):
 // one row per workspace; the Delivery & returns page and the buyer's email are drawn from it.
 export const shopSettings = pgTable("shop_settings", {

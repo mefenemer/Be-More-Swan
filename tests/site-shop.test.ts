@@ -141,7 +141,7 @@ async function main() {
         const repriced = await go(db, { _s: sid, _pid: '11', _n: 'House Blend', _v: '999' });
         assert.ok(repriced.kind === 'error' && repriced.status === 409, 'the price changed in Business Information since the page was drawn');
         const fn = read('src/utils/site-shop.ts');
-        assert.ok(fn.slice(fn.indexOf('export async function startCheckout')).indexOf('loadSiteProducts(db, req.site.organisationId') > 0, 'read from Business Information at the click');
+        assert.ok(fn.slice(fn.indexOf('async function resolveBuy')).indexOf('loadSiteProducts(db, req.site.organisationId') > 0 && fn.slice(fn.indexOf('export async function startCheckout')).indexOf('await resolveBuy(db, req)') > 0, 'read from Business Information at the click');
     });
 
     await check('a checkout needs the workspace\'s account to be able to take payments, and is rate-limited', () => {

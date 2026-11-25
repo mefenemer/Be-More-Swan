@@ -188,6 +188,7 @@
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
+          ${((d.orderLines || {})[o.id] || []).length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5" data-order-lines>${d.orderLines[o.id].map((l) => `<li>${esc(l.qty)} × ${esc(l.name)} · ${esc(money(l.unit * l.qty, o.currency))}</li>`).join('')}</ul>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
           ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
         </li>`;

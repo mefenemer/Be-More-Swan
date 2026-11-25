@@ -5,6 +5,7 @@
 // as spelled out in the archive notification (manage-assistant.ts). Scheduled via netlify.toml:
 // runs daily. Mirrors netlify/functions/archive-cleanup.ts.
 
+import { sweepBaskets } from '../../src/utils/shop-basket';
 import { and, eq, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, adminAuditLog } from '../../db/schema';
@@ -20,6 +21,10 @@ export default withLambda(async () => {
     // or the archive's own attempt failed) goes offline now (site-offline.ts). Never throws.
     const taken = await takeAssistantSitesOffline(db, await archivedAssistantsWithLiveSites(db));
     if (taken.length) console.log(`[purge-archived-assistants] took offline ${taken.length} site(s) of archived assistants: ${taken.join(', ')}`);
+
+    // Shop baskets untouched for a week go (shop-basket.ts; a week covers a late Stripe webhook). Never fatal.
+    const baskets = await sweepBaskets(db).catch((err) => { console.error('[purge-archived-assistants] basket sweep failed', err instanceof Error ? err.message : err); return 0; });
+    if (baskets) console.log(`[purge-archived-assistants] deleted ${baskets} shop basket(s) older than a week`);
 
     const expired = await db
         .select({ id: aiAssistants.id, organisationId: aiAssistants.organisationId })
