@@ -4667,6 +4667,28 @@ let tcState = null;
 // of the 1 January they meant). Cleared after a successful save, so the saved draft's own values show.
 let tcForm = { date: null, reason: null };
 
+/** The saved draft, if any. */
+const tcDraft = () => (tcState && tcState.changes || []).find((c) => c.id === tcState.draftChangeId && c.status === 'draft') || null;
+/** Typed date or reason that differs from the saved draft (review of #879: Announce must never use a date the form isn't showing). */
+function tcUnsaved() {
+  const d = tcDraft();
+  if (!d) return false;
+  return (tcForm.date !== null && tcForm.date !== d.effectiveDate) || (tcForm.reason !== null && tcForm.reason !== d.reason);
+}
+/** Shows "Not saved yet" and holds Announce while the form and the saved draft disagree. */
+function tcSyncUnsaved() {
+  const d = tcDraft();
+  const note = document.getElementById('tc-unsaved');
+  const unsaved = tcUnsaved();
+  if (note) {
+    note.textContent = unsaved && d ? `Not saved yet: the draft still starts on ${tcLongDate(d.effectiveDate)} with the reason it was saved with. Press Update the draft before you test or announce it.` : '';
+    note.classList.toggle('hidden', !unsaved);
+  }
+  const go = document.getElementById('tc-announce');
+  const typed = document.getElementById('tc-confirm');
+  if (go && typed && d) go.disabled = unsaved || typed.value.trim() !== String(d.waiting);
+}
+
 function showTcStatus(kind, msg, opts = {}) {
   const el = document.getElementById('tc-status');
   el.textContent = msg;
@@ -4745,6 +4767,7 @@ function tcPaintCosts() {
         <textarea id="tc-reason" rows="2" maxlength="600" class="block w-full mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">${bcEsc(tcForm.reason ?? (draft ? draft.reason : ''))}</textarea>
       </label>
       <p class="text-sm text-gray-700" id="tc-date-words" aria-live="polite"></p>
+      <p id="tc-unsaved" role="status" class="hidden text-sm rounded-lg px-3 py-2 bg-amber-50 text-amber-800"></p>
       <button type="button" id="tc-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${draft ? 'Update the draft' : 'Save as a draft'}</button>
       <p id="tc-save-status" role="alert" class="hidden text-sm rounded-lg px-3 py-2"></p>
       <p class="text-xs text-gray-500">A draft changes nothing and tells nobody.</p>
@@ -4756,16 +4779,19 @@ function tcPaintCosts() {
     const v = dateBox.value;
     words.textContent = /^\d{4}-\d{2}-\d{2}$/.test(v) ? `This change will start on ${tcLongDate(v)}.` : 'Choose the date it starts.';
   };
-  dateBox.addEventListener('input', () => { tcForm.date = dateBox.value || null; sayDate(); });
-  dateBox.addEventListener('change', () => { tcForm.date = dateBox.value || null; sayDate(); });
-  document.getElementById('tc-reason').addEventListener('input', (e) => { tcForm.reason = e.target.value; });
+  // '' (cleared) is kept as typed, so a repaint never fills the earliest allowed day back in (review of #879).
+  dateBox.addEventListener('input', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
+  dateBox.addEventListener('change', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
+  document.getElementById('tc-reason').addEventListener('input', (e) => { tcForm.reason = e.target.value; tcSyncUnsaved(); });
   sayDate();
+  tcSyncUnsaved();
   document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
   document.getElementById('tc-save')?.addEventListener('click', tcSaveDraft);
 }
 
 async function tcSaveDraft(e) {
   const btn = e.currentTarget;
+  document.getElementById('tc-save-status')?.classList.add('hidden');
   const items = {};
   document.querySelectorAll('[data-tc-key]').forEach((i) => { if (i.value !== i.dataset.tcNow) items[i.dataset.tcKey] = Number(i.value); });
   btn.disabled = true;
@@ -4836,7 +4862,7 @@ function tcPaintChange(c, box) {
       </div>`;
     const frame = document.getElementById('tc-email');
     if (frame && c.email) frame.srcdoc = c.email.html;
-    document.getElementById('tc-confirm').addEventListener('input', (e) => { document.getElementById('tc-announce').disabled = e.target.value.trim() !== String(c.waiting); });
+    document.getElementById('tc-confirm').addEventListener('input', () => tcSyncUnsaved());
     document.getElementById('tc-test').addEventListener('click', (e) => tcRun(e.currentTarget, 'test', { id: c.id }, (d) => `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`));
     document.getElementById('tc-discard').addEventListener('click', (e) => tcRun(e.currentTarget, 'discard', { id: c.id }, () => 'Draft discarded.'));
     document.getElementById('tc-announce').addEventListener('click', (e) => tcRun(e.currentTarget, 'announce', { id: c.id, expected: c.waiting }, (d) => d.emailsGoToCustomers ? `Announced. Sending to ${d.waiting} people in the background.` : `Announced on this database. In-app notices are going to ${d.waiting} people; no customer is emailed from here.`));
@@ -4885,6 +4911,8 @@ async function tcRun(btn, resource, payload, say) {
   btn.disabled = true;
   try {
     const d = await tcCall(resource, payload);
+    // The draft these typed values belonged to is gone (announced, discarded, cancelled): start the next one clean.
+    if (resource === 'discard' || resource === 'announce' || resource === 'cancel') tcForm = { date: null, reason: null };
     showTcStatus('success', say(d));
     setTimeout(loadTaskCostsAdmin, resource === 'test' ? 0 : 3000);
   } catch (err) {
