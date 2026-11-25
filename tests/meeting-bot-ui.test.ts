@@ -134,8 +134,8 @@ await test('the Inbox mounts it for the Note Taker only, and the GET hides every
     assert.match(html, /id="meeting-bots-strip" class="hidden" style="display:none"/);
     assert.ok(read('workspace.html').includes('<script src="/src/components/meeting-bots.js"></script>'));
     const ep = read('netlify/functions/meeting-bots.ts');
-    assert.ok(ep.indexOf('isFeatureEnabled(organisationId, MEETING_BOT_FLAG)') < ep.indexOf('listMeetingBots(db, organisationId, assistantId)'));
-    assert.match(ep, /if \(!available\) return json\(200, \{ available: false, dpaAccepted: false, tasksPer5Min: 0, bots: \[\] \}\);/);
+    assert.ok(ep.indexOf('await meetingBotAvailable(db, organisationId)') > 0 && ep.indexOf('await meetingBotAvailable(db, organisationId)') < ep.indexOf('listMeetingBots(db, organisationId, assistantId)'));
+    assert.match(ep, /if \(!available\) return json\(200, \{ available: false, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: \[\] \}\);/);
 });
 
 await test('a bot meeting in the Inbox says "Joined by Note Taker"; a picked-up one still says "Picked up from"', () => {
@@ -308,6 +308,46 @@ await test('both minutes views show the label: the stored card (Inbox + chat) an
     const detail = hub.slice(hub.indexOf('function meetingDetail(record)'));
     assert.ok(detail.indexOf('DisruptiveUIRegistry.meetingSourcePillHtml(data)') > 0, 'Meeting Notes tab uses the same helper');
     assert.ok(detail.indexOf('meetingSourcePillHtml(data)') < detail.indexOf('data.meetingSummary ?'), 'above the summary');
+});
+
+// ── Launch (legal review 2026-11-25): Terms 2.5 gate, owner-or-admin wording, the announced price ───────────────────
+
+await test('sending needs the SENDER to have accepted Terms 2.5 (clause 9.3), checked after the DPA, in the one shared action', () => {
+    const db = read('src/utils/meeting-bot-db.ts');
+    assert.match(db, /export const BOT_TOS_MIN_VERSION = '2\.5';/);
+    const send = db.slice(db.indexOf('export async function sendMeetingBot'));
+    const dpa = send.indexOf("fail(409, 'dpa_required', DPA_NEEDED_MESSAGE)");
+    const terms = send.indexOf("fail(409, 'terms_required', TERMS_NEEDED_MESSAGE)");
+    assert.ok(dpa > 0 && terms > dpa, 'DPA first, then the sender\'s Terms');
+    assert.ok(send.indexOf('hasAcceptedBotTerms(db, i.userId)') > 0, 'by the user who sends it, not the workspace');
+    assert.ok(terms < send.indexOf('cleanMeetingLink(i.meetingUrl)'), 'before anything is booked');
+    const ep = read('netlify/functions/meeting-bots.ts');
+    assert.match(ep, /hasAcceptedBotTerms\(db, userId\)/);
+    assert.match(read('src/components/meeting-bots.js'), /const needsTerms = !needsDpa && d\.termsAccepted === false;/);
+});
+
+await test('DPA wording says "owner or admin" (DPA_ACCEPT_ROLES) everywhere a user reads it', () => {
+    assert.match(read('netlify/functions/accept-dpa.ts'), /DPA_ACCEPT_ROLES = \['owner', ?'admin'\]/);
+    for (const f of ['src/utils/meeting-bot-db.ts', 'src/components/meeting-bots.js', 'src/utils/chat-meeting-bot.ts']) {
+        assert.ok(!/Your workspace owner needs to accept/.test(read(f)), `${f}: still says only the owner`);
+    }
+});
+
+await test('cost words: free until the announced day, then the price; a price in force as before; nothing announced → not charged yet', () => {
+    const MB = loadComponent();
+    assert.equal(MB._costWords({ tasksPer5Min: 0, nextTasksPer5Min: { units: 1, from: '2027-01-01' } }),
+        'Free until 1 January 2027. From then, 1 task for each started 5 minutes it’s in the call (about 12 an hour). Nothing if it isn’t let in.');
+    assert.equal(MB._costWords({ tasksPer5Min: 1, nextTasksPer5Min: null }), 'Uses 1 task for each started 5 minutes it’s in the call (about 12 an hour). Nothing if it isn’t let in.');
+    assert.equal(MB._costWords({ tasksPer5Min: 0 }), 'Nothing is charged for this yet.');
+    assert.equal(MB._costWords({ tasksPer5Min: 0, nextTasksPer5Min: { units: 0, from: '2027-01-01' } }), 'Nothing is charged for this yet.');
+    assert.equal(MB._costWords({ tasksPer5Min: 0, nextTasksPer5Min: { units: 1, from: 'nonsense' } }), 'Nothing is charged for this yet.');
+});
+
+await test('chat snapshot says free until the announced day', () => {
+    const s = formatMeetingBotsSnapshot({ dpaAccepted: true, tasksPer5Min: 0, next: { units: 1, from: '2027-01-01' }, zoom: false, rows: [] });
+    assert.match(s, /Cost: free until 2027-01-01/);
+    assert.match(s, /then 1 task for each started 5 minutes/);
+    assert.match(formatMeetingBotsSnapshot({ dpaAccepted: true, tasksPer5Min: 0, zoom: false, rows: [] }), /Cost: nothing at the moment\./);
 });
 
 console.log(`meeting-bot-ui: ${passed} passed`);

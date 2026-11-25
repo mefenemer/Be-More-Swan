@@ -11,6 +11,12 @@ import type { PickupPlatform } from './meeting-pickup';
 export const MEETING_BOT_FLAG = 'meeting_bot';
 /** Plan B7: Zoom joins only once our Zoom app passes Zoom's review (OBF). No row needed: absent = off. */
 export const MEETING_BOT_ZOOM_FLAG = 'meeting_bot_zoom';
+/** Per-workspace switch-OFF (review of #867: the sub-processor notice promises "we will switch the Note Taker's meeting
+ *  feature off for your workspace"). Feature flags can only ADD workspaces, so this second flag's allow-list is the
+ *  block list: a workspace in meeting_bot_blocked.allowed_workspace_ids can't send a bot even when meeting_bot is on
+ *  for everyone. db/z-meeting-bot-blocked-flag.sql. enabled = TRUE blocks every workspace (kill switch); meeting-bot-db.ts
+ *  meetingBotBlocked reads the row itself so an unreadable row counts as blocked. */
+export const MEETING_BOT_BLOCK_FLAG = 'meeting_bot_blocked';
 
 /**
  * How the minutes writer is told a bot meeting reached it (instead of meeting-pickup.ts PICKUP_CHANNEL_BLOCK). Carries the
@@ -78,7 +84,8 @@ export function botName(businessName: string | null | undefined): string {
 
 /** The notice posted (and pinned where the platform allows) when the bot joins (plan §6). Pure. */
 export function joinMessage(businessName: string | null | undefined): string {
-    return `Hi, I'm ${shortBusiness(businessName)}'s Be More Swan Note Taker. I'm making a transcript of this call to write the minutes. The host can remove me at any time.`.slice(0, JOIN_MESSAGE_MAX);
+    // Says "recording" (legal review 2026-11-25: transparency, and US all-party-consent states) and links the privacy notice.
+    return `Hi, I'm ${shortBusiness(businessName)}'s Be More Swan Note Taker. I'm recording this call only to make a transcript for the minutes; the recording is deleted once the minutes are written. If you'd rather not be recorded, say so: the host can remove me at any time. Privacy: bemoreswan.com/privacy.html#note-taker`.slice(0, JOIN_MESSAGE_MAX);
 }
 
 // ── Length, timing and charging ──────────────────────────────────────────────────────────────────

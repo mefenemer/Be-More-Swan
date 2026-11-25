@@ -62,8 +62,12 @@ await test('the bot\'s name and join notice name the business, and the notice fi
     const m = joinMessage('Marmalade Productions');
     assert.match(m, /Marmalade Productions's Be More Swan Note Taker/);
     assert.match(m, /transcript/);
+    assert.match(m, /I'm recording this call/, 'says recording, not just transcript (legal review 2026-11-25)');
+    assert.match(m, /recording is deleted/);
     assert.match(m, /host can remove me/);
-    assert.ok(joinMessage('y'.repeat(300)).length <= JOIN_MESSAGE_MAX);
+    const long = joinMessage('y'.repeat(300));
+    assert.ok(long.length <= JOIN_MESSAGE_MAX);
+    assert.ok(long.endsWith('Privacy: bemoreswan.com/privacy.html#note-taker'), 'the privacy link is never cut off, even for the longest name');
 });
 
 await test('join time: now, under 10 minutes away = now, later = booked, over 60 days = refused', () => {
@@ -123,6 +127,30 @@ await test('a normal call: joining → waiting room → in the call → ended �
     assert.equal(r.joinedAt?.getTime(), at(1).getTime());
     assert.equal(r.leftAt?.getTime(), at(31).getTime(), 'left when the call ended, not when Recall finished');
     assert.equal(r.minutes, 30);
+});
+
+await test('per-workspace block (review of #867): every way in checks meetingBotAvailable = on AND not on the block list, failing closed', () => {
+    const db = read('src/utils/meeting-bot-db.ts');
+    const fn = db.slice(db.indexOf('export async function meetingBotBlocked'), db.indexOf('export async function hasAcceptedBotTerms'));
+    assert.match(fn, /return row\.enabled === true \|\| \(Array\.isArray\(row\.allowed\) && row\.allowed\.includes\(organisationId\)\);/);
+    assert.match(fn, /treating as blocked', [^\n]*\n\s*return true;/, 'an unreadable block list counts as blocked (round 4)');
+    assert.match(fn, /if \(!row\) return false;/, 'no row → nobody blocked');
+    assert.match(fn, /return on && !blocked;/);
+    assert.match(read('src/utils/meeting-bot.ts'), /export const MEETING_BOT_BLOCK_FLAG = 'meeting_bot_blocked';/);
+    for (const f of ['src/utils/meeting-bot-db.ts', 'src/utils/chat-meeting-bot.ts', 'netlify/functions/meeting-bots.ts']) {
+        const src = read(f);
+        assert.ok(src.includes('meetingBotAvailable('), `${f} uses the block-aware check`);
+        assert.ok(!/isFeatureEnabled\([^)]*MEETING_BOT_FLAG\)\)\)/.test(src), `${f}: no bare meeting_bot check left`);
+    }
+    const sql = read('db/z-meeting-bot-blocked-flag.sql');
+    assert.match(sql, /VALUES \('meeting_bot_blocked', FALSE, 0, NULL,/);
+    assert.match(sql, /ON CONFLICT \(key\) DO NOTHING;/);
+    assert.match(sql, /Cancel its open bots first/, 'booked bots are scheduled at Recall: cancel before blocking (round 4)');
+});
+
+await test('a flagged meeting transcript is never stored, not even a 200-character excerpt ("we do not keep the transcript")', () => {
+    assert.match(read('src/utils/moderation.ts'), /promptExcerpt: opts\.source === 'meeting_pickup' \? null : \(opts\.prompt \|\| ''\)\.slice\(0, 200\),/);
+    assert.match(read('src/utils/meeting-pickup-db.ts'), /source: 'meeting_pickup'/);
 });
 
 await test('everyone left: the empty-call wait (ALONE_TIMEOUT_S) is not charged (owner 2026-11-22: run 5 was 3 min talk + 2 min alone)', () => {
@@ -486,10 +514,10 @@ await test('sendMeetingBot checks the flag, the assistant, DPA 1.2, the link and
     const fn = src.slice(src.indexOf('export async function sendMeetingBot'), src.indexOf('// ── Listing and removing'));
     const pos = (s: string) => { const i = fn.indexOf(s); assert.ok(i >= 0, `missing: ${s}`); return i; };
     const recall = pos('createRecallBot(');
-    for (const before of ['MEETING_BOT_FLAG', "roleKey !== 'meeting_note_taker'", 'hasAcceptedBotDpa(', 'cleanMeetingLink(', 'hasTaskCapacity(', 'db.insert(meetingBots)']) {
+    for (const before of ['meetingBotAvailable(', "roleKey !== 'meeting_note_taker'", 'hasAcceptedBotDpa(', 'cleanMeetingLink(', 'hasTaskCapacity(', 'db.insert(meetingBots)']) {
         assert.ok(pos(before) < recall, `${before} comes before Recall`);
     }
-    assert.match(src, /export const BOT_DPA_VERSIONS = \['1\.2'\];/, 'only DPA 1.2 covers meetings the Note Taker joins');
+    assert.match(src, /export const BOT_DPA_MIN_VERSION = '1\.2';/, 'DPA 1.2 or later covers meetings the Note Taker joins');
     // Review of #769: "now" looks back only, so a recurring link's future booking never blocks today's call.
     assert.ok(fn.includes('lte(meetingBots.joinAt, new Date(now.getTime() + SCHEDULE_AHEAD_MS))'), 'the immediate check sees a booking about to join, not next week\'s');
     // Review round 2: the index and the conflict target cover OPEN bots only, so a cancelled or refused bot never blocks re-booking.

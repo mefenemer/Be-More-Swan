@@ -70,7 +70,8 @@ export async function logSecurityAudit(opts: {
             organisationId: opts.organisationId ?? null,
             source: opts.source,
             flaggedCategories: opts.categories,
-            promptExcerpt: (opts.prompt || '').slice(0, 200),
+            // A meeting's text is never stored (privacy §5/§9, DPA 1.2: "we do not keep the transcript"), not even an excerpt.
+            promptExcerpt: opts.source === 'meeting_pickup' ? null : (opts.prompt || '').slice(0, 200),
         });
     } catch (err) {
         console.error('[moderation] security_audits insert failed (non-blocking):', err);

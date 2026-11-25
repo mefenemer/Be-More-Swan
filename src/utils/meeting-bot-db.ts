@@ -10,11 +10,11 @@
 
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations, userOrganisations } from '../../db/schema';
+import { aiAssistants, billingInformation, dpaAcceptances, featureFlags, masterAssistants, meetingBots, meetingImports, organisations, tosAcceptances, userOrganisations } from '../../db/schema';
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    ALONE_TIMEOUT_S, BOT_STATUS_WORDS, recallCostDue, FINAL_BOT_STATUSES, WAITING_ROOM_TIMEOUT_S, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    ALONE_TIMEOUT_S, BOT_STATUS_WORDS, recallCostDue, FINAL_BOT_STATUSES, WAITING_ROOM_TIMEOUT_S, MEETING_BOT_BLOCK_FLAG, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallMediaExpired, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
@@ -28,10 +28,29 @@ type Db = ReturnType<typeof getDb>;
 type BotRow = typeof meetingBots.$inferSelect;
 
 /**
- * The DPA versions that cover meetings the Note Taker joins (clause 13, docs/note-taker-bot-legal.md §4). A workspace must
- * have accepted one before a bot can be sent. 1.2 is drafted but not yet published, so today no workspace can.
+ * The first DPA version that names Recall.ai + AssemblyAI and covers meetings the Note Taker joins (clauses 5 and 13). A
+ * workspace must have accepted it, or any later version, before a bot can be sent.
  */
-export const BOT_DPA_VERSIONS = ['1.2'];
+export const BOT_DPA_MIN_VERSION = '1.2';
+/** The first Terms version with clause 9.3 (Meetings: tell people, get any consent the law requires). The SENDER must have
+ *  accepted it or a later one (legal review 2026-11-25). "Or later" so the next Terms bump doesn't lock everyone out
+ *  of the bot (review of #864). */
+export const BOT_TOS_MIN_VERSION = '2.5';
+
+/** "2.10" ≥ "2.5", compared number by number; anything unreadable is never at least the minimum. Pure. */
+export function versionAtLeast(version: string | null | undefined, min: string): boolean {
+    const parse = (v: string) => (/^\d+(\.\d+)*$/.test(v) ? v.split('.').map(Number) : null);
+    const a = parse(String(version ?? '').trim());
+    const b = parse(min);
+    if (!a || !b) return false;
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const x = a[i] ?? 0, y = b[i] ?? 0;
+        if (x !== y) return x > y;
+    }
+    return true;
+}
+export const DPA_NEEDED_MESSAGE = 'An owner or admin of your workspace needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.';
+export const TERMS_NEEDED_MESSAGE = 'Please accept the updated Terms of Service (version 2.5) first: they say what you must tell people in the meeting. Reload the page to see them.';
 
 // ── What the GUI and chat see ────────────────────────────────────────────────────────────────────
 
@@ -97,10 +116,40 @@ export type SendBotResult =
 
 const fail = (status: number, code: string, error: string): SendBotResult => ({ ok: false, status, code, error });
 
+/**
+ * Is this workspace on the meeting-bot block list (MEETING_BOT_BLOCK_FLAG)? Read straight from the table, not through
+ * isFeatureEnabled, so a failed read counts as BLOCKED (isFeatureEnabled turns errors into false = not blocked; review
+ * of #864 round 4). Listed in allowed_workspace_ids → blocked; enabled = TRUE → every workspace blocked (kill switch,
+ * whatever the rollout percentage); no row → nobody blocked.
+ */
+export async function meetingBotBlocked(db: Db, organisationId: number): Promise<boolean> {
+    try {
+        const [row] = await db.select({ enabled: featureFlags.enabled, allowed: featureFlags.allowedWorkspaceIds })
+            .from(featureFlags).where(eq(featureFlags.key, MEETING_BOT_BLOCK_FLAG)).limit(1);
+        if (!row) return false;
+        return row.enabled === true || (Array.isArray(row.allowed) && row.allowed.includes(organisationId));
+    } catch (err) {
+        console.error('[meeting-bot] block list unreadable; treating as blocked', err instanceof Error ? err.message : err);
+        return true;
+    }
+}
+
+/** Can this workspace send a bot at all: meeting_bot on for it, and it isn't on the block list. Never throws; fails closed. */
+export async function meetingBotAvailable(db: Db, organisationId: number): Promise<boolean> {
+    const [on, blocked] = await Promise.all([
+        isFeatureEnabled(organisationId, MEETING_BOT_FLAG).catch(() => false), meetingBotBlocked(db, organisationId),
+    ]);
+    return on && !blocked;
+}
+
+export async function hasAcceptedBotTerms(db: Db, userId: number): Promise<boolean> {
+    const rows = await db.selectDistinct({ version: tosAcceptances.version }).from(tosAcceptances).where(eq(tosAcceptances.userId, userId));
+    return rows.some((r) => versionAtLeast(r.version, BOT_TOS_MIN_VERSION));
+}
+
 export async function hasAcceptedBotDpa(db: Db, organisationId: number): Promise<boolean> {
-    const [r] = await db.select({ id: dpaAcceptances.id }).from(dpaAcceptances)
-        .where(and(eq(dpaAcceptances.organisationId, organisationId), inArray(dpaAcceptances.version, BOT_DPA_VERSIONS))).limit(1);
-    return Boolean(r);
+    const rows = await db.selectDistinct({ version: dpaAcceptances.version }).from(dpaAcceptances).where(eq(dpaAcceptances.organisationId, organisationId));
+    return rows.some((r) => versionAtLeast(r.version, BOT_DPA_MIN_VERSION));
 }
 
 /**
@@ -122,7 +171,7 @@ async function regionFor(db: Db, organisationId: number): Promise<RecallRegion> 
 const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended')");
 
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
-    if (!(await isFeatureEnabled(i.organisationId, MEETING_BOT_FLAG))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
+    if (!(await meetingBotAvailable(db, i.organisationId))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
 
     const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
@@ -130,9 +179,8 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     if (!assistant || assistant.roleKey !== 'meeting_note_taker') return fail(404, 'no_assistant', 'Meeting assistant not found in this workspace.');
     if (assistant.lifecycleStatus === 'archived') return fail(409, 'archived', 'This assistant has been archived.');
 
-    if (!(await hasAcceptedBotDpa(db, i.organisationId))) {
-        return fail(409, 'dpa_required', 'Your workspace owner needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.');
-    }
+    if (!(await hasAcceptedBotDpa(db, i.organisationId))) return fail(409, 'dpa_required', DPA_NEEDED_MESSAGE);
+    if (!(await hasAcceptedBotTerms(db, i.userId))) return fail(409, 'terms_required', TERMS_NEEDED_MESSAGE);
 
     const link = cleanMeetingLink(i.meetingUrl);
     if (!link.ok) return fail(400, 'bad_link', link.error);

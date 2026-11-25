@@ -66,9 +66,9 @@ console.log('customer Terms and privacy policy');
 check('the Terms point to the Partner Terms WITHOUT a version bump (owner decision: no re-acceptance)', () => {
     const tos = read('terms_of_service.html');
     assert.ok(tos.includes('<strong>1.4 — Partner programme.</strong>') && tos.includes('href="./partner-terms.html"'));
-    // The version has since moved on for clause 5.2 (2.3, then 2.4); the 1.4 change itself never bumped it.
-    assert.ok(tos.includes('Version 2.4 &middot;'));
-    assert.match(read('netlify/functions/accept-tos.ts'), /CURRENT_TOS_VERSION\s*=\s*['"]2\.4['"]/);
+    // The version has since moved on for clause 5.2 (2.3, 2.4, then 2.5); the 1.4 change itself never bumped it.
+    assert.ok(tos.includes('Version 2.5 &middot;'));
+    assert.match(read('netlify/functions/accept-tos.ts'), /CURRENT_TOS_VERSION\s*=\s*['"]2\.5['"]/);
 });
 
 check('the privacy policy covers partners, invited people, payout details in the vault, and the retention rows', () => {
