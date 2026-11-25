@@ -89,6 +89,30 @@ export const hasDelivery = (s: DeliverySetup | null | undefined): s is DeliveryS
 export const deliveryApplies = (s: DeliverySetup | null | undefined, lines: { currency: string }[]): s is DeliverySetup =>
     hasDelivery(s) && lines.length > 0 && lines.every((l) => String(l.currency).toUpperCase() === 'GBP');
 
+/**
+ * The Delivery & returns page's "Delivery choices and costs" words: none for a shop with nothing priced in pounds
+ * (its baskets never get them — deliveryApplies), a note when only some of its products are. Pure.
+ */
+export function termsDeliveryChoices(s: DeliverySetup | null | undefined, pounds: 'all' | 'some' | 'none'): string | null {
+    if (!hasDelivery(s) || pounds === 'none') return null;
+    return pounds === 'some' ? `${deliveryWords(s)} (for orders priced in pounds)` : deliveryWords(s);
+}
+
+/** Whether the workspace's products that can be bought online are priced in pounds: all, some or none. Never throws ('all' on failure, as before). */
+export async function poundsPriced(db: Db, orgId: number): Promise<'all' | 'some' | 'none'> {
+    try {
+        const [r] = asRows<{ gbp: unknown; other: unknown }>(await db.execute(sql`
+            SELECT count(*) FILTER (WHERE upper(coalesce(price_currency, 'GBP')) = 'GBP')::int AS gbp,
+                   count(*) FILTER (WHERE upper(coalesce(price_currency, 'GBP')) <> 'GBP')::int AS other
+              FROM org_products WHERE organisation_id = ${orgId} AND status = 'active' AND price_type = 'fixed' AND price_amount IS NOT NULL`));
+        const gbp = Number(r?.gbp ?? 0), other = Number(r?.other ?? 0);
+        return other === 0 ? 'all' : gbp === 0 ? 'none' : 'some';
+    } catch (err) {
+        console.error('[shop-delivery] currency read failed', err instanceof Error ? err.message : err);
+        return 'all';
+    }
+}
+
 export interface DeliveryOption { name: string; amount: number; days: string | null; collect?: boolean }
 
 /** The choices for an order whose items come to `subtotal` pence: a rate is free at or over its threshold. Pure. */

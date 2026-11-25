@@ -15,6 +15,7 @@ import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
 import { loadProductOptions, optionsWords, type ProductOptions } from './shop-options';
 import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
+import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -31,6 +32,9 @@ export interface ShopSnapshotInput {
     options?: Record<number, ProductOptions>;
     /** UK delivery choices (Phase 1, shop-delivery.ts); undefined = not read. */
     delivery?: DeliverySetup | null;
+    /** Posted orders' tracking (shop-orders.ts), by order id; postingOn = db/z-shop-orders.sql is on this database. */
+    posting?: Record<number, OrderPosting>;
+    postingOn?: boolean;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -112,11 +116,12 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         lines.push('', 'ORDERS: none yet.');
     } else {
         const fresh = input.orders.filter((o) => o.status === 'paid').length;
-        lines.push('', `ORDERS (newest ${input.orders.length}; ${fresh} not yet marked as dealt with):`);
+        lines.push('', `ORDERS (newest ${input.orders.length}; ${fresh} NEW, not yet posted or dealt with):`);
         for (const o of input.orders) {
-            const state = o.status === 'refunded' ? 'refunded' : o.refundedAmount > 0 ? `part refunded (${formatMoney(o.refundedAmount, o.currency)})` : o.status === 'done' ? 'dealt with' : 'NEW';
+            const state = orderStateWords(o, input.posting?.[o.id]);
             lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}`);
         }
+        if (input.postingOn === false) lines.push('- Marking orders as posted isn\'t switched on yet: don\'t offer the order_update card with status "posted".');
     }
     return lines.join('\n');
 }
@@ -133,5 +138,6 @@ export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> 
     ]);
     const options = stock?.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {};
     const delivery = await loadDelivery(db, orgId);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery });
+    const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn });
 }

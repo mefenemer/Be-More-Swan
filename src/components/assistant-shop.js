@@ -14,7 +14,9 @@
  *    price and stock. Same server action as the chat's product_options card (shop.ts product_options).
  * Delivery (Phase 1): up to 5 UK delivery choices buyers pick from at checkout (basket shops), each optionally
  *    free over an order total, plus "Collect in person". Same server action as the chat's delivery_rates card.
- * 4. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
+ * 4. Orders: every paid order in the workspace — Mark as posted (tracking number / link, emailed to the buyer from
+ *    the owner's own Gmail or Outlook), Mark as dealt with, refunds shown (made in Stripe), Download CSV
+ *    (owner/admin). Same server action as the chat's order_update card (shop.ts order_update, shop-orders.ts).
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
@@ -199,26 +201,48 @@
       ${state.deliveryError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.deliveryError)}</p>` : ''}`);
   }
 
+  /** "Mark as posted" (or "Change tracking" once posted): tracking number and link, both optional. */
+  function postForm(o, posted) {
+    const open = state.postOpen === Number(o.id);
+    return `<details class="w-full sm:w-auto" data-post-form="${esc(o.id)}"${open ? ' open' : ''}>
+      <summary class="list-none cursor-pointer btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center" style="min-height:44px">${posted ? 'Change tracking' : 'Mark as posted'}</summary>
+      <div class="mt-2 p-3 border border-gray-200 rounded-lg bg-gray-50 space-y-2">
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking number (optional)</span><input type="text" maxlength="60" data-post-number value="${esc((posted && posted.trackingNumber) || '')}" placeholder="e.g. AB123456789GB" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking link (optional)</span><input type="url" maxlength="500" data-post-url value="${esc((posted && posted.trackingUrl) || '')}" placeholder="https://www.royalmail.com/track-your-item" class="${inputCls} mt-1"></label>
+        <p class="text-[11px] text-gray-500">${o.customerEmail ? 'We email the buyer that it\'s on its way, from your own Gmail or Outlook.' : 'There\'s no email for this buyer, so they won\'t be told.'}</p>
+        ${btn(`data-post-save="${esc(o.id)}"`, posted ? 'Save tracking' : 'Mark as posted', true)}
+      </div>
+    </details>`;
+  }
+
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
     const shown = list.slice(0, state.shown);
-    return card(`<p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
+    return card(`<div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
+      ${d.canEdit ? btn('data-shop-csv', 'Download CSV') : ''}</div>
+      ${state.ordersSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.ordersSaved)}</p>` : ''}
+      ${state.ordersError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.ordersError)}</p>` : ''}
       <ul class="space-y-2 mt-3">${shown.map((o) => {
         const a = o.shippingAddress && o.shippingAddress.address;
         const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
+        const posted = (d.orderPosting || {})[o.id];
         const refundNote = o.status === 'refunded' ? '<span class="text-xs font-bold text-gray-600">· Refunded</span>'
           : o.refundedAmount > 0 ? `<span class="text-xs font-bold text-gray-600">· ${esc(money(o.refundedAmount, o.currency))} refunded</span>` : '';
-        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${o.status === 'done' ? 'opacity-80' : ''}">
+        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${o.status === 'done' ? 'opacity-80' : ''}" data-order-row="${esc(o.id)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''} ${refundNote}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : o.status === 'posted' ? '<span class="text-xs font-bold text-indigo-800">· Posted</span>' : ''} ${refundNote}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
           ${((d.orderLines || {})[o.id] || []).length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5" data-order-lines>${d.orderLines[o.id].map((l) => `<li>${esc(l.qty)} × ${esc(l.name)} · ${esc(money(l.unit * l.qty, o.currency))}</li>`).join('')}</ul>` : ''}
           ${((d.orderDelivery || {})[o.id]) ? `<p class="text-xs text-gray-600 mt-1" data-order-delivery>Delivery: ${esc(d.orderDelivery[o.id].name || 'chosen at checkout')}${d.orderDelivery[o.id].amount != null ? ` · ${esc(d.orderDelivery[o.id].amount === 0 ? 'free' : money(d.orderDelivery[o.id].amount, o.currency))}` : ''}</p>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
-          ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
+          ${posted ? `<p class="text-xs text-gray-600 mt-1" data-order-tracking>Posted ${esc(new Date(posted.postedAt).toLocaleDateString('en-GB', { dateStyle: 'medium' }))}${posted.trackingNumber ? ` · tracking ${esc(posted.trackingNumber)}` : ''}${posted.trackingUrl ? ` · <a class="underline" href="${esc(posted.trackingUrl)}" target="_blank" rel="noopener">track it</a>` : ''}${posted.buyerToldAt ? ' · buyer emailed' : ''}</p>` : ''}
+          ${o.status === 'refunded' ? '' : `<div class="flex flex-wrap items-start gap-2 mt-2">
+            ${d.postingOn && o.status !== 'done' ? postForm(o, posted) : ''}
+            ${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'done' ? '0' : '1'}"`, o.status === 'done' ? 'Mark as new' : 'Mark as dealt with')}
+          </div>`}
         </li>`;
       }).join('')}</ul>
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-shop-more', `Show more (${list.length - shown.length})`)}</div>` : ''}
@@ -344,6 +368,34 @@
       } catch (err) { state.paymentsError = err.message; render(); }
       return;
     }
+    if (t('[data-post-form] > summary')) { const f = t('[data-post-form]'); state.postOpen = f.open ? null : Number(f.dataset.postForm); return; }
+    const postSave = t('[data-post-save]');
+    if (postSave) {
+      const f = postSave.closest('[data-post-form]');
+      const id = Number(postSave.dataset.postSave);
+      state.ordersSaved = null; state.ordersError = null; postSave.disabled = true; state.postOpen = id;
+      try {
+        state.data = await post({ action: 'order_update', id, status: 'posted', trackingNumber: f.querySelector('[data-post-number]').value, trackingUrl: f.querySelector('[data-post-url]').value });
+        state.ordersSaved = (state.data.warnings || [])[0] || 'Saved.';
+        state.postOpen = null;
+      } catch (err) { state.ordersError = err.message; }
+      render();
+      return;
+    }
+    const csv = t('[data-shop-csv]');
+    if (csv) {
+      state.ordersError = null; csv.disabled = true;
+      try {
+        const r = await post({ action: 'orders_csv' });
+        const url = URL.createObjectURL(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = r.filename || 'orders.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        csv.disabled = false;
+      } catch (err) { state.ordersError = err.message; render(); }
+      return;
+    }
     const order = t('[data-shop-order]');
     if (order) {
       order.disabled = true;
@@ -359,12 +411,12 @@
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.assistantName = assistantName || '';
-    state.shown = 20; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
+    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     // Bound once, on the document (the tab is re-rendered; never bind from render).
     if (!state.bound) { document.addEventListener('click', onClick); state.bound = true; }
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard } };
 })();

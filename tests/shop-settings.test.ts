@@ -150,7 +150,8 @@ check('recordPaidCheckout stores the payment and emails the buyer; a refund is m
     assert.ok(shopTs.includes('paymentIntentId: typeof session.payment_intent'));
     assert.ok(shopTs.includes('await sendBuyerConfirmation(db, order, site, total, orderLines, delivery)'));
     assert.ok(shopTs.includes("...(refunded >= order.amountTotal && order.amountTotal > 0 ? { status: 'refunded' } : {})"));
-    assert.ok(shopTs.includes("ne(siteOrders.status, 'refunded')"), 'Mark as done never hides a refund');
+    // Mark as done / new: shop-orders.ts setOrderDone (FR#35 order statuses), which never touches a refunded order.
+    assert.ok(shopTs.includes('return setOrderDone(db, orgId, orderId, done, siteId);') && read('src/utils/shop-orders.ts').includes("AND status <> 'refunded'"), 'Mark as done never hides a refund');
     const hook = read('netlify/functions/stripe-connect-webhook.ts');
     assert.ok(hook.includes("evt.type === 'charge.refunded'") && hook.includes('await recordRefund(db, evt.account'));
 });

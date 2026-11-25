@@ -3054,6 +3054,52 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('delivery_rates', renderDeliveryRatesCard);
 
+  // { type: 'order_update', orderId, orderSummary, status: 'posted'|'done'|'new', trackingNumber?, trackingUrl? } — one
+  // order's status (online shop Phase 1, shop-orders.ts): shop.ts order_update, the Shop tab's "Mark as posted" /
+  // "Mark as dealt with" same save. Posted emails the buyer from the owner's own Gmail or Outlook. Nothing is
+  // saved until they click.
+  function renderOrderUpdateCard(data) {
+    const d = data || {};
+    const status = ['posted', 'done', 'new'].includes(d.status) ? d.status : 'done';
+    const orderId = Number(d.orderId);
+    const num = String(d.trackingNumber || '').trim();
+    const url = String(d.trackingUrl || '').trim();
+    const label = status === 'posted' ? 'Mark as posted' : status === 'done' ? 'Mark as dealt with' : 'Mark as new';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Order ${Number.isInteger(orderId) ? `#${orderId}` : ''}</p>
+      ${d.orderSummary ? `<p class="text-sm text-gray-900 mt-1">${escapeHtml(String(d.orderSummary).slice(0, 200))}</p>` : ''}
+      <p class="text-xs text-gray-800 mt-2"><strong>${escapeHtml(label)}</strong>${status === 'posted' && num ? ` · tracking ${escapeHtml(num)}` : ''}${status === 'posted' && url ? ` · ${escapeHtml(url)}` : ''}</p>
+      ${status === 'posted' ? '<p class="text-xs text-gray-600 mt-2">The buyer is emailed that it\'s on its way, from your own Gmail or Outlook (if one is connected).</p>' : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-ord-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${escapeHtml(label)}</button>
+        <button type="button" data-ord-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-ord-status role="status"></p>`;
+    const say = (t, tone) => { const st = el.querySelector('[data-ord-status]'); st.textContent = t; st.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    if (!Number.isInteger(orderId) || orderId <= 0) { setBusy(true); say('This card has no order to change.', 'error'); return el; }
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ord-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-ord-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('shop:orderUpdate', {
+        bubbles: true,
+        detail: {
+          change: { id: orderId, status, ...(status === 'posted' ? { trackingNumber: num, trackingUrl: url } : {}) },
+          respond({ ok: done, error, message }) {
+            if (!done) { setBusy(false); say(error || 'That didn\'t work — nothing was changed.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('order_update', renderOrderUpdateCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
