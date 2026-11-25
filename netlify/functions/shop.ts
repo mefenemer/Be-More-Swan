@@ -151,8 +151,10 @@ export default withLambda(async (event) => {
             return json(200, await view([postedMessage(r, orderId)]));
         }
         if (body.status !== 'done' && body.status !== 'new') return json(400, { error: 'Choose posted, done or new.' });
-        if (!(await markShopOrderDone(db, orgId, orderId, body.status === 'done'))) return json(404, { error: 'Order not found, or it was refunded.' });
-        return json(200, await view([body.status === 'done' ? `Order ${orderId} marked as dealt with.` : `Order ${orderId} marked as new again.`]));
+        const now = await markShopOrderDone(db, orgId, orderId, body.status === 'done');
+        if (!now) return json(404, { error: 'Order not found, or it was refunded.' });
+        // Worded from where the order ended up: "new" on a posted order keeps it posted.
+        return json(200, await view([now === 'done' ? `Order ${orderId} marked as dealt with.` : now === 'posted' ? `Order ${orderId} is no longer marked as dealt with: it's back to Posted.` : `Order ${orderId} marked as new again.`]));
     }
 
     if (action === 'orders_csv') {

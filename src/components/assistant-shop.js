@@ -204,11 +204,15 @@
   /** "Mark as posted" (or "Change tracking" once posted): tracking number and link, both optional. */
   function postForm(o, posted) {
     const open = state.postOpen === Number(o.id);
+    // After a failed save, what they typed (not the saved values) — an error never wipes it.
+    const draft = state.postDraft && state.postDraft.id === Number(o.id) ? state.postDraft : null;
+    const num = draft ? draft.number : (posted && posted.trackingNumber) || '';
+    const link = draft ? draft.url : (posted && posted.trackingUrl) || '';
     return `<details class="w-full sm:w-auto" data-post-form="${esc(o.id)}"${open ? ' open' : ''}>
       <summary class="list-none cursor-pointer btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center" style="min-height:44px">${posted ? 'Change tracking' : 'Mark as posted'}</summary>
       <div class="mt-2 p-3 border border-gray-200 rounded-lg bg-gray-50 space-y-2">
-        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking number (optional)</span><input type="text" maxlength="60" data-post-number value="${esc((posted && posted.trackingNumber) || '')}" placeholder="e.g. AB123456789GB" class="${inputCls} mt-1"></label>
-        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking link (optional)</span><input type="url" maxlength="500" data-post-url value="${esc((posted && posted.trackingUrl) || '')}" placeholder="https://www.royalmail.com/track-your-item" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking number (optional)</span><input type="text" maxlength="60" data-post-number value="${esc(num)}" placeholder="e.g. AB123456789GB" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking link (optional)</span><input type="url" maxlength="500" data-post-url value="${esc(link)}" placeholder="https://www.royalmail.com/track-your-item" class="${inputCls} mt-1"></label>
         <p class="text-[11px] text-gray-500">${o.customerEmail ? 'We email the buyer that it\'s on its way, from your own Gmail or Outlook.' : 'There\'s no email for this buyer, so they won\'t be told.'}</p>
         ${btn(`data-post-save="${esc(o.id)}"`, posted ? 'Save tracking' : 'Mark as posted', true)}
       </div>
@@ -374,11 +378,12 @@
       const f = postSave.closest('[data-post-form]');
       const id = Number(postSave.dataset.postSave);
       state.ordersSaved = null; state.ordersError = null; postSave.disabled = true; state.postOpen = id;
+      const typed = { id, number: f.querySelector('[data-post-number]').value, url: f.querySelector('[data-post-url]').value };
       try {
-        state.data = await post({ action: 'order_update', id, status: 'posted', trackingNumber: f.querySelector('[data-post-number]').value, trackingUrl: f.querySelector('[data-post-url]').value });
+        state.data = await post({ action: 'order_update', id, status: 'posted', trackingNumber: typed.number, trackingUrl: typed.url });
         state.ordersSaved = (state.data.warnings || [])[0] || 'Saved.';
-        state.postOpen = null;
-      } catch (err) { state.ordersError = err.message; }
+        state.postOpen = null; state.postDraft = null;
+      } catch (err) { state.ordersError = err.message; state.postDraft = typed; }
       render();
       return;
     }
@@ -411,7 +416,7 @@
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.assistantName = assistantName || '';
-    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
+    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.postDraft = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     // Bound once, on the document (the tab is re-rendered; never bind from render).
     if (!state.bound) { document.addEventListener('click', onClick); state.bound = true; }

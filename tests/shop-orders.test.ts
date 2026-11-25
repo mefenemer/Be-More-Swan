@@ -32,25 +32,39 @@ type Db = Parameters<typeof markOrderPosted>[0];
 
 const notConnected = () => new IntegrationError('not_connected', 'not connected');
 
-/** A fake database: `columns` = whether db/z-shop-orders.sql has run; `order` = the row SELECTed. */
-function fakeDb(o: { columns: boolean; order?: Record<string, unknown> | null; updated?: boolean }) {
+/**
+ * A fake database: `columns` = whether db/z-shop-orders.sql has run; `order` = the stored row. It keeps the
+ * order's tracking and "buyer emailed" mark between calls, so repeat saves behave like the real UPDATEs.
+ */
+function fakeDb(o: { columns: boolean; order?: Record<string, unknown> | null }) {
     const exec: string[] = [];
+    const row = o.order ? { ...o.order } : null;
     const db = {
         execute: async (q: unknown) => {
             const t = sqlText(q); exec.push(t);
             if (t.includes('information_schema.columns')) return [{ n: o.columns ? 1 : 0 }];
-            if (t.includes('SELECT id, status, posted_at')) return o.order ? [o.order] : [];
-            if (t.includes("SET status = 'posted'")) return o.updated === false ? [] : [{ id: 7 }];
-            if (t.includes('UPDATE site_orders SET status =')) return [{ id: 7 }];
-            if (t.includes('shop_settings')) return [];
+            if (t.includes("SET status = 'posted'")) {
+                if (!row || row.status === 'refunded') return [];
+                // New tracking clears the "buyer emailed" mark (the CASE in the real UPDATE).
+                const same = row.tracking_number != null && t.includes(JSON.stringify(row.tracking_number));
+                if (!same) row.buyer_posted_emailed_at = null;
+                const m = t.match(/"(AB[0-9A-Z]*)"/);
+                row.tracking_number = m ? m[1] : null;
+                row.status = 'posted';
+                return [row];
+            }
+            if (t.includes('SELECT status FROM site_orders')) return row ? [{ status: row.status }] : [];
+            if (t.includes('buyer_posted_emailed_at = now()')) { if (!row || row.buyer_posted_emailed_at) return []; row.buyer_posted_emailed_at = 'now'; return [{ id: 7 }]; }
+            if (t.includes('buyer_posted_emailed_at = NULL')) { if (row) row.buyer_posted_emailed_at = null; return []; }
+            if (t.includes('UPDATE site_orders SET status =')) return [{ id: 7, status: t.includes("'done'") ? 'done' : t.includes('CASE WHEN posted_at') ? 'posted' : 'paid' }];
             return [];
         },
         select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }),
     };
-    return { db: db as unknown as Db, exec };
+    return { db: db as unknown as Db, exec, row };
 }
 
-const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, tracking_url: null, customer_name: 'Sam', customer_email: 'sam@example.com', item_name: 'Mug', quantity: 2 };
+const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, tracking_url: null, buyer_posted_emailed_at: null, customer_name: 'Sam', customer_email: 'sam@example.com', item_name: 'Mug', quantity: 2 };
 
 (async () => {
     console.log('\nshop-orders');
@@ -60,7 +74,7 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         const { db, exec } = fakeDb({ columns: false, order: ORDER });
         const r = await markOrderPosted(db, 1, 7, { trackingNumber: 'AB1' });
         assert.ok(!r.ok && r.status === 503 && /isn't switched on yet/.test(r.error));
-        assert.ok(await setOrderDone(db, 1, 7, false));
+        assert.strictEqual(await setOrderDone(db, 1, 7, false), 'paid');
         const upd = exec.find((t) => t.includes('UPDATE site_orders SET status ='))!;
         assert.ok(upd.includes("'paid'") && !upd.includes('posted_at'), upd);
     });
@@ -104,7 +118,7 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         const { db, exec } = fakeDb({ columns: true, order: ORDER });
         const r = await markOrderPosted(db, 1, 7, {}, { gmail: async () => { throw notConnected(); }, outlook: async () => { throw notConnected(); } });
         assert.ok(r.ok && r.emailed === null && r.reason === 'no_mailbox');
-        assert.ok(exec.some((t) => t.includes("SET status = 'posted'")) && !exec.some((t) => t.includes('buyer_posted_emailed_at = now()')));
+        assert.ok(exec.some((t) => t.includes("SET status = 'posted'")) && exec.some((t) => t.includes('buyer_posted_emailed_at = NULL')), 'the claim is released');
         assert.ok(/wasn't emailed: connect Gmail or Outlook/.test(postedMessage(r as Extract<typeof r, { ok: true }>, 7)));
         assert.ok(!read('src/utils/shop-orders.ts').includes('sendEmail('), 'posting never uses our own sender');
     });
@@ -117,15 +131,36 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         assert.strictEqual(outlook as number, 0);
     });
 
-    await check('already posted with the same tracking: not emailed again; changed tracking: emailed again', async () => {
-        const was = { ...ORDER, status: 'posted', posted_at: '2026-11-24 10:00:00', tracking_number: 'AB1', tracking_url: null };
+    await check('already emailed this tracking: not again; changed tracking: emailed again', async () => {
+        const f = fakeDb({ columns: true, order: { ...ORDER, status: 'posted', posted_at: '2026-11-24 10:00:00', tracking_number: 'AB1', buyer_posted_emailed_at: '2026-11-24 10:00:00' } });
         const count: { n: number } = { n: 0 };
         const senders: MailSenders = { gmail: async () => { count.n++; }, outlook: async () => { count.n++; } };
-        const same = await markOrderPosted(fakeDb({ columns: true, order: was }).db, 1, 7, { trackingNumber: 'AB1' }, senders);
+        const same = await markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB1' }, senders);
         assert.ok(same.ok && same.reason === 'unchanged' && count.n === 0);
-        const changed = await markOrderPosted(fakeDb({ columns: true, order: was }).db, 1, 7, { trackingNumber: 'AB2' }, senders);
+        assert.ok(/already has these tracking details/.test(postedMessage(same as Extract<typeof same, { ok: true }>, 7)));
+        const changed = await markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB2' }, senders);
         assert.ok(changed.ok && changed.reason === 'sent');
         assert.strictEqual(count.n as number, 1);
+    });
+
+    await check('review #883: the first email didn\'t go (no inbox), then Gmail connected and the SAME tracking saved → sent', async () => {
+        const f = fakeDb({ columns: true, order: ORDER });
+        const first = await markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB9' }, { gmail: async () => { throw notConnected(); }, outlook: async () => { throw notConnected(); } });
+        assert.ok(first.ok && first.reason === 'no_mailbox' && f.row!.buyer_posted_emailed_at == null);
+        assert.ok(/press "Save tracking"/.test(postedMessage(first as Extract<typeof first, { ok: true }>, 7)));
+        let n = 0;
+        const again = await markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB9' }, { gmail: async () => { n++; }, outlook: async () => { throw new Error('no'); } });
+        assert.ok(again.ok && again.reason === 'sent' && n === 1);
+    });
+
+    await check('review #883: two saves at the same moment email the buyer once (the claim is one statement)', async () => {
+        const f = fakeDb({ columns: true, order: ORDER });
+        let n = 0;
+        const senders: MailSenders = { gmail: async () => { n++; await new Promise((r) => setTimeout(r, 5)); }, outlook: async () => undefined };
+        const [a, b] = await Promise.all([markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB5' }, senders), markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB5' }, senders)]);
+        assert.strictEqual(n, 1);
+        assert.deepStrictEqual([a, b].map((r) => r.ok && r.reason).sort(), ['sent', 'unchanged']);
+        assert.ok(read('src/utils/shop-orders.ts').includes('SET buyer_posted_emailed_at = now() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id'));
     });
 
     await check('refunded, unknown, bad tracking, no buyer email', async () => {
@@ -145,7 +180,13 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         assert.ok(exec.at(-1)!.includes("CASE WHEN posted_at IS NOT NULL THEN 'posted' ELSE 'paid' END") && exec.at(-1)!.includes("status <> 'refunded'"));
         await setOrderDone(db, 1, 7, true, 12);
         assert.ok(exec.at(-1)!.includes("'done'") && exec.at(-1)!.includes('site_id'));
-        assert.strictEqual(await setOrderDone(db, 1, 0, true), false);
+        assert.strictEqual(await setOrderDone(db, 1, 0, true), null);
+        // review #883: the chat's "new" on a posted order is worded from where it ends up (still Posted).
+        assert.ok(read('netlify/functions/shop.ts').includes("now === 'posted' ? `Order ${orderId} is no longer marked as dealt with: it's back to Posted.`"));
+        assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('a posted order never goes back to New'));
+        // review #883: a failed "Mark as posted" keeps what was typed.
+        const tab = read('src/components/assistant-shop.js');
+        assert.ok(tab.includes('state.ordersError = err.message; state.postDraft = typed;') && tab.includes('data-post-number value="${esc(num)}"'));
     });
 
     await check('postedEmail escapes the buyer\'s and business\'s names', () => {

@@ -39,7 +39,7 @@ import { checkRateLimit } from './rate-limit';
 const stripeClient = async () => (await import('./stripe')).getStripe();
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
-import { setOrderDone } from './shop-orders';
+import { setOrderDone, type OrderStatus } from './shop-orders';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
@@ -634,11 +634,11 @@ export async function recordRefund(db: Db, accountId: string, charge: Stripe.Cha
 
 /** The Shopkeeper's Shop tab (shop.ts): the same rule as markOrderDone across the whole workspace's
  *  orders, since a Shopkeeper is not tied to one website. "Mark as new" goes back to posted if it was posted. */
-export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<boolean> {
+export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<OrderStatus | null> {
     return setOrderDone(db, orgId, orderId, done);
 }
 
 export async function markOrderDone(db: Db, orgId: number, siteId: number, orderId: number, done: boolean): Promise<boolean> {
     // A refunded order stays refunded: "Mark as done" never hides a refund (shop-orders.ts setOrderDone).
-    return setOrderDone(db, orgId, orderId, done, siteId);
+    return !!(await setOrderDone(db, orgId, orderId, done, siteId));
 }

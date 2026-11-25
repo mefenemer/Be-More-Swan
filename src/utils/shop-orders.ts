@@ -80,18 +80,18 @@ export async function ordersPostingOn(db: Db): Promise<boolean> {
 
 /**
  * "Mark as dealt with" (done) or "Mark as new" (back to posted if it was posted, else paid). A refund stays a
- * refund. `siteId` limits it to one website's orders (the Website Assistant's Orders tab). Returns false when
- * no such order (or it was refunded).
+ * refund. `siteId` limits it to one website's orders (the Website Assistant's Orders tab). Returns the status the
+ * order is now in, or null when no such order (or it was refunded).
  */
-export async function setOrderDone(db: Db, orgId: number, orderId: number, done: boolean, siteId: number | null = null): Promise<boolean> {
-    if (!Number.isInteger(orderId) || orderId <= 0) return false;
+export async function setOrderDone(db: Db, orgId: number, orderId: number, done: boolean, siteId: number | null = null): Promise<OrderStatus | null> {
+    if (!Number.isInteger(orderId) || orderId <= 0) return null;
     const site = siteId == null ? sql`` : sql` AND site_id = ${siteId}`;
     const next = done ? sql`'done'` : (await ordersPostingOn(db)) ? sql`CASE WHEN posted_at IS NOT NULL THEN 'posted' ELSE 'paid' END` : sql`'paid'`;
-    const rows = asRows<{ id: number }>(await db.execute(sql`
+    const rows = asRows<{ id: number; status: string }>(await db.execute(sql`
         UPDATE site_orders SET status = ${next}
          WHERE id = ${orderId} AND organisation_id = ${orgId}${site} AND status <> 'refunded'
-        RETURNING id`));
-    return rows.length > 0;
+        RETURNING id, status`));
+    return rows.length ? ((rows[0].status as OrderStatus) || (done ? 'done' : 'paid')) : null;
 }
 
 export interface OrderPosting { postedAt: Date | null; trackingNumber: string | null; trackingUrl: string | null; buyerToldAt: Date | null }
@@ -153,8 +153,10 @@ export type PostResult =
     | { ok: false; status: 400 | 404 | 409 | 503; error: string };
 
 /**
- * Mark an order as posted, with its tracking. Emails the buyer the first time, and again only when the tracking
- * changes. A refunded order can't be posted. `senders` is for tests.
+ * Mark an order as posted, with its tracking. Emails the buyer once per tracking: the first time, again when the
+ * tracking changes, and again after an email that didn't go (no inbox connected, or the inbox refused it).
+ * Which save sends is decided by claiming buyer_posted_emailed_at in one statement, so two saves at the same
+ * moment (Shop tab and chat card) never email twice. A refunded order can't be posted. `senders` is for tests.
  */
 export async function markOrderPosted(db: Db, orgId: number, orderId: number, input: { trackingNumber?: unknown; trackingUrl?: unknown }, senders?: MailSenders): Promise<PostResult> {
     if (!Number.isInteger(orderId) || orderId <= 0) return { ok: false, status: 404, error: 'Order not found.' };
@@ -162,39 +164,45 @@ export async function markOrderPosted(db: Db, orgId: number, orderId: number, in
     if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
     const t = parsed.value;
     if (!(await ordersPostingOn(db))) return { ok: false, status: 503, error: 'Marking orders as posted isn\'t switched on yet. Please try again later.' };
-    type Row = { id: number; status: string; posted_at: unknown; tracking_number: string | null; tracking_url: string | null; customer_name: string | null; customer_email: string | null; item_name: string; quantity: number };
-    let before: Row | undefined;
+    const refused = { ok: false as const, status: 409 as const, error: 'This order was refunded, so it can\'t be marked as posted.' };
+    type Row = { id: number; customer_name: string | null; customer_email: string | null; item_name: string; quantity: number };
+    let row: Row | undefined;
     try {
-        [before] = asRows<Row>(await db.execute(sql`
-            SELECT id, status, posted_at, tracking_number, tracking_url, customer_name, customer_email, item_name, quantity
-              FROM site_orders WHERE id = ${orderId} AND organisation_id = ${orgId}`));
-        if (!before) return { ok: false, status: 404, error: 'Order not found.' };
-        if (before.status === 'refunded') return { ok: false, status: 409, error: 'This order was refunded, so it can\'t be marked as posted.' };
-        const done = asRows<{ id: number }>(await db.execute(sql`
-            UPDATE site_orders SET status = 'posted', posted_at = COALESCE(posted_at, now()), tracking_number = ${t.number}, tracking_url = ${t.url}
-             WHERE id = ${orderId} AND organisation_id = ${orgId} AND status <> 'refunded' RETURNING id`));
-        if (!done.length) return { ok: false, status: 409, error: 'This order was refunded, so it can\'t be marked as posted.' };
+        // New tracking clears "buyer emailed" (in an UPDATE the right-hand side reads the old values).
+        [row] = asRows<Row>(await db.execute(sql`
+            UPDATE site_orders SET status = 'posted', posted_at = COALESCE(posted_at, now()),
+                   buyer_posted_emailed_at = CASE WHEN tracking_number IS NOT DISTINCT FROM ${t.number}::text AND tracking_url IS NOT DISTINCT FROM ${t.url}::text
+                                                  THEN buyer_posted_emailed_at ELSE NULL END,
+                   tracking_number = ${t.number}, tracking_url = ${t.url}
+             WHERE id = ${orderId} AND organisation_id = ${orgId} AND status <> 'refunded'
+            RETURNING id, customer_name, customer_email, item_name, quantity`));
+        if (!row) {
+            const [exists] = asRows<{ status: string }>(await db.execute(sql`SELECT status FROM site_orders WHERE id = ${orderId} AND organisation_id = ${orgId}`));
+            return exists ? refused : { ok: false, status: 404, error: 'Order not found.' };
+        }
     } catch (err) {
         if (isMissingPostedColumn(err)) return { ok: false, status: 503, error: 'Marking orders as posted isn\'t switched on yet. Please try again later.' };
         throw err;
     }
-    const wasPosted = before.posted_at != null;
-    const changed = (before.tracking_number ?? null) !== t.number || (before.tracking_url ?? null) !== t.url;
-    if (wasPosted && !changed) return { ok: true, emailed: null, reason: 'unchanged', tracking: t };
-    if (!before.customer_email) return { ok: true, emailed: null, reason: 'no_email', tracking: t };
+    if (!row.customer_email) return { ok: true, emailed: null, reason: 'no_email', tracking: t };
+    // Claim the email: only one save gets a row back; none when this tracking was already sent.
+    const claimed = asRows<{ id: number }>(await db.execute(sql`
+        UPDATE site_orders SET buyer_posted_emailed_at = now() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id`));
+    if (!claimed.length) return { ok: true, emailed: null, reason: 'unchanged', tracking: t };
+    const release = () => db.execute(sql`UPDATE site_orders SET buyer_posted_emailed_at = NULL WHERE id = ${orderId}`).catch(() => undefined);
 
     const { loadShopSettings } = await import('./shop-settings');
     const { loadOrderLines } = await import('./shop-basket');
     const [shop, lines] = await Promise.all([loadShopSettings(db, orgId).catch(() => null), loadOrderLines(db, orgId, [orderId])]);
-    const items = (lines[orderId] ?? []).length ? lines[orderId].map((l) => `${l.qty} × ${l.name}`).join(', ') : `${before.quantity} × ${before.item_name}`;
-    const mail = postedEmail({ orderId, customerName: before.customer_name, business: shop?.traderName || 'us', items, tracking: t });
+    const items = (lines[orderId] ?? []).length ? lines[orderId].map((l) => `${l.qty} × ${l.name}`).join(', ') : `${row.quantity} × ${row.item_name}`;
+    const mail = postedEmail({ orderId, customerName: row.customer_name, business: shop?.traderName || 'us', items, tracking: t });
     try {
-        const via = await sendFromOwnInbox({ to: before.customer_email.replace(/[\r\n,;]/g, ''), subject: mail.subject, body: mail.text, html: mail.html }, senders ?? await defaultSenders(db, orgId));
-        if (!via) return { ok: true, emailed: null, reason: 'no_mailbox', tracking: t };
-        await db.execute(sql`UPDATE site_orders SET buyer_posted_emailed_at = now() WHERE id = ${orderId}`).catch(() => undefined);
+        const via = await sendFromOwnInbox({ to: row.customer_email.replace(/[\r\n,;]/g, ''), subject: mail.subject, body: mail.text, html: mail.html }, senders ?? await defaultSenders(db, orgId));
+        if (!via) { await release(); return { ok: true, emailed: null, reason: 'no_mailbox', tracking: t }; }
         return { ok: true, emailed: via, reason: 'sent', tracking: t };
     } catch (err) {
         console.error('[shop-orders] posted email not sent', err instanceof Error ? err.message : err);
+        await release();
         return { ok: true, emailed: null, reason: 'failed', tracking: t };
     }
 }
@@ -204,10 +212,10 @@ export function postedMessage(r: Extract<PostResult, { ok: true }>, orderId: num
     const head = `Order ${orderId} marked as posted.`;
     switch (r.reason) {
         case 'sent': return `${head} The buyer was emailed${r.tracking.number || r.tracking.url ? ' the tracking details' : ''} from your ${r.emailed === 'gmail' ? 'Gmail' : 'Outlook'}.`;
-        case 'unchanged': return `${head} The tracking didn't change, so the buyer wasn't emailed again.`;
+        case 'unchanged': return `${head} The buyer already has these tracking details, so they weren't emailed again.`;
         case 'no_email': return `${head} There's no email address for the buyer, so they weren't told.`;
-        case 'no_mailbox': return `${head} The buyer wasn't emailed: connect Gmail or Outlook in Connections and we'll send it from your own inbox next time. You can email them the tracking yourself.`;
-        default: return `${head} The email to the buyer didn't go: your inbox refused it. You can email them the tracking yourself.`;
+        case 'no_mailbox': return `${head} The buyer wasn't emailed: connect Gmail or Outlook in Connections, then press "Save tracking" on the order to send it from your own inbox. Or email them the tracking yourself.`;
+        default: return `${head} The email to the buyer didn't go: your inbox refused it. Press "Save tracking" on the order to try again, or email them the tracking yourself.`;
     }
 }
 
