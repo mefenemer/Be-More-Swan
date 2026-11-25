@@ -138,7 +138,7 @@ async function dueOrders(db: Db, now: Date): Promise<Candidate[]> {
         .from(siteOrders)
         .innerJoin(reviewSettings, eq(reviewSettings.organisationId, siteOrders.organisationId))
         .where(and(
-            eq(reviewSettings.askAfterOrders, true), isNotNull(reviewSettings.enabledAt), inArray(siteOrders.status, ['paid', 'done']), isNotNull(siteOrders.customerEmail),
+            eq(reviewSettings.askAfterOrders, true), isNotNull(reviewSettings.enabledAt), inArray(siteOrders.status, ['paid', 'posted', 'done']), isNotNull(siteOrders.customerEmail),
             sql`${siteOrders.createdAt} <= ${now.toISOString()}::timestamp - make_interval(days => ${reviewSettings.orderDelayDays})`,
             gte(siteOrders.createdAt, sql`${reviewSettings.enabledAt}`),
             gt(siteOrders.createdAt, new Date(now.getTime() - (REVIEW_REQUEST_RULES.lookbackDays + 30) * 86_400_000)),

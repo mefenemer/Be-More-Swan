@@ -172,10 +172,47 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    was oversold. Shopkeeper Shop tab ▸ **Stock** card and chat card `product_stock` → one action (`shop.ts
    product_stock`), any member (like Business Information ▸ Products). Tests: `tests/shop-stock.test.ts`.
    *Not in this slice:* low-stock / back-in-stock drafts (Phase 2), stock per option (with options).
-2. Product options + product pages — next.
-3. Basket + UK delivery rates (`weight_band`, zone `uk`).
-4. Order statuses (posted + tracking email), CSV export.
-5. Shop page for a business with no Be More Swan website.
+2. **Product pages — built 2026-11-25** (PR #868): `/shop/<id>-<name>` (`site-product-page.ts`, `renderSiteProduct`),
+   only while a products section offers the product; old names 301; in the sitemap; Stripe Cancel returns there.
+3. **Options — built 2026-11-25** (`feat/shop-options`): `product_options` (db/z-shop-options.sql, raw SQL in
+   `shop-options.ts`; mirrored in schema.ts only for the data export). One group per product; each option its own
+   price (or the product's) and stock. A product with options is bought by option only: its card says "Choose
+   size" and links to its page, where each option has its own Buy button. Checkout charges the option's price,
+   names the order "Product — Option" and takes the option's stock. Shop tab Options editor + chat card
+   `product_options` → `shop.ts product_options`. Tests: `tests/shop-options.test.ts`.
+4. **Basket — built 2026-11-25** (`feat/shop-basket`): Shopkeeper workspaces only (decision 5). Carried in the address as
+   `?b=<id>` (the sites host passes no cookies and allows posts only to /_form, /_buy, /_book), so every action posts to
+   `/_buy` with `_a` = add / set / remove / checkout. `site_baskets` + `site_order_lines` (db/z-shop-basket.sql, raw SQL in
+   `shop-basket.ts`). Every line priced again from Business Information; one Stripe Checkout for the lot; the snapshot of
+   what was charged is kept per Stripe session; the paid order gets its lines, each line's stock is taken, the basket is
+   emptied; both emails list the items. A page carrying `?b=` keeps it in links and is never shared-cached; /basket is
+   never cached or indexed. Week-old baskets swept daily. Tests: `tests/shop-basket.test.ts`.
+5. **UK delivery rates — built 2026-11-25** (`feat/shop-delivery`): basket checkouts (Shopkeeper workspaces). Up to 5
+   choices buyers pick on Stripe's page: the business's own rates, each optionally free over an order total, plus
+   "Collect in person". **Flat per order in this first version — no weight bands yet** (add `weight_band` per product
+   later if sellers ask). Stored as `shop_settings.delivery = { zones: { uk: … } }` so EU/US zones add without a
+   reshape (Phase 3); the paid order records `delivery_name` / `delivery_amount` (db/z-shop-delivery.sql, raw SQL in
+   `shop-delivery.ts`). Shown on the basket page and the Delivery & returns page before paying. Shop tab Delivery card +
+   chat card `delivery_rates` → `shop.ts delivery_rates` (owner/admin). Tests: `tests/shop-delivery.test.ts`.
+6. **Order statuses + CSV — built 2026-11-25** (`feat/shop-orders`): New → **Posted** (optional tracking number and/or
+   link) → Dealt with; refunded (from Stripe) never changes; "Mark as new" goes back to Posted if it was posted.
+   Posting emails the buyer "on its way" **from the owner's own Gmail or Outlook** (owner rule 2026-11-17: never a
+   Be More Swan sender for a customer's email); with neither connected the order is still posted and the owner is told
+   the buyer wasn't emailed. Same tracking again = no second email. `site_orders.posted_at` / `tracking_number` /
+   `tracking_url` / `buyer_posted_emailed_at` and 'posted' in the status CHECK (db/z-shop-orders.sql, raw SQL in
+   `shop-orders.ts`; "manual" to the pipeline only because it widens the CHECK). **Download CSV** of every order
+   (owner/admin; formula cells made plain text). Shop tab buttons + chat card `order_update` → `shop.ts order_update`.
+   Also: the Delivery & returns page hides pound delivery choices when nothing is priced in pounds. Tests:
+   `tests/shop-orders.test.ts`.
+7. **Shop page — built 2026-11-25** (`feat/shop-page`): for a business with no Be More Swan website. An ordinary
+   hosted site OWNED BY THE SHOPKEEPER (`sites.ai_assistant_id`), drawn by the same renderer: one page with the name,
+   brand colours, every product (not service) with a fixed price in products sections of 12 (up to 48), and how to
+   reach them about an order (`src/utils/shop-page.ts`). Product pages, basket, checkout, Delivery & returns (now with a
+   short "Your details" privacy paragraph) and the sitemap come with it. Address `<name>.bemoreswan.site`; **own domain
+   not in this slice**. Offered only while no OTHER site of theirs is published. Shop tab "Shop page" card: Publish /
+   Update / Take offline (owner/admin, a click only, the same safety check as a website's Publish) and each product's
+   link to copy for posts and an Instagram bio. The chat reads where it stands and gives the links; never a chat card.
+   Archiving the Shopkeeper takes it offline (site-offline.ts). No SQL. Tests: `tests/shop-page.test.ts`.
 
 ## 7. Costs and fees model
 

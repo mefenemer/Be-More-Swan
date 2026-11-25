@@ -96,6 +96,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),
+    ...group('on_request', 'Shop product options: each product\'s sizes or colours, their prices and stock (shop-options.ts), when the shop is in use', ['product_options']),
     ...group('on_request', 'Team Chat notes addressed to the Mentor', ['team_messages']),
     ...group('on_request', 'Its own chat history with this user (never other assistants\' — §2.8)', ['chat_sessions']),
 
@@ -129,7 +130,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'user_organisations', 'login_events', 'team_reads',
     ], 'Your team members\' email addresses and logins'),
     ...group('never', 'Billing and payment internals', [
-        'invoices', 'payments', 'stripe_disputes', 'site_orders', 'shop_settings', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
+        'invoices', 'payments', 'stripe_disputes', 'site_orders', 'site_order_lines', 'site_baskets', 'shop_settings', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
     ], 'Card details and payments'),
     ...group('never', 'What Be More Swan records about the customer, and compliance records', [
         'dpa_acceptances', 'legal_holds', 'beta_endings', 'platform_reviews', 'risk_assessments', 'security_audits', 'agent_anomalies',

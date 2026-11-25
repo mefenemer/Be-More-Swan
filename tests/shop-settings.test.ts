@@ -130,7 +130,7 @@ check('a live products section links Delivery & returns under the Buy buttons; t
 check('site-serve serves /delivery-returns from the settings, and 404s until they are complete', () => {
     const serve = read('netlify/functions/site-serve.ts');
     assert.ok(serve.includes('if (path === SHOP_TERMS_PATH && !definition.pages.some('));
-    assert.ok(serve.includes("renderSiteShell(definition, ctx, 'Delivery & returns', shopTermsHtml(shop!))"));
+    assert.ok(serve.includes("renderSiteShell(definition, ctx, 'Delivery & returns', shopTermsHtml(shop!, "));
 });
 
 console.log('\nAfter paying');
@@ -148,9 +148,10 @@ check('the buyer email: order, total, delivery, how to cancel, the page link and
 check('recordPaidCheckout stores the payment and emails the buyer; a refund is matched back by it', () => {
     const shopTs = read('src/utils/site-shop.ts');
     assert.ok(shopTs.includes('paymentIntentId: typeof session.payment_intent'));
-    assert.ok(shopTs.includes('await sendBuyerConfirmation(db, order, site, total)'));
+    assert.ok(shopTs.includes('await sendBuyerConfirmation(db, order, site, total, orderLines, delivery)'));
     assert.ok(shopTs.includes("...(refunded >= order.amountTotal && order.amountTotal > 0 ? { status: 'refunded' } : {})"));
-    assert.ok(shopTs.includes("ne(siteOrders.status, 'refunded')"), 'Mark as done never hides a refund');
+    // Mark as done / new: shop-orders.ts setOrderDone (FR#35 order statuses), which never touches a refunded order.
+    assert.ok(shopTs.includes('return !!(await setOrderDone(db, orgId, orderId, done, siteId));') && read('src/utils/shop-orders.ts').includes("AND status <> 'refunded'"), 'Mark as done never hides a refund');
     const hook = read('netlify/functions/stripe-connect-webhook.ts');
     assert.ok(hook.includes("evt.type === 'charge.refunded'") && hook.includes('await recordRefund(db, evt.account'));
 });

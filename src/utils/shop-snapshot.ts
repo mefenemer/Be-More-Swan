@@ -13,6 +13,10 @@ import { connectAccountFor } from './site-shop';
 import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText } from './shop-settings';
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
+import { loadProductOptions, optionsWords, type ProductOptions } from './shop-options';
+import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
+import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop-page';
+import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -25,19 +29,41 @@ export interface ShopSnapshotInput {
     orders: { id: number; itemName: string; quantity: number; amountTotal: number; currency: string; customerName: string | null; status: string; refundedAmount: number; createdAt: Date }[];
     /** Stock (Phase 1, shop-stock.ts). Absent = not read. */
     stock?: { ready: boolean; items: StockItem[] };
+    /** Options by product id (Phase 1, shop-options.ts). */
+    options?: Record<number, ProductOptions>;
+    /** UK delivery choices (Phase 1, shop-delivery.ts); undefined = not read. */
+    delivery?: DeliverySetup | null;
+    /** Posted orders' tracking (shop-orders.ts), by order id; postingOn = db/z-shop-orders.sql is on this database. */
+    posting?: Record<number, OrderPosting>;
+    postingOn?: boolean;
+    /** The shop page for a business with no website (shop-page.ts). */
+    shopPage?: ShopPageState | null;
+}
+
+/** Pure: the DELIVERY line (what buyers choose from at checkout). */
+export function deliverySnapshotLines(delivery: ShopSnapshotInput['delivery']): string[] {
+    if (delivery === undefined) return [];
+    return ['', hasDelivery(delivery)
+        ? `DELIVERY CHOICES (buyers pick one at checkout; basket orders only): ${deliveryWords(delivery)}.`
+        : 'DELIVERY CHOICES: none set — basket checkouts charge no delivery. Offer the delivery_rates card when they tell you how they deliver and what it costs.'];
 }
 
 /** How many products the stock list carries into the prompt. */
 export const SNAPSHOT_STOCK = 40;
 
 /** Pure: the STOCK lines (with each product's id, for the product_stock card). */
-export function stockSnapshotLines(stock: ShopSnapshotInput['stock']): string[] {
+export function stockSnapshotLines(stock: ShopSnapshotInput['stock'], options: ShopSnapshotInput['options'] = {}): string[] {
     if (!stock) return [];
     if (!stock.ready) return ['', 'STOCK: stock levels are not switched on yet. Do not offer the product_stock card; say it is coming shortly.'];
     if (!stock.items.length) return ['', 'STOCK: no products can be bought online yet (a product needs a fixed price in Business Information ▸ Products & Services).'];
     const shown = stock.items.slice(0, SNAPSHOT_STOCK);
     const out = ['', `STOCK (products that can be bought online, with the productId the product_stock card needs${stock.items.length > shown.length ? `; first ${shown.length} of ${stock.items.length}` : ''}):`];
-    for (const it of shown) out.push(`- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}`);
+    for (const it of shown) {
+        const po = options?.[it.id];
+        out.push(po?.options.length
+            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option; product_stock does not apply): ${optionsWords(po, it.pence ?? null, it.currency)}`
+            : `- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}; no options`);
+    }
     return out;
 }
 
@@ -87,21 +113,24 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         ? `- So: the shop can NOT take orders yet. Steps left (${left.length}): ${left.join('; ')}. Nothing else is required.`
         : '- So: the shop CAN take orders now. Nothing is left to set up.');
     lines.push(`- Optional, never a step left to do: phone, VAT number, extra terms, the days to cancel (${s?.returnsDays ?? 14} set; 14 is the legal minimum) and the things that can't be returned for a change of mind.`);
-    lines.push(...stockSnapshotLines(input.stock));
+    lines.push(...stockSnapshotLines(input.stock, input.options));
+    lines.push(...deliverySnapshotLines(input.delivery));
+    lines.push(...shopPageSnapshotLines(input.shopPage));
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
         const fresh = input.orders.filter((o) => o.status === 'paid').length;
-        lines.push('', `ORDERS (newest ${input.orders.length}; ${fresh} not yet marked as dealt with):`);
+        lines.push('', `ORDERS (newest ${input.orders.length}; ${fresh} NEW, not yet posted or dealt with):`);
         for (const o of input.orders) {
-            const state = o.status === 'refunded' ? 'refunded' : o.refundedAmount > 0 ? `part refunded (${formatMoney(o.refundedAmount, o.currency)})` : o.status === 'done' ? 'dealt with' : 'NEW';
+            const state = orderStateWords(o, input.posting?.[o.id]);
             lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}`);
         }
+        if (input.postingOn === false) lines.push('- Marking orders as posted isn\'t switched on yet: don\'t offer the order_update card with status "posted".');
     }
     return lines.join('\n');
 }
 
-export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> {
+export async function buildShopSnapshot(db: Db, orgId: number, assistantId: number | null = null): Promise<string> {
     const [acct, shop, orders, stock] = await Promise.all([
         connectAccountFor(db, orgId),
         loadShopSettings(db, orgId),
@@ -111,5 +140,9 @@ export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> 
         }).from(siteOrders).where(eq(siteOrders.organisationId, orgId)).orderBy(desc(siteOrders.createdAt)).limit(SNAPSHOT_ORDERS),
         loadStockList(db, orgId).catch(() => undefined),
     ]);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock });
+    const options = stock?.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {};
+    const delivery = await loadDelivery(db, orgId);
+    const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
+    const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage });
 }

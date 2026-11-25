@@ -184,7 +184,7 @@ export function cancellationFormHtml(s: ShopSettings): string {
 }
 
 /** The whole Delivery & returns page body (site-serve.ts draws it in the site's own shell). */
-export function shopTermsHtml(s: ShopSettings): string {
+export function shopTermsHtml(s: ShopSettings, deliveryChoices: string | null = null): string {
     const postage = s.returnPostage === 'seller'
         ? 'We pay the cost of sending the goods back to us.'
         : 'You pay the cost of sending the goods back to us.';
@@ -194,7 +194,7 @@ export function shopTermsHtml(s: ShopSettings): string {
     return '<section><div class="w n">'
         + '<h1>Delivery &amp; returns</h1>'
         + `<h2>Who you're buying from</h2>${traderBlockHtml(s)}`
-        + `<h2>Delivery</h2>${para(s.deliveryText || '')}<p>We deliver to addresses in the United Kingdom. Any delivery charge is shown before you pay.</p>`
+        + `<h2>Delivery</h2>${para(s.deliveryText || '')}${deliveryChoices ? `<p><strong>Delivery choices and costs:</strong> ${esc(deliveryChoices)}.</p>` : ''}<p>We deliver to addresses in the United Kingdom. Any delivery charge is shown before you pay.</p>`
         + `<h2>Your right to cancel</h2><p>You can cancel your order within ${s.returnsDays} days of the day you (or someone you name) receive the goods, without giving any reason. If your order arrives in several parts, the time runs from the day the last part arrives.</p>`
         + `<p>To cancel, tell us clearly — by email to <a href="mailto:${esc(s.contactEmail || '')}">${esc(s.contactEmail || '')}</a>, or by post to the address above. You can use the form below, but you don't have to.</p>`
         + `<p>Send the goods back within 14 days of telling us. ${postage}</p>`
@@ -203,6 +203,8 @@ export function shopTermsHtml(s: ShopSettings): string {
         + '<h2>Faulty items</h2><p>If an item is faulty, not as described or not fit for purpose, you can reject it for a full refund within 30 days of receiving it. After that you can ask for a repair or replacement, or a refund if that doesn\'t work. These are your rights under the Consumer Rights Act 2015, and nothing here takes them away.</p>'
         + (s.extraTerms ? `<h2>Other terms</h2>${para(s.extraTerms)}` : '')
         + '<h2>Payment</h2><p>Payments are taken securely by Stripe on our behalf. We never see your card details.</p>'
+        // Privacy wording for the buyer (online shop Phase 1: a shop page has no other page that says it).
+        + '<h2>Your details</h2><p>We use the name, email address and delivery address you give at checkout only to send your order, to contact you about it, and to keep the records the law asks us to keep.</p>'
         + `<h2>Cancellation form</h2><p>Copy this into an email or letter if you'd like to use it.</p>${cancellationFormHtml(s)}`
         + '</div></section>';
 }

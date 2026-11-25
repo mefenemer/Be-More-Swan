@@ -1508,12 +1508,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           : o.refundedAmount > 0 ? `<span class="text-xs font-bold text-gray-600">· ${esc(money(o.refundedAmount, o.currency))} refunded</span>` : '';
         return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''} ${refundNote}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : o.status === 'posted' ? '<span class="text-xs font-bold text-gray-700">· Posted</span>' : ''} ${refundNote}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
-          ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
+          ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'done' ? '0' : '1'}"`, o.status === 'done' ? 'Mark as new' : 'Mark as dealt with')}</div>`}
         </li>`;
       }).join('')}</ul>
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-orders-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);

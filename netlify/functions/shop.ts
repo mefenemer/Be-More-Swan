@@ -10,9 +10,20 @@
 //   payments_connect → Stripe's onboarding link for the workspace's Standard account (owner/admin)
 //   payments_refresh → re-read the account from Stripe (back from onboarding)
 //   order_done       { id, done }  → mark an order dealt with (or new again); a refund stays a refund
+//   order_update     { id, status: 'posted'|'done'|'new', trackingNumber?, trackingUrl? } → the Shop tab's "Mark as
+//                    posted" and the chat's order_update card; posted emails the buyer from the owner's own inbox
+//   orders_csv       → { filename, csv } every order (the newest 5000), for the Shop tab's "Download CSV"
+//   shop_page_publish { slug } → write and publish the shop page for a business with no website (owner/admin;
+//                    also "Update shop page"); shop_page_offline → take it offline (shop-page.ts). A click only.
 //   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
 //                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
 //                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
+//   delivery_rates   { rates: [{ name, price, freeOver?, days? }], collect: { on, note? } } → REPLACE the UK delivery
+//                    choices (owner/admin, like the Delivery & returns details); the Shop tab's Delivery card and
+//                    the chat's delivery_rates card send exactly this (shop-delivery.ts, Phase 1)
+//   product_options  { productId, group, options: [{ id?, label, price?, stock? }] } → REPLACE a product's
+//                    options (any member); an empty list removes them. The Shop tab's Options editor and
+//                    the chat's product_options card send exactly this (shop-options.ts, Phase 1)
 //
 // assistantId must be THIS workspace's Shopkeeper. shop_settings also accepts the Website Assistant, so
 // one chat card (disruptive-ui-registry.js `shop_settings`) saves through one path for both roles.
@@ -28,6 +39,16 @@ import { connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshCon
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
+import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
+import { loadOrderLines } from '../../src/utils/shop-basket';
+import { loadOrderPosting, markOrderPosted, ordersCsv, ordersPostingOn, postedMessage } from '../../src/utils/shop-orders';
+import { publishShopPage, shopPageOffline, shopPageState } from '../../src/utils/shop-page';
+import { shopStepsLeft } from '../../src/utils/shop-snapshot';
+import { enforcePromptModeration } from '../../src/utils/moderation';
+import { cleanSiteSlugInput, siteCacheTag, siteOrigin, siteVisibleText } from '../../src/utils/site-hosting';
+import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
+import { purgeCache } from '@netlify/functions';
+import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -35,6 +56,13 @@ function json(statusCode: number, body: unknown) {
 
 /** Orders shown on the tab: the newest 200 is plenty for a micro seller (plan §8, decision 1). */
 export const SHOP_ORDER_LIMIT = 200;
+
+/** Clear a site's cached pages so the shop page shows at once (as sites.ts does). Never fails the action. */
+async function purgeSitePages(slug: string | null | undefined): Promise<void> {
+    if (!slug) return;
+    try { await purgeCache({ tags: [siteCacheTag(slug)] }); }
+    catch (err) { console.error('[shop] cache purge failed (the change shows within a minute)', err instanceof Error ? err.message : err); }
+}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -52,7 +80,7 @@ export default withLambda(async (event) => {
     const id = Number(body.assistantId);
     if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'assistantId required.' });
     const roles = action === 'shop_settings' ? [SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY] : [SHOPKEEPER_ROLE_KEY];
-    const [assistant] = await db.select({ id: aiAssistants.id }).from(aiAssistants).where(and(
+    const [assistant] = await db.select({ id: aiAssistants.id, archivedAt: aiAssistants.archivedAt, lifecycleStatus: aiAssistants.lifecycleStatus }).from(aiAssistants).where(and(
         eq(aiAssistants.id, id), eq(aiAssistants.organisationId, orgId),
         sql`(${aiAssistants.configuration} ->> 'type') IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})`,
     )).limit(1);
@@ -79,7 +107,18 @@ export default withLambda(async (event) => {
             payments: { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: canEdit },
             shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
             orders, stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
-            stock, canEdit, warnings,
+            stock, options: stock.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {},
+            // A basket order's items (shop-basket.ts), by order id.
+            orderLines: orders.length ? await loadOrderLines(db, orgId, orders.map((o) => o.id)) : {},
+            // UK delivery choices (shop-delivery.ts) and the one each order chose.
+            delivery: await loadDelivery(db, orgId),
+            orderDelivery: orders.length ? await loadOrderDelivery(db, orgId, orders.map((o) => o.id)) : {},
+            // Posted orders' tracking (shop-orders.ts); postingOn = db/z-shop-orders.sql has reached this database.
+            orderPosting: orders.length ? await loadOrderPosting(db, orgId, orders.map((o) => o.id)) : {},
+            postingOn: await ordersPostingOn(db),
+            // The shop page for a business with no Be More Swan website (shop-page.ts).
+            shopPage: await shopPageState(db, orgId, assistant.id).catch((err) => { console.error('[shop] shop page read failed', err instanceof Error ? err.message : err); return null; }),
+            canEdit, warnings,
         };
     }
 
@@ -121,6 +160,57 @@ export default withLambda(async (event) => {
         return json(200, await view());
     }
 
+    if (action === 'order_update') {
+        const orderId = Number(body.id);
+        if (body.status === 'posted') {
+            const r = await markOrderPosted(db, orgId, orderId, { trackingNumber: body.trackingNumber, trackingUrl: body.trackingUrl });
+            if (!r.ok) return json(r.status, { error: r.error });
+            return json(200, await view([postedMessage(r, orderId)]));
+        }
+        if (body.status !== 'done' && body.status !== 'new') return json(400, { error: 'Choose posted, done or new.' });
+        const now = await markShopOrderDone(db, orgId, orderId, body.status === 'done');
+        if (!now) return json(404, { error: 'Order not found, or it was refunded.' });
+        // Worded from where the order ended up: "new" on a posted order keeps it posted.
+        return json(200, await view([now === 'done' ? `Order ${orderId} marked as dealt with.` : now === 'posted' ? `Order ${orderId} is no longer marked as dealt with: it's back to Posted.` : `Order ${orderId} marked as new again.`]));
+    }
+
+    if (action === 'orders_csv') {
+        // Every buyer's name, email and address in one file: owner/admin only, like the shop's other settings.
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can download the orders.' });
+        return json(200, await ordersCsv(db, orgId));
+    }
+
+    if (action === 'shop_page_publish') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can publish the shop page.' });
+        // An archived Shopkeeper's page is taken offline (site-offline.ts); it can't go live again (review #884).
+        if (assistant.archivedAt || assistant.lifecycleStatus === 'archived') return json(409, { error: 'This Shopkeeper is archived. Reinstate it first to publish its shop page.' });
+        const [acct, shop] = await Promise.all([connectAccountFor(db, orgId), loadShopSettings(db, orgId)]);
+        const left = shopStepsLeft({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop });
+        if (left.length) return json(400, { error: `Get your shop ready first: ${left.join('; ')}.` });
+        const slug = cleanSiteSlugInput(body.slug);
+        const r = await publishShopPage(db, {
+            orgId, assistantId: assistant.id, userId, slug, contactEmail: shop?.contactEmail ?? null,
+            // The safety check reads every word a visitor would read, as a website's Publish does.
+            moderate: async (def) => {
+                const blocked = await enforcePromptModeration({ text: siteVisibleText(def).slice(0, 20000), userId, organisationId: orgId, source: 'site_publish' });
+                return blocked ? 'Something on the page couldn\'t be published. Check your business name, description and product names.' : null;
+            },
+        });
+        if (!r.ok) return json(r.status, { error: r.error });
+        await purgeSitePages(r.oldSlug);
+        await purgeSitePages(r.site.slug);
+        await refreshDirectoryAfterPublish(db, orgId);
+        return json(200, await view([`Your shop page is live at ${siteOrigin(r.site.slug!)}.`]));
+    }
+
+    if (action === 'shop_page_offline') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can take the shop page offline.' });
+        const slug = await shopPageOffline(db, orgId, assistant.id);
+        await purgeSitePages(slug);
+        await refreshDirectoryAfterAddressChange(db, orgId);
+        return json(200, await view(['Your shop page is offline. Nothing is deleted: "Publish shop page" puts it back.']));
+    }
+
     if (action === 'product_stock') {
         const r = await saveProductStock(db, orgId, Number(body.productId), {
             ...(Object.prototype.hasOwnProperty.call(body, 'stock') ? { stock: body.stock } : {}),
@@ -128,6 +218,20 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
+    }
+
+    if (action === 'delivery_rates') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can change the delivery choices.' });
+        const r = await saveDelivery(db, orgId, { rates: body.rates, collect: body.collect });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, await view([hasDelivery(r.value) ? `Saved. Buyers choose from: ${deliveryWords(r.value)}.` : 'Delivery choices removed: checkout charges no delivery.']));
+    }
+
+    if (action === 'product_options') {
+        const r = await saveProductOptions(db, orgId, Number(body.productId), { group: body.group, options: body.options });
+        if (!r.ok) return json(r.status, { error: r.error });
+        const n = r.value.options.length;
+        return json(200, await view([n ? `Saved ${n} option${n === 1 ? '' : 's'} (${r.value.options.map((o) => o.label).join(', ')}).` : 'Options removed: the product is bought as one item again.']));
     }
 
     return json(400, { error: `Unknown action: ${action}` });

@@ -10,13 +10,21 @@
  *    chat's shop_settings card. Buy buttons stay hidden until the required fields are filled in.
  * 3. Stock (Phase 1): how many of each product are left. Empty = not tracked; 0 = Sold out on the site.
  *    Same server action as the chat's product_stock card (shop.ts product_stock, shop-stock.ts).
- * 4. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
+ *    Options (Phase 1): under each product, one group of choices ("Size": Small / Large), each with its own
+ *    price and stock. Same server action as the chat's product_options card (shop.ts product_options).
+ * Delivery (Phase 1): up to 5 UK delivery choices buyers pick from at checkout (basket shops), each optionally
+ *    free over an order total, plus "Collect in person". Same server action as the chat's delivery_rates card.
+ * 4. Orders: every paid order in the workspace — Mark as posted (tracking number / link, emailed to the buyer from
+ *    the owner's own Gmail or Outlook), Mark as dealt with, refunds shown (made in Stripe), Download CSV
+ *    (owner/admin). Same server action as the chat's order_update card (shop.ts order_update, shop-orders.ts).
+ * 5. Shop page: for a business with no Be More Swan website — publish / update / take offline its own shop page
+ *    at <name>.bemoreswan.site (owner/admin, a click only, like a website), with each product's link to copy.
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -117,6 +125,30 @@
     sold_out: ['Sold out', 'bg-red-100 text-red-700'],
   };
 
+  const majorOf = (minor) => (minor == null ? '' : (minor / 100).toFixed(2).replace(/\.00$/, ''));
+  function optionRow(o) {
+    const v = (x) => (x == null ? '' : esc(x));
+    return `<div class="flex flex-wrap items-end gap-2 mt-2" data-opt-row data-opt-id="${o && o.id ? esc(o.id) : ''}">
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Option</span><input type="text" maxlength="60" data-opt-label value="${v(o && o.label)}" placeholder="e.g. Large" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Price</span><input type="text" inputmode="decimal" data-opt-price value="${v(o ? majorOf(o.priceAmount) : '')}" placeholder="Same" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">In stock</span><input type="number" min="0" max="100000" step="1" data-opt-stock value="${v(o && o.stock)}" placeholder="Not tracked" class="${inputCls} mt-1" style="max-width:7rem"></label>
+      ${btn('data-opt-remove aria-label="Remove this option"', 'Remove')}
+    </div>`;
+  }
+  /** The Options editor under a product: one group name and its rows; saving replaces the list. */
+  function optionsEditor(it, po) {
+    const list = po ? po.options : [];
+    const summary = po ? `${esc(po.group)}: ${list.map((o) => esc(o.label) + (o.stock === 0 ? ' (sold out)' : '')).join(', ')}` : 'No options. Add sizes, colours or other choices, each with its own price and stock.';
+    return `<details class="mt-2" data-opt-editor="${esc(it.id)}" ${state.optOpen === it.id ? 'open' : ''}>
+      <summary class="cursor-pointer text-xs font-bold text-gray-700 underline">Options</summary>
+      <p class="text-xs text-gray-500 mt-1">${summary}</p>
+      <label class="block text-[11px] font-bold text-gray-600 mt-2">The choice<input type="text" maxlength="40" data-opt-group value="${esc(po ? po.group : 'Size')}" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      <div data-opt-rows>${list.map(optionRow).join('')}</div>
+      <p class="text-xs text-gray-500 mt-2">Leave a price empty to use the product's price (${esc(it.price)}). With options, buyers choose one on the product's page and stock is kept per option.</p>
+      <div class="flex flex-wrap gap-2 mt-2">${btn('data-opt-add', '+ Add option')}${btn(`data-opt-save="${esc(it.id)}"`, 'Save options', true)}</div>
+    </details>`;
+  }
+
   /** Stock: one row per product that can be bought online (a fixed price in Business Information). */
   function stockCard(d) {
     const st = d.stock || { ready: false, items: [] };
@@ -128,40 +160,124 @@
       <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid.</p>
       <ul class="space-y-2 mt-3">${st.items.map((it) => {
         const [label, cls] = STOCK_PILL[it.state] || STOCK_PILL.untracked;
+        const po = (d.options || {})[it.id];
         return `<li class="border border-gray-200 rounded-lg p-3" data-stock-row="${esc(it.id)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-xs font-bold text-gray-900">${esc(it.name)} <span class="font-normal text-gray-500">· ${esc(it.price)}</span></p>
-            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>
+            ${po ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">Stock per option</span>' : `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>`}
           </div>
-          <div class="flex flex-wrap items-end gap-3 mt-2">
+          ${po ? '' : `<div class="flex flex-wrap items-end gap-3 mt-2">
             ${num('data-stock-count', it.stock, 'In stock')}
             ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
             ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
-          </div>
+          </div>`}
+          ${optionsEditor(it, po)}
         </li>`;
       }).join('')}</ul>
       ${state.stockSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.stockSaved)}</p>` : ''}
       ${state.stockError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.stockError)}</p>` : ''}`);
   }
 
+  const poundsOf = (p) => (p == null ? '' : (p / 100).toFixed(2).replace(/\.00$/, ''));
+  function deliveryRow(r) {
+    const v = (x) => (x == null ? '' : esc(x));
+    return `<div class="flex flex-wrap items-end gap-2 mt-2" data-del-row>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Name</span><input type="text" maxlength="50" data-del-name value="${v(r && r.name)}" placeholder="e.g. Royal Mail Tracked 48" class="${inputCls} mt-1" style="max-width:14rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Price (£)</span><input type="text" inputmode="decimal" data-del-price value="${v(r ? poundsOf(r.price) : '')}" placeholder="3.95" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">Free over (£)</span><input type="text" inputmode="decimal" data-del-free value="${v(r ? poundsOf(r.freeOver) : '')}" placeholder="Never" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600"><span class="block">How long</span><input type="text" maxlength="40" data-del-days value="${v(r && r.days)}" placeholder="2–3 working days" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      ${btn('data-del-remove aria-label="Remove this delivery choice"', 'Remove')}
+    </div>`;
+  }
+  /** Delivery: the UK choices buyers pick from on Stripe's page (basket checkouts). Saving replaces the list. */
+  function deliveryCard(d) {
+    const s = d.delivery || { rates: [], collect: { on: false, note: null } };
+    const canEdit = !!d.canEdit;
+    return card(`<p class="text-sm font-black text-gray-900">Delivery</p>
+      <p class="text-xs text-gray-500 mt-1">The choices buyers pick from when they check out their basket, with the cost added before they pay. UK addresses only for now, priced in pounds (a basket priced in another currency checks out without them). Up to 5 choices in all.</p>
+      <div data-del-rows>${s.rates.map(deliveryRow).join('')}</div>
+      <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-del-collect ${s.collect.on ? 'checked' : ''} ${canEdit ? '' : 'disabled'} class="mt-0.5"> Buyers can collect in person (free)</label>
+      <label class="block text-[11px] font-bold text-gray-600 mt-1"><span class="block">Where and when to collect (optional)</span><input type="text" maxlength="120" data-del-collect-note value="${esc(s.collect.note || '')}" placeholder="e.g. 12 Mill Lane, Tue–Sat 10–4" class="${inputCls} mt-1"></label>
+      ${canEdit ? `<div class="flex flex-wrap gap-2 mt-3">${btn('data-del-add', '+ Add delivery choice')}${btn('data-del-save', 'Save delivery', true)}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change these.</p>'}
+      ${state.deliverySaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.deliverySaved)}</p>` : ''}
+      ${state.deliveryError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.deliveryError)}</p>` : ''}`);
+  }
+
+  /** "Mark as posted" (or "Change tracking" once posted): tracking number and link, both optional. */
+  function postForm(o, posted) {
+    const open = state.postOpen === Number(o.id);
+    // After a failed save, what they typed (not the saved values) — an error never wipes it.
+    const draft = state.postDraft && state.postDraft.id === Number(o.id) ? state.postDraft : null;
+    const num = draft ? draft.number : (posted && posted.trackingNumber) || '';
+    const link = draft ? draft.url : (posted && posted.trackingUrl) || '';
+    return `<details class="w-full sm:w-auto" data-post-form="${esc(o.id)}"${open ? ' open' : ''}>
+      <summary class="list-none cursor-pointer btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center" style="min-height:44px">${posted ? 'Change tracking' : 'Mark as posted'}</summary>
+      <div class="mt-2 p-3 border border-gray-200 rounded-lg bg-gray-50 space-y-2">
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking number (optional)</span><input type="text" maxlength="60" data-post-number value="${esc(num)}" placeholder="e.g. AB123456789GB" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600"><span class="block">Tracking link (optional)</span><input type="url" maxlength="500" data-post-url value="${esc(link)}" placeholder="https://www.royalmail.com/track-your-item" class="${inputCls} mt-1"></label>
+        <p class="text-[11px] text-gray-500">${o.customerEmail ? 'We email the buyer that it\'s on its way, from your own Gmail or Outlook.' : 'There\'s no email for this buyer, so they won\'t be told.'}</p>
+        ${btn(`data-post-save="${esc(o.id)}"`, posted ? 'Save tracking' : 'Mark as posted', true)}
+      </div>
+    </details>`;
+  }
+
+  /** The shop page for a business with no website (shop-page.ts). */
+  function shopPageCard(d) {
+    const p = d.shopPage;
+    if (!p) return '';
+    const head = '<p class="text-sm font-black text-gray-900">Shop page</p>';
+    const notes = `${state.pageSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.pageSaved)}</p>` : ''}${state.pageError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.pageError)}</p>` : ''}`;
+    if (p.state === 'website') {
+      return card(`${head}<p class="text-xs text-gray-600 mt-1">Your products sell on your website, <a class="underline" href="${esc(p.websiteUrl)}" target="_blank" rel="noopener">${esc(p.websiteUrl)}</a>, so a separate shop page isn't needed.</p>`);
+    }
+    const ready = !steps(d).some((x) => !x.done);
+    const address = `<label class="block text-[11px] font-bold text-gray-600 mt-3"><span class="block">Its address</span>
+        <span class="flex items-center gap-1 mt-1"><input type="text" maxlength="40" data-page-slug value="${esc(p.slug || p.suggestedSlug || '')}" class="${inputCls}" autocomplete="off" spellcheck="false"><span class="text-xs text-gray-600 whitespace-nowrap">.${esc(p.domain)}</span></span></label>`;
+    if (p.state === 'live') {
+      return card(`${head}
+        <p class="text-xs text-gray-600 mt-1">✓ Live at <a class="underline font-semibold" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>. Buyers can add things to a basket and pay with Stripe.</p>
+        ${p.productLinks.length ? `<p class="text-xs font-bold text-gray-800 mt-3">Each product's link — for posts and your Instagram bio</p>
+        <ul class="mt-1 space-y-1">${p.productLinks.map((l) => `<li class="flex flex-wrap items-center gap-2 text-xs"><span class="font-semibold text-gray-900">${esc(l.name)}</span><a class="underline text-gray-600 break-all" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a><button type="button" data-page-copy="${esc(l.url)}" class="btn-secondary border px-2 py-1 text-[11px] font-bold rounded-lg">Copy</button></li>`).join('')}</ul>` : ''}
+        ${p.notYetOn ? `<p class="text-xs font-semibold text-amber-800 mt-2" data-page-not-yet>${esc(p.notYetOn)} product${p.notYetOn === 1 ? ' isn\'t' : 's aren\'t'} on your shop page yet. Press "Update shop page" to add ${p.notYetOn === 1 ? 'it' : 'them'}.</p>` : ''}
+        ${d.canEdit ? `${address}<p class="text-[11px] text-gray-500 mt-1">Added or changed a product, your logo or colours? Update it to show them.</p>
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-page-publish', 'Update shop page', true)}${btn('data-page-offline', 'Take offline')}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change it.</p>'}
+        ${notes}`);
+    }
+    return card(`${head}
+      <p class="text-xs text-gray-600 mt-1">No website? Publish a shop page of your own: your name and colours, every product with a fixed price, a basket and Stripe checkout, and your Delivery &amp; returns page. Each product gets a link you can share in posts and your Instagram bio.${p.state === 'offline' ? ' It is offline now.' : ''}</p>
+      ${!ready ? '<p class="text-xs font-semibold text-amber-800 mt-2">Finish the steps at the top first.</p>' : ''}
+      ${d.canEdit ? `${address}<div class="flex flex-wrap gap-2 mt-3">${btn(`data-page-publish${ready ? '' : ' disabled'}`, 'Publish shop page', true)}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can publish it.</p>'}
+      ${notes}`);
+  }
+
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
     const shown = list.slice(0, state.shown);
-    return card(`<p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
+    return card(`<div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
+      ${d.canEdit ? btn('data-shop-csv', 'Download CSV') : ''}</div>
+      ${state.ordersSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.ordersSaved)}</p>` : ''}
+      ${state.ordersError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.ordersError)}</p>` : ''}
       <ul class="space-y-2 mt-3">${shown.map((o) => {
         const a = o.shippingAddress && o.shippingAddress.address;
         const addr = a ? [o.shippingAddress.name, a.line1, a.line2, a.city, a.postal_code].filter(Boolean).join(', ') : '';
+        const posted = (d.orderPosting || {})[o.id];
         const refundNote = o.status === 'refunded' ? '<span class="text-xs font-bold text-gray-600">· Refunded</span>'
           : o.refundedAmount > 0 ? `<span class="text-xs font-bold text-gray-600">· ${esc(money(o.refundedAmount, o.currency))} refunded</span>` : '';
-        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${o.status === 'done' ? 'opacity-80' : ''}">
+        return `<li class="border ${o.status === 'paid' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${o.status === 'done' ? 'opacity-80' : ''}" data-order-row="${esc(o.id)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : ''} ${refundNote}</p>
+            <p class="text-xs font-bold text-gray-900">${esc(o.quantity)} × ${esc(o.itemName)} · ${esc(money(o.amountTotal, o.currency))} ${o.status === 'paid' ? '<span class="text-xs font-bold text-emerald-800">· New</span>' : o.status === 'posted' ? '<span class="text-xs font-bold text-indigo-800">· Posted</span>' : ''} ${refundNote}</p>
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
+          ${((d.orderLines || {})[o.id] || []).length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5" data-order-lines>${d.orderLines[o.id].map((l) => `<li>${esc(l.qty)} × ${esc(l.name)} · ${esc(money(l.unit * l.qty, o.currency))}</li>`).join('')}</ul>` : ''}
+          ${((d.orderDelivery || {})[o.id]) ? `<p class="text-xs text-gray-600 mt-1" data-order-delivery>Delivery: ${esc(d.orderDelivery[o.id].name || 'chosen at checkout')}${d.orderDelivery[o.id].amount != null ? ` · ${esc(d.orderDelivery[o.id].amount === 0 ? 'free' : money(d.orderDelivery[o.id].amount, o.currency))}` : ''}</p>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
-          ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'paid' ? '1' : '0'}"`, o.status === 'paid' ? 'Mark as dealt with' : 'Mark as new')}</div>`}
+          ${posted ? `<p class="text-xs text-gray-600 mt-1" data-order-tracking>Posted ${esc(new Date(posted.postedAt).toLocaleDateString('en-GB', { dateStyle: 'medium' }))}${posted.trackingNumber ? ` · tracking ${esc(posted.trackingNumber)}` : ''}${posted.trackingUrl ? ` · <a class="underline" href="${esc(posted.trackingUrl)}" target="_blank" rel="noopener">track it</a>` : ''}${posted.buyerToldAt ? ' · buyer emailed' : ''}</p>` : ''}
+          ${o.status === 'refunded' ? '' : `<div class="flex flex-wrap items-start gap-2 mt-2">
+            ${d.postingOn && o.status !== 'done' ? postForm(o, posted) : ''}
+            ${btn(`data-shop-order="${esc(o.id)}" data-done="${o.status === 'done' ? '0' : '1'}"`, o.status === 'done' ? 'Mark as new' : 'Mark as dealt with')}
+          </div>`}
         </li>`;
       }).join('')}</ul>
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-shop-more', `Show more (${list.length - shown.length})`)}</div>` : ''}
@@ -172,7 +288,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${stockCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -224,6 +340,45 @@
       render();
       return;
     }
+    if (t('[data-opt-editor] > summary')) { const ed = t('[data-opt-editor]'); state.optOpen = ed.open ? null : Number(ed.dataset.optEditor); return; }
+    if (t('[data-opt-add]')) { const ed = t('[data-opt-editor]'); ed.querySelector('[data-opt-rows]').insertAdjacentHTML('beforeend', optionRow(null)); return; }
+    if (t('[data-opt-remove]')) { t('[data-opt-row]').remove(); return; }
+    const optSave = t('[data-opt-save]');
+    if (optSave) {
+      const ed = optSave.closest('[data-opt-editor]');
+      const options = [...ed.querySelectorAll('[data-opt-row]')].map((row) => ({
+        ...(row.dataset.optId ? { id: Number(row.dataset.optId) } : {}),
+        label: row.querySelector('[data-opt-label]').value,
+        price: row.querySelector('[data-opt-price]').value,
+        stock: row.querySelector('[data-opt-stock]').value,
+      })).filter((o) => o.id || o.label.trim() || o.price.trim() || o.stock.trim());
+      state.stockSaved = null; state.stockError = null; optSave.disabled = true;
+      state.optOpen = Number(optSave.dataset.optSave);
+      try {
+        state.data = await post({ action: 'product_options', productId: Number(optSave.dataset.optSave), group: ed.querySelector('[data-opt-group]').value, options });
+        state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
+      } catch (err) { state.stockError = err.message; }
+      render();
+      return;
+    }
+    if (t('[data-del-add]')) { document.querySelector('[data-del-rows]').insertAdjacentHTML('beforeend', deliveryRow(null)); return; }
+    if (t('[data-del-remove]')) { t('[data-del-row]').remove(); return; }
+    const delSave = t('[data-del-save]');
+    if (delSave) {
+      const root = delSave.closest('.rounded-2xl') || document;
+      const rates = [...root.querySelectorAll('[data-del-row]')].map((row) => ({
+        name: row.querySelector('[data-del-name]').value, price: row.querySelector('[data-del-price]').value,
+        freeOver: row.querySelector('[data-del-free]').value, days: row.querySelector('[data-del-days]').value,
+      })).filter((r) => r.name.trim() || r.price.trim() || r.freeOver.trim() || r.days.trim());
+      const collect = { on: !!root.querySelector('[data-del-collect]').checked, note: root.querySelector('[data-del-collect-note]').value };
+      state.deliverySaved = null; state.deliveryError = null; delSave.disabled = true;
+      try {
+        state.data = await post({ action: 'delivery_rates', rates, collect });
+        state.deliverySaved = (state.data.warnings || [])[0] || 'Saved.';
+      } catch (err) { state.deliveryError = err.message; }
+      render();
+      return;
+    }
     const stockSave = t('[data-stock-save]');
     if (stockSave) {
       const row = stockSave.closest('[data-stock-row]');
@@ -248,6 +403,64 @@
       } catch (err) { state.paymentsError = err.message; render(); }
       return;
     }
+    if (t('[data-post-form] > summary')) { const f = t('[data-post-form]'); state.postOpen = f.open ? null : Number(f.dataset.postForm); return; }
+    const postSave = t('[data-post-save]');
+    if (postSave) {
+      const f = postSave.closest('[data-post-form]');
+      const id = Number(postSave.dataset.postSave);
+      state.ordersSaved = null; state.ordersError = null; postSave.disabled = true; state.postOpen = id;
+      const typed = { id, number: f.querySelector('[data-post-number]').value, url: f.querySelector('[data-post-url]').value };
+      try {
+        state.data = await post({ action: 'order_update', id, status: 'posted', trackingNumber: typed.number, trackingUrl: typed.url });
+        state.ordersSaved = (state.data.warnings || [])[0] || 'Saved.';
+        state.postOpen = null; state.postDraft = null;
+      } catch (err) { state.ordersError = err.message; state.postDraft = typed; }
+      render();
+      return;
+    }
+    const pagePublish = t('[data-page-publish]');
+    if (pagePublish) {
+      const input = document.querySelector('[data-page-slug]');
+      state.pageSaved = null; state.pageError = null; pagePublish.disabled = true;
+      try {
+        state.data = await post({ action: 'shop_page_publish', slug: input ? input.value : '' });
+        state.pageSaved = (state.data.warnings || [])[0] || 'Published.';
+      } catch (err) { state.pageError = err.message; }
+      render();
+      return;
+    }
+    const pageOff = t('[data-page-offline]');
+    if (pageOff) {
+      const sure = window.confirmModal ? await window.confirmModal('Take your shop page offline? Buyers won\'t be able to open it or its product links until you publish it again.', { title: 'Take shop page offline', confirmLabel: 'Take offline', tone: 'destructive' }) : true;
+      if (!sure) return;
+      state.pageSaved = null; state.pageError = null; pageOff.disabled = true;
+      try {
+        state.data = await post({ action: 'shop_page_offline' });
+        state.pageSaved = (state.data.warnings || [])[0] || 'Offline.';
+      } catch (err) { state.pageError = err.message; }
+      render();
+      return;
+    }
+    const copy = t('[data-page-copy]');
+    if (copy) {
+      try { await navigator.clipboard.writeText(copy.dataset.pageCopy); copy.textContent = 'Copied'; }
+      catch { copy.textContent = 'Copy failed'; }
+      return;
+    }
+    const csv = t('[data-shop-csv]');
+    if (csv) {
+      state.ordersError = null; csv.disabled = true;
+      try {
+        const r = await post({ action: 'orders_csv' });
+        const url = URL.createObjectURL(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = r.filename || 'orders.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        csv.disabled = false;
+      } catch (err) { state.ordersError = err.message; render(); }
+      return;
+    }
     const order = t('[data-shop-order]');
     if (order) {
       order.disabled = true;
@@ -263,12 +476,12 @@
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.assistantName = assistantName || '';
-    state.shown = 20; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
+    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.postDraft = null; state.pageSaved = null; state.pageError = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     // Bound once, on the document (the tab is re-rendered; never bind from render).
     if (!state.bound) { document.addEventListener('click', onClick); state.bound = true; }
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard, shopPageCard } };
 })();

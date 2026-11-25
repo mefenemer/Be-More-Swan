@@ -634,7 +634,7 @@
     "overview": [
       "The Shopkeeper Assistant gets your shop ready to take money and keeps your orders in one place. Connect your own Stripe account and buyers pay you directly: Be More Swan takes no fee on your sales, ever. Stripe charges its usual card fees.",
       "Before anyone can pay, UK law says they must see who they are buying from, a real address, how and when you deliver and their right to cancel. Tell the Shopkeeper in your own words and it puts those details on a card for you to check and save. Buy buttons stay hidden until they are in place, so you can't take money without them.",
-      "Buyers buy through the Buy buttons on a website made with the Website Assistant. Every paid order lands on the Shop tab and in your email, and you can ask the Shopkeeper in chat whether you're ready to sell or what has come in."
+      "Buyers buy on a website made with the Website Assistant, or, with no website, on a shop page of your own at its own address. Every paid order lands on the Shop tab and in your email. Mark it as posted and the buyer gets their tracking details from your own Gmail or Outlook. You can ask the Shopkeeper in chat whether you're ready to sell or what has come in."
     ],
     "highlights": [
       "0% fee on your sales",
@@ -696,7 +696,7 @@
       },
       {
         "q": "Do I need a website?",
-        "a": "Buyers buy through Buy buttons on your products on a website made with the Website Assistant, so you'll want one of those to sell. You can connect Stripe and fill in your Delivery & returns details before your website is ready."
+        "a": "No. If you have a website made with the Website Assistant, your products sell there. If not, publish a shop page of your own from the Shop tab: your name and colours, every product with a fixed price, a basket and Stripe checkout, and your Delivery & returns page, at its own address. Each product gets a link you can share in posts and your Instagram bio."
       },
       {
         "q": "Can it refund an order?",
@@ -708,7 +708,7 @@
       },
       {
         "q": "Can buyers put several things in a basket?",
-        "a": "Not yet. Each Buy button sells one product, and delivery rates aren't there yet either. Stock levels are: set how many you have on the Shop tab or in the chat, and your website shows Sold out at 0. The Shopkeeper will tell you plainly what it can't do."
+        "a": "Yes. With the Shopkeeper, your Buy buttons become Add to basket: buyers add several things, change quantities, and pay once on Stripe. You set the UK delivery choices (with free delivery over an amount, or collection), and buyers pick one before they pay. Stock levels and options (sizes, colours) are there too: your website shows Sold out at 0. The Shopkeeper will tell you plainly what it can't do."
       },
       {
         "q": "Is this legal advice?",

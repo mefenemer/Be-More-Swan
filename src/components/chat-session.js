@@ -2413,6 +2413,54 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A product_options card — shop.ts product_options, the Shop tab Options editor's same save (shop-options.ts).
+    function onProductOptions(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'product_options', assistantId, ...(d.change || {}) }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // A delivery_rates card — shop.ts delivery_rates, the Shop tab Delivery card's same save (shop-delivery.ts).
+    function onDeliveryRates(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'delivery_rates', assistantId, ...(d.change || {}) }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // An order_update card — shop.ts order_update, the Shop tab's Mark as posted / dealt with same save (shop-orders.ts).
+    function onOrderUpdate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'order_update', assistantId, ...(d.change || {}) }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2814,6 +2862,9 @@
     container.addEventListener('site:importProducts', onSiteImportProducts);
     container.addEventListener('site:shopSettings', onShopSettings);
     container.addEventListener('shop:productStock', onProductStock);
+    container.addEventListener('shop:productOptions', onProductOptions);
+    container.addEventListener('shop:deliveryRates', onDeliveryRates);
+    container.addEventListener('shop:orderUpdate', onOrderUpdate);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -2947,6 +2998,9 @@
         container.removeEventListener('site:importProducts', onSiteImportProducts);
         container.removeEventListener('site:shopSettings', onShopSettings);
         container.removeEventListener('shop:productStock', onProductStock);
+        container.removeEventListener('shop:productOptions', onProductOptions);
+        container.removeEventListener('shop:deliveryRates', onDeliveryRates);
+        container.removeEventListener('shop:orderUpdate', onOrderUpdate);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

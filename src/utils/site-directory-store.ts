@@ -13,6 +13,7 @@
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, organisations, orgProducts, siteDirectories, siteDomains, sites } from '../../db/schema';
+import { websiteSiteFirst } from './shop-page';
 import { CRAWLERS } from '../lib/robots';
 import { resolveBaseUrl } from './base-url';
 import { safeFetchText } from './safe-fetch';
@@ -130,8 +131,10 @@ async function hostedOrigin(db: Db, site: SiteRow): Promise<string | null> {
 
 /** A published hosted site wins (plan D2); else the website address in Business Information; else none. */
 export async function resolveDirectorySource(db: Db, organisationId: number): Promise<DirectorySource | null> {
-    const [site] = await db.select().from(sites)
-        .where(and(eq(sites.organisationId, organisationId), eq(sites.status, 'published'))).limit(1);
+    // A website wins over a Shopkeeper's shop page when both are live (shop-page.ts websiteSiteFirst).
+    const [row] = await db.select({ site: sites }).from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId))
+        .where(and(eq(sites.organisationId, organisationId), eq(sites.status, 'published'))).orderBy(websiteSiteFirst).limit(1);
+    const site = row?.site;
     if (site && site.publishedVersion != null) {
         const origin = await hostedOrigin(db, site);
         if (origin) return { kind: 'hosted', site, origin };
