@@ -17,6 +17,7 @@
 import { and, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, sites } from '../../db/schema';
+import { websiteSiteFirst } from './shop-page';
 import { normaliseSiteDefinition, type BookingSectionKind, type SiteDefinition } from './site-definition';
 import { BOOKING_PAGE_PATH, esc } from './site-render';
 import { loadBookingSetup, resourcesForKind, type BookingSetup } from './bookings';
@@ -154,7 +155,8 @@ async function findBookingLink(db: Db, orgId: number, now: Date): Promise<string
     const rows = await db.select({ id: sites.id, slug: sites.slug, status: sites.status, draft: sites.draft })
         .from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId))
         .where(and(eq(sites.organisationId, orgId), isNotNull(sites.slug), ne(sites.status, 'suspended'), isNull(aiAssistants.archivedAt)))
-        .orderBy(desc(sites.publishedAt), desc(sites.id)).limit(5);
+        .orderBy(websiteSiteFirst, desc(sites.publishedAt), desc(sites.id)).limit(5);
+    // A website wins over a Shopkeeper's shop page (shop-page.ts websiteSiteFirst), then the newest published.
     const site = rows.find((r) => r.status === 'published') ?? rows[0];
     if (!site?.slug) return null;
     if (bookingsSwitchedOff(normaliseSiteDefinition(site.draft, { maxPages: 1000 }).definition)) return null;

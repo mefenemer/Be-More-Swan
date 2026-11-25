@@ -186,10 +186,12 @@ export async function markOrderPosted(db: Db, orgId: number, orderId: number, in
     }
     if (!row.customer_email) return { ok: true, emailed: null, reason: 'no_email', tracking: t };
     // Claim the email: only one save gets a row back; none when this tracking was already sent.
-    const claimed = asRows<{ id: number }>(await db.execute(sql`
-        UPDATE site_orders SET buyer_posted_emailed_at = now() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id`));
+    const claimed = asRows<{ id: number; at: string }>(await db.execute(sql`
+        UPDATE site_orders SET buyer_posted_emailed_at = clock_timestamp() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id, buyer_posted_emailed_at::text AS at`));
     if (!claimed.length) return { ok: true, emailed: null, reason: 'unchanged', tracking: t };
-    const release = () => db.execute(sql`UPDATE site_orders SET buyer_posted_emailed_at = NULL WHERE id = ${orderId}`).catch(() => undefined);
+    // Undo only OUR claim: another save may have claimed (and sent) since a new tracking cleared it (review #883).
+    const at = claimed[0].at;
+    const release = () => db.execute(sql`UPDATE site_orders SET buyer_posted_emailed_at = NULL WHERE id = ${orderId} AND buyer_posted_emailed_at::text = ${at}`).catch(() => undefined);
 
     const { loadShopSettings } = await import('./shop-settings');
     const { loadOrderLines } = await import('./shop-basket');

@@ -11,6 +11,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, siteAuditCheckWork, siteAuditFixes, siteAuditItemChecks, siteAudits, sites } from '../../db/schema';
 import { resolveSiteHost } from './site-domains';
+import { WEBSITE_ASSISTANT_ROLE_KEY } from '../constants/roles';
 import { failAuditRun, requestAuditRun } from './site-audit';
 import { isCheckWorkTableMissing } from './site-audit-check-work';
 import { postTeamMessage } from './team-messages';
@@ -27,7 +28,9 @@ export async function websiteHelperFor(db: Db, orgId: number, auditUrl: string):
         if (!resolved?.slug) return null;
         const [row] = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(sites)
             .innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId))
-            .where(and(eq(sites.slug, resolved.slug), eq(sites.organisationId, orgId), eq(sites.status, 'published'), working))
+            // A Website Assistant's site only: a Shopkeeper's shop page (shop-page.ts) has no editor to fix things in.
+            .where(and(eq(sites.slug, resolved.slug), eq(sites.organisationId, orgId), eq(sites.status, 'published'), working,
+                sql`(${aiAssistants.configuration} ->> 'type') = ${WEBSITE_ASSISTANT_ROLE_KEY}`))
             .limit(1);
         return row ?? null;
     } catch (err) {

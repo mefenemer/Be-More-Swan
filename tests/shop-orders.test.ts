@@ -39,6 +39,7 @@ const notConnected = () => new IntegrationError('not_connected', 'not connected'
 function fakeDb(o: { columns: boolean; order?: Record<string, unknown> | null }) {
     const exec: string[] = [];
     const row = o.order ? { ...o.order } : null;
+    let claims = 0;
     const db = {
         execute: async (q: unknown) => {
             const t = sqlText(q); exec.push(t);
@@ -54,8 +55,8 @@ function fakeDb(o: { columns: boolean; order?: Record<string, unknown> | null })
                 return [row];
             }
             if (t.includes('SELECT status FROM site_orders')) return row ? [{ status: row.status }] : [];
-            if (t.includes('buyer_posted_emailed_at = now()')) { if (!row || row.buyer_posted_emailed_at) return []; row.buyer_posted_emailed_at = 'now'; return [{ id: 7 }]; }
-            if (t.includes('buyer_posted_emailed_at = NULL')) { if (row) row.buyer_posted_emailed_at = null; return []; }
+            if (t.includes('buyer_posted_emailed_at = clock_timestamp()')) { if (!row || row.buyer_posted_emailed_at) return []; row.buyer_posted_emailed_at = `claim-${++claims}`; return [{ id: 7, at: row.buyer_posted_emailed_at }]; }
+            if (t.includes('buyer_posted_emailed_at = NULL')) { if (row && t.includes(JSON.stringify(row.buyer_posted_emailed_at))) row.buyer_posted_emailed_at = null; return []; }
             if (t.includes('UPDATE site_orders SET status =')) return [{ id: 7, status: t.includes("'done'") ? 'done' : t.includes('CASE WHEN posted_at') ? 'posted' : 'paid' }];
             return [];
         },
@@ -109,7 +110,7 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         assert.strictEqual(sent[0].to, 'sam@example.com');
         assert.ok(sent[0].subject.includes('on its way') && sent[0].body.includes('AB123456789GB') && sent[0].html!.includes('https://www.royalmail.com/track-your-item'));
         assert.ok(sent[0].body.includes('2 × Mug'));
-        assert.ok(exec.some((t) => t.includes('buyer_posted_emailed_at = now()')));
+        assert.ok(exec.some((t) => t.includes('buyer_posted_emailed_at = clock_timestamp()')));
         assert.ok(/from your Gmail/.test(postedMessage(r as Extract<typeof r, { ok: true }>, 7)));
     });
 
@@ -160,7 +161,23 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         const [a, b] = await Promise.all([markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB5' }, senders), markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB5' }, senders)]);
         assert.strictEqual(n, 1);
         assert.deepStrictEqual([a, b].map((r) => r.ok && r.reason).sort(), ['sent', 'unchanged']);
-        assert.ok(read('src/utils/shop-orders.ts').includes('SET buyer_posted_emailed_at = now() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id'));
+        assert.ok(read('src/utils/shop-orders.ts').includes('SET buyer_posted_emailed_at = clock_timestamp() WHERE id = ${orderId} AND buyer_posted_emailed_at IS NULL RETURNING id'));
+    });
+
+    await check('review #883 note: a failed save undoes only its own claim, never another save\'s "emailed" mark', async () => {
+        const f = fakeDb({ columns: true, order: ORDER });
+        let releaseLate: () => void = () => undefined;
+        const slow: MailSenders = { gmail: () => new Promise((_, rej) => { releaseLate = () => rej(new Error('refused')); }), outlook: async () => undefined };
+        const a = markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB7' }, slow);
+        await new Promise((r) => setTimeout(r, 5));
+        // Meanwhile a second save with NEW tracking clears the mark, claims it again and sends.
+        const b = await markOrderPosted(f.db, 1, 7, { trackingNumber: 'AB8' }, { gmail: async () => undefined, outlook: async () => undefined });
+        assert.ok(b.ok && b.reason === 'sent');
+        const held = f.row!.buyer_posted_emailed_at;
+        releaseLate();
+        const ra = await a;
+        assert.ok(ra.ok && ra.reason === 'failed');
+        assert.strictEqual(f.row!.buyer_posted_emailed_at, held, 'B\'s mark survives A\'s failure');
     });
 
     await check('refunded, unknown, bad tracking, no buyer email', async () => {
