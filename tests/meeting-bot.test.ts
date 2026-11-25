@@ -129,6 +129,28 @@ await test('a normal call: joining → waiting room → in the call → ended �
     assert.equal(r.minutes, 30);
 });
 
+await test('per-workspace block (review of #867): every way in checks meetingBotAvailable = on AND not on the block list', () => {
+    const db = read('src/utils/meeting-bot-db.ts');
+    const fn = db.slice(db.indexOf('export async function meetingBotAvailable'), db.indexOf('export async function hasAcceptedBotTerms'));
+    assert.match(fn, /isFeatureEnabled\(organisationId, MEETING_BOT_FLAG\), isFeatureEnabled\(organisationId, MEETING_BOT_BLOCK_FLAG\)/);
+    assert.match(fn, /return on && !blocked;/);
+    assert.match(fn, /catch \{\s*return false;/, 'fails closed');
+    assert.match(read('src/utils/meeting-bot.ts'), /export const MEETING_BOT_BLOCK_FLAG = 'meeting_bot_blocked';/);
+    for (const f of ['src/utils/meeting-bot-db.ts', 'src/utils/chat-meeting-bot.ts', 'netlify/functions/meeting-bots.ts']) {
+        const src = read(f);
+        assert.ok(src.includes('meetingBotAvailable('), `${f} uses the block-aware check`);
+        assert.ok(!/isFeatureEnabled\([^)]*MEETING_BOT_FLAG\)/.test(src.replace(fn, '')), `${f}: no bare meeting_bot check left`);
+    }
+    const sql = read('db/z-meeting-bot-blocked-flag.sql');
+    assert.match(sql, /VALUES \('meeting_bot_blocked', FALSE, 0, NULL,/);
+    assert.match(sql, /ON CONFLICT \(key\) DO NOTHING;/);
+});
+
+await test('a flagged meeting transcript is never stored, not even a 200-character excerpt ("we do not keep the transcript")', () => {
+    assert.match(read('src/utils/moderation.ts'), /promptExcerpt: opts\.source === 'meeting_pickup' \? null : \(opts\.prompt \|\| ''\)\.slice\(0, 200\),/);
+    assert.match(read('src/utils/meeting-pickup-db.ts'), /source: 'meeting_pickup'/);
+});
+
 await test('everyone left: the empty-call wait (ALONE_TIMEOUT_S) is not charged (owner 2026-11-22: run 5 was 3 min talk + 2 min alone)', () => {
     const alone = ALONE_TIMEOUT_S / 60;
     // Staging run 5 shape: in 05:14:35, people gone ~05:15:42, bot left 05:17:42 with timeout_exceeded_everyone_left.
@@ -490,7 +512,7 @@ await test('sendMeetingBot checks the flag, the assistant, DPA 1.2, the link and
     const fn = src.slice(src.indexOf('export async function sendMeetingBot'), src.indexOf('// ── Listing and removing'));
     const pos = (s: string) => { const i = fn.indexOf(s); assert.ok(i >= 0, `missing: ${s}`); return i; };
     const recall = pos('createRecallBot(');
-    for (const before of ['MEETING_BOT_FLAG', "roleKey !== 'meeting_note_taker'", 'hasAcceptedBotDpa(', 'cleanMeetingLink(', 'hasTaskCapacity(', 'db.insert(meetingBots)']) {
+    for (const before of ['meetingBotAvailable(', "roleKey !== 'meeting_note_taker'", 'hasAcceptedBotDpa(', 'cleanMeetingLink(', 'hasTaskCapacity(', 'db.insert(meetingBots)']) {
         assert.ok(pos(before) < recall, `${before} comes before Recall`);
     }
     assert.match(src, /export const BOT_DPA_MIN_VERSION = '1\.2';/, 'DPA 1.2 or later covers meetings the Note Taker joins');

@@ -11,6 +11,11 @@ import type { PickupPlatform } from './meeting-pickup';
 export const MEETING_BOT_FLAG = 'meeting_bot';
 /** Plan B7: Zoom joins only once our Zoom app passes Zoom's review (OBF). No row needed: absent = off. */
 export const MEETING_BOT_ZOOM_FLAG = 'meeting_bot_zoom';
+/** Per-workspace switch-OFF (review of #867: the sub-processor notice promises "we will switch the Note Taker's meeting
+ *  feature off for your workspace"). Feature flags can only ADD workspaces, so this second flag's allow-list is the
+ *  block list: a workspace in meeting_bot_blocked.allowed_workspace_ids can't send a bot even when meeting_bot is on
+ *  for everyone. db/z-meeting-bot-blocked-flag.sql. Turning the flag itself on blocks every workspace (a kill switch). */
+export const MEETING_BOT_BLOCK_FLAG = 'meeting_bot_blocked';
 
 /**
  * How the minutes writer is told a bot meeting reached it (instead of meeting-pickup.ts PICKUP_CHANNEL_BLOCK). Carries the

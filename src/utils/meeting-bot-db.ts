@@ -14,7 +14,7 @@ import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, mee
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
-    ALONE_TIMEOUT_S, BOT_STATUS_WORDS, recallCostDue, FINAL_BOT_STATUSES, WAITING_ROOM_TIMEOUT_S, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
+    ALONE_TIMEOUT_S, BOT_STATUS_WORDS, recallCostDue, FINAL_BOT_STATUSES, WAITING_ROOM_TIMEOUT_S, MEETING_BOT_BLOCK_FLAG, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, runBatchesWithinBudget, OPEN_BOT_STATUSES, SCHEDULE_AHEAD_MS, chargeUnits, cleanJoinAt, cleanLengthLimit,
     botWriteUp, cleanMeetingLink, minutesInCall, nextBotState, recallBotRequest, recallMediaExpired, recallRegionFor, replayBotState, reserveUnits,
     type BotStatePatch, type BotStatus, type BotVideoTile, type BotWriteUp, type RecallRegion,
 } from './meeting-bot';
@@ -116,6 +116,18 @@ export type SendBotResult =
 
 const fail = (status: number, code: string, error: string): SendBotResult => ({ ok: false, status, code, error });
 
+/** Can this workspace send a bot at all: meeting_bot on for it, and it isn't on the block list. Never throws. */
+export async function meetingBotAvailable(organisationId: number): Promise<boolean> {
+    try {
+        const [on, blocked] = await Promise.all([
+            isFeatureEnabled(organisationId, MEETING_BOT_FLAG), isFeatureEnabled(organisationId, MEETING_BOT_BLOCK_FLAG),
+        ]);
+        return on && !blocked;
+    } catch {
+        return false;
+    }
+}
+
 export async function hasAcceptedBotTerms(db: Db, userId: number): Promise<boolean> {
     const rows = await db.selectDistinct({ version: tosAcceptances.version }).from(tosAcceptances).where(eq(tosAcceptances.userId, userId));
     return rows.some((r) => versionAtLeast(r.version, BOT_TOS_MIN_VERSION));
@@ -145,7 +157,7 @@ async function regionFor(db: Db, organisationId: number): Promise<RecallRegion> 
 const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended')");
 
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
-    if (!(await isFeatureEnabled(i.organisationId, MEETING_BOT_FLAG))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
+    if (!(await meetingBotAvailable(i.organisationId))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
 
     const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))

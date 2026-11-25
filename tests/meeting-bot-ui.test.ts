@@ -134,7 +134,7 @@ await test('the Inbox mounts it for the Note Taker only, and the GET hides every
     assert.match(html, /id="meeting-bots-strip" class="hidden" style="display:none"/);
     assert.ok(read('workspace.html').includes('<script src="/src/components/meeting-bots.js"></script>'));
     const ep = read('netlify/functions/meeting-bots.ts');
-    assert.ok(ep.indexOf('isFeatureEnabled(organisationId, MEETING_BOT_FLAG)') < ep.indexOf('listMeetingBots(db, organisationId, assistantId)'));
+    assert.ok(ep.indexOf('await meetingBotAvailable(organisationId)') > 0 && ep.indexOf('await meetingBotAvailable(organisationId)') < ep.indexOf('listMeetingBots(db, organisationId, assistantId)'));
     assert.match(ep, /if \(!available\) return json\(200, \{ available: false, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: \[\] \}\);/);
 });
 

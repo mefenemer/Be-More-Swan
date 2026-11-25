@@ -10,7 +10,7 @@
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { hasAcceptedBotDpa, hasAcceptedBotTerms, listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
+import { hasAcceptedBotDpa, hasAcceptedBotTerms, listMeetingBots, meetingBotAvailable, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
 import { MEETING_BOT_FLAG } from '../../src/utils/meeting-bot';
 // Only this function imports the pictures (the one place a bot is sent), so no other bundle carries them: the
 // workspace's own picture is drawn here (meeting-bot-tile.ts, canvas loaded on send only), the fallback is fixed.
@@ -35,7 +35,7 @@ export default withLambda(async (event) => {
         const assistantId = Number(event.queryStringParameters?.assistantId);
         if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
         if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
-        const available = await isFeatureEnabled(organisationId, MEETING_BOT_FLAG).catch(() => false);
+        const available = await meetingBotAvailable(organisationId);
         if (!available) return json(200, { available: false, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: [] });
         try {
             const [bots, dpaAccepted, termsAccepted, costs, upcoming] = await Promise.all([

@@ -19,7 +19,7 @@ import {
     BOT_STATUS_WORDS, MEETING_BOT_FLAG, MEETING_BOT_ZOOM_FLAG, OPEN_BOT_STATUSES, cleanJoinAt, cleanMeetingLink,
     type BotStatus,
 } from './meeting-bot';
-import { hasAcceptedBotDpa } from './meeting-bot-db';
+import { hasAcceptedBotDpa, meetingBotAvailable } from './meeting-bot-db';
 import { PICKUP_PLATFORM_LABELS, type PickupPlatform } from './meeting-pickup';
 import { getTaskCosts, getUpcomingTaskCosts } from './task-costs';
 
@@ -52,7 +52,7 @@ export function formatMeetingBotsSnapshot(i: { dpaAccepted: boolean; tasksPer5Mi
 /** The block for the chat prompt, or null when the meeting_bot flag is off (or the read failed). */
 export async function buildMeetingBotsSnapshot(db: Db, organisationId: number, aiAssistantId: number): Promise<string | null> {
     try {
-        if (!(await isFeatureEnabled(organisationId, MEETING_BOT_FLAG))) return null;
+        if (!(await meetingBotAvailable(organisationId))) return null;
         const [rows, dpaAccepted, costs, zoom, upcoming] = await Promise.all([
             db.select({ id: meetingBots.id, platform: meetingBots.platform, title: meetingBots.title, joinAt: meetingBots.joinAt, status: meetingBots.status })
                 .from(meetingBots).where(and(
@@ -130,7 +130,7 @@ export async function resolveMeetingBotProposal(
         // the card on screen stays clickable, RELATIVE, so a device clock that runs fast can't expire it at once (review of #774).
         const base = { type: MEETING_BOT_PROPOSAL_TYPE, action: 'send', assistantId: aiAssistantId, meetingUrl: req.meetingUrl, title: req.title, madeAt: now.toISOString(), freshForMs: SEND_CARD_FRESH_MS };
         const block = (reason: string) => ({ ...base, joinAt: null, blocked: reason });
-        if (!(await isFeatureEnabled(organisationId, MEETING_BOT_FLAG))) return block('Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
+        if (!(await meetingBotAvailable(organisationId))) return block('Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
         const link = cleanMeetingLink(req.meetingUrl);
         if (!link.ok) return block(link.error);
         if (link.platform === 'zoom' && !(await isFeatureEnabled(organisationId, MEETING_BOT_ZOOM_FLAG).catch(() => false))) {
