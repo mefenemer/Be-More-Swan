@@ -330,7 +330,9 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         const product = (await loadSiteProducts(db, site.organisationId, definition))[pr.id];
         if (!product) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
         const canonical = productPagePath(product);
-        if (canonical !== path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' } as Record<string, string>, body: '' };
+        // Keep the query (UTM tags on a shared link), as the domain redirect above does.
+        const q = String(event.queryStringParameters?.q || '');
+        if (canonical !== path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${q ? `?${q}` : ''}`, 'Cache-Control': 'public, max-age=300' } as Record<string, string>, body: '' };
         const html = renderSiteProduct(definition, { ...ctx, canSell: await canSell(db, site.organisationId), products: { [product.id]: product } }, product);
         if (html) return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : html };
     }

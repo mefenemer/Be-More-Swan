@@ -47,7 +47,8 @@ check('only /shop/<id>(-<slug>) is a product route', () => {
     assert.deepStrictEqual(productRoute('/shop/11-house-blend-250g'), { id: 11, slug: 'house-blend-250g' });
     assert.deepStrictEqual(productRoute('/shop/11'), { id: 11, slug: '' });
     assert.deepStrictEqual(productRoute('/shop/11-old-name/'), { id: 11, slug: 'old-name' });
-    for (const no of ['/shop', '/shop/', '/shop/abc', '/shop/0', '/shop/11/x', '/shops/11', '/shop/11-UPPER']) assert.strictEqual(productRoute(no), null, no);
+    assert.deepStrictEqual(productRoute('/shop/11-House-Blend'), { id: 11, slug: 'House-Blend' }, 'capitals: matched, then 301 to the lowercase address');
+    for (const no of ['/shop', '/shop/', '/shop/abc', '/shop/0', '/shop/11/x', '/shops/11', '/shop/11-a b']) assert.strictEqual(productRoute(no), null, no);
 });
 
 check('a product has a page only while a products section on the site offers it', () => {
@@ -108,7 +109,7 @@ check('a Buy from a product page returns there; any other made-up path still fal
 check('served by site-serve: offered products only, old names 301 to the current one, sitemap included', () => {
     const serve = read('netlify/functions/site-serve.ts');
     assert.ok(serve.includes('if (pr && productSections(definition).has(pr.id))'));
-    assert.ok(serve.includes("if (canonical !== path.replace(/\\/$/, '')) return { statusCode: 301"));
+    assert.ok(serve.includes("if (canonical !== path.replace(/\\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${q ? `?${q}` : ''}`"), 'the 301 keeps the query');
     assert.ok(serve.includes('renderSiteProduct(definition, { ...ctx, canSell: await canSell(db, site.organisationId)'));
     assert.ok(serve.indexOf('const pr = productRoute(path);') < serve.indexOf('const moved = redirectFor(definition, path);'), 'before old-address redirects');
     assert.ok(serve.includes('productPaths) };'), 'sitemap gets the product pages');

@@ -22,9 +22,10 @@ export function productSlug(name: string): string {
 
 export const productPagePath = (p: { id: number; name: string }) => `${PRODUCT_PATH}/${p.id}-${productSlug(p.name)}`;
 
-/** /shop/<id> or /shop/<id>-<slug> → the id and the slug given; anything else → null. */
+/** /shop/<id> or /shop/<id>-<name> → the id and the name part given; anything else → null. Any case
+ *  and any URL-safe name is accepted: the id is the truth, and site-serve 301s to the current address. */
 export function productRoute(path: string): { id: number; slug: string } | null {
-    const m = /^\/shop\/(\d{1,9})(?:-([a-z0-9-]{1,80}))?\/?$/.exec((path || '').split(/[?#]/)[0]);
+    const m = /^\/shop\/(\d{1,9})(?:-([A-Za-z0-9._~%-]{1,160}))?\/?$/.exec((path || '').split(/[?#]/)[0]);
     if (!m) return null;
     const id = Number(m[1]);
     return id > 0 ? { id, slug: m[2] || '' } : null;
