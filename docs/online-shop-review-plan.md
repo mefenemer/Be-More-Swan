@@ -172,10 +172,17 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    was oversold. Shopkeeper Shop tab ▸ **Stock** card and chat card `product_stock` → one action (`shop.ts
    product_stock`), any member (like Business Information ▸ Products). Tests: `tests/shop-stock.test.ts`.
    *Not in this slice:* low-stock / back-in-stock drafts (Phase 2), stock per option (with options).
-2. Product options + product pages — next.
-3. Basket + UK delivery rates (`weight_band`, zone `uk`).
-4. Order statuses (posted + tracking email), CSV export.
-5. Shop page for a business with no Be More Swan website.
+2. **Product pages — built 2026-11-25** (PR #868): `/shop/<id>-<name>` (`site-product-page.ts`, `renderSiteProduct`),
+   only while a products section offers the product; old names 301; in the sitemap; Stripe Cancel returns there.
+3. **Options — built 2026-11-25** (`feat/shop-options`): `product_options` (db/z-shop-options.sql, raw SQL in
+   `shop-options.ts`; mirrored in schema.ts only for the data export). One group per product; each option its own
+   price (or the product's) and stock. A product with options is bought by option only: its card says "Choose
+   size" and links to its page, where each option has its own Buy button. Checkout charges the option's price,
+   names the order "Product — Option" and takes the option's stock. Shop tab Options editor + chat card
+   `product_options` → `shop.ts product_options`. Tests: `tests/shop-options.test.ts`.
+4. Basket + UK delivery rates (`weight_band`, zone `uk`) — next.
+5. Order statuses (posted + tracking email), CSV export.
+6. Shop page for a business with no Be More Swan website.
 
 ## 7. Costs and fees model
 

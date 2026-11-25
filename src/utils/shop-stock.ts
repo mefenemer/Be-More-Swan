@@ -110,6 +110,9 @@ export interface StockItem extends StockLevel {
     name: string;
     /** The displayed price, e.g. "£24". */
     price: string;
+    /** The same price in minor units, and its currency (options' prices default to it). */
+    pence?: number;
+    currency?: string;
     state: StockState;
 }
 
@@ -139,7 +142,7 @@ export async function loadStockList(db: Db, orgId: number): Promise<{ ready: boo
         if (pence == null) continue;
         const stock = numOrNull(r.stock);
         const lowStockAt = numOrNull(r.low_stock_at);
-        items.push({ id: Number(r.id), name: r.name, price: formatMoney(pence, r.price_currency || 'GBP'), stock, lowStockAt, state: stockState(stock, lowStockAt) });
+        items.push({ id: Number(r.id), name: r.name, price: formatMoney(pence, r.price_currency || 'GBP'), pence, currency: r.price_currency || 'GBP', stock, lowStockAt, state: stockState(stock, lowStockAt) });
     }
     return { ready, items };
 }

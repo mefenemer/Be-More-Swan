@@ -96,6 +96,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),
+    ...group('on_request', 'Shop product options: each product\'s sizes or colours, their prices and stock (shop-options.ts), when the shop is in use', ['product_options']),
     ...group('on_request', 'Team Chat notes addressed to the Mentor', ['team_messages']),
     ...group('on_request', 'Its own chat history with this user (never other assistants\' — §2.8)', ['chat_sessions']),
 

@@ -43,6 +43,8 @@ import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
 import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, STOCK_NOT_UPDATED_LINE, type StockTaken } from './shop-stock';
+import { loadProductOptions, optionItemName, optionPence, takeOptionStock, type ProductOptions } from './shop-options';
+import { productPagePath } from './site-product-page';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -148,8 +150,10 @@ export interface SiteProduct {
     /** Dietary markers and allergen words (product-dietary.ts), for a menu. */
     dietary?: unknown;
     allergens?: string | null;
-    /** Stock (shop-stock.ts): null/absent = not tracked, 0 = Sold out. */
+    /** Stock (shop-stock.ts): null/absent = not tracked, 0 = Sold out. Not used while it has options. */
     stock?: number | null;
+    /** Its options (shop-options.ts), when it has any: then it is bought by option only. */
+    options?: ProductOptions | null;
 }
 
 /** The active products a site's products sections name, keyed by id — only this workspace's. */
@@ -164,10 +168,12 @@ export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinitio
     }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
     // Stock (Phase 1): read apart, raw, so a database without the columns sells exactly as before.
     const stock = await loadStockLevels(db, orgId, rows.map((r) => r.id));
+    const options = await loadProductOptions(db, orgId, rows.map((r) => r.id));
     return Object.fromEntries(rows.map((r) => [r.id, {
         id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), currency: r.priceCurrency ?? 'GBP', imageAssetId: r.imageAssetId,
         durationMinutes: r.durationMinutes ?? null, dietary: r.dietary ?? null, allergens: r.allergens ?? null,
         stock: stock[r.id]?.stock ?? null,
+        options: options[r.id]?.options.length ? options[r.id] : null,
     }]));
 }
 
@@ -182,8 +188,9 @@ export interface BuyRequest {
     assetUrl?: (assetId: number) => string | null;
 }
 
-/** The Checkout Session parameters for one product — pure, so the money rules are testable. */
-export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; product: SiteProduct; collectAddress: boolean; backPath: string; imageUrl?: string | null; shop?: ShopSettings | null }): Stripe.Checkout.SessionCreateParams {
+/** The Checkout Session parameters for one product — pure, so the money rules are testable. For an option,
+ *  `product` is already that option's sellable form (its name, price and stock) and `optionId` names it. */
+export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: string; product: SiteProduct; collectAddress: boolean; backPath: string; imageUrl?: string | null; shop?: ShopSettings | null; optionId?: number | null }): Stripe.Checkout.SessionCreateParams {
     const { product } = req;
     // Stripe shows the picture on its checkout page: it needs a real https address.
     const picture = req.imageUrl ?? null;
@@ -214,6 +221,7 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
         metadata: {
             bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_section: req.sectionId,
             bms_product: String(product.id), bms_item_name: product.name, bms_unit: String(product.buyPence), bms_page: req.backPath,
+            ...(req.optionId ? { bms_option: String(req.optionId) } : {}),
         },
     };
 }
@@ -227,16 +235,27 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     const section = req.definition.pages.flatMap((p) => p.sections).find((s) => s.id === sectionId);
     if (!section || section.type !== 'products' || !Number.isInteger(productId) || !section.props.productIds.includes(productId)) return notForSale;
     // Name, price and picture: read from Business Information now — never from the visitor's browser.
-    const product = (await loadSiteProducts(db, req.site.organisationId, req.definition))[productId];
-    if (!product || product.buyPence === null) return notForSale;
+    const found = (await loadSiteProducts(db, req.site.organisationId, req.definition))[productId];
+    if (!found || found.buyPence === null) return notForSale;
+    const changed: BuyOutcome = { kind: 'error', status: 409, title: 'This item has changed', message: 'The details changed since you opened the page. Go back to see the current price before you buy.', backPath: back };
+    const soldOut: BuyOutcome = { kind: 'error', status: 409, title: 'Sold out', message: 'Sorry, this item has just sold out. Go back to see what else is available.', backPath: back };
+    if (String(req.body.get('_n') || '') !== found.name) return changed;
+    // A product with options is bought by option only (shop-options.ts): the option must be this
+    // product's, and it is charged at ITS price, with ITS stock.
+    let product: SiteProduct = found;
+    let optionId: number | null = null;
+    if (found.options?.options.length) {
+        const option = found.options.options.find((o) => o.id === Number(req.body.get('_o')));
+        if (!option) return { kind: 'error', status: 409, title: 'Choose an option', message: `Please choose a ${found.options.group.toLowerCase()} on the product's page first.`, backPath: productPagePath(found) };
+        const pence = optionPence(found.buyPence, option, found.currency);
+        if (pence === null) return notForSale;
+        product = { ...found, name: optionItemName(found.name, option.label), buyPence: pence, stock: option.stock, options: null };
+        optionId = option.id;
+    }
     // Sold out since the page was drawn (pages are cached for two minutes): refuse before Stripe.
-    if (product.stock != null && product.stock <= 0) {
-        return { kind: 'error', status: 409, title: 'Sold out', message: 'Sorry, this item has just sold out. Go back to see what else is available.', backPath: back };
-    }
-    // The item the visitor saw must be the item they buy.
-    if (String(req.body.get('_n') || '') !== product.name || Number(req.body.get('_v')) !== product.buyPence) {
-        return { kind: 'error', status: 409, title: 'This item has changed', message: 'The details changed since you opened the page. Go back to see the current price before you buy.', backPath: back };
-    }
+    if (product.stock != null && product.stock <= 0) return soldOut;
+    // The price the visitor saw must be the price they pay.
+    if (Number(req.body.get('_v')) !== product.buyPence) return changed;
     const account = await connectAccountFor(db, req.site.organisationId);
     const shop = await loadShopSettings(db, req.site.organisationId);
     if (!account?.chargesEnabled || !shopReady(shop)) {
@@ -252,7 +271,7 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
         const session = await (await stripeClient()).checkout.sessions.create(
             checkoutParams({
                 origin: req.origin, site: req.site, sectionId, product, collectAddress: section.props.collectAddress, backPath: back,
-                imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null, shop,
+                imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null, shop, optionId,
             }),
             { stripeAccount: account.stripeAccountId },
         );
@@ -310,7 +329,11 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     let stockFailed = false;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
+            // An option has its own stock (shop-options.ts); otherwise the product's.
+            const optionId = Number(session.metadata?.bms_option);
+            taken = Number.isInteger(optionId) && optionId > 0
+                ? await takeOptionStock(db, site.organisationId, optionId, order.quantity)
+                : await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
             stockFailed = false;
             break;
         } catch (err) {

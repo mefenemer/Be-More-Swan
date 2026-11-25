@@ -13,6 +13,9 @@
 //   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
 //                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
 //                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
+//   product_options  { productId, group, options: [{ id?, label, price?, stock? }] } → REPLACE a product's
+//                    options (any member); an empty list removes them. The Shop tab's Options editor and
+//                    the chat's product_options card send exactly this (shop-options.ts, Phase 1)
 //
 // assistantId must be THIS workspace's Shopkeeper. shop_settings also accepts the Website Assistant, so
 // one chat card (disruptive-ui-registry.js `shop_settings`) saves through one path for both roles.
@@ -28,6 +31,7 @@ import { connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshCon
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
+import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -79,7 +83,8 @@ export default withLambda(async (event) => {
             payments: { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: canEdit },
             shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
             orders, stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
-            stock, canEdit, warnings,
+            stock, options: stock.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {},
+            canEdit, warnings,
         };
     }
 
@@ -128,6 +133,13 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
+    }
+
+    if (action === 'product_options') {
+        const r = await saveProductOptions(db, orgId, Number(body.productId), { group: body.group, options: body.options });
+        if (!r.ok) return json(r.status, { error: r.error });
+        const n = r.value.options.length;
+        return json(200, await view([n ? `Saved ${n} option${n === 1 ? '' : 's'} (${r.value.options.map((o) => o.label).join(', ')}).` : 'Options removed: the product is bought as one item again.']));
     }
 
     return json(400, { error: `Unknown action: ${action}` });
