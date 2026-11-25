@@ -14,6 +14,7 @@ import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText 
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
 import { loadProductOptions, optionsWords, type ProductOptions } from './shop-options';
+import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -28,6 +29,16 @@ export interface ShopSnapshotInput {
     stock?: { ready: boolean; items: StockItem[] };
     /** Options by product id (Phase 1, shop-options.ts). */
     options?: Record<number, ProductOptions>;
+    /** UK delivery choices (Phase 1, shop-delivery.ts); undefined = not read. */
+    delivery?: DeliverySetup | null;
+}
+
+/** Pure: the DELIVERY line (what buyers choose from at checkout). */
+export function deliverySnapshotLines(delivery: ShopSnapshotInput['delivery']): string[] {
+    if (delivery === undefined) return [];
+    return ['', hasDelivery(delivery)
+        ? `DELIVERY CHOICES (buyers pick one at checkout; basket orders only): ${deliveryWords(delivery)}.`
+        : 'DELIVERY CHOICES: none set — basket checkouts charge no delivery. Offer the delivery_rates card when they tell you how they deliver and what it costs.'];
 }
 
 /** How many products the stock list carries into the prompt. */
@@ -96,6 +107,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         : '- So: the shop CAN take orders now. Nothing is left to set up.');
     lines.push(`- Optional, never a step left to do: phone, VAT number, extra terms, the days to cancel (${s?.returnsDays ?? 14} set; 14 is the legal minimum) and the things that can't be returned for a change of mind.`);
     lines.push(...stockSnapshotLines(input.stock, input.options));
+    lines.push(...deliverySnapshotLines(input.delivery));
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
@@ -120,5 +132,6 @@ export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> 
         loadStockList(db, orgId).catch(() => undefined),
     ]);
     const options = stock?.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {};
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options });
+    const delivery = await loadDelivery(db, orgId);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery });
 }

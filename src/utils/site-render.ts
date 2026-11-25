@@ -1079,7 +1079,7 @@ ${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
     });
 }
 
-export interface BasketPageView { id: string | null; lines: PricedLine[]; dropped: string[]; canSell: boolean; continuePath: string }
+export interface BasketPageView { id: string | null; lines: PricedLine[]; dropped: string[]; canSell: boolean; continuePath: string; /** shop-delivery.ts deliveryWords, when rates are set. */ delivery?: string | null }
 
 /**
  * /basket?b=<id> — the buyer's basket (shop-basket.ts): every line priced from Business Information again,
@@ -1112,6 +1112,7 @@ export function renderSiteBasket(def: SiteDefinition, ctx: RenderContext, v: Bas
             : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<button class="btn" type="submit">Check out</button></form>`;
         body = `<h1>Your basket</h1>${notes}<ul class="opts basket">${rows}</ul>
 <p class="price"><strong>Total: ${esc(formatMoney(basketTotal(v.lines), currency))}</strong></p>
+${v.delivery ? `<p data-basket-delivery><strong>Delivery:</strong> ${esc(v.delivery)}. You choose on the next page; the cost is added there before you pay.</p>` : ''}
 <p class="fine">Delivery and your right to cancel are on our <a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a> page. You pay securely on Stripe's page.</p>
 ${checkout}
 <p><a href="${esc(href(v.continuePath))}">← Continue shopping</a></p>`;

@@ -197,6 +197,7 @@ export const GENERATED_CHAT_MANIFEST = {
             "offersOwnCards": true,
             "maxTokens": 1200,
             "cards": [
+                "delivery_rates",
                 "product_options",
                 "product_stock",
                 "shop_settings"
@@ -402,6 +403,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "class_sessions",
         "comment_action_proposal",
         "data_diff_view",
+        "delivery_rates",
         "design_edit",
         "design_started",
         "discovery_campaign_proposal",

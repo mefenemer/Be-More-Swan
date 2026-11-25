@@ -13,6 +13,9 @@
 //   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
 //                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
 //                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
+//   delivery_rates   { rates: [{ name, price, freeOver?, days? }], collect: { on, note? } } → REPLACE the UK delivery
+//                    choices (owner/admin, like the Delivery & returns details); the Shop tab's Delivery card and
+//                    the chat's delivery_rates card send exactly this (shop-delivery.ts, Phase 1)
 //   product_options  { productId, group, options: [{ id?, label, price?, stock? }] } → REPLACE a product's
 //                    options (any member); an empty list removes them. The Shop tab's Options editor and
 //                    the chat's product_options card send exactly this (shop-options.ts, Phase 1)
@@ -33,6 +36,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
 import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
 import { loadOrderLines } from '../../src/utils/shop-basket';
+import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -87,6 +91,9 @@ export default withLambda(async (event) => {
             stock, options: stock.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {},
             // A basket order's items (shop-basket.ts), by order id.
             orderLines: orders.length ? await loadOrderLines(db, orgId, orders.map((o) => o.id)) : {},
+            // UK delivery choices (shop-delivery.ts) and the one each order chose.
+            delivery: await loadDelivery(db, orgId),
+            orderDelivery: orders.length ? await loadOrderDelivery(db, orgId, orders.map((o) => o.id)) : {},
             canEdit, warnings,
         };
     }
@@ -136,6 +143,13 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
+    }
+
+    if (action === 'delivery_rates') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can change the delivery choices.' });
+        const r = await saveDelivery(db, orgId, { rates: body.rates, collect: body.collect });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, await view([hasDelivery(r.value) ? `Saved. Buyers choose from: ${deliveryWords(r.value)}.` : 'Delivery choices removed: checkout charges no delivery.']));
     }
 
     if (action === 'product_options') {
