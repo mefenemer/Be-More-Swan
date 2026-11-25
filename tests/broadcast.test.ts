@@ -131,6 +131,8 @@ check('Recall.ai notice (Note Taker launch 27 Nov 2026): owners, both lists, eve
     assert.ok(email.bodyHtml.includes('as soon as the minutes are written'), 'deletion matches the code and privacy/Trust');
     assert.ok(email.bodyHtml.includes('if that deletion fails, the audio and text are deleted within 3 days'), 'exact AssemblyAI wording');
     assert.ok(email.bodyHtml.includes('version 1.2'), 'the specific-authorisation basis');
+    assert.ok(email.bodyHtml.includes('On 27 November we will add Recall.ai to the list of sub-processors'), 'true if sent before the launch pages are live (review of #867)');
+    assert.ok(tpl.message.includes('US support staff'), 'the in-app copy names the US support access too (review of #867)');
     assert.doesNotMatch(email.bodyHtml + tpl.message, /saved the transcript|30 days|Zoom|within 3 days at most|\btrain/i, 'no promise the code or Recall has not confirmed');
 });
 
