@@ -702,6 +702,25 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('Any questions, just reply to this email.') + signoff,
     },
     {
+        // Courtesy notice: Recall.ai (with its sub-processor AssemblyAI) for the Note Taker meeting bot, from 27 November 2026
+        // (docs/note-taker-launch-notices-draft.md §2, fast route). DPA 1.2 names both as specifically authorised, so the
+        // copy offers a switch-off, not a 14-day objection window. Every promise matches the code: we never store the
+        // transcript; Recall's copy goes once the minutes are written, Recall's own 48-hour retention as a backstop.
+        triggerKey: 'subprocessor_recall_notice',
+        name: 'Notice: new sub-processor Recall.ai (Note Taker meetings)',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'A new sub-processor for the Note Taker: Recall.ai',
+        preheader: 'From 27 November 2026, only when you send the Note Taker to a meeting.',
+        bodyHtml: greet +
+            p('Our Data Processing Agreement promises to tell you about new sub-processors, so here it is: from 27 November 2026 we will use <strong>Recall.ai</strong> for the Note Taker\'s meeting feature.') +
+            p('<strong>What it does.</strong> When you send your Note Taker to a Google Meet or Microsoft Teams call, Recall.ai\'s bot joins the call and records it only to make the transcript, which we turn into minutes for you to approve. Recall.ai uses its own sub-processor, <strong>AssemblyAI</strong>, to turn the audio into text. AssemblyAI deletes the audio once it has made the text; if that deletion fails, the audio and text are deleted within 3 days. AssemblyAI may keep limited billing and technical log records. We delete the recording and transcript at Recall.ai as soon as the minutes are written (we do not keep the transcript), and Recall.ai deletes anything left after 48 hours.') +
+            p('<strong>Where.</strong> For UK and EU workspaces, recordings and transcripts are made and stored in the EU (Frankfurt); for US workspaces, in the US. Recall.ai\'s support staff in the US may access data when they need to, to support or fix the service, under the standard contractual clauses and UK Addendum in Recall.ai\'s data processing agreement.') +
+            p('<strong>Your choice.</strong> Nothing changes for your workspace unless an owner or admin accepts version 1.2 of our <a href="https://bemoreswan.com/dpa.html">Data Processing Agreement</a>, which names Recall.ai and AssemblyAI, and someone sends the Note Taker to a meeting. If you have accepted and change your mind, stop sending it, or ask us at <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a> and we will switch the Note Taker\'s meeting feature off for your workspace.') +
+            p('On 27 November we will add Recall.ai to the list of sub-processors on our <a href="https://bemoreswan.com/trust.html#sub-processors">Trust page</a> and publish version 1.2 of our <a href="https://bemoreswan.com/dpa.html">Data Processing Agreement</a>. Until then those pages show the current versions.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
         // A change to task costs (Admin → Money → Task costs, src/utils/task-cost-changes.ts). The figures
         // come from the change; the in-app twin shares the key. Transactional: a notice, not marketing.
         triggerKey: 'task_cost_change',
