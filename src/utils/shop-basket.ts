@@ -165,13 +165,17 @@ export function isMissingBasketTable(err: unknown): boolean {
 const asRows = <T>(r: unknown): T[] => (Array.isArray(r) ? r : ((r as { rows?: T[] })?.rows ?? [])) as T[];
 
 /** Whether this workspace sells by basket: an active, unarchived Shopkeeper, and the tables exist. */
+async function basketOnQuery(db: Db, orgId: number): Promise<boolean> {
+    const [r] = asRows<{ enabled: boolean }>(await db.execute(sql`
+        SELECT (EXISTS (SELECT 1 FROM ai_assistants WHERE organisation_id = ${orgId} AND is_active
+                         AND lifecycle_status <> 'archived' AND configuration->>'type' = 'shopkeeper')
+                AND to_regclass('public.site_baskets') IS NOT NULL) AS enabled`));
+    return !!r?.enabled;
+}
+
 export async function basketOn(db: Db, orgId: number): Promise<boolean> {
     try {
-        const [r] = asRows<{ enabled: boolean }>(await db.execute(sql`
-            SELECT (EXISTS (SELECT 1 FROM ai_assistants WHERE organisation_id = ${orgId} AND is_active
-                             AND lifecycle_status <> 'archived' AND configuration->>'type' = 'shopkeeper')
-                    AND to_regclass('public.site_baskets') IS NOT NULL) AS enabled`));
-        return !!r?.enabled;
+        return await basketOnQuery(db, orgId);
     } catch (err) {
         console.error('[shop-basket] basketOn failed', err instanceof Error ? err.message : err);
         return false;
@@ -189,7 +193,13 @@ const BASKET_ON_TTL_MS = 60_000;
 export async function basketOnCached(db: Db, orgId: number): Promise<boolean> {
     const seen = basketOnSeen.get(orgId);
     if (seen && Date.now() - seen.at < BASKET_ON_TTL_MS) return seen.on;
-    const on = await basketOn(db, orgId);
+    let on: boolean;
+    try { on = await basketOnQuery(db, orgId); }
+    catch (err) {
+        // A failed read isn't remembered (review #887): this view goes without the basket, the next one asks again.
+        console.error('[shop-basket] basketOn failed', err instanceof Error ? err.message : err);
+        return false;
+    }
     if (basketOnSeen.size > 5000) basketOnSeen.clear();
     basketOnSeen.set(orgId, { on, at: Date.now() });
     return on;

@@ -298,6 +298,13 @@ async function main() {
         assert.strictEqual(queries, 1);
         assert.strictEqual(await basketOnCached(fakeDb, 90002), true);
         assert.strictEqual(queries, 2);
+        // review #887: a failed read is not remembered.
+        let fails = 0;
+        const flaky = { execute: async () => { fails++; if (fails === 1) throw new Error('boom'); return [{ enabled: true }]; } } as unknown as Parameters<typeof basketOnCached>[0];
+        const quiet = console.error; console.error = () => {};
+        try { assert.strictEqual(await basketOnCached(flaky, 90003), false); } finally { console.error = quiet; }
+        assert.strictEqual(await basketOnCached(flaky, 90003), true);
+        assert.strictEqual(fails, 2);
         const serve = read('netlify/functions/site-serve.ts');
         assert.ok(serve.includes('hasProducts && await basketOnCached(db, site.organisationId)') && !serve.includes('basketOn('));
         assert.ok(read('src/utils/site-shop.ts').includes('if (!(await basketOn(db, orgId)))'));
