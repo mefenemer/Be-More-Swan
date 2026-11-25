@@ -10,6 +10,9 @@
 //   payments_connect → Stripe's onboarding link for the workspace's Standard account (owner/admin)
 //   payments_refresh → re-read the account from Stripe (back from onboarding)
 //   order_done       { id, done }  → mark an order dealt with (or new again); a refund stays a refund
+//   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
+//                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
+//                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
 //
 // assistantId must be THIS workspace's Shopkeeper. shop_settings also accepts the Website Assistant, so
 // one chat card (disruptive-ui-registry.js `shop_settings`) saves through one path for both roles.
@@ -24,6 +27,7 @@ import { SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/const
 import { connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -55,7 +59,7 @@ export default withLambda(async (event) => {
     if (!assistant) return json(404, { error: 'Assistant not found.' });
 
     async function view(warnings: string[] = []) {
-        const [acct, shop, orders, [counts]] = await Promise.all([
+        const [acct, shop, orders, [counts], stock] = await Promise.all([
             connectAccountFor(db, orgId),
             loadShopSettings(db, orgId),
             db.select({
@@ -69,12 +73,13 @@ export default withLambda(async (event) => {
                 takenPence30: sql<number>`coalesce(sum(${siteOrders.amountTotal} - ${siteOrders.refundedAmount}) filter (where ${siteOrders.createdAt} > now() - interval '30 days' and lower(${siteOrders.currency}) = 'gbp'), 0)::int`,
                 refunds30: sql<number>`count(*) filter (where ${siteOrders.refundedAmount} > 0 and ${siteOrders.createdAt} > now() - interval '30 days')::int`,
             }).from(siteOrders).where(eq(siteOrders.organisationId, orgId)),
+            loadStockList(db, orgId).catch((err) => { console.error('[shop] stock list failed', err instanceof Error ? err.message : err); return { ready: false, items: [] }; }),
         ]);
         return {
             payments: { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: canEdit },
             shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
             orders, stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
-            canEdit, warnings,
+            stock, canEdit, warnings,
         };
     }
 
@@ -114,6 +119,15 @@ export default withLambda(async (event) => {
     if (action === 'order_done') {
         if (!(await markShopOrderDone(db, orgId, Number(body.id), body.done !== false))) return json(404, { error: 'Order not found.' });
         return json(200, await view());
+    }
+
+    if (action === 'product_stock') {
+        const r = await saveProductStock(db, orgId, Number(body.productId), {
+            ...(Object.prototype.hasOwnProperty.call(body, 'stock') ? { stock: body.stock } : {}),
+            ...(Object.prototype.hasOwnProperty.call(body, 'lowStockAt') ? { lowStockAt: body.lowStockAt } : {}),
+        });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
     }
 
     return json(400, { error: `Unknown action: ${action}` });

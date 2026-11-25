@@ -19,6 +19,10 @@
 // shopReady): a buyer sees who they buy from and their right to cancel before paying, and gets it
 // again by email afterwards (sendBuyerConfirmation). Checkout refuses too, not just the drawing.
 //
+// ── Stock (Phase 1, FR#35) ──────────────────────────────────────────────────────────────────────
+// shop-stock.ts: a product at 0 shows "Sold out" and checkout refuses it; the quantity a buyer can
+// pick is capped at what is left; stock is taken when the order is recorded as paid.
+//
 // ── Orders ──────────────────────────────────────────────────────────────────────────────────────
 // Recorded from the Connect webhook (stripe-connect-webhook.ts → recordPaidCheckout), not from the
 // success page: a visitor who closes the tab after paying has still paid.
@@ -38,6 +42,7 @@ import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
+import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, type StockTaken } from './shop-stock';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -143,6 +148,8 @@ export interface SiteProduct {
     /** Dietary markers and allergen words (product-dietary.ts), for a menu. */
     dietary?: unknown;
     allergens?: string | null;
+    /** Stock (shop-stock.ts): null/absent = not tracked, 0 = Sold out. */
+    stock?: number | null;
 }
 
 /** The active products a site's products sections name, keyed by id — only this workspace's. */
@@ -155,9 +162,12 @@ export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinitio
         priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, imageAssetId: orgProducts.imageAssetId,
         durationMinutes: orgProducts.durationMinutes, dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
+    // Stock (Phase 1): read apart, raw, so a database without the columns sells exactly as before.
+    const stock = await loadStockLevels(db, orgId, rows.map((r) => r.id));
     return Object.fromEntries(rows.map((r) => [r.id, {
         id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), currency: r.priceCurrency ?? 'GBP', imageAssetId: r.imageAssetId,
         durationMinutes: r.durationMinutes ?? null, dietary: r.dietary ?? null, allergens: r.allergens ?? null,
+        stock: stock[r.id]?.stock ?? null,
     }]));
 }
 
@@ -177,11 +187,13 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
     const { product } = req;
     // Stripe shows the picture on its checkout page: it needs a real https address.
     const picture = req.imageUrl ?? null;
+    // Never more than are in stock (shop-stock.ts); with one left, the buyer can't change the quantity.
+    const most = maxBuyable(product.stock, MAX_QUANTITY);
     return {
         mode: 'payment',
         line_items: [{
             quantity: 1,
-            adjustable_quantity: { enabled: true, minimum: 1, maximum: MAX_QUANTITY },
+            ...(most > 1 ? { adjustable_quantity: { enabled: true, minimum: 1, maximum: most } } : {}),
             price_data: {
                 currency: (product.currency || 'GBP').toLowerCase(),
                 unit_amount: product.buyPence!,
@@ -217,6 +229,10 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     // Name, price and picture: read from Business Information now — never from the visitor's browser.
     const product = (await loadSiteProducts(db, req.site.organisationId, req.definition))[productId];
     if (!product || product.buyPence === null) return notForSale;
+    // Sold out since the page was drawn (pages are cached for two minutes): refuse before Stripe.
+    if (product.stock != null && product.stock <= 0) {
+        return { kind: 'error', status: 409, title: 'Sold out', message: 'Sorry, this item has just sold out. Go back to see what else is available.', backPath: back };
+    }
     // The item the visitor saw must be the item they buy.
     if (String(req.body.get('_n') || '') !== product.name || Number(req.body.get('_v')) !== product.buyPence) {
         return { kind: 'error', status: 409, title: 'This item has changed', message: 'The details changed since you opened the page. Go back to see the current price before you buy.', backPath: back };
@@ -287,6 +303,15 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     }).onConflictDoNothing({ target: siteOrders.checkoutSessionId }).returning();
     if (!order) return true;   // a retry of an order already recorded
 
+    // Take it from stock — once, here, because only the first delivery of this webhook inserts the order.
+    let taken: StockTaken | null = null;
+    try {
+        taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
+    } catch (err) {
+        console.error('[site-shop] stock update failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) });
+    }
+    const stockLine = stockAfterOrderLine(taken, order.quantity);
+
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
         .from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId))
         .where(eq(aiAssistants.id, site.aiAssistantId)).limit(1);
@@ -309,6 +334,7 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             html: `<p>${esc(order.customerName || 'Someone')} paid <strong>${esc(total)}</strong> for ${order.quantity} × ${esc(order.itemName)}.</p>
 ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}</p>` : ''}
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
+${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }

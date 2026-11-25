@@ -163,6 +163,20 @@ consumer-law and tax wording, non-UK legal review. Needs its own plan first.
 **Later (optional).** Digital downloads (we have private asset links from lead magnets), gift cards, Google
 Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
 
+### Phase 1 progress (built in slices, one PR each)
+
+1. **Stock — built 2026-11-25** (`feat/shop-stock`). `org_products.stock` / `low_stock_at` (db/z-shop-stock.sql,
+   additive, kept out of `db/schema.ts` so code before the SQL still works). `src/utils/shop-stock.ts`. Empty = not
+   tracked (as before); 0 = "Sold out" on the site and checkout refuses; a buyer can't pick more than are left; stock is
+   taken once when the order is recorded as paid, stops at 0, and the owner's order email says what is left or that it
+   was oversold. Shopkeeper Shop tab ▸ **Stock** card and chat card `product_stock` → one action (`shop.ts
+   product_stock`), any member (like Business Information ▸ Products). Tests: `tests/shop-stock.test.ts`.
+   *Not in this slice:* low-stock / back-in-stock drafts (Phase 2), stock per option (with options).
+2. Product options + product pages — next.
+3. Basket + UK delivery rates (`weight_band`, zone `uk`).
+4. Order statuses (posted + tracking email), CSV export.
+5. Shop page for a business with no Be More Swan website.
+
 ## 7. Costs and fees model
 
 - **Keep 0% on sales.** It is true, already public, and the clearest difference from Shopify Starter, Squarespace

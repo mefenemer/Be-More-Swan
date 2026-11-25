@@ -8,13 +8,15 @@
  * 1. Take payments: connect the business's own Stripe account (0% fee to us).
  * 2. Delivery & returns: what UK law asks a buyer to see (shop-settings.ts). Same server action as the
  *    chat's shop_settings card. Buy buttons stay hidden until the required fields are filled in.
- * 3. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
+ * 3. Stock (Phase 1): how many of each product are left. Empty = not tracked; 0 = Sold out on the site.
+ *    Same server action as the chat's product_stock card (shop.ts product_stock, shop-stock.ts).
+ * 4. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -108,6 +110,40 @@
       : `${head}${body}`, ready ? '' : 'border-amber-200');
   }
 
+  const STOCK_PILL = {
+    untracked: ['Not tracked', 'bg-gray-100 text-gray-700'],
+    in_stock: ['In stock', 'bg-emerald-100 text-emerald-800'],
+    low: ['Low', 'bg-amber-100 text-amber-800'],
+    sold_out: ['Sold out', 'bg-red-100 text-red-700'],
+  };
+
+  /** Stock: one row per product that can be bought online (a fixed price in Business Information). */
+  function stockCard(d) {
+    const st = d.stock || { ready: false, items: [] };
+    const head = '<p class="text-sm font-black text-gray-900">Stock</p>';
+    if (!st.ready) return card(`${head}<p class="text-xs text-gray-500 mt-1">Stock levels are being switched on. Until then every product can be bought, as now.</p>`);
+    if (!st.items.length) return card(`${head}<p class="text-xs text-gray-500 mt-1">No products can be bought online yet. Give a product a fixed price in <strong>Business Information ▸ Products &amp; Services</strong> and it appears here.</p>`);
+    const num = (attr, value, label) => `<label class="block text-[11px] font-bold text-gray-600">${esc(label)}<input type="number" min="0" max="100000" step="1" inputmode="numeric" ${attr} value="${value == null ? '' : esc(value)}" class="${inputCls} mt-1" style="max-width:7rem"></label>`;
+    return card(`${head}
+      <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid.</p>
+      <ul class="space-y-2 mt-3">${st.items.map((it) => {
+        const [label, cls] = STOCK_PILL[it.state] || STOCK_PILL.untracked;
+        return `<li class="border border-gray-200 rounded-lg p-3" data-stock-row="${esc(it.id)}">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs font-bold text-gray-900">${esc(it.name)} <span class="font-normal text-gray-500">· ${esc(it.price)}</span></p>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>
+          </div>
+          <div class="flex flex-wrap items-end gap-3 mt-2">
+            ${num('data-stock-count', it.stock, 'In stock')}
+            ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
+            ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
+          </div>
+        </li>`;
+      }).join('')}</ul>
+      ${state.stockSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.stockSaved)}</p>` : ''}
+      ${state.stockError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.stockError)}</p>` : ''}`);
+  }
+
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
@@ -136,7 +172,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${stockCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -188,6 +224,20 @@
       render();
       return;
     }
+    const stockSave = t('[data-stock-save]');
+    if (stockSave) {
+      const row = stockSave.closest('[data-stock-row]');
+      state.stockSaved = null; state.stockError = null; stockSave.disabled = true;
+      try {
+        state.data = await post({
+          action: 'product_stock', productId: Number(stockSave.dataset.stockSave),
+          stock: row.querySelector('[data-stock-count]').value, lowStockAt: row.querySelector('[data-stock-low]').value,
+        });
+        state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
+      } catch (err) { state.stockError = err.message; }
+      render();
+      return;
+    }
     const connect = t('[data-shop-connect]');
     if (connect) {
       state.paymentsError = null; connect.disabled = true;
@@ -213,12 +263,12 @@
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.assistantName = assistantName || '';
-    state.shown = 20; state.shopSaved = null; state.shopError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
+    state.shown = 20; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     // Bound once, on the document (the tab is re-rendered; never bind from render).
     if (!state.bound) { document.addEventListener('click', onClick); state.bound = true; }
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard } };
 })();

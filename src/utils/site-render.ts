@@ -40,7 +40,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; stock?: number | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -545,7 +545,10 @@ ${formButton(p.buttonLabel)}
             // Business Information products, in the section's order; one archived or deleted since is skipped.
             const fromCatalogue = p.productIds.map((id) => formState.products[id]).filter(Boolean).map((pr) => {
                 let buy = '';
-                if (pr.buyPence !== null) {
+                // Stock tracked and none left (shop-stock.ts): "Sold out" instead of a Buy button, in the
+                // editor's preview too, so the owner sees what buyers see.
+                if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = '<p class="price" data-sold-out><strong>Sold out</strong></p>';
+                else if (pr.buyPence !== null) {
                     if (formState.preview) buy = `<p><button class="btn" type="button" disabled>${esc(p.buyLabel)}</button></p>`;
                     else if (formState.canSell) {
                         buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}"><input type="hidden" name="_v" value="${pr.buyPence}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
@@ -790,7 +793,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
                 ...(pr.description ? { description: pr.description } : {}),
                 ...(img ? { image: img } : {}),
-                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {}),
             });
         }
     }
