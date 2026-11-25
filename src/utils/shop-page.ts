@@ -13,9 +13,9 @@
 // Shop tab (owner/admin) — like a website, never a chat card (site-store.ts: "Publish is a click only"). The
 // chat reads where it stands and hands out the product links.
 
-import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, ne, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { organisations, orgProducts, sites } from '../../db/schema';
+import { aiAssistants, organisations, orgProducts, sites, siteVersions } from '../../db/schema';
 import { normalizeBrandKit } from './brand-kit';
 import { LIMITS, normaliseSiteDefinition, type SiteDefinition } from './site-definition';
 import { themeFromBrandKit } from './site-draft';
@@ -23,6 +23,13 @@ import { siteOrigin, sitesDomain, suggestSiteSlug } from './site-hosting';
 import { productPagePath } from './site-product-page';
 
 type Db = ReturnType<typeof getDb>;
+
+/**
+ * ORDER BY this (with sites joined to ai_assistants) so a Website Assistant's site wins over a Shopkeeper's shop
+ * page: a shop page published first stays live when a website follows, and "the business's site" (the site
+ * directory, the booking link, the Stripe notice) must then mean the website (review #884).
+ */
+export const websiteSiteFirst = sql`CASE WHEN (${aiAssistants.configuration} ->> 'type') = 'website_assistant' THEN 0 ELSE 1 END`;
 
 /** Products shown on the page: four products sections of 12. */
 export const SHOP_PAGE_MAX_PRODUCTS = LIMITS.products * 4;
@@ -68,8 +75,18 @@ export interface ShopPageState {
     /** The free addresses' domain ("bemoreswan.site"), shown after the address box. */
     domain: string;
     publishedAt: Date | null;
-    /** Each product's own page, for posts and an Instagram bio (live only). */
+    /** Each product's own page, for posts and an Instagram bio (live only; only products on the published page). */
     productLinks: Array<{ id: number; name: string; url: string }>;
+    /** Products for sale now that aren't on the published page yet ("Update shop page" adds them). */
+    notYetOn: number;
+}
+
+/** The product ids the published version's products sections offer. */
+async function publishedProductIds(db: Db, siteId: number, version: number): Promise<Set<number>> {
+    const [v] = await db.select({ definition: siteVersions.definition }).from(siteVersions)
+        .where(and(eq(siteVersions.siteId, siteId), eq(siteVersions.version, version))).limit(1);
+    const pages = ((v?.definition as SiteDefinition | undefined)?.pages ?? []);
+    return new Set(pages.flatMap((p) => p.sections).flatMap((x) => (x.type === 'products' ? (x.props as { productIds: number[] }).productIds : [])));
 }
 
 /** Where the shop page stands, for the Shop tab and the chat. */
@@ -79,7 +96,12 @@ export async function shopPageState(db: Db, orgId: number, assistantId: number):
         .where(and(eq(sites.organisationId, orgId), ne(sites.aiAssistantId, assistantId), eq(sites.status, 'published'), isNotNull(sites.slug))).limit(1);
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
     const live = own?.status === 'published' && !!own.slug;
-    const products = live ? await shopPageProducts(db, orgId) : [];
+    // Links only to products ON the published page (site-serve serves /shop/<id>-<name> only for those), still
+    // for sale; ones added since are counted so the owner knows to press "Update shop page" (review #884).
+    const now = live ? await shopPageProducts(db, orgId) : [];
+    const onPage = live && own!.publishedVersion != null ? await publishedProductIds(db, own!.id, own!.publishedVersion) : new Set<number>();
+    const products = now.filter((p) => onPage.has(p.id));
+    const notYetOn = now.length - products.length;
     const url = own?.slug ? siteOrigin(own.slug) : null;
     return {
         state: live ? 'live' : other ? 'website' : own?.publishedVersion != null ? 'offline' : 'none',
@@ -88,6 +110,7 @@ export async function shopPageState(db: Db, orgId: number, assistantId: number):
         domain: sitesDomain(),
         publishedAt: own?.publishedAt ?? null,
         productLinks: live && url ? products.map((p) => ({ id: p.id, name: p.name, url: `${url}${productPagePath(p)}` })) : [],
+        notYetOn: live ? notYetOn : 0,
     };
 }
 
@@ -99,7 +122,7 @@ export function shopPageSnapshotLines(s: ShopPageState | null | undefined): stri
     if (s.state === 'offline') return ['', `SHOP PAGE: made but offline (${s.url}). "Publish shop page" on the Shop tab puts it back.`];
     return ['', `SHOP PAGE: live at ${s.url}. Product links (for posts and an Instagram bio):`,
         ...s.productLinks.slice(0, 20).map((p) => `- ${p.name}: ${p.url}`),
-        'A product added or changed since appears after "Update shop page" on the Shop tab.'];
+        s.notYetOn ? `- ${s.notYetOn} product${s.notYetOn === 1 ? '' : 's'} for sale ${s.notYetOn === 1 ? 'is' : 'are'} NOT on the page yet and ${s.notYetOn === 1 ? 'has' : 'have'} no link until they press "Update shop page" on the Shop tab.` : '- Every product for sale is on the page. One added or changed later appears after "Update shop page".'];
 }
 
 export type ShopPagePublish = { ok: true; site: typeof sites.$inferSelect; oldSlug: string | null } | { ok: false; status: 400 | 409; error: string };

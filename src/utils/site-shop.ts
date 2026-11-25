@@ -40,6 +40,7 @@ const stripeClient = async () => (await import('./stripe')).getStripe();
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import { setOrderDone, type OrderStatus } from './shop-orders';
+import { websiteSiteFirst } from './shop-page';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
@@ -90,7 +91,7 @@ export async function syncConnectAccount(db: Db, account: Stripe.Account): Promi
 /** "Stripe is connected" — a card for the Website Assistant's owner. */
 async function announcePaymentsReady(db: Db, orgId: number): Promise<void> {
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, assistantId: aiAssistants.id })
-        .from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId)).where(eq(sites.organisationId, orgId)).limit(1);
+        .from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId)).where(eq(sites.organisationId, orgId)).orderBy(websiteSiteFirst).limit(1);
     if (!owner?.userId) return;
     await createNotification(db, 'site_payments_ready', {
         userId: owner.userId, assistantId: owner.assistantId, category: 'state_change',

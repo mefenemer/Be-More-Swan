@@ -80,7 +80,7 @@ export default withLambda(async (event) => {
     const id = Number(body.assistantId);
     if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'assistantId required.' });
     const roles = action === 'shop_settings' ? [SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY] : [SHOPKEEPER_ROLE_KEY];
-    const [assistant] = await db.select({ id: aiAssistants.id }).from(aiAssistants).where(and(
+    const [assistant] = await db.select({ id: aiAssistants.id, archivedAt: aiAssistants.archivedAt, lifecycleStatus: aiAssistants.lifecycleStatus }).from(aiAssistants).where(and(
         eq(aiAssistants.id, id), eq(aiAssistants.organisationId, orgId),
         sql`(${aiAssistants.configuration} ->> 'type') IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})`,
     )).limit(1);
@@ -182,6 +182,8 @@ export default withLambda(async (event) => {
 
     if (action === 'shop_page_publish') {
         if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can publish the shop page.' });
+        // An archived Shopkeeper's page is taken offline (site-offline.ts); it can't go live again (review #884).
+        if (assistant.archivedAt || assistant.lifecycleStatus === 'archived') return json(409, { error: 'This Shopkeeper is archived. Reinstate it first to publish its shop page.' });
         const [acct, shop] = await Promise.all([connectAccountFor(db, orgId), loadShopSettings(db, orgId)]);
         const left = shopStepsLeft({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop });
         if (left.length) return json(400, { error: `Get your shop ready first: ${left.join('; ')}.` });

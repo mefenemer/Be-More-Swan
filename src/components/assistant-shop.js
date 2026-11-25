@@ -238,6 +238,7 @@
         <p class="text-xs text-gray-600 mt-1">✓ Live at <a class="underline font-semibold" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>. Buyers can add things to a basket and pay with Stripe.</p>
         ${p.productLinks.length ? `<p class="text-xs font-bold text-gray-800 mt-3">Each product's link — for posts and your Instagram bio</p>
         <ul class="mt-1 space-y-1">${p.productLinks.map((l) => `<li class="flex flex-wrap items-center gap-2 text-xs"><span class="font-semibold text-gray-900">${esc(l.name)}</span><a class="underline text-gray-600 break-all" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a><button type="button" data-page-copy="${esc(l.url)}" class="btn-secondary border px-2 py-1 text-[11px] font-bold rounded-lg">Copy</button></li>`).join('')}</ul>` : ''}
+        ${p.notYetOn ? `<p class="text-xs font-semibold text-amber-800 mt-2" data-page-not-yet>${esc(p.notYetOn)} product${p.notYetOn === 1 ? ' isn\'t' : 's aren\'t'} on your shop page yet. Press "Update shop page" to add ${p.notYetOn === 1 ? 'it' : 'them'}.</p>` : ''}
         ${d.canEdit ? `${address}<p class="text-[11px] text-gray-500 mt-1">Added or changed a product, your logo or colours? Update it to show them.</p>
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-page-publish', 'Update shop page', true)}${btn('data-page-offline', 'Take offline')}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change it.</p>'}
         ${notes}`);

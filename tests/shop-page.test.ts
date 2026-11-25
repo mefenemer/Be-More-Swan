@@ -54,12 +54,15 @@ const products = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i + 1
     });
 
     await check('chat snapshot: each state, live lists the product links', () => {
-        const base: ShopPageState = { state: 'none', url: null, websiteUrl: null, slug: null, suggestedSlug: 'kudzu', domain: 'bemoreswan.site', publishedAt: null, productLinks: [] };
+        const base: ShopPageState = { state: 'none', url: null, websiteUrl: null, slug: null, suggestedSlug: 'kudzu', domain: 'bemoreswan.site', publishedAt: null, productLinks: [], notYetOn: 0 };
         assert.ok(shopPageSnapshotLines(base).join('\n').includes('"Publish shop page"'));
         assert.ok(shopPageSnapshotLines({ ...base, state: 'website', websiteUrl: 'https://kudzu.bemoreswan.site' }).join('\n').includes('not needed'));
         const live = shopPageSnapshotLines({ ...base, state: 'live', url: 'https://kudzu.bemoreswan.site', productLinks: [{ id: 3, name: 'Fig candle', url: 'https://kudzu.bemoreswan.site/shop/3-fig-candle' }] }).join('\n');
         assert.ok(live.includes('live at https://kudzu.bemoreswan.site') && live.includes('- Fig candle: https://kudzu.bemoreswan.site/shop/3-fig-candle') && live.includes('"Update shop page"'));
         assert.deepStrictEqual(shopPageSnapshotLines(null), []);
+        // review #884: a product for sale but not on the published page has no link yet, and the chat is told.
+        const behind = shopPageSnapshotLines({ ...base, state: 'live', url: 'https://kudzu.bemoreswan.site', notYetOn: 2 }).join('\n');
+        assert.ok(behind.includes('2 products for sale are NOT on the page yet and have no link until they press "Update shop page"'));
     });
 
     await check('Delivery & returns page carries privacy wording for the buyer', () => {
@@ -90,6 +93,17 @@ const products = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i + 1
         assert.ok(show.faqs[1].a.startsWith('No.') && show.faqs[1].a.includes('shop page of your own'));
         assert.ok(!JSON.stringify(show).includes("you'll want one of those to sell"));
         assert.ok(read('db/z-assistant-showcases.sql').includes('publish a shop page of your own from the Shop tab'));
+    });
+
+    await check('review #884: links only for products on the PUBLISHED page; a website wins over a shop page; archived can\'t publish', () => {
+        const mod = read('src/utils/shop-page.ts');
+        assert.ok(mod.includes('const products = now.filter((p) => onPage.has(p.id));') && mod.includes('publishedProductIds(db, own!.id, own!.publishedVersion)'));
+        assert.ok(mod.includes("export const websiteSiteFirst = sql`CASE WHEN (${aiAssistants.configuration} ->> 'type') = 'website_assistant' THEN 0 ELSE 1 END`;"));
+        assert.ok(read('src/utils/site-directory-store.ts').includes('.orderBy(websiteSiteFirst).limit(1);'));
+        assert.ok(read('src/utils/site-booking-page.ts').includes('.orderBy(websiteSiteFirst, desc(sites.publishedAt), desc(sites.id))'));
+        assert.ok(read('src/utils/site-shop.ts').includes('.where(eq(sites.organisationId, orgId)).orderBy(websiteSiteFirst).limit(1);'));
+        assert.ok(read('netlify/functions/shop.ts').includes("if (assistant.archivedAt || assistant.lifecycleStatus === 'archived') return json(409,"));
+        assert.ok(read('src/components/assistant-shop.js').includes('data-page-not-yet'));
     });
 
     console.log(`\n${passed}/${total} passed`);
