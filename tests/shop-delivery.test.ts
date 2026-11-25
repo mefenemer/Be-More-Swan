@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getTableName } from 'drizzle-orm';
 import {
-    deliveryOptionsFor, deliveryWords, hasDelivery, loadDelivery, parseDeliveryInput, saveDelivery, setupFromStored, stripeShippingOptions,
+    deliveryApplies, deliveryOptionsFor, deliveryWords, hasDelivery, loadDelivery, parseDeliveryInput, saveDelivery, setupFromStored, stripeShippingOptions,
     MAX_DELIVERY_OPTIONS, type DeliverySetup,
 } from '../src/utils/shop-delivery';
 import { deliverySnapshotLines } from '../src/utils/shop-snapshot';
@@ -74,12 +74,14 @@ async function main() {
         assert.ok(!hasDelivery({ rates: [], collect: { on: false, note: null } }) && hasDelivery(SETUP));
     });
 
-    await check('Stripe gets them cheapest first, in pounds, with the time beside the name and the choice in metadata', () => {
+    await check('Stripe gets the rates cheapest first and collection LAST (Stripe pre-selects the first), in pounds', () => {
         const opts = stripeShippingOptions(deliveryOptionsFor(SETUP, 1000));
         assert.deepStrictEqual(opts.map((o) => [o.shipping_rate_data!.display_name, o.shipping_rate_data!.fixed_amount!.amount, o.shipping_rate_data!.fixed_amount!.currency]), [
-            ['Collect in person: 12 Mill Lane, Tue–Sat', 0, 'gbp'], ['Royal Mail Tracked 48 · 2–3 working days', 395, 'gbp'], ['Next day', 795, 'gbp'],
+            ['Royal Mail Tracked 48 · 2–3 working days', 395, 'gbp'], ['Next day', 795, 'gbp'], ['Collect in person: 12 Mill Lane, Tue–Sat', 0, 'gbp'],
         ]);
-        assert.strictEqual(opts[1].shipping_rate_data!.metadata!.bms_delivery, 'Royal Mail Tracked 48');
+        assert.strictEqual(opts[0].shipping_rate_data!.metadata!.bms_delivery, 'Royal Mail Tracked 48');
+        const free = stripeShippingOptions(deliveryOptionsFor(SETUP, 5000));
+        assert.strictEqual(free[0].shipping_rate_data!.display_name, 'Royal Mail Tracked 48 (free over £40) · 2–3 working days', 'a free rate still comes before collection');
     });
 
     await check('stored → read back is the same set-up (pence stored, pounds parsed)', () => {
@@ -96,6 +98,11 @@ async function main() {
         assert.strictEqual(withRates.shipping_options!.length, 3);
         assert.ok(withRates.shipping_options!.some((o) => o.shipping_rate_data!.display_name === 'Royal Mail Tracked 48 (free over £40) · 2–3 working days' && o.shipping_rate_data!.fixed_amount!.amount === 0), '4 × £12.50 = £50 ≥ £40');
         assert.deepStrictEqual(withRates.shipping_address_collection, { allowed_countries: ['GB'] });
+        const dollars = basketCheckoutParams({ origin, site: row, basketId: ID, lines: lines(4).map((l) => ({ ...l, currency: 'USD' })), collectAddress: false, delivery: SETUP });
+        assert.strictEqual(dollars.shipping_options, undefined, 'a basket priced in dollars gets no pound delivery choices (Stripe would refuse the checkout)');
+        assert.strictEqual(dollars.line_items![0].price_data!.currency, 'usd');
+        assert.ok(deliveryApplies(SETUP, lines(1)) && !deliveryApplies(SETUP, [{ currency: 'EUR' }]) && !deliveryApplies(SETUP, []) && !deliveryApplies(null, lines(1)));
+        assert.ok(read('netlify/functions/site-serve.ts').includes('deliveryApplies(d, priced.lines) ? deliveryWords(d) : null'), 'the basket page hides them too');
         const none = basketCheckoutParams({ origin, site: row, basketId: ID, lines: lines(1), collectAddress: false, delivery: null });
         assert.strictEqual(none.shipping_options, undefined);
         assert.strictEqual(none.shipping_address_collection, undefined);

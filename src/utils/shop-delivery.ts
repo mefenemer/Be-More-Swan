@@ -6,6 +6,9 @@
 // Flat per order in this first version (no weight bands yet). Stored under a zone (only `uk` for now) so
 // Phase 3 can add EU/US zones without reshaping: shop_settings.delivery = { zones: { uk: DeliverySetup } }.
 //
+// Delivery prices are in POUNDS (UK only), so they are offered only when every line of the basket is priced in
+// pounds (deliveryApplies): Stripe refuses a checkout whose items and delivery are in different currencies.
+//
 // Only for basket checkouts — i.e. workspaces with a Shopkeeper (owner decision 5); a website-only shop's
 // one-product Buy keeps its delivery wording in the Delivery & returns text, as today.
 // Set from the Shopkeeper's Shop tab and its chat card `delivery_rates` (shop.ts delivery_rates).
@@ -82,7 +85,11 @@ export function parseDeliveryInput(raw: DeliveryInput): Parsed {
 
 export const hasDelivery = (s: DeliverySetup | null | undefined): s is DeliverySetup => !!s && (s.rates.length > 0 || s.collect.on);
 
-export interface DeliveryOption { name: string; amount: number; days: string | null }
+/** Whether the delivery choices go with this basket: set up, and every line priced in pounds. Pure. */
+export const deliveryApplies = (s: DeliverySetup | null | undefined, lines: { currency: string }[]): s is DeliverySetup =>
+    hasDelivery(s) && lines.length > 0 && lines.every((l) => String(l.currency).toUpperCase() === 'GBP');
+
+export interface DeliveryOption { name: string; amount: number; days: string | null; collect?: boolean }
 
 /** The choices for an order whose items come to `subtotal` pence: a rate is free at or over its threshold. Pure. */
 export function deliveryOptionsFor(s: DeliverySetup, subtotal: number): DeliveryOption[] {
@@ -90,13 +97,18 @@ export function deliveryOptionsFor(s: DeliverySetup, subtotal: number): Delivery
         const free = r.freeOver != null && subtotal >= r.freeOver;
         return { name: free ? `${r.name} (free over ${formatMoney(r.freeOver!, 'GBP')})` : r.name, amount: free ? 0 : r.price, days: r.days };
     });
-    if (s.collect.on) out.push({ name: s.collect.note ? `Collect in person: ${s.collect.note}` : 'Collect in person', amount: 0, days: null });
+    if (s.collect.on) out.push({ name: s.collect.note ? `Collect in person: ${s.collect.note}` : 'Collect in person', amount: 0, days: null, collect: true });
     return out.slice(0, MAX_DELIVERY_OPTIONS);
 }
 
-/** Stripe Checkout's shipping_options for those choices (cheapest first, as Stripe pre-selects the first). Pure. */
+/**
+ * Stripe Checkout's shipping_options for those choices. Stripe pre-selects the FIRST, so the delivery rates come
+ * first, cheapest first, and "Collect in person" always last: a buyer who doesn't notice the choice is never
+ * defaulted into collection while giving a home address. Pure.
+ */
 export function stripeShippingOptions(options: DeliveryOption[]): Stripe.Checkout.SessionCreateParams.ShippingOption[] {
-    return [...options].sort((a, b) => a.amount - b.amount).map((o) => ({
+    const rates = options.filter((o) => !o.collect).sort((a, b) => a.amount - b.amount);
+    return [...rates, ...options.filter((o) => o.collect)].map((o) => ({
         shipping_rate_data: {
             type: 'fixed_amount',
             display_name: (o.days ? `${o.name} · ${o.days}` : o.name).slice(0, 100),

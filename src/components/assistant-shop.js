@@ -190,7 +190,7 @@
     const s = d.delivery || { rates: [], collect: { on: false, note: null } };
     const canEdit = !!d.canEdit;
     return card(`<p class="text-sm font-black text-gray-900">Delivery</p>
-      <p class="text-xs text-gray-500 mt-1">The choices buyers pick from when they check out their basket, with the cost added before they pay. UK addresses only for now. Up to 5 choices in all.</p>
+      <p class="text-xs text-gray-500 mt-1">The choices buyers pick from when they check out their basket, with the cost added before they pay. UK addresses only for now, priced in pounds (a basket priced in another currency checks out without them). Up to 5 choices in all.</p>
       <div data-del-rows>${s.rates.map(deliveryRow).join('')}</div>
       <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-del-collect ${s.collect.on ? 'checked' : ''} ${canEdit ? '' : 'disabled'} class="mt-0.5"> Buyers can collect in person (free)</label>
       <label class="block text-[11px] font-bold text-gray-600 mt-1"><span class="block">Where and when to collect (optional)</span><input type="text" maxlength="120" data-del-collect-note value="${esc(s.collect.note || '')}" placeholder="e.g. 12 Mill Lane, Tue–Sat 10–4" class="${inputCls} mt-1"></label>

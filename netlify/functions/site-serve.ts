@@ -24,7 +24,7 @@ import { sites } from '../../db/schema';
 import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay, renderSiteShell, renderSiteProduct, renderSiteBasket } from '../../src/utils/site-render';
 import { productPagePath, productRoute, productSections } from '../../src/utils/site-product-page';
 import { basketCount, basketOn, loadBasket, priceBasket, withBasket, BASKET_PATH } from '../../src/utils/shop-basket';
-import { deliveryWords, hasDelivery, loadDelivery } from '../../src/utils/shop-delivery';
+import { deliveryApplies, deliveryWords, hasDelivery, loadDelivery } from '../../src/utils/shop-delivery';
 import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
 import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
@@ -279,7 +279,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         const html = renderSiteBasket(definition, pageCtx, {
             id: basket?.id ?? null, lines: priced.lines, dropped: priced.dropped, canSell: await canSell(db, site.organisationId),
             continuePath: shopPage ? (shopPage.slug ? `/${shopPage.slug}` : '/') : '/',
-            delivery: await loadDelivery(db, site.organisationId).then((d) => (hasDelivery(d) ? deliveryWords(d) : null)),
+            delivery: await loadDelivery(db, site.organisationId).then((d) => (deliveryApplies(d, priced.lines) ? deliveryWords(d) : null)),
         });
         return { statusCode: 200, headers: { ...headers('text/html; charset=utf-8', 'private, no-store'), 'X-Robots-Tag': 'noindex' }, body: event.httpMethod === 'HEAD' ? '' : html };
     }

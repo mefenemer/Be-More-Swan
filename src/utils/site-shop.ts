@@ -45,7 +45,7 @@ import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBl
 import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, STOCK_NOT_UPDATED_LINE, type StockTaken } from './shop-stock';
 import { loadProductOptions, optionItemName, optionPence, takeOptionStock, type ProductOptions } from './shop-options';
 import { productPagePath } from './site-product-page';
-import { deliveryOptionsFor, hasDelivery, loadDelivery, recordOrderDelivery, stripeShippingOptions, type DeliverySetup } from './shop-delivery';
+import { deliveryApplies, deliveryOptionsFor, loadDelivery, recordOrderDelivery, stripeShippingOptions, type DeliverySetup } from './shop-delivery';
 import {
     addItem, basketOn, basketTotal, checkoutBlocker, checkoutLinesFor, emptyBasket, loadBasket, markBasketCheckout, orderSummaryName, priceBasket,
     saveBasket, setQty, withBasket, writeOrderLines, BASKET_PATH, type CheckoutLine, type OrderLine, type PricedLine,
@@ -328,7 +328,8 @@ export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURICompo
 export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null }): Stripe.Checkout.SessionCreateParams {
     const back = basketPagePath(req.basketId);
     // UK delivery rates (shop-delivery.ts): the buyer picks one on Stripe's page; a rate is free over its threshold.
-    const shipping = hasDelivery(req.delivery) ? stripeShippingOptions(deliveryOptionsFor(req.delivery, basketTotal(req.lines))) : [];
+    // In pounds only: a basket priced in another currency is checked out without them (Stripe needs one currency).
+    const shipping = deliveryApplies(req.delivery, req.lines) ? stripeShippingOptions(deliveryOptionsFor(req.delivery, basketTotal(req.lines))) : [];
     return {
         mode: 'payment',
         line_items: req.lines.map((l) => {
