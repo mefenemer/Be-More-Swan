@@ -658,13 +658,13 @@
       },
       {
         "title": "Sell",
-        "body": "Buy buttons show on your products, and each order arrives on the Shop tab and in your email."
+        "body": "Buyers add your products to a basket and pay on Stripe. Each order arrives on the Shop tab and in your email."
       }
     ],
     "features": [
       {
         "title": "Two steps to ready",
-        "body": "The Shop tab shows where you stand: connect Stripe, then fill in your Delivery & returns details. Buy buttons show on your products once both are done.",
+        "body": "The Shop tab shows where you stand: connect Stripe, then fill in your Delivery & returns details. Your products can be bought once both are done.",
         "image": "/images/assistants/shopkeeper/shop.jpg",
         "alt": "The Shop tab: a two-step checklist, Connect Stripe, Delivery & returns and Orders"
       },
@@ -686,7 +686,7 @@
       },
       {
         "title": "Orders in one place",
-        "body": "Every paid order in your workspace, newest first, with what was bought, how much and who bought it. Mark each one as dealt with once it's sent, or ask in chat for any new orders."
+        "body": "Every paid order in your workspace, newest first, with what was bought, how much and who bought it. Mark one as posted, with a tracking number if you have one, and the buyer gets an email from your own Gmail or Outlook. Download them all as a spreadsheet (CSV), or ask in chat for any new orders."
       }
     ],
     "faqs": [

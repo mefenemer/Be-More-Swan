@@ -93,6 +93,12 @@ const products = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i + 1
         assert.ok(show.faqs[1].a.startsWith('No.') && show.faqs[1].a.includes('shop page of your own'));
         assert.ok(!JSON.stringify(show).includes("you'll want one of those to sell"));
         assert.ok(read('db/z-assistant-showcases.sql').includes('publish a shop page of your own from the Shop tab'));
+        // Showcase + Shop tab match what's built: a basket, posted + tracking email, CSV (no "Buy buttons show" / "dealt with").
+        const showText = JSON.stringify(show);
+        assert.ok(showText.includes('Mark one as posted, with a tracking number') && showText.includes('spreadsheet (CSV)') && showText.includes('add your products to a basket'));
+        for (const f of ['db/assistant-showcases.json', 'db/z-assistant-showcases.sql', 'src/components/assistant-shop.js']) {
+            assert.ok(!read(f).includes('Buy buttons show on your products') && !read(f).includes('Mark each one as dealt with'), f);
+        }
     });
 
     await check('review #884: links only for products on the PUBLISHED page; a website wins over a shop page; archived can\'t publish', () => {
