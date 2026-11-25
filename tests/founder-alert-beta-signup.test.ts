@@ -24,10 +24,11 @@ const trial = buildNewTrialAlertEmail({ companyName: 'X', fullName: '', email: n
 assert.match(trial.subject, /^🌱 New free trial: X$/);
 assert.match(trial.html, /Trial ends/);
 
-// verify.ts: only when no trial started because the workspace has a plan, only for the verifier's OWN beta plan row.
+// verify.ts: whenever no trial started (beta workspaces already have a plan), only for the verifier's OWN beta plan row.
 const verify = readFileSync(join(__dirname, '..', 'netlify', 'functions', 'verify.ts'), 'utf8');
-const at = verify.indexOf("t.reason === 'has_plan'");
-assert.ok(at !== -1, "verify.ts handles the beta ('has_plan') case");
+const at = verify.indexOf('if (t.started) await sendNewTrialAlert(');
+assert.ok(at !== -1, 'verify.ts sends the trial alert when the trial started');
+assert.ok(!verify.includes("t.reason === 'has_plan'"), 'the beta check runs whenever no trial started, not only on has_plan');
 const block = verify.slice(at, verify.indexOf("kind: 'beta'", at) + 20);
 assert.ok(block.includes("kind: 'beta'"), 'sends the beta alert in that branch');
 assert.match(block, /eq\(plans\.userId, user\.id\)/, "the verifier's own plan row");

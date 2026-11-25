@@ -138,7 +138,8 @@ export default withLambda(async (event) => {
                 // Beta sign-up: register.ts already gave THIS person's new workspace the free beta plan, so no
                 // trial and no Stripe either. Their own plan row is the test: a person joining an existing
                 // workspace has none, so they are not announced as a new beta tester.
-                else if (t.reason === 'has_plan') {
+                // Any reason (has_plan, or no_trial_plan if the trial tier were missing): the row decides.
+                else {
                     const [beta] = await db.select({ planName: plans.planName }).from(plans).where(and(
                         eq(plans.organisationId, user.organisationId),
                         eq(plans.userId, user.id),
