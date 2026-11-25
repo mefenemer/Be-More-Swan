@@ -21,6 +21,7 @@ import type { SiteRenderSocialFeed, SiteRenderSocialPost } from './site-social-f
 import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from './site-blog';
 import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
+import { productHomePage, productPagePath, productSections } from './site-product-page';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
 import { describeCancellation } from './stay-quote';
@@ -40,7 +41,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; stock?: number | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -540,19 +541,21 @@ ${formButton(p.buttonLabel)}
         }
         case 'products': {
             const p = s.props;
-            const card = (name: string, description: string | null, price: string | null, imgSrc: string, imgAlt: string, buy: string) =>
-                `<div class="card">${imgSrc ? `<img src="${esc(imgSrc)}" alt="${esc(imgAlt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">` : ''}<h3>${esc(name)}</h3>${price ? `<p class="price"><strong>${esc(price)}</strong></p>` : ''}${description ? paragraphs(description) : ''}${buy}</div>`;
+            // A live product links to its own page (/shop/<id>-<name>, site-product-page.ts); the editor's preview doesn't.
+            const card = (name: string, description: string | null, price: string | null, imgSrc: string, imgAlt: string, buy: string, link = '') =>
+                `<div class="card">${imgSrc ? `${link ? `<a href="${esc(href(link))}" tabindex="-1" aria-hidden="true">` : ''}<img src="${esc(imgSrc)}" alt="${esc(imgAlt)}" loading="lazy" style="border-radius:var(--r);margin-bottom:12px">${link ? '</a>' : ''}` : ''}<h3>${link ? `<a href="${esc(href(link))}" data-product-link>${esc(name)}</a>` : esc(name)}</h3>${price ? `<p class="price"><strong>${esc(price)}</strong></p>` : ''}${description ? paragraphs(description) : ''}${buy}</div>`;
             // Business Information products, in the section's order; one archived or deleted since is skipped.
             const fromCatalogue = p.productIds.map((id) => formState.products[id]).filter(Boolean).map((pr) => {
                 let buy = '';
-                if (pr.buyPence !== null) {
+                // Stock tracked and none left (shop-stock.ts): "Sold out" instead of a Buy button, in the
+                // editor's preview too, so the owner sees what buyers see.
+                if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
+                else if (pr.buyPence !== null) {
                     if (formState.preview) buy = `<p><button class="btn" type="button" disabled>${esc(p.buyLabel)}</button></p>`;
-                    else if (formState.canSell) {
-                        buy = `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(s.id)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}"><input type="hidden" name="_v" value="${pr.buyPence}"><input type="hidden" name="_p" value="${esc(formState.path)}"><button class="btn" type="submit">${esc(p.buyLabel)}</button></form>`;
-                    }
+                    else if (formState.canSell) buy = buyFormHtml(s.id, pr, p.buyLabel, formState.path);
                 }
                 const src = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) || '' : '';
-                return card(pr.name, pr.description, pr.price, src, pr.name, buy);
+                return card(pr.name, pr.description, pr.price, src, pr.name, buy, formState.preview ? '' : productPagePath(pr));
             });
             // Older sites: items typed into the site itself — shown, never sold (moved via Business Information).
             const legacy = p.productIds.length ? [] : p.items.map((it) => card(it.name, it.description, it.price !== null ? formatPrice(it.price) : null, imageSrc(it.image), it.image?.alt ?? '', ''));
@@ -790,7 +793,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
                 ...(pr.description ? { description: pr.description } : {}),
                 ...(img ? { image: img } : {}),
-                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {}),
             });
         }
     }
@@ -976,6 +979,50 @@ ${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li
     });
 }
 
+const SOLD_OUT_HTML = '<p class="price" data-sold-out><strong>Sold out</strong></p>';
+
+/** The Buy form: which section and product, and the name and price the visitor SAW (checked at the click). */
+function buyFormHtml(sectionId: string, pr: SiteRenderProduct, label: string, backPath: string): string {
+    return `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}"><input type="hidden" name="_v" value="${pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
+}
+
+/**
+ * /shop/<id>-<name> — one product's own page (site-product-page.ts): picture, price, description, and
+ * the same Buy form as its card (or Sold out). site-serve.ts serves it only while a products section
+ * on the published site offers the product, so `sectionId` is always that section.
+ */
+export function renderSiteProduct(def: SiteDefinition, ctx: RenderContext, pr: SiteRenderProduct): string | null {
+    const sectionId = productSections(def).get(pr.id);
+    if (!sectionId) return null;
+    startRender(def, ctx);
+    const s = def.settings;
+    const path = productPagePath(pr);
+    const pageUrl = `${ctx.origin}${path}`;
+    const section = def.pages.flatMap((p) => p.sections).find((x) => x.id === sectionId);
+    const label = section && section.type === 'products' ? section.props.buyLabel : 'Buy now';
+    const home = productHomePage(def, pr.id);
+    const img = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) || '' : '';
+    let buy = '';
+    if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
+    else if (pr.buyPence !== null && ctx.canSell === true && !ctx.preview) buy = buyFormHtml(sectionId, pr, label, path);
+    const terms = buy && buy !== SOLD_OUT_HTML ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
+    const body = `<article><section><div class="w art li pr">
+<p class="meta"><a href="${esc(href(home ? home.path : '/'))}">← ${esc(home ? home.title : 'Home')}</a></p>
+<h1>${esc(pr.name)}</h1>
+${img ? `<img class="hero-img" src="${esc(img)}" alt="${esc(pr.name)}">` : ''}
+${pr.price ? `<p class="price"><strong>${esc(pr.price)}</strong></p>` : ''}
+${buy}${terms}
+${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
+</div></section></article>`;
+    const offer = pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl, ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {};
+    return documentHtml(def, null, ctx, body, {
+        title: `${pr.name} | ${s.siteName}`,
+        description: pr.description ? pr.description.replace(/\s+/g, ' ').slice(0, 160) : null,
+        canonical: pageUrl, pageUrl, robots: null, ogType: 'website', image: img || null, menuId: home?.id ?? '',
+        ld: [{ '@context': 'https://schema.org', '@type': 'Product', name: pr.name, url: pageUrl, ...(pr.description ? { description: pr.description } : {}), ...(img ? { image: img } : {}), ...offer }],
+    });
+}
+
 /** /listings/<slug> — one listing's own page, in the site's own look. */
 export function renderSiteListing(def: SiteDefinition, ctx: RenderContext, l: SiteRenderListing): string {
     startRender(def, ctx);
@@ -1100,7 +1147,7 @@ function fmtClock(t: string): string {
 }
 
 /** `blog`: the blog's own addresses when it is on — only posts whose canonical is this site belong here. */
-export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = [], stays: string[] = []): string {
+export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = [], stays: string[] = [], productPaths: string[] = []): string {
     const blogUrls = blogOn(def)
         ? [`  <url><loc>${esc(`${origin}${BLOG_PATH}`)}</loc></url>`, ...blog.map((b) => `  <url><loc>${esc(`${origin}${BLOG_PATH}/${encodeURIComponent(b.slug)}`)}</loc>${b.lastmod ? `<lastmod>${esc(b.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)]
         : [];
@@ -1108,7 +1155,8 @@ export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls,
     ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`),
-    ...stays.map((slug) => `  <url><loc>${esc(`${origin}${STAY_PATH}/${slug}`)}</loc></url>`)].join('\n')}
+    ...stays.map((slug) => `  <url><loc>${esc(`${origin}${STAY_PATH}/${slug}`)}</loc></url>`),
+    ...productPaths.map((pp) => `  <url><loc>${esc(`${origin}${pp}`)}</loc></url>`)].join('\n')}
 </urlset>
 `;
 }

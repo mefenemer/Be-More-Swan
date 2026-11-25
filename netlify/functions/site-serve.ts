@@ -21,7 +21,8 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay, renderSiteShell } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay, renderSiteShell, renderSiteProduct } from '../../src/utils/site-render';
+import { productPagePath, productRoute, productSections } from '../../src/utils/site-product-page';
 import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
 import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
@@ -268,7 +269,10 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (path === '/sitemap.xml') {
         const blog = blogOn(definition) ? await siteBlogSlugs(db, site.organisationId, origin, origins) : [];
         const hasListings = definition.pages.some((p) => p.sections.some((x) => x.type === 'listings'));
-        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : [], siteHasStays(definition) ? await staySlugs(db, site.organisationId) : []) };
+        // Each product's own page (site-product-page.ts), for products a products section offers.
+        const offered = productSections(definition);
+        const productPaths = offered.size ? Object.values(await loadSiteProducts(db, site.organisationId, definition)).filter((p) => offered.has(p.id)).map(productPagePath) : [];
+        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : [], siteHasStays(definition) ? await staySlugs(db, site.organisationId) : [], productPaths) };
     }
 
     // ── The Blog Assistant's posts (site-blog.ts): /blog and /blog/<slug>, while the blog is on ──
@@ -317,6 +321,20 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         if (!v) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
         // The calendar changes with every booking: kept a minute, like other pages.
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteStay(definition, ctx, v, BOOK_PATH) };
+    }
+
+    // ── A product's own page: /shop/<id>-<name> (online shop Phase 1, site-product-page.ts) ──
+    // Only while a products section on the published site offers it; an old name 301s to the current one.
+    const pr = productRoute(path);
+    if (pr && productSections(definition).has(pr.id)) {
+        const product = (await loadSiteProducts(db, site.organisationId, definition))[pr.id];
+        if (!product) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        const canonical = productPagePath(product);
+        // Keep the query (UTM tags on a shared link), as the domain redirect above does.
+        const q = String(event.queryStringParameters?.q || '');
+        if (canonical !== path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${q ? `?${q}` : ''}`, 'Cache-Control': 'public, max-age=300' } as Record<string, string>, body: '' };
+        const html = renderSiteProduct(definition, { ...ctx, canSell: await canSell(db, site.organisationId), products: { [product.id]: product } }, product);
+        if (html) return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : html };
     }
 
     // An old address that moved (an imported page's former path — site-definition.ts redirects).

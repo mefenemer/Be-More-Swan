@@ -55,6 +55,12 @@ export const BROADCASTS: readonly BroadcastDef[] = [
         // The DPA's notice goes to the workspace owner (clause 5); the owner chose owners only (2026-11-20).
         audience: 'owners',
     },
+    {
+        key: 'subprocessor_recall_notice',
+        label: 'New sub-processor: Recall.ai with AssemblyAI (Note Taker meetings, from 27 November 2026)',
+        purpose: 'Courtesy notice for the Note Taker meeting bot (docs/note-taker-launch-notices-draft.md §2). DPA 1.2 names Recall.ai and AssemblyAI as specifically authorised, so no 14-day wait applies (legal review 2026-11-25); the Trust and privacy pages promise owners this email anyway. Send to owners before 27 November 2026.',
+        audience: 'owners',
+    },
 ];
 
 export function broadcastDef(key: unknown): BroadcastDef | null {
