@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-    addItem, basketCount, basketTotal, checkoutBlocker, checkoutLinesFor, cleanItems, isBasketId, newBasketId, orderSummaryName,
+    addItem, basketCount, basketOnCached, basketTotal, checkoutBlocker, checkoutLinesFor, cleanItems, isBasketId, newBasketId, orderSummaryName,
     priceBasket, setQty, withBasket, BASKET_LINE_MAX_QTY, BASKET_MAX_LINES, type BasketItem,
 } from '../src/utils/shop-basket';
 import { classifySql } from '../src/utils/issue-sql';
@@ -288,6 +288,28 @@ async function main() {
         assert.ok('websiteOrderLines' in WORKSPACE_TABLES);
         const inv = read('src/config/mentor-data-inventory.ts');
         assert.ok(inv.includes("'site_order_lines', 'site_baskets'"));
+    });
+
+    await check('review #885: page views ask "basket on?" once a minute per workspace; checkout still asks fresh', async () => {
+        let queries = 0;
+        const fakeDb = { execute: async () => { queries++; return [{ enabled: true }]; } } as unknown as Parameters<typeof basketOnCached>[0];
+        assert.strictEqual(await basketOnCached(fakeDb, 90001), true);
+        assert.strictEqual(await basketOnCached(fakeDb, 90001), true);
+        assert.strictEqual(queries, 1);
+        assert.strictEqual(await basketOnCached(fakeDb, 90002), true);
+        assert.strictEqual(queries, 2);
+        // review #887: a failed read is not remembered.
+        let fails = 0;
+        const flaky = { execute: async () => { fails++; if (fails === 1) throw new Error('boom'); return [{ enabled: true }]; } } as unknown as Parameters<typeof basketOnCached>[0];
+        const quiet = console.error; console.error = () => {};
+        try { assert.strictEqual(await basketOnCached(flaky, 90003), false); } finally { console.error = quiet; }
+        assert.strictEqual(await basketOnCached(flaky, 90003), true);
+        assert.strictEqual(fails, 2);
+        const serve = read('netlify/functions/site-serve.ts');
+        assert.ok(serve.includes('hasProducts && await basketOnCached(db, site.organisationId)') && !serve.includes('basketOn('));
+        assert.ok(read('src/utils/site-shop.ts').includes('if (!(await basketOn(db, orgId)))'));
+        // …and the business-kind guess reads the website's draft, not a shop page's.
+        assert.ok(read('src/utils/offer-profile.ts').includes('.where(eq(sites.organisationId, organisationId)).orderBy(websiteSiteFirst).limit(1)'));
     });
 
     await check('SQL: additive', () => {
