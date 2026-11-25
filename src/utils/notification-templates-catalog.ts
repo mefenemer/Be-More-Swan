@@ -1273,7 +1273,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Compliance',
         type: 'subprocessor_recall_notice',
         title: 'A new sub-processor for the Note Taker: Recall.ai',
-        message: 'From 27 November 2026, when you send your Note Taker to a Google Meet or Teams call, Recall.ai\'s bot joins and records it only to make the transcript; its sub-processor AssemblyAI turns the audio into text. UK and EU meetings stay in the EU, though Recall.ai's US support staff may access data when they need to fix the service. We delete the recording and transcript at Recall.ai once the minutes are written and do not keep the transcript. Nothing reaches them unless an owner or admin accepts DPA version 1.2 and someone sends the Note Taker. Ask privacy@bemoreswan.com to switch it off for your workspace.',
+        message: 'From 27 November 2026, when you send your Note Taker to a Google Meet or Teams call, Recall.ai\'s bot joins and records it only to make the transcript; its sub-processor AssemblyAI turns the audio into text. UK and EU meetings stay in the EU, though Recall.ai\'s US support staff may access data when they need to fix the service. We delete the recording and transcript at Recall.ai once the minutes are written and do not keep the transcript. Nothing reaches them unless an owner or admin accepts DPA version 1.2 and someone sends the Note Taker. Ask privacy@bemoreswan.com to switch it off for your workspace.',
         variables: [],
     },
     {
