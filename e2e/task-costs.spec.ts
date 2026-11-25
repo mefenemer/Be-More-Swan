@@ -214,6 +214,44 @@ test.describe('Admin → Money → Task costs', () => {
         await expect(page.locator('#tc-save-status')).toContainText('30 days');
     });
 
+    test('with a saved draft, an unsaved date says "Not saved yet" and holds Announce until it is updated (review of #879)', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', STATE([DRAFT]));
+        await openAdmin(page, api);
+        await expect(page.locator('#tc-unsaved')).toBeHidden();
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+        await page.locator('#tc-date').fill('2027-01-01');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await expect(page.locator('#tc-unsaved')).toContainText('the draft still starts on 6 December 2026');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+        // A repaint (e.g. after "Send a test to me") keeps the warning and the hold.
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('#tc-date')).toHaveValue('2027-01-01');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+        // Back to the draft's own date: nothing unsaved, Announce can go again.
+        await page.locator('#tc-date').fill('2026-12-06');
+        await expect(page.locator('#tc-unsaved')).toBeHidden();
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+    });
+
+    test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Choose the date the change starts.' } }); return undefined; }
+            return STATE([]);
+        });
+        await openAdmin(page, api);
+        await page.locator('#tc-date').fill('');
+        await expect(page.locator('#tc-date-words')).toHaveText('Choose the date it starts.');
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('#tc-date')).toHaveValue('');
+        await page.locator('[data-tc-key="ai_music"]').fill('25');
+        await page.locator('#tc-save').click();
+        await expect(page.locator('#tc-save-status')).toContainText('Choose the date');
+        expect(await page.evaluate(() => { (document.getElementById('tc-save') as HTMLButtonElement).click(); return document.getElementById('tc-save-status')!.classList.contains('hidden'); })).toBe(true);
+    });
+
     test('the chosen date and reason survive a repaint, and the date is said in words before saving', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Change at least one cost.' } }); return undefined; }
