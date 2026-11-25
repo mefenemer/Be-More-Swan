@@ -5830,6 +5830,22 @@ export const orgProducts = pgTable("org_products", {
   check("org_products_status_check", sql`${t.status} IN ('active','archived')`),
 ]);
 
+// Product options (online shop Phase 1, db/z-shop-options.sql). Mirrored here ONLY for the workspace data
+// export; the app reads and writes it with raw SQL in src/utils/shop-options.ts (missing table = no options).
+export const productOptions = pgTable("product_options", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  productId: integer("product_id").notNull().references(() => orgProducts.id, { onDelete: "cascade" }),
+  groupName: text("group_name").notNull().default("Option"),
+  label: text().notNull(),
+  priceAmount: integer("price_amount"),
+  stock: integer(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  status: text().notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ── Business Information ▸ Reviews (db/z-reviews.sql) ─────────────────────────────────────────────
 // The customer's words, word for word. `hidden` reviews are not quoted but still count in the average.
 export const orgReviews = pgTable("org_reviews", {

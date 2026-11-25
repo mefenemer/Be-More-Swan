@@ -13,6 +13,7 @@ import { connectAccountFor } from './site-shop';
 import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText } from './shop-settings';
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
+import { loadProductOptions, optionsWords, type ProductOptions } from './shop-options';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -25,19 +26,26 @@ export interface ShopSnapshotInput {
     orders: { id: number; itemName: string; quantity: number; amountTotal: number; currency: string; customerName: string | null; status: string; refundedAmount: number; createdAt: Date }[];
     /** Stock (Phase 1, shop-stock.ts). Absent = not read. */
     stock?: { ready: boolean; items: StockItem[] };
+    /** Options by product id (Phase 1, shop-options.ts). */
+    options?: Record<number, ProductOptions>;
 }
 
 /** How many products the stock list carries into the prompt. */
 export const SNAPSHOT_STOCK = 40;
 
 /** Pure: the STOCK lines (with each product's id, for the product_stock card). */
-export function stockSnapshotLines(stock: ShopSnapshotInput['stock']): string[] {
+export function stockSnapshotLines(stock: ShopSnapshotInput['stock'], options: ShopSnapshotInput['options'] = {}): string[] {
     if (!stock) return [];
     if (!stock.ready) return ['', 'STOCK: stock levels are not switched on yet. Do not offer the product_stock card; say it is coming shortly.'];
     if (!stock.items.length) return ['', 'STOCK: no products can be bought online yet (a product needs a fixed price in Business Information ▸ Products & Services).'];
     const shown = stock.items.slice(0, SNAPSHOT_STOCK);
     const out = ['', `STOCK (products that can be bought online, with the productId the product_stock card needs${stock.items.length > shown.length ? `; first ${shown.length} of ${stock.items.length}` : ''}):`];
-    for (const it of shown) out.push(`- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}`);
+    for (const it of shown) {
+        const po = options?.[it.id];
+        out.push(po?.options.length
+            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option; product_stock does not apply): ${optionsWords(po, it.pence ?? null, it.currency)}`
+            : `- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}; no options`);
+    }
     return out;
 }
 
@@ -87,7 +95,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         ? `- So: the shop can NOT take orders yet. Steps left (${left.length}): ${left.join('; ')}. Nothing else is required.`
         : '- So: the shop CAN take orders now. Nothing is left to set up.');
     lines.push(`- Optional, never a step left to do: phone, VAT number, extra terms, the days to cancel (${s?.returnsDays ?? 14} set; 14 is the legal minimum) and the things that can't be returned for a change of mind.`);
-    lines.push(...stockSnapshotLines(input.stock));
+    lines.push(...stockSnapshotLines(input.stock, input.options));
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
@@ -111,5 +119,6 @@ export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> 
         }).from(siteOrders).where(eq(siteOrders.organisationId, orgId)).orderBy(desc(siteOrders.createdAt)).limit(SNAPSHOT_ORDERS),
         loadStockList(db, orgId).catch(() => undefined),
     ]);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock });
+    const options = stock?.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {};
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options });
 }

@@ -10,13 +10,15 @@
  *    chat's shop_settings card. Buy buttons stay hidden until the required fields are filled in.
  * 3. Stock (Phase 1): how many of each product are left. Empty = not tracked; 0 = Sold out on the site.
  *    Same server action as the chat's product_stock card (shop.ts product_stock, shop-stock.ts).
+ *    Options (Phase 1): under each product, one group of choices ("Size": Small / Large), each with its own
+ *    price and stock. Same server action as the chat's product_options card (shop.ts product_options).
  * 4. Orders: every paid order in the workspace, Mark as dealt with, refunds shown (made in Stripe).
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -117,6 +119,30 @@
     sold_out: ['Sold out', 'bg-red-100 text-red-700'],
   };
 
+  const majorOf = (minor) => (minor == null ? '' : (minor / 100).toFixed(2).replace(/\.00$/, ''));
+  function optionRow(o) {
+    const v = (x) => (x == null ? '' : esc(x));
+    return `<div class="flex flex-wrap items-end gap-2 mt-2" data-opt-row data-opt-id="${o && o.id ? esc(o.id) : ''}">
+      <label class="block text-[11px] font-bold text-gray-600">Option<input type="text" maxlength="60" data-opt-label value="${v(o && o.label)}" placeholder="e.g. Large" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600">Price<input type="text" inputmode="decimal" data-opt-price value="${v(o ? majorOf(o.priceAmount) : '')}" placeholder="Same" class="${inputCls} mt-1" style="max-width:6rem"></label>
+      <label class="block text-[11px] font-bold text-gray-600">In stock<input type="number" min="0" max="100000" step="1" data-opt-stock value="${v(o && o.stock)}" placeholder="Not tracked" class="${inputCls} mt-1" style="max-width:7rem"></label>
+      ${btn('data-opt-remove aria-label="Remove this option"', 'Remove')}
+    </div>`;
+  }
+  /** The Options editor under a product: one group name and its rows; saving replaces the list. */
+  function optionsEditor(it, po) {
+    const list = po ? po.options : [];
+    const summary = po ? `${esc(po.group)}: ${list.map((o) => esc(o.label) + (o.stock === 0 ? ' (sold out)' : '')).join(', ')}` : 'No options. Add sizes, colours or other choices, each with its own price and stock.';
+    return `<details class="mt-2" data-opt-editor="${esc(it.id)}" ${state.optOpen === it.id ? 'open' : ''}>
+      <summary class="cursor-pointer text-xs font-bold text-gray-700 underline">Options</summary>
+      <p class="text-xs text-gray-500 mt-1">${summary}</p>
+      <label class="block text-[11px] font-bold text-gray-600 mt-2">The choice<input type="text" maxlength="40" data-opt-group value="${esc(po ? po.group : 'Size')}" class="${inputCls} mt-1" style="max-width:10rem"></label>
+      <div data-opt-rows>${list.map(optionRow).join('')}</div>
+      <p class="text-xs text-gray-500 mt-2">Leave a price empty to use the product's price (${esc(it.price)}). With options, buyers choose one on the product's page and stock is kept per option.</p>
+      <div class="flex flex-wrap gap-2 mt-2">${btn('data-opt-add', '+ Add option')}${btn(`data-opt-save="${esc(it.id)}"`, 'Save options', true)}</div>
+    </details>`;
+  }
+
   /** Stock: one row per product that can be bought online (a fixed price in Business Information). */
   function stockCard(d) {
     const st = d.stock || { ready: false, items: [] };
@@ -128,16 +154,18 @@
       <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid.</p>
       <ul class="space-y-2 mt-3">${st.items.map((it) => {
         const [label, cls] = STOCK_PILL[it.state] || STOCK_PILL.untracked;
+        const po = (d.options || {})[it.id];
         return `<li class="border border-gray-200 rounded-lg p-3" data-stock-row="${esc(it.id)}">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-xs font-bold text-gray-900">${esc(it.name)} <span class="font-normal text-gray-500">· ${esc(it.price)}</span></p>
-            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>
+            ${po ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">Stock per option</span>' : `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>`}
           </div>
-          <div class="flex flex-wrap items-end gap-3 mt-2">
+          ${po ? '' : `<div class="flex flex-wrap items-end gap-3 mt-2">
             ${num('data-stock-count', it.stock, 'In stock')}
             ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
             ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
-          </div>
+          </div>`}
+          ${optionsEditor(it, po)}
         </li>`;
       }).join('')}</ul>
       ${state.stockSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.stockSaved)}</p>` : ''}
@@ -221,6 +249,27 @@
         state.shopSaved = gaps.length ? `Saved. Still needed: ${gaps.join(', ')}.` : 'Saved — your Delivery & returns page is ready.';
         state.shopOpen = false;
       } catch (err) { state.shopError = err.message; state.shopOpen = true; }
+      render();
+      return;
+    }
+    if (t('[data-opt-editor] > summary')) { const ed = t('[data-opt-editor]'); state.optOpen = ed.open ? null : Number(ed.dataset.optEditor); return; }
+    if (t('[data-opt-add]')) { const ed = t('[data-opt-editor]'); ed.querySelector('[data-opt-rows]').insertAdjacentHTML('beforeend', optionRow(null)); return; }
+    if (t('[data-opt-remove]')) { t('[data-opt-row]').remove(); return; }
+    const optSave = t('[data-opt-save]');
+    if (optSave) {
+      const ed = optSave.closest('[data-opt-editor]');
+      const options = [...ed.querySelectorAll('[data-opt-row]')].map((row) => ({
+        ...(row.dataset.optId ? { id: Number(row.dataset.optId) } : {}),
+        label: row.querySelector('[data-opt-label]').value,
+        price: row.querySelector('[data-opt-price]').value,
+        stock: row.querySelector('[data-opt-stock]').value,
+      })).filter((o) => o.id || o.label.trim() || o.price.trim() || o.stock.trim());
+      state.stockSaved = null; state.stockError = null; optSave.disabled = true;
+      state.optOpen = Number(optSave.dataset.optSave);
+      try {
+        state.data = await post({ action: 'product_options', productId: Number(optSave.dataset.optSave), group: ed.querySelector('[data-opt-group]').value, options });
+        state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
+      } catch (err) { state.stockError = err.message; }
       render();
       return;
     }

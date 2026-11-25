@@ -2965,6 +2965,52 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('product_stock', renderProductStockCard);
 
+  // { type: 'product_options', productId, productName, group, options: [{ id?, label, price?, stock? }] } —
+  // a product's options (online shop Phase 1, shop-options.ts): shop.ts product_options, the Shop tab
+  // Options editor's same save. It REPLACES the list (an empty list removes the options). Nothing is
+  // saved until they click.
+  function renderProductOptionsCard(data) {
+    const d = data || {};
+    const productId = Number(d.productId);
+    const list = Array.isArray(d.options) ? d.options.filter((o) => o && String(o.label || '').trim()) : null;
+    const ok = Number.isInteger(productId) && productId > 0 && list !== null;
+    const group = String(d.group || 'Option');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Options</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${escapeHtml(d.productName || 'Product')} · ${escapeHtml(group)}</p>
+      ${list && list.length ? `<ul class="mt-2 space-y-1">${list.map((o) => `<li class="text-xs text-gray-900"><strong>${escapeHtml(o.label)}</strong> · ${o.price == null || o.price === '' ? 'the product\'s price' : escapeHtml(String(o.price))} · ${o.stock == null || o.stock === '' ? 'stock not tracked' : (Number(o.stock) === 0 ? 'sold out' : `${escapeHtml(String(o.stock))} in stock`)}</li>`).join('')}</ul>`
+        : '<p class="text-xs text-gray-700 mt-2">No options: the product is bought as one item again.</p>'}
+      <p class="text-xs text-gray-600 mt-2">This replaces the product's options. Buyers choose one on the product's page.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pop-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${ok ? '' : 'disabled'}>Save options</button>
+        <button type="button" data-pop-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pop-status role="status"></p>`;
+    const status = el.querySelector('[data-pop-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pop-cancel]')) { setBusy(true); say('Nothing saved.'); return; }
+      if (!e.target.closest('[data-pop-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('shop:productOptions', {
+        bubbles: true,
+        detail: {
+          change: { productId, group, options: list.map((o) => ({ ...(o.id ? { id: Number(o.id) } : {}), label: o.label, price: o.price == null ? '' : o.price, stock: o.stock == null ? '' : o.stock })) },
+          respond({ ok: done, error, message }) {
+            if (!done) { setBusy(false); say(error || 'That didn\'t work — nothing was saved.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('product_options', renderProductOptionsCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
