@@ -35,7 +35,7 @@ export default withLambda(async (event) => {
         const assistantId = Number(event.queryStringParameters?.assistantId);
         if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
         if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
-        const available = await meetingBotAvailable(organisationId);
+        const available = await meetingBotAvailable(db, organisationId);
         if (!available) return json(200, { available: false, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: [] });
         try {
             const [bots, dpaAccepted, termsAccepted, costs, upcoming] = await Promise.all([

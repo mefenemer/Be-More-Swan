@@ -10,7 +10,7 @@
 
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations, tosAcceptances, userOrganisations } from '../../db/schema';
+import { aiAssistants, billingInformation, dpaAcceptances, featureFlags, masterAssistants, meetingBots, meetingImports, organisations, tosAcceptances, userOrganisations } from '../../db/schema';
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
@@ -116,16 +116,30 @@ export type SendBotResult =
 
 const fail = (status: number, code: string, error: string): SendBotResult => ({ ok: false, status, code, error });
 
-/** Can this workspace send a bot at all: meeting_bot on for it, and it isn't on the block list. Never throws. */
-export async function meetingBotAvailable(organisationId: number): Promise<boolean> {
+/**
+ * Is this workspace on the meeting-bot block list (MEETING_BOT_BLOCK_FLAG)? Read straight from the table, not through
+ * isFeatureEnabled, so a failed read counts as BLOCKED (isFeatureEnabled turns errors into false = not blocked; review
+ * of #864 round 4). Listed in allowed_workspace_ids → blocked; enabled = TRUE → every workspace blocked (kill switch,
+ * whatever the rollout percentage); no row → nobody blocked.
+ */
+export async function meetingBotBlocked(db: Db, organisationId: number): Promise<boolean> {
     try {
-        const [on, blocked] = await Promise.all([
-            isFeatureEnabled(organisationId, MEETING_BOT_FLAG), isFeatureEnabled(organisationId, MEETING_BOT_BLOCK_FLAG),
-        ]);
-        return on && !blocked;
-    } catch {
-        return false;
+        const [row] = await db.select({ enabled: featureFlags.enabled, allowed: featureFlags.allowedWorkspaceIds })
+            .from(featureFlags).where(eq(featureFlags.key, MEETING_BOT_BLOCK_FLAG)).limit(1);
+        if (!row) return false;
+        return row.enabled === true || (Array.isArray(row.allowed) && row.allowed.includes(organisationId));
+    } catch (err) {
+        console.error('[meeting-bot] block list unreadable; treating as blocked', err instanceof Error ? err.message : err);
+        return true;
     }
+}
+
+/** Can this workspace send a bot at all: meeting_bot on for it, and it isn't on the block list. Never throws; fails closed. */
+export async function meetingBotAvailable(db: Db, organisationId: number): Promise<boolean> {
+    const [on, blocked] = await Promise.all([
+        isFeatureEnabled(organisationId, MEETING_BOT_FLAG).catch(() => false), meetingBotBlocked(db, organisationId),
+    ]);
+    return on && !blocked;
 }
 
 export async function hasAcceptedBotTerms(db: Db, userId: number): Promise<boolean> {
@@ -157,7 +171,7 @@ async function regionFor(db: Db, organisationId: number): Promise<RecallRegion> 
 const OPEN_BOT_SQL = sql.raw("status IN ('scheduled', 'joining', 'waiting_room', 'in_call', 'ended')");
 
 export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Date()): Promise<SendBotResult> {
-    if (!(await meetingBotAvailable(i.organisationId))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
+    if (!(await meetingBotAvailable(db, i.organisationId))) return fail(403, 'not_available', 'Sending the Note Taker into a call isn\'t switched on for this workspace yet.');
 
     const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, lifecycleStatus: aiAssistants.lifecycleStatus, roleKey: masterAssistants.roleKey })
         .from(aiAssistants).leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))

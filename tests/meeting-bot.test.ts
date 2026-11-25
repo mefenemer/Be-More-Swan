@@ -129,21 +129,23 @@ await test('a normal call: joining → waiting room → in the call → ended �
     assert.equal(r.minutes, 30);
 });
 
-await test('per-workspace block (review of #867): every way in checks meetingBotAvailable = on AND not on the block list', () => {
+await test('per-workspace block (review of #867): every way in checks meetingBotAvailable = on AND not on the block list, failing closed', () => {
     const db = read('src/utils/meeting-bot-db.ts');
-    const fn = db.slice(db.indexOf('export async function meetingBotAvailable'), db.indexOf('export async function hasAcceptedBotTerms'));
-    assert.match(fn, /isFeatureEnabled\(organisationId, MEETING_BOT_FLAG\), isFeatureEnabled\(organisationId, MEETING_BOT_BLOCK_FLAG\)/);
+    const fn = db.slice(db.indexOf('export async function meetingBotBlocked'), db.indexOf('export async function hasAcceptedBotTerms'));
+    assert.match(fn, /return row\.enabled === true \|\| \(Array\.isArray\(row\.allowed\) && row\.allowed\.includes\(organisationId\)\);/);
+    assert.match(fn, /treating as blocked', [^\n]*\n\s*return true;/, 'an unreadable block list counts as blocked (round 4)');
+    assert.match(fn, /if \(!row\) return false;/, 'no row → nobody blocked');
     assert.match(fn, /return on && !blocked;/);
-    assert.match(fn, /catch \{\s*return false;/, 'fails closed');
     assert.match(read('src/utils/meeting-bot.ts'), /export const MEETING_BOT_BLOCK_FLAG = 'meeting_bot_blocked';/);
     for (const f of ['src/utils/meeting-bot-db.ts', 'src/utils/chat-meeting-bot.ts', 'netlify/functions/meeting-bots.ts']) {
         const src = read(f);
         assert.ok(src.includes('meetingBotAvailable('), `${f} uses the block-aware check`);
-        assert.ok(!/isFeatureEnabled\([^)]*MEETING_BOT_FLAG\)/.test(src.replace(fn, '')), `${f}: no bare meeting_bot check left`);
+        assert.ok(!/isFeatureEnabled\([^)]*MEETING_BOT_FLAG\)\)\)/.test(src), `${f}: no bare meeting_bot check left`);
     }
     const sql = read('db/z-meeting-bot-blocked-flag.sql');
     assert.match(sql, /VALUES \('meeting_bot_blocked', FALSE, 0, NULL,/);
     assert.match(sql, /ON CONFLICT \(key\) DO NOTHING;/);
+    assert.match(sql, /Cancel its open bots first/, 'booked bots are scheduled at Recall: cancel before blocking (round 4)');
 });
 
 await test('a flagged meeting transcript is never stored, not even a 200-character excerpt ("we do not keep the transcript")', () => {
