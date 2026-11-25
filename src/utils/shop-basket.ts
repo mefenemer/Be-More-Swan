@@ -242,12 +242,12 @@ export async function emptyBasket(db: Db, basketId: string, orgId: number): Prom
     await db.execute(sql`UPDATE site_baskets SET items = '[]'::jsonb, updated_at = now() WHERE id = ${basketId} AND organisation_id = ${orgId}`);
 }
 
+/** All of an order's lines in ONE statement: every line is saved, or none. */
 export async function writeOrderLines(db: Db, orderId: number, orgId: number, lines: CheckoutLine[]): Promise<void> {
-    for (const l of lines) {
-        await db.execute(sql`
-            INSERT INTO site_order_lines (order_id, organisation_id, product_id, option_id, item_name, unit_amount, quantity)
-            VALUES (${orderId}, ${orgId}, ${l.productId}, ${l.optionId}, ${l.name.slice(0, 160)}, ${l.unit}, ${Math.min(100, l.qty)})`);
-    }
+    if (!lines.length) return;
+    await db.execute(sql`
+        INSERT INTO site_order_lines (order_id, organisation_id, product_id, option_id, item_name, unit_amount, quantity)
+        VALUES ${sql.join(lines.map((l) => sql`(${orderId}, ${orgId}, ${l.productId}, ${l.optionId}, ${l.name.slice(0, 160)}, ${l.unit}, ${Math.min(100, l.qty)})`), sql`, `)}`);
 }
 
 export interface OrderLine { name: string; unit: number; qty: number }

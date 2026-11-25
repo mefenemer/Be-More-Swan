@@ -47,7 +47,7 @@ import { loadProductOptions, optionItemName, optionPence, takeOptionStock, type 
 import { productPagePath } from './site-product-page';
 import {
     addItem, basketOn, checkoutBlocker, checkoutLinesFor, emptyBasket, loadBasket, markBasketCheckout, orderSummaryName, priceBasket,
-    saveBasket, setQty, writeOrderLines, BASKET_PATH, type CheckoutLine, type OrderLine, type PricedLine,
+    saveBasket, setQty, withBasket, writeOrderLines, BASKET_PATH, type CheckoutLine, type OrderLine, type PricedLine,
 } from './shop-basket';
 import type { SiteRow } from './site-store';
 
@@ -277,9 +277,12 @@ async function readyToSell(db: Db, orgId: number, back: string): Promise<{ accou
     return { account, shop: shop! };
 }
 
-async function rateLimited(db: Db, ip: string, back: string): Promise<BuyOutcome | null> {
+/** Baskets a visitor may START in an hour (each Add without a basket makes one; adding to one is free). */
+export const NEW_BASKET_LIMIT = { maxAttempts: 30, windowSecs: 3600 };
+
+async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip', limit = BUY_LIMIT): Promise<BuyOutcome | null> {
     try {
-        const limited = await checkRateLimit(db, 'site_buy_ip', ip, BUY_LIMIT);
+        const limited = await checkRateLimit(db, key, ip, limit);
         if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: 'Too many checkouts were started from here just now.', backPath: back };
     } catch (err) {
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
@@ -360,7 +363,12 @@ async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOu
     const basket = await loadBasket(db, req.site.id, req.body.get('_b'));
     if (act === 'add') {
         const r = await resolveBuy(db, req);
-        if (r.kind !== 'ok') return r;
+        // A refused Add keeps the buyer's basket in its "Go back" link, so their next Add goes into it.
+        if (r.kind !== 'ok') return basket && r.kind === 'error' ? { ...r, backPath: withBasket(r.backPath, basket.id) } : r;
+        if (!basket) {
+            const limited = await rateLimited(db, req.ip, back, 'site_basket_ip', NEW_BASKET_LIMIT);
+            if (limited) return limited;
+        }
         const qty = Math.max(1, Math.floor(Number(req.body.get('_q') || 1)) || 1);
         const added = addItem(basket?.items ?? [], { productId: r.product.id, optionId: r.optionId, sectionId: r.sectionId, qty });
         if (added.error) return { kind: 'error', status: 409, title: 'Your basket is full', message: added.error, backPath: basket ? basketPagePath(basket.id) : back };
@@ -461,9 +469,14 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     };
     let stockLine: string | null;
     let orderLines: OrderLine[] | null = null;
+    let linesFailed = false;
     if (lines) {
         // A basket: its lines, each line's stock, and the basket emptied.
-        await writeOrderLines(db, order.id, site.organisationId, lines).catch((err) => console.error('[site-shop] order lines failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) }));
+        // One statement (all lines or none); if it fails the owner is told, since a repeated webhook never comes back here.
+        await writeOrderLines(db, order.id, site.organisationId, lines).catch((err) => {
+            linesFailed = true;
+            console.error('[site-shop] order lines failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) });
+        });
         orderLines = lines.map((l) => ({ name: l.name, unit: l.unit, qty: l.qty }));
         const notes: string[] = [];
         let failed = false;
@@ -507,6 +520,7 @@ ${orderLines ? orderLinesHtml(orderLines, order.currency) : ''}
 ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}</p>` : ''}
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
+${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
@@ -517,6 +531,9 @@ ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
 type OrderRow = typeof siteOrders.$inferSelect;
 
 /** "Order confirmed" — from the business, to the buyer (CCR 2013: confirmation in a durable form). */
+/** The owner's email when a basket order's items couldn't be saved on the order (the email still lists them). */
+export const ORDER_LINES_NOT_SAVED_LINE = 'We couldn\'t save this order\'s items on your Shop tab. They are listed above and in your Stripe dashboard.';
+
 /** A basket order's lines, for the owner's and the buyer's emails. */
 export function orderLinesHtml(lines: OrderLine[], currency: string): string {
     return `<ul>${lines.map((l) => `<li>${l.qty} × ${esc(l.name)} — ${esc(formatMoney(l.unit * l.qty, currency))}</li>`).join('')}</ul>`;

@@ -15,7 +15,8 @@ import {
 import { classifySql } from '../src/utils/issue-sql';
 import { normaliseSiteDefinition, type SiteDefinition } from '../src/utils/site-definition';
 import { renderSiteBasket, renderSitePage, renderSiteProduct } from '../src/utils/site-render';
-import { basketCheckoutParams, buyerEmail, startCheckout, type SiteProduct } from '../src/utils/site-shop';
+import { getTableName } from 'drizzle-orm';
+import { basketCheckoutParams, buyerEmail, recordPaidCheckout, startCheckout, ORDER_LINES_NOT_SAVED_LINE, type SiteProduct } from '../src/utils/site-shop';
 import { EMPTY_SHOP_SETTINGS } from '../src/utils/shop-settings';
 import { WORKSPACE_TABLES } from '../src/utils/workspace-export';
 import type { SiteRow } from '../src/utils/site-store';
@@ -203,6 +204,72 @@ async function main() {
             lines: [{ name: 'T-shirt — Large', unit: 2200, qty: 2 }, { name: 'House Blend', unit: 1250, qty: 1 }],
         });
         assert.ok(mail.html.includes('<li>2 × T-shirt — Large — £44</li>') && mail.html.includes('<li>1 × House Blend — £12.50</li>') && mail.html.includes('reference 7'));
+    });
+
+    // The paid-basket webhook path, RUN against a stand-in database (review of #878). No email can be sent:
+    // the stand-in owner has no email address and the buyer gave none.
+    const webhookDb = (opts: { lines?: unknown; duplicate?: boolean; linesFail?: boolean } = {}) => {
+        const log = { exec: [] as string[], orders: [] as Record<string, unknown>[] };
+        const rowsFor = (t: string): unknown[] => (t === 'sites' ? [row] : t === 'stripe_connect_accounts' ? [{ stripeAccountId: 'acct_1', organisationId: 3, chargesEnabled: true }] : t === 'ai_assistants' ? [{ userId: null, name: 'Shop', email: null }] : []);
+        const chain = (t: string) => { const c: Record<string, unknown> = {}; c.leftJoin = () => c; c.innerJoin = () => c; c.where = () => c; c.limit = async () => rowsFor(t); return c; };
+        const db = {
+            select: () => ({ from: (tbl: Parameters<typeof getTableName>[0]) => chain(getTableName(tbl)) }),
+            insert: () => ({ values: (v: Record<string, unknown>) => ({ onConflictDoNothing: () => ({ returning: async () => { log.orders.push(v); return opts.duplicate ? [] : [{ id: 77, refundedAmount: 0, status: 'paid', createdAt: new Date(), ...v }]; } }) }) }),
+            update: () => ({ set: () => ({ where: async () => [] }) }),
+            execute: async (q: unknown) => {
+                const t = sqlText(q);
+                log.exec.push(t);
+                if (t.includes('checkout_lines -> ')) return [{ lines: opts.lines === undefined ? [{ productId: 13, optionId: 4, name: 'T-shirt — Large', unit: 2200, qty: 2 }, { productId: 11, optionId: null, name: 'House Blend', unit: 1250, qty: 1 }] : opts.lines }];
+                if (t.includes('INSERT INTO site_order_lines') && opts.linesFail) throw new Error('db down');
+                if (t.includes('UPDATE product_options o SET stock')) return [{ before: 4, after: 2 }];
+                if (t.includes('UPDATE org_products p SET stock')) return [{ before: 5, after: 4, low_stock_at: null }];
+                return [];
+            },
+        } as unknown as Parameters<typeof recordPaidCheckout>[0];
+        return { db, log };
+    };
+    const paid = { id: 'cs_test_1', payment_status: 'paid', amount_total: 5650, amount_subtotal: 5650, currency: 'gbp', customer_details: { name: 'Jo', email: null }, collected_information: null, payment_intent: 'pi_1',
+        metadata: { bms_site_id: '9', bms_org_id: '3', bms_basket: ID, bms_item_name: 'T-shirt — Large × 2, House Blend', bms_page: '/basket' } } as never;
+
+    await check('RUN: a paid basket records one order, all its lines in one statement, each line\'s stock, and empties the basket', async () => {
+        const { db, log } = webhookDb();
+        assert.strictEqual(await recordPaidCheckout(db, 'acct_1', paid), true);
+        assert.strictEqual(log.orders.length, 1);
+        assert.strictEqual(log.orders[0].quantity, 3, '2 + 1');
+        assert.strictEqual(log.orders[0].itemName, 'T-shirt — Large × 2, House Blend');
+        const inserts = log.exec.filter((t) => t.includes('INSERT INTO site_order_lines'));
+        assert.strictEqual(inserts.length, 1, 'one statement for every line');
+        assert.ok(inserts[0].includes('T-shirt — Large') && inserts[0].includes('House Blend'));
+        assert.strictEqual(log.exec.filter((t) => t.includes('UPDATE product_options o SET stock')).length, 1, 'the Large option\'s stock');
+        assert.strictEqual(log.exec.filter((t) => t.includes('UPDATE org_products p SET stock')).length, 1, 'House Blend\'s stock');
+        assert.ok(log.exec.some((t) => t.includes("UPDATE site_baskets SET items = '[]'::jsonb")), 'the basket is emptied');
+    });
+
+    await check('RUN: a repeated webhook records nothing more (no lines, no stock, basket untouched)', async () => {
+        const { db, log } = webhookDb({ duplicate: true });
+        assert.strictEqual(await recordPaidCheckout(db, 'acct_1', paid), true);
+        assert.ok(!log.exec.some((t) => /INSERT INTO site_order_lines|SET stock|UPDATE site_baskets/.test(t)));
+    });
+
+    await check('RUN: saved lines that can\'t be read → the order is still recorded, no stock is guessed', async () => {
+        const { db, log } = webhookDb({ lines: null });
+        assert.strictEqual(await recordPaidCheckout(db, 'acct_1', paid), true);
+        assert.strictEqual(log.orders.length, 1);
+        assert.ok(!log.exec.some((t) => /INSERT INTO site_order_lines|SET stock/.test(t)));
+    });
+
+    await check('RUN: lines that fail to save → stock is still taken and the owner\'s email says so', async () => {
+        const { db, log } = webhookDb({ linesFail: true });
+        assert.strictEqual(await recordPaidCheckout(db, 'acct_1', paid), true);
+        assert.strictEqual(log.exec.filter((t) => /SET stock/.test(t)).length, 2);
+        assert.ok(read('src/utils/site-shop.ts').includes('${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : \'\'}'));
+        assert.match(ORDER_LINES_NOT_SAVED_LINE, /couldn't save this order's items/);
+    });
+
+    await check('a refused Add keeps the basket in its Go back link; starting a basket is rate-limited', () => {
+        const src = read('src/utils/site-shop.ts');
+        assert.ok(src.includes("return basket && r.kind === 'error' ? { ...r, backPath: withBasket(r.backPath, basket.id) } : r;"));
+        assert.ok(src.includes("await rateLimited(db, req.ip, back, 'site_basket_ip', NEW_BASKET_LIMIT)"));
     });
 
     console.log('\nServing, sweep, export and SQL');
