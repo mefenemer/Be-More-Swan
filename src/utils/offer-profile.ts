@@ -30,7 +30,8 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { bookingSettings, bookings, organisations, orgOfferProfile, orgProducts, sites, stayTypes } from '../../db/schema';
+import { websiteSiteFirst } from './shop-page';
+import { aiAssistants, bookingSettings, bookings, organisations, orgOfferProfile, orgProducts, sites, stayTypes } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -165,7 +166,8 @@ export async function loadOfferProfile(db: Db, organisationId: number): Promise<
     if (stored?.complete) return { offers: await withStays(db, organisationId, stored), answered: true };
 
     const [org] = await safe(db.select({ industry: organisations.industry }).from(organisations).where(eq(organisations.id, organisationId)).limit(1), []);
-    const siteRows = await safe(db.select({ draft: sites.draft }).from(sites).where(eq(sites.organisationId, organisationId)).limit(1), []);
+    const siteRows = await safe(db.select({ draft: sites.draft }).from(sites).leftJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId))
+        .where(eq(sites.organisationId, organisationId)).orderBy(websiteSiteFirst).limit(1), []);
     const [stats] = await safe(db.select({
         products: sql<number>`count(*) filter (where ${orgProducts.kind} = 'product')::int`,
         services: sql<number>`count(*) filter (where ${orgProducts.kind} = 'service')::int`,

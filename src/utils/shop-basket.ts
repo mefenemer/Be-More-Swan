@@ -178,6 +178,23 @@ export async function basketOn(db: Db, orgId: number): Promise<boolean> {
     }
 }
 
+const basketOnSeen = new Map<number, { on: boolean; at: number }>();
+const BASKET_ON_TTL_MS = 60_000;
+
+/**
+ * basketOn for page views, remembered per workspace for a minute while the function instance lives (review #885:
+ * one query fewer on every uncached page). A minute matches the pages' own public cache, so archiving the
+ * Shopkeeper hides the basket no later than a cached page would. Checkout keeps the fresh basketOn.
+ */
+export async function basketOnCached(db: Db, orgId: number): Promise<boolean> {
+    const seen = basketOnSeen.get(orgId);
+    if (seen && Date.now() - seen.at < BASKET_ON_TTL_MS) return seen.on;
+    const on = await basketOn(db, orgId);
+    if (basketOnSeen.size > 5000) basketOnSeen.clear();
+    basketOnSeen.set(orgId, { on, at: Date.now() });
+    return on;
+}
+
 /** A fresh basket of this site (null: none, another site's, or older than a day). */
 export async function loadBasket(db: Db, siteId: number, id: unknown): Promise<{ id: string; items: BasketItem[] } | null> {
     if (!isBasketId(id)) return null;
