@@ -32,6 +32,7 @@ import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, t
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
 import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
+import { loadOrderLines } from '../../src/utils/shop-basket';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -84,6 +85,8 @@ export default withLambda(async (event) => {
             shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
             orders, stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
             stock, options: stock.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {},
+            // A basket order's items (shop-basket.ts), by order id.
+            orderLines: orders.length ? await loadOrderLines(db, orgId, orders.map((o) => o.id)) : {},
             canEdit, warnings,
         };
     }

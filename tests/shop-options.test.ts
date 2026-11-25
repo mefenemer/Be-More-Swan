@@ -147,7 +147,7 @@ async function main() {
     await check('a paid option takes ITS stock (once, after the order insert)', async () => {
         const src = read('src/utils/site-shop.ts');
         const insertDone = src.indexOf('if (!order) return true;   // a retry of an order already recorded');
-        const take = src.indexOf('await takeOptionStock(db, site.organisationId, optionId, order.quantity)');
+        const take = src.indexOf('? await takeOptionStock(db, site.organisationId, optionId, qty)');
         assert.ok(insertDone > 0 && take > insertDone);
         assert.deepStrictEqual(await takeOptionStock({ execute: async () => [{ before: 4, after: 2 }] } as unknown as Db, 3, 3, 2), { before: 4, after: 2, lowStockAt: null, oversold: false });
         assert.strictEqual(await takeOptionStock({ execute: async () => { throw missingTable; } } as unknown as Db, 3, 3, 1), null);
