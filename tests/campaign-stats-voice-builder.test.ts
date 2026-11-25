@@ -73,17 +73,18 @@ check('every generator passes the stored voice; social re-asks once on a never-s
     assert.match(read('assistant-detail.html'), /<input type="hidden" id="edit_voice_json" value="">/);
 });
 
-check('Terms 2.4: a version bump that users can actually accept', () => {
+check('Terms 2.5: a version bump that users can actually accept', () => {
     // 2.4 (2026-11-18, effective 2026-12-19): an AI presenter is 2 tasks a second (clause 5.2). 2.3 made AI
     // video count by its length; 2.2 made one task allowance; the 2.1 Swan Index clause is asserted below.
-    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.4';/);
+    // 2.5 (2026-11-27): the Note Taker in a meeting (clause 5.2, from 1 January 2027) and clause 9.3 Meetings.
+    assert.match(read('netlify/functions/accept-tos.ts'), /export const CURRENT_TOS_VERSION = '2\.5';/);
     assert.match(read('netlify/functions/accept-tos.ts'), /const version = CURRENT_TOS_VERSION;/);
     assert.doesNotMatch(read('workspace.html'), /version: '2\.0'/);
-    assert.match(read('terms_of_service.html'), /Version 2\.4 &middot;/);
+    assert.match(read('terms_of_service.html'), /Version 2\.5 &middot;/);
     assert.match(read('terms_of_service.html'), /Within 5 working days of receiving your request/);
     // A version bump must reach people who accepted an older version — at login, not only in setup.
     assert.match(read('workspace.html'), /if \(d && d\.version && !d\.upToDate\) checkTosAcceptance\(true\);/);
-    assert.match(read('workspace.html'), /What changed in Terms v2\.4/);
+    assert.match(read('workspace.html'), /What changed in Terms v2\.5/);
     // The presenter's figures are plain text: the live cost is 0 until 19 December, so a data-task-cost span would read "no tasks".
     assert.match(read('terms_of_service.html'), /an AI presenter \(a made-up person who speaks your video's script to camera\) as 2 tasks for each second the presenter is on screen/);
     assert.doesNotMatch(read('terms_of_service.html'), /data-task-cost="ai_presenter"/);

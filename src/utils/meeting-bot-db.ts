@@ -10,7 +10,7 @@
 
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations, userOrganisations } from '../../db/schema';
+import { aiAssistants, billingInformation, dpaAcceptances, masterAssistants, meetingBots, meetingImports, organisations, tosAcceptances, userOrganisations } from '../../db/schema';
 import { canAccessAssistant, type AssistantAccess } from './assistant-access';
 import { isFeatureEnabled } from './feature-flags';
 import {
@@ -32,6 +32,11 @@ type BotRow = typeof meetingBots.$inferSelect;
  * have accepted one before a bot can be sent. 1.2 is drafted but not yet published, so today no workspace can.
  */
 export const BOT_DPA_VERSIONS = ['1.2'];
+/** Terms versions with clause 9.3 (Meetings: tell people, get any consent the law requires). The SENDER must have
+ *  accepted one (legal review 2026-11-25: 9.3 is what puts the recording-consent duty on the customer). */
+export const BOT_TOS_VERSIONS = ['2.5'];
+export const DPA_NEEDED_MESSAGE = 'An owner or admin of your workspace needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.';
+export const TERMS_NEEDED_MESSAGE = 'Please accept the updated Terms of Service (version 2.5) first: they say what you must tell people in the meeting. Reload the page to see them.';
 
 // ── What the GUI and chat see ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +102,12 @@ export type SendBotResult =
 
 const fail = (status: number, code: string, error: string): SendBotResult => ({ ok: false, status, code, error });
 
+export async function hasAcceptedBotTerms(db: Db, userId: number): Promise<boolean> {
+    const [r] = await db.select({ id: tosAcceptances.id }).from(tosAcceptances)
+        .where(and(eq(tosAcceptances.userId, userId), inArray(tosAcceptances.version, BOT_TOS_VERSIONS))).limit(1);
+    return Boolean(r);
+}
+
 export async function hasAcceptedBotDpa(db: Db, organisationId: number): Promise<boolean> {
     const [r] = await db.select({ id: dpaAcceptances.id }).from(dpaAcceptances)
         .where(and(eq(dpaAcceptances.organisationId, organisationId), inArray(dpaAcceptances.version, BOT_DPA_VERSIONS))).limit(1);
@@ -130,9 +141,8 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     if (!assistant || assistant.roleKey !== 'meeting_note_taker') return fail(404, 'no_assistant', 'Meeting assistant not found in this workspace.');
     if (assistant.lifecycleStatus === 'archived') return fail(409, 'archived', 'This assistant has been archived.');
 
-    if (!(await hasAcceptedBotDpa(db, i.organisationId))) {
-        return fail(409, 'dpa_required', 'Your workspace owner needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.');
-    }
+    if (!(await hasAcceptedBotDpa(db, i.organisationId))) return fail(409, 'dpa_required', DPA_NEEDED_MESSAGE);
+    if (!(await hasAcceptedBotTerms(db, i.userId))) return fail(409, 'terms_required', TERMS_NEEDED_MESSAGE);
 
     const link = cleanMeetingLink(i.meetingUrl);
     if (!link.ok) return fail(400, 'bad_link', link.error);

@@ -10,14 +10,14 @@
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { hasAcceptedBotDpa, listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
+import { hasAcceptedBotDpa, hasAcceptedBotTerms, listMeetingBots, removeMeetingBot, sendMeetingBot } from '../../src/utils/meeting-bot-db';
 import { MEETING_BOT_FLAG } from '../../src/utils/meeting-bot';
 // Only this function imports the pictures (the one place a bot is sent), so no other bundle carries them: the
 // workspace's own picture is drawn here (meeting-bot-tile.ts, canvas loaded on send only), the fallback is fixed.
 import { BOT_TILE_NOT_RECORDING_JPEG_B64, BOT_TILE_RECORDING_JPEG_B64 } from '../../src/utils/meeting-bot-tile-data';
 import { drawBotTiles } from '../../src/utils/meeting-bot-tile';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
-import { getTaskCosts } from '../../src/utils/task-costs';
+import { getTaskCosts, getUpcomingTaskCosts } from '../../src/utils/task-costs';
 import { canAccessAssistant } from '../../src/utils/assistant-access';
 import { requireTenant } from '../../src/utils/tenant';
 
@@ -36,15 +36,18 @@ export default withLambda(async (event) => {
         if (!Number.isInteger(assistantId) || assistantId <= 0) return json(400, { error: 'assistantId is required.' });
         if (!canAccessAssistant(assistantAccess, assistantId)) return json(404, { error: 'Meeting assistant not found in this workspace.' });
         const available = await isFeatureEnabled(organisationId, MEETING_BOT_FLAG).catch(() => false);
-        if (!available) return json(200, { available: false, dpaAccepted: false, tasksPer5Min: 0, bots: [] });
+        if (!available) return json(200, { available: false, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: [] });
         try {
-            const [bots, dpaAccepted, costs] = await Promise.all([
-                listMeetingBots(db, organisationId, assistantId), hasAcceptedBotDpa(db, organisationId), getTaskCosts(),
+            const [bots, dpaAccepted, termsAccepted, costs, upcoming] = await Promise.all([
+                listMeetingBots(db, organisationId, assistantId), hasAcceptedBotDpa(db, organisationId), hasAcceptedBotTerms(db, userId),
+                getTaskCosts(), getUpcomingTaskCosts(),
             ]);
-            return json(200, { available: true, dpaAccepted, tasksPer5Min: costs.weights.meeting_bot_call, bots });
+            // The announced price, so the dialog can say "free until 1 January 2027, then …" (task-costs.ts getUpcomingTaskCosts).
+            const next = upcoming.meeting_bot_call ?? null;
+            return json(200, { available: true, dpaAccepted, termsAccepted, tasksPer5Min: costs.weights.meeting_bot_call, nextTasksPer5Min: next ? { units: next.units, from: next.from } : null, bots });
         } catch (err) {
             console.error('[meeting-bots] list failed', err instanceof Error ? err.message : err);
-            return json(200, { available: true, dpaAccepted: false, tasksPer5Min: 0, bots: [] });
+            return json(200, { available: true, dpaAccepted: false, termsAccepted: false, tasksPer5Min: 0, bots: [] });
         }
     }
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });

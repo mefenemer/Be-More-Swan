@@ -62,8 +62,12 @@ await test('the bot\'s name and join notice name the business, and the notice fi
     const m = joinMessage('Marmalade Productions');
     assert.match(m, /Marmalade Productions's Be More Swan Note Taker/);
     assert.match(m, /transcript/);
+    assert.match(m, /I'm recording this call/, 'says recording, not just transcript (legal review 2026-11-25)');
+    assert.match(m, /recording is deleted/);
     assert.match(m, /host can remove me/);
-    assert.ok(joinMessage('y'.repeat(300)).length <= JOIN_MESSAGE_MAX);
+    const long = joinMessage('y'.repeat(300));
+    assert.ok(long.length <= JOIN_MESSAGE_MAX);
+    assert.ok(long.endsWith('Privacy: bemoreswan.com/privacy.html#note-taker'), 'the privacy link is never cut off, even for the longest name');
 });
 
 await test('join time: now, under 10 minutes away = now, later = booked, over 60 days = refused', () => {

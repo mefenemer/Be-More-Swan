@@ -12,9 +12,11 @@
 
 ## 1. What goes out when (launch day = L)
 
+> **Superseded 2026-11-25 by the owner's fast-launch decision (L = Friday 27 November 2026).** After an independent legal review (not formal legal advice), DPA 1.2 clause 5 names Recall.ai and AssemblyAI as **specifically** authorised by accepting that version, so the 14-day general-authorisation notice does not apply to workspaces that accept it, and Trust/privacy carry a matching carve-out sentence. The sub-processor email still went out on 25 November as a courtesy. The bot is **free until 1 January 2027**; the charge was announced on 25 November. Also added after the review: the in-call notice says "recording" and links `privacy.html#note-taker`; sending needs the SENDER to have accepted Terms 2.5 (clause 9.3); the flag stays off for customers until Recall confirms no model training. Drafts sent: `docs/note-taker-launch-notices-draft.md`. The table below is the original plan, kept for the record.
+
 | When | What | Who | Why this date |
 |---|---|---|---|
-| **L − 30 days or earlier** | Announce the new charge: Admin → Money → Task costs, change for `meeting_bot_per_5_min` from 0 to 1, starting L, with the customer "Why" text in §7.2 | Owner (announcing sends email + in-app) | Terms 5.2: weights change on at least 30 days' notice. The key is created at 0 in plan step 2, as `ai_presenter` was |
+| **L − 30 days or earlier** | Announce the new charge: Admin → Money → Task costs, change for `meeting_bot_call` from 0 to 1, starting **1 January 2027** (announced 25 November 2026; the weight was set to 0 on both databases by `db/z-meeting-bot-free-until-2027.sql`), with the customer "Why" text in §7.2 | Owner (announcing sends email + in-app) | Terms 5.2: weights change on at least 30 days' notice. The key was seeded at 1; `db/z-meeting-bot-free-until-2027.sql` set it to 0 on 2026-11-25 |
 | **L − 14 days or earlier** | Sub-processor notice email to every workspace owner (§7.1) | Owner | DPA clause 5 and the Trust page: at least 14 days before adding a sub-processor that handles personal data |
 | **L − 14 days** | Trust and privacy pages: add the Recall.ai row (§2) with "from ⟨L⟩" in the Purpose cell; update "Last updated" | Me (PR) | The list customers are told to check |
 | **L** | DPA 1.2 live (§4); Terms 2.5 live (§5); privacy §5 and §9 additions (§3); help article; Pricing page row | Me (PR), owner merges | The bot switches on the same day |
@@ -128,25 +130,34 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 
 | | |
 |---|---|
-| **Processing** | A bot joins a meeting the customer chooses, records audio only to make a transcript, deletes the recording, keeps the transcript 30 days, and writes minutes that a person approves |
+| **Processing** | A bot joins a meeting the customer chooses, records audio only to make a transcript, writes minutes from it that a person approves, then deletes the recording and transcript at Recall. We never store the transcript |
 | **Roles** | Customer = controller. Be More Swan = processor. Recall.ai = sub-processor. AssemblyAI = Recall's sub-processor for the transcription (sees the audio). Anthropic = sub-processor for the minutes (existing) |
 | **People affected** | Meeting participants, including people outside the customer's business who never signed up to Be More Swan |
-| **Necessity and proportionality** | Only meetings the user sends it to (v1 has no automatic joining; calendar auto-join is off by default in v2). Audio is never stored by us. Transcript kept 30 days, the shortest that still allows "redo the minutes". Minutes are the purpose, and the customer controls them |
+| **Necessity and proportionality** | Only meetings the user sends it to (v1 has no automatic joining; calendar auto-join is off by default in v2). Audio and transcript are never stored by us (checked 2026-11-25: `meeting_imports` holds no transcript text and the minutes writer saves nothing). Minutes are the purpose, and the customer controls them |
 
 **Risks and measures:**
 
 | Risk | Likelihood / impact | Measures | Left over |
 |---|---|---|---|
-| People recorded without knowing | Medium / high | Bot's name says what it is; chat notice on joining (proven in Phase 0 on Meet and Teams); host must admit it and can remove it; Terms 9.3; reminder in the send dialog | Low |
+| People recorded without knowing | Medium / high | Bot's name says what it is; chat notice on joining says it is **recording** and links the privacy notice (changed 2026-11-25 after the legal review); video tile says "Taking notes & recording"; host must admit it and can remove it; Terms 9.3; reminder in the send dialog | Low |
 | All-party consent laws (US states) broken | Medium / high | Terms 9.3 puts the duty on the customer; help article names it; the in-call notice supports consent | Medium (customer's duty) |
-| Special category data in what is said | Medium / medium | DPA 13 exception limits use to transcript and minutes; prompt never infers or labels a category; meetings for medical or disciplinary purposes excluded; transcript deleted at 30 days | Low |
+| Special category data in what is said | Medium / medium | DPA 13 exception limits use to transcript and minutes; prompt never infers or labels a category; meetings for medical or disciplinary purposes excluded; transcript not kept | Low |
 | Recording kept longer than needed | Low / high | `delete_media` straight after the transcript is saved (proven in Phase 0); failed jobs deleted within 24 hours; every bot is sent with a 48-hour Recall retention, so a failed delete cannot leave media at Recall for good (Recall's default is to keep it forever) | Low |
 | Transfer to the US | Medium / medium | UK and EU workspaces on Recall's EU region, where recordings, transcripts and backups stay and AssemblyAI transcribes in the EU; US workspaces stay in the US. Recall support staff in the US may access data when needed (least privilege, multi-factor sign-in), covered by the SCCs and UK Addendum in Recall's DPA. Recall confirmed (24 November) that the DPA's "primary processing in the United States" (§6.1) is general wording for the whole service: for our eu-central-1 workspace, meeting content is processed and stored in the EU. Recall's logs and webhooks can hold meeting links, join times and participant names, never audio or video | Low |
 | Transcription provider keeps meeting audio or text | Low / medium | AssemblyAI deletes the audio once processed, keeping it up to 3 days only if that deletion fails; billing and log details may remain. Zero Data Retention would remove this, but only in English low-latency mode and with no transcript stored to fetch after the call (§10); owner chose accuracy mode with language detection instead | Low |
 | Bot joins the wrong meeting | Low / medium | Sent only by a person pasting a link or approving a chat card; duplicate-send guard; Remove from call / Cancel | Low |
-| Vendor breach | Low / high | Recall SOC 2 Type II and ISO 27001; recordings deleted at once, so little is held | Low |
+| Vendor breach | Low / high | Recall SOC 2 Type II and ISO 27001; recordings deleted at once, so little is held. ⚠️ Recall's breach-notice window asked 2026-11-25 (our DPA promises customers 48 hours) | Low |
+| Recall or AssemblyAI train models on meeting audio or text | Unknown / high | ⚠️ Asked Recall in writing 2026-11-25. **The flag stays off for customers until Recall confirms no training (or a contractual opt-out applies).** Reply to be saved in `docs/vendor-records/` | Low once confirmed |
+| Workplace monitoring (a customer records its own staff's meetings) | Medium / medium | Customer is the controller and must meet the ICO's monitoring-workers guidance; Terms 9.3 and the help article put the duty to tell people on the customer; the bot is visible and announces itself; minutes need human approval | Medium (customer's duty) |
+| Children or vulnerable people in meetings (tutoring, coaching, care) | Low / high | Help article warns; DPA clause 13 excludes meetings about special category data without a lawful basis | Low |
 
-**Outcome:** acceptable with the measures above. No prior consultation with the ICO needed. Review at L + 3 months, or when calendar auto-join (v2) or Zoom ships.
+**Transfer risk assessment (Recall US support access):** UK/EU meeting content stays in eu-central-1; the only transfer is occasional access by Recall support staff in the US (least privilege, MFA), under the EU SCCs + UK Addendum in Recall's self-executing DPA (`docs/vendor-records/recall-dpa-2026-11-20.pdf`). Data seen would be what is needed for support, rarely and briefly; US public-authority access risk to this data is low, and the EU–US DPF/UK Extension applies to certified US recipients. Assessed acceptable.
+
+**Customers' own DPIAs:** the customer is the controller. Help article offers a DPIA-support summary on request (Art. 28(3)(f)).
+
+**Outcome:** acceptable with the measures above, **subject to Recall confirming no model training**. No prior consultation with the ICO needed. Review at L + 3 months, or when calendar auto-join (v2) or Zoom ships.
+
+**Sign-off:** ______________________ (owner, Be More Swan Ltd) · Date: ____ November 2026
 
 ## 9. Also to check in plan step 2 (code)
 

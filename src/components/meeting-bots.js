@@ -191,16 +191,30 @@
     refresh();
   }
 
+  const perFive = (w) => `${w} task${w === 1 ? '' : 's'} for each started 5 minutes it’s in the call (about ${w * 12} an hour)`;
+  /** "1 January 2027" from "2027-01-01", in UTC so no device moves it a day. */
+  function longDate(iso) {
+    const t = Date.parse(`${iso}T00:00:00Z`);
+    return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
   function costWords(d) {
     const w = Number(d?.tasksPer5Min) || 0;
-    if (w <= 0) return 'Nothing is charged for this yet.';
-    return `Uses ${w} task${w === 1 ? '' : 's'} for each started 5 minutes it’s in the call (about ${w * 12} an hour). Nothing if it isn’t let in.`;
+    const next = d?.nextTasksPer5Min && Number(d.nextTasksPer5Min.units) > 0 ? d.nextTasksPer5Min : null;
+    if (w <= 0) {
+      // The announced price (Terms 5.2, 30 days' notice), e.g. free until 1 January 2027.
+      const when = next ? longDate(next.from) : '';
+      return next && when ? `Free until ${when}. From then, ${perFive(Number(next.units))}. Nothing if it isn’t let in.` : 'Nothing is charged for this yet.';
+    }
+    return `Uses ${perFive(w)}. Nothing if it isn’t let in.`;
   }
 
   function openDialog() {
     const d = st.data || {};
     const name = st.assistantName || 'Your Note Taker';
     const needsDpa = d.dpaAccepted === false;
+    // Terms 2.5 clause 9.3 (tell people, get consent) must be accepted by whoever sends it; the server refuses otherwise.
+    const needsTerms = !needsDpa && d.termsAccepted === false;
+    const blocked = needsDpa || needsTerms;
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
     overlay.setAttribute('data-meeting-bot-dialog', '');
@@ -214,7 +228,8 @@
           <button type="button" data-mb-close aria-label="Close" class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>
         <form data-mb-form class="p-5 space-y-4" novalidate>
-          ${needsDpa ? '<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-mb-dpa>Your workspace owner needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.</p>' : ''}
+          ${needsDpa ? '<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-mb-dpa>An owner or admin of your workspace needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.</p>' : ''}
+          ${needsTerms ? '<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-mb-terms>Please accept the updated Terms of Service (version 2.5) first: they say what you must tell people in the meeting. Reload the page to see them.</p>' : ''}
           <label class="block">
             <span class="block text-sm font-bold text-gray-700 mb-1">Meeting link</span>
             <input name="meetingUrl" type="url" inputmode="url" autocomplete="off" required maxlength="500"
@@ -247,7 +262,7 @@
           <p class="hidden text-sm font-semibold" data-mb-status role="status"></p>
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-mb-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
-            <button type="submit" data-mb-submit ${needsDpa ? 'disabled' : ''}
+            <button type="submit" data-mb-submit ${blocked ? 'disabled' : ''}
               class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Send the Note Taker</button>
           </div>
         </form>
@@ -274,7 +289,7 @@
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (busy || needsDpa) return;
+      if (busy || blocked) return;
       const meetingUrl = (form.elements.meetingUrl.value || '').trim();
       if (!meetingUrl) { say('Paste the meeting link first.', 'error'); return; }
       let joinAt = null;

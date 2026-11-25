@@ -21,7 +21,7 @@ import {
 } from './meeting-bot';
 import { hasAcceptedBotDpa } from './meeting-bot-db';
 import { PICKUP_PLATFORM_LABELS, type PickupPlatform } from './meeting-pickup';
-import { getTaskCosts } from './task-costs';
+import { getTaskCosts, getUpcomingTaskCosts } from './task-costs';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -35,7 +35,7 @@ const oneLine = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(
 export interface BotSnapshotRow { id: number; platform: string; title: string | null; joinAt: Date; status: string }
 
 /** Pure: the block from the facts. */
-export function formatMeetingBotsSnapshot(i: { dpaAccepted: boolean; tasksPer5Min: number; zoom: boolean; rows: readonly BotSnapshotRow[] }): string {
+export function formatMeetingBotsSnapshot(i: { dpaAccepted: boolean; tasksPer5Min: number; next?: { units: number; from: string } | null; zoom: boolean; rows: readonly BotSnapshotRow[] }): string {
     const lines = i.rows.map((r) => {
         const label = PICKUP_PLATFORM_LABELS[r.platform as PickupPlatform] ?? r.platform;
         const when = r.status === 'scheduled' ? `booked for ${r.joinAt.toISOString().slice(0, 16).replace('T', ' ')} UTC` : `sent ${r.joinAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
@@ -43,8 +43,8 @@ export function formatMeetingBotsSnapshot(i: { dpaAccepted: boolean; tasksPer5Mi
     });
     return [
         `THE NOTE TAKER IN CALLS: it can join ${i.zoom ? 'Google Meet, Microsoft Teams and Zoom' : 'Google Meet and Microsoft Teams'} calls when the user sends it a link.`,
-        i.dpaAccepted ? '' : 'IT CANNOT JOIN YET: the workspace owner must first accept the updated Data Processing Agreement (version 1.2). Say so if they ask; a send card will say it can\'t be done.',
-        i.tasksPer5Min > 0 ? `Cost: ${i.tasksPer5Min} task${i.tasksPer5Min === 1 ? '' : 's'} for each started 5 minutes in the call (about ${i.tasksPer5Min * 12} an hour); nothing if it isn't let in.` : 'Cost: nothing at the moment.',
+        i.dpaAccepted ? '' : 'IT CANNOT JOIN YET: an owner or admin of the workspace must first accept the updated Data Processing Agreement (version 1.2). Say so if they ask; a send card will say it can\'t be done.',
+        i.tasksPer5Min > 0 ? `Cost: ${i.tasksPer5Min} task${i.tasksPer5Min === 1 ? '' : 's'} for each started 5 minutes in the call (about ${i.tasksPer5Min * 12} an hour); nothing if it isn't let in.` : (i.next && i.next.units > 0 ? `Cost: free until ${i.next.from} (YYYY-MM-DD; say the date in words), then ${i.next.units} task${i.next.units === 1 ? '' : 's'} for each started 5 minutes in the call; nothing if it isn't let in.` : 'Cost: nothing at the moment.'),
         lines.length ? `Booked or in a call now (newest first):\n${lines.join('\n')}` : 'None booked or in a call now.',
     ].filter(Boolean).join('\n');
 }
@@ -53,7 +53,7 @@ export function formatMeetingBotsSnapshot(i: { dpaAccepted: boolean; tasksPer5Mi
 export async function buildMeetingBotsSnapshot(db: Db, organisationId: number, aiAssistantId: number): Promise<string | null> {
     try {
         if (!(await isFeatureEnabled(organisationId, MEETING_BOT_FLAG))) return null;
-        const [rows, dpaAccepted, costs, zoom] = await Promise.all([
+        const [rows, dpaAccepted, costs, zoom, upcoming] = await Promise.all([
             db.select({ id: meetingBots.id, platform: meetingBots.platform, title: meetingBots.title, joinAt: meetingBots.joinAt, status: meetingBots.status })
                 .from(meetingBots).where(and(
                     eq(meetingBots.organisationId, organisationId), eq(meetingBots.aiAssistantId, aiAssistantId),
@@ -62,8 +62,9 @@ export async function buildMeetingBotsSnapshot(db: Db, organisationId: number, a
             hasAcceptedBotDpa(db, organisationId),
             getTaskCosts(),
             isFeatureEnabled(organisationId, MEETING_BOT_ZOOM_FLAG).catch(() => false),
+            getUpcomingTaskCosts(),
         ]);
-        return formatMeetingBotsSnapshot({ dpaAccepted, tasksPer5Min: costs.weights.meeting_bot_call, zoom, rows });
+        return formatMeetingBotsSnapshot({ dpaAccepted, tasksPer5Min: costs.weights.meeting_bot_call, next: upcoming.meeting_bot_call ?? null, zoom, rows });
     } catch (err) {
         console.error('[chat-meeting-bot] snapshot failed (non-fatal)', err instanceof Error ? err.message : err);
         return null;
@@ -137,7 +138,7 @@ export async function resolveMeetingBotProposal(
         }
         const when = cleanJoinAt(req.joinAt, now);
         if (!when.ok) return block(when.error);
-        if (!(await hasAcceptedBotDpa(db, organisationId))) return block('Your workspace owner needs to accept the updated Data Processing Agreement (version 1.2) first.');
+        if (!(await hasAcceptedBotDpa(db, organisationId))) return block('An owner or admin of your workspace needs to accept the updated Data Processing Agreement (version 1.2) first.');
         return {
             ...base, meetingUrl: link.url, platformLabel: PICKUP_PLATFORM_LABELS[link.platform],
             joinAt: when.scheduled ? when.joinAt.toISOString() : null,

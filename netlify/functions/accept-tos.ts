@@ -21,7 +21,10 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 // 2.3 (2026-11-02): clause 5.2 — an AI video counts by its length from 3 December 2026.
 // 2.4 (2026-11-18): clause 5.2 — an AI presenter is 2 tasks a second from 19 December 2026 (task cost
 // change 3, announced 2026-11-18; docs/ai-presenter-pricing-notice.md).
-export const CURRENT_TOS_VERSION = '2.4';
+// 2.5 (2026-11-27): clause 5.2 — the Note Taker in a meeting is 1 task per started 5 minutes from 1 January 2027
+// (announced 2026-11-25); new clause 9.3 — meetings: tell people, get any consent the law requires. The meeting bot
+// needs the SENDER to have accepted 2.5 (meeting-bot-db.ts BOT_TOS_VERSIONS).
+export const CURRENT_TOS_VERSION = '2.5';
 
 const jwtSecret = process.env.JWT_SECRET;
 
