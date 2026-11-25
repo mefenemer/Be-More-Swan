@@ -204,7 +204,15 @@ Merchant Center feed, Instagram/Facebook Shop catalogue from the same products.
    (owner/admin; formula cells made plain text). Shop tab buttons + chat card `order_update` → `shop.ts order_update`.
    Also: the Delivery & returns page hides pound delivery choices when nothing is priced in pounds. Tests:
    `tests/shop-orders.test.ts`.
-7. Shop page for a business with no Be More Swan website.
+7. **Shop page — built 2026-11-25** (`feat/shop-page`): for a business with no Be More Swan website. An ordinary
+   hosted site OWNED BY THE SHOPKEEPER (`sites.ai_assistant_id`), drawn by the same renderer: one page with the name,
+   brand colours, every product (not service) with a fixed price in products sections of 12 (up to 48), and how to
+   reach them about an order (`src/utils/shop-page.ts`). Product pages, basket, checkout, Delivery & returns (now with a
+   short "Your details" privacy paragraph) and the sitemap come with it. Address `<name>.bemoreswan.site`; **own domain
+   not in this slice**. Offered only while no OTHER site of theirs is published. Shop tab "Shop page" card: Publish /
+   Update / Take offline (owner/admin, a click only, the same safety check as a website's Publish) and each product's
+   link to copy for posts and an Instagram bio. The chat reads where it stands and gives the links; never a chat card.
+   Archiving the Shopkeeper takes it offline (site-offline.ts). No SQL. Tests: `tests/shop-page.test.ts`.
 
 ## 7. Costs and fees model
 

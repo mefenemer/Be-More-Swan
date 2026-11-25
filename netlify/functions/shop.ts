@@ -13,6 +13,8 @@
 //   order_update     { id, status: 'posted'|'done'|'new', trackingNumber?, trackingUrl? } → the Shop tab's "Mark as
 //                    posted" and the chat's order_update card; posted emails the buyer from the owner's own inbox
 //   orders_csv       → { filename, csv } every order (the newest 5000), for the Shop tab's "Download CSV"
+//   shop_page_publish { slug } → write and publish the shop page for a business with no website (owner/admin;
+//                    also "Update shop page"); shop_page_offline → take it offline (shop-page.ts). A click only.
 //   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
 //                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
 //                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
@@ -40,6 +42,12 @@ import { loadStockList, saveProductStock, stockWords } from '../../src/utils/sho
 import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
 import { loadOrderLines } from '../../src/utils/shop-basket';
 import { loadOrderPosting, markOrderPosted, ordersCsv, ordersPostingOn, postedMessage } from '../../src/utils/shop-orders';
+import { publishShopPage, shopPageOffline, shopPageState } from '../../src/utils/shop-page';
+import { shopStepsLeft } from '../../src/utils/shop-snapshot';
+import { enforcePromptModeration } from '../../src/utils/moderation';
+import { cleanSiteSlugInput, siteCacheTag, siteOrigin, siteVisibleText } from '../../src/utils/site-hosting';
+import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
+import { purgeCache } from '@netlify/functions';
 import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
 
 function json(statusCode: number, body: unknown) {
@@ -48,6 +56,13 @@ function json(statusCode: number, body: unknown) {
 
 /** Orders shown on the tab: the newest 200 is plenty for a micro seller (plan §8, decision 1). */
 export const SHOP_ORDER_LIMIT = 200;
+
+/** Clear a site's cached pages so the shop page shows at once (as sites.ts does). Never fails the action. */
+async function purgeSitePages(slug: string | null | undefined): Promise<void> {
+    if (!slug) return;
+    try { await purgeCache({ tags: [siteCacheTag(slug)] }); }
+    catch (err) { console.error('[shop] cache purge failed (the change shows within a minute)', err instanceof Error ? err.message : err); }
+}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -101,6 +116,8 @@ export default withLambda(async (event) => {
             // Posted orders' tracking (shop-orders.ts); postingOn = db/z-shop-orders.sql has reached this database.
             orderPosting: orders.length ? await loadOrderPosting(db, orgId, orders.map((o) => o.id)) : {},
             postingOn: await ordersPostingOn(db),
+            // The shop page for a business with no Be More Swan website (shop-page.ts).
+            shopPage: await shopPageState(db, orgId, assistant.id).catch((err) => { console.error('[shop] shop page read failed', err instanceof Error ? err.message : err); return null; }),
             canEdit, warnings,
         };
     }
@@ -161,6 +178,35 @@ export default withLambda(async (event) => {
         // Every buyer's name, email and address in one file: owner/admin only, like the shop's other settings.
         if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can download the orders.' });
         return json(200, await ordersCsv(db, orgId));
+    }
+
+    if (action === 'shop_page_publish') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can publish the shop page.' });
+        const [acct, shop] = await Promise.all([connectAccountFor(db, orgId), loadShopSettings(db, orgId)]);
+        const left = shopStepsLeft({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop });
+        if (left.length) return json(400, { error: `Get your shop ready first: ${left.join('; ')}.` });
+        const slug = cleanSiteSlugInput(body.slug);
+        const r = await publishShopPage(db, {
+            orgId, assistantId: assistant.id, userId, slug, contactEmail: shop?.contactEmail ?? null,
+            // The safety check reads every word a visitor would read, as a website's Publish does.
+            moderate: async (def) => {
+                const blocked = await enforcePromptModeration({ text: siteVisibleText(def).slice(0, 20000), userId, organisationId: orgId, source: 'site_publish' });
+                return blocked ? 'Something on the page couldn\'t be published. Check your business name, description and product names.' : null;
+            },
+        });
+        if (!r.ok) return json(r.status, { error: r.error });
+        await purgeSitePages(r.oldSlug);
+        await purgeSitePages(r.site.slug);
+        await refreshDirectoryAfterPublish(db, orgId);
+        return json(200, await view([`Your shop page is live at ${siteOrigin(r.site.slug!)}.`]));
+    }
+
+    if (action === 'shop_page_offline') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can take the shop page offline.' });
+        const slug = await shopPageOffline(db, orgId, assistant.id);
+        await purgeSitePages(slug);
+        await refreshDirectoryAfterAddressChange(db, orgId);
+        return json(200, await view(['Your shop page is offline. Nothing is deleted: "Publish shop page" puts it back.']));
     }
 
     if (action === 'product_stock') {
