@@ -17,6 +17,8 @@
  * 4. Orders: every paid order in the workspace — Mark as posted (tracking number / link, emailed to the buyer from
  *    the owner's own Gmail or Outlook), Mark as dealt with, refunds shown (made in Stripe), Download CSV
  *    (owner/admin). Same server action as the chat's order_update card (shop.ts order_update, shop-orders.ts).
+ * 5. Shop page: for a business with no Be More Swan website — publish / update / take offline its own shop page
+ *    at <name>.bemoreswan.site (owner/admin, a click only, like a website), with each product's link to copy.
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
 (function () {
@@ -219,6 +221,35 @@
     </details>`;
   }
 
+  /** The shop page for a business with no website (shop-page.ts). */
+  function shopPageCard(d) {
+    const p = d.shopPage;
+    if (!p) return '';
+    const head = '<p class="text-sm font-black text-gray-900">Shop page</p>';
+    const notes = `${state.pageSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.pageSaved)}</p>` : ''}${state.pageError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.pageError)}</p>` : ''}`;
+    if (p.state === 'website') {
+      return card(`${head}<p class="text-xs text-gray-600 mt-1">Your products sell on your website, <a class="underline" href="${esc(p.websiteUrl)}" target="_blank" rel="noopener">${esc(p.websiteUrl)}</a>, so a separate shop page isn't needed.</p>`);
+    }
+    const ready = !steps(d).some((x) => !x.done);
+    const address = `<label class="block text-[11px] font-bold text-gray-600 mt-3"><span class="block">Its address</span>
+        <span class="flex items-center gap-1 mt-1"><input type="text" maxlength="40" data-page-slug value="${esc(p.slug || p.suggestedSlug || '')}" class="${inputCls}" autocomplete="off" spellcheck="false"><span class="text-xs text-gray-600 whitespace-nowrap">.${esc(p.domain)}</span></span></label>`;
+    if (p.state === 'live') {
+      return card(`${head}
+        <p class="text-xs text-gray-600 mt-1">✓ Live at <a class="underline font-semibold" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>. Buyers can add things to a basket and pay with Stripe.</p>
+        ${p.productLinks.length ? `<p class="text-xs font-bold text-gray-800 mt-3">Each product's link — for posts and your Instagram bio</p>
+        <ul class="mt-1 space-y-1">${p.productLinks.map((l) => `<li class="flex flex-wrap items-center gap-2 text-xs"><span class="font-semibold text-gray-900">${esc(l.name)}</span><a class="underline text-gray-600 break-all" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a><button type="button" data-page-copy="${esc(l.url)}" class="btn-secondary border px-2 py-1 text-[11px] font-bold rounded-lg">Copy</button></li>`).join('')}</ul>` : ''}
+        ${p.notYetOn ? `<p class="text-xs font-semibold text-amber-800 mt-2" data-page-not-yet>${esc(p.notYetOn)} product${p.notYetOn === 1 ? ' isn\'t' : 's aren\'t'} on your shop page yet. Press "Update shop page" to add ${p.notYetOn === 1 ? 'it' : 'them'}.</p>` : ''}
+        ${d.canEdit ? `${address}<p class="text-[11px] text-gray-500 mt-1">Added or changed a product, your logo or colours? Update it to show them.</p>
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-page-publish', 'Update shop page', true)}${btn('data-page-offline', 'Take offline')}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can change it.</p>'}
+        ${notes}`);
+    }
+    return card(`${head}
+      <p class="text-xs text-gray-600 mt-1">No website? Publish a shop page of your own: your name and colours, every product with a fixed price, a basket and Stripe checkout, and your Delivery &amp; returns page. Each product gets a link you can share in posts and your Instagram bio.${p.state === 'offline' ? ' It is offline now.' : ''}</p>
+      ${!ready ? '<p class="text-xs font-semibold text-amber-800 mt-2">Finish the steps at the top first.</p>' : ''}
+      ${d.canEdit ? `${address}<div class="flex flex-wrap gap-2 mt-3">${btn(`data-page-publish${ready ? '' : ' disabled'}`, 'Publish shop page', true)}</div>` : '<p class="text-xs font-semibold text-gray-700 mt-3">Only the workspace owner or an admin can publish it.</p>'}
+      ${notes}`);
+  }
+
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
@@ -257,7 +288,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -387,6 +418,35 @@
       render();
       return;
     }
+    const pagePublish = t('[data-page-publish]');
+    if (pagePublish) {
+      const input = document.querySelector('[data-page-slug]');
+      state.pageSaved = null; state.pageError = null; pagePublish.disabled = true;
+      try {
+        state.data = await post({ action: 'shop_page_publish', slug: input ? input.value : '' });
+        state.pageSaved = (state.data.warnings || [])[0] || 'Published.';
+      } catch (err) { state.pageError = err.message; }
+      render();
+      return;
+    }
+    const pageOff = t('[data-page-offline]');
+    if (pageOff) {
+      const sure = window.confirmModal ? await window.confirmModal('Take your shop page offline? Buyers won\'t be able to open it or its product links until you publish it again.', { title: 'Take shop page offline', confirmLabel: 'Take offline', tone: 'destructive' }) : true;
+      if (!sure) return;
+      state.pageSaved = null; state.pageError = null; pageOff.disabled = true;
+      try {
+        state.data = await post({ action: 'shop_page_offline' });
+        state.pageSaved = (state.data.warnings || [])[0] || 'Offline.';
+      } catch (err) { state.pageError = err.message; }
+      render();
+      return;
+    }
+    const copy = t('[data-page-copy]');
+    if (copy) {
+      try { await navigator.clipboard.writeText(copy.dataset.pageCopy); copy.textContent = 'Copied'; }
+      catch { copy.textContent = 'Copy failed'; }
+      return;
+    }
     const csv = t('[data-shop-csv]');
     if (csv) {
       state.ordersError = null; csv.disabled = true;
@@ -416,12 +476,12 @@
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.assistantName = assistantName || '';
-    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.postDraft = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
+    state.shown = 20; state.ordersSaved = null; state.ordersError = null; state.postOpen = null; state.postDraft = null; state.pageSaved = null; state.pageError = null; state.shopSaved = null; state.shopError = null; state.stockSaved = null; state.stockError = null; state.paymentsError = null; state.paymentsNotice = null; state.refreshed = false;
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     // Bound once, on the document (the tab is re-rendered; never bind from render).
     if (!state.bound) { document.addEventListener('click', onClick); state.bound = true; }
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard, shopPageCard } };
 })();

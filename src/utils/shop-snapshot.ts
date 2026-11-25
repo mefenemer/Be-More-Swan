@@ -15,6 +15,7 @@ import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
 import { loadProductOptions, optionsWords, type ProductOptions } from './shop-options';
 import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
+import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop-page';
 import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
 
 type Db = ReturnType<typeof getDb>;
@@ -35,6 +36,8 @@ export interface ShopSnapshotInput {
     /** Posted orders' tracking (shop-orders.ts), by order id; postingOn = db/z-shop-orders.sql is on this database. */
     posting?: Record<number, OrderPosting>;
     postingOn?: boolean;
+    /** The shop page for a business with no website (shop-page.ts). */
+    shopPage?: ShopPageState | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -112,6 +115,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     lines.push(`- Optional, never a step left to do: phone, VAT number, extra terms, the days to cancel (${s?.returnsDays ?? 14} set; 14 is the legal minimum) and the things that can't be returned for a change of mind.`);
     lines.push(...stockSnapshotLines(input.stock, input.options));
     lines.push(...deliverySnapshotLines(input.delivery));
+    lines.push(...shopPageSnapshotLines(input.shopPage));
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
@@ -126,7 +130,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     return lines.join('\n');
 }
 
-export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> {
+export async function buildShopSnapshot(db: Db, orgId: number, assistantId: number | null = null): Promise<string> {
     const [acct, shop, orders, stock] = await Promise.all([
         connectAccountFor(db, orgId),
         loadShopSettings(db, orgId),
@@ -139,5 +143,6 @@ export async function buildShopSnapshot(db: Db, orgId: number): Promise<string> 
     const options = stock?.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {};
     const delivery = await loadDelivery(db, orgId);
     const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn });
+    const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage });
 }

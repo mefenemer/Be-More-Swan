@@ -203,6 +203,8 @@ export function shopTermsHtml(s: ShopSettings, deliveryChoices: string | null = 
         + '<h2>Faulty items</h2><p>If an item is faulty, not as described or not fit for purpose, you can reject it for a full refund within 30 days of receiving it. After that you can ask for a repair or replacement, or a refund if that doesn\'t work. These are your rights under the Consumer Rights Act 2015, and nothing here takes them away.</p>'
         + (s.extraTerms ? `<h2>Other terms</h2>${para(s.extraTerms)}` : '')
         + '<h2>Payment</h2><p>Payments are taken securely by Stripe on our behalf. We never see your card details.</p>'
+        // Privacy wording for the buyer (online shop Phase 1: a shop page has no other page that says it).
+        + '<h2>Your details</h2><p>We use the name, email address and delivery address you give at checkout only to send your order, to contact you about it, and to keep the records the law asks us to keep.</p>'
         + `<h2>Cancellation form</h2><p>Copy this into an email or letter if you'd like to use it.</p>${cancellationFormHtml(s)}`
         + '</div></section>';
 }
