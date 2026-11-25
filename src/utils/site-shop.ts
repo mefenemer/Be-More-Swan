@@ -42,7 +42,7 @@ import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
-import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, type StockTaken } from './shop-stock';
+import { loadStockLevels, maxBuyable, stockAfterOrderLine, takeStock, STOCK_NOT_UPDATED_LINE, type StockTaken } from './shop-stock';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -304,13 +304,21 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     if (!order) return true;   // a retry of an order already recorded
 
     // Take it from stock — once, here, because only the first delivery of this webhook inserts the order.
+    // A blip is tried once more; if it still fails, the owner is told to check the count (a repeat
+    // webhook never gets here, so nothing else would correct it).
     let taken: StockTaken | null = null;
-    try {
-        taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
-    } catch (err) {
-        console.error('[site-shop] stock update failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) });
+    let stockFailed = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity);
+            stockFailed = false;
+            break;
+        } catch (err) {
+            stockFailed = true;
+            console.error('[site-shop] stock update failed', { orderId: order.id, attempt, message: err instanceof Error ? err.message : String(err) });
+        }
     }
-    const stockLine = stockAfterOrderLine(taken, order.quantity);
+    const stockLine = stockFailed ? STOCK_NOT_UPDATED_LINE : stockAfterOrderLine(taken, order.quantity);
 
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
         .from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId))

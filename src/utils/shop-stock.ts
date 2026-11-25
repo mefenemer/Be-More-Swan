@@ -194,6 +194,9 @@ export async function takeStock(db: Db, orgId: number, productId: number, qty: n
     }
 }
 
+/** The owner's email when the stock couldn't be updated for this order (after one retry). */
+export const STOCK_NOT_UPDATED_LINE = '⚠️ We couldn\'t update the stock for this order. Check the count on your Shopkeeper\'s Shop tab (Stock) and correct it if needed.';
+
 /** The line for the owner's "New order" email. Pure. */
 export function stockAfterOrderLine(taken: StockTaken | null, qty: number): string | null {
     if (!taken) return null;

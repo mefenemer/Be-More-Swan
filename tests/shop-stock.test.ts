@@ -9,9 +9,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-    isMissingStockColumn, loadStockLevels, maxBuyable, parseStockInput, saveProductStock, stockAfterOrderLine, stockState, stockWords, takeStock, STOCK_MAX,
+    isMissingStockColumn, loadStockLevels, STOCK_NOT_UPDATED_LINE, maxBuyable, parseStockInput, saveProductStock, stockAfterOrderLine, stockState, stockWords, takeStock, STOCK_MAX,
 } from '../src/utils/shop-stock';
 import { stockSnapshotLines } from '../src/utils/shop-snapshot';
+import { classifySql } from '../src/utils/issue-sql';
 import { normaliseSiteDefinition, type SiteDefinition } from '../src/utils/site-definition';
 import { renderSitePage } from '../src/utils/site-render';
 import { checkoutParams, MAX_QUANTITY, startCheckout, type SiteProduct } from '../src/utils/site-shop';
@@ -165,6 +166,8 @@ async function main() {
         const take = src.indexOf('taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity)');
         assert.ok(insertDone > 0 && take > insertDone, 'takeStock runs after the retry check');
         assert.ok(src.includes('<p><strong>Stock:</strong> ${esc(stockLine)}</p>'), 'the line reaches the owner\'s email');
+        assert.ok(src.includes('for (let attempt = 1; attempt <= 2; attempt++)') && src.includes('stockFailed ? STOCK_NOT_UPDATED_LINE'), 'a failed update is retried once, then the owner is told');
+        assert.match(STOCK_NOT_UPDATED_LINE, /couldn't update the stock/);
     });
 
     console.log('\nShop tab, chat and SQL');
@@ -200,8 +203,9 @@ async function main() {
 
     await check('SQL: additive columns with a range check; kept out of db/schema.ts on purpose', () => {
         const q = read('db/z-shop-stock.sql');
-        assert.ok(q.includes('ADD COLUMN IF NOT EXISTS stock        INTEGER') && q.includes('ADD COLUMN IF NOT EXISTS low_stock_at INTEGER'));
-        assert.ok(q.includes('org_products_stock_check'));
+        assert.ok(q.includes('ADD COLUMN IF NOT EXISTS stock        INTEGER CHECK (stock IS NULL OR stock BETWEEN 0 AND 100000)'));
+        assert.ok(q.includes('ADD COLUMN IF NOT EXISTS low_stock_at INTEGER CHECK (low_stock_at IS NULL OR low_stock_at BETWEEN 0 AND 100000)'));
+        assert.strictEqual(classifySql(q).safety, 'additive', 'the pipeline can run it');
         assert.ok(!/DROP|DELETE|TRUNCATE/i.test(q.replace(/--.*$/gm, '')), 'additive only');
         assert.ok(!read('db/schema.ts').includes('low_stock_at'), 'not in the Drizzle schema (select() would break before the SQL runs)');
     });
