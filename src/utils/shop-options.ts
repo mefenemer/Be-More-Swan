@@ -12,6 +12,8 @@
 // Set from the Shopkeeper's Shop tab and its chat card `product_options` — one server action (shop.ts).
 //
 // ⚠️ Raw SQL only, and a missing table reads as "no options" (code before the SQL works as today).
+// Known limit: an option's own price is stored in the product's currency at the time; if the owner later
+// changes the product's currency, they set the option prices again (rare: one currency per shop in practice).
 // db/schema.ts mirrors the table only so the workspace data export includes it.
 
 import { sql } from 'drizzle-orm';
@@ -208,6 +210,7 @@ export function optionsWords(po: ProductOptions, productPence: number | null, cu
         const pence = optionPence(productPence, o, currency);
         const st = optionState(o);
         const stock = st === 'untracked' ? '' : st === 'sold_out' ? ', sold out' : `, ${o.stock} left`;
-        return `${o.label} [optionId ${o.id}] (${pence != null ? formatMoney(pence, currency || 'GBP') : 'no online price'}${stock})`;
+        const price = pence == null ? 'no online price' : o.priceAmount == null ? `the product's price, ${formatMoney(pence, currency || 'GBP')}` : formatMoney(pence, currency || 'GBP');
+        return `${o.label} [optionId ${o.id}] (${price}${stock})`;
     }).join(' · ')}`;
 }

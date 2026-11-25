@@ -802,7 +802,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
                 ...(pr.description ? { description: pr.description } : {}),
                 ...(img ? { image: img } : {}),
-                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+                ...productOffers(pr, s.siteName, null),
             });
         }
     }
@@ -990,6 +990,20 @@ ${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li
 
 const SOLD_OUT_HTML = '<p class="price" data-sold-out><strong>Sold out</strong></p>';
 
+const availability = (stock: number | null | undefined) => (stock != null ? { availability: stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {});
+/** schema.org offers for a product: one per option when it has options (each its own price and stock), else one. */
+function productOffers(pr: SiteRenderProduct, siteName: string, url: string | null): { offers?: unknown } {
+    if (pr.buyPence === null) return {};
+    const seller = { '@type': 'Organization', name: siteName };
+    const at = url ? { url } : {};
+    if (pr.options?.options.length) {
+        const offers = pr.options.options.map((o) => ({ o, pence: optionPence(pr.buyPence, o, pr.currency) })).filter((x) => x.pence !== null)
+            .map(({ o, pence }) => ({ '@type': 'Offer', name: o.label, price: (pence! / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', ...at, ...availability(o.stock), seller }));
+        return offers.length ? { offers } : {};
+    }
+    return { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', ...at, ...availability(pr.stock), seller } };
+}
+
 /** The Buy form: which section and product, and the name and price the visitor SAW (checked at the click). */
 function buyFormHtml(sectionId: string, pr: SiteRenderProduct, label: string, backPath: string, option?: { id: number; pence: number }): string {
     return `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}">${option ? `<input type="hidden" name="_o" value="${option.id}">` : ''}<input type="hidden" name="_v" value="${option ? option.pence : pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
@@ -1041,11 +1055,7 @@ ${pr.price ? `<p class="price"><strong>${esc(pr.price)}</strong></p>` : ''}
 ${buy}${terms}
 ${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
 </div></section></article>`;
-    const optionOffers = hasOptions ? pr.options!.options.map((o) => ({ o, pence: optionPence(pr.buyPence, o, pr.currency) })).filter((x) => x.pence !== null).map(({ o, pence }) => ({
-        '@type': 'Offer', name: o.label, price: (pence! / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl,
-        ...(o.stock != null ? { availability: o.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}),
-    })) : null;
-    const offer = optionOffers ? { offers: optionOffers } : pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl, ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {};
+    const offer = productOffers(pr, s.siteName, pageUrl);
     return documentHtml(def, null, ctx, body, {
         title: `${pr.name} | ${s.siteName}`,
         description: pr.description ? pr.description.replace(/\s+/g, ' ').slice(0, 160) : null,

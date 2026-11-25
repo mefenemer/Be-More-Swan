@@ -7,8 +7,8 @@
 --   npm run db:migrate:apply -- --only z-shop-options.sql                              (staging)
 --   npm run db:migrate:apply -- --only z-shop-options.sql --url-var DATABASE_URL_PROD  (prod)
 --
--- Not in db/schema.ts on purpose (like z-shop-stock.sql): shop-options.ts reads it with raw SQL and a
--- missing table reads as "no options", so the code is safe on a database this has not reached.
+-- Read and written with raw SQL (shop-options.ts): a missing table reads as "no options", so the code is safe
+-- on a database this has not reached. db/schema.ts mirrors it ONLY so the workspace data export includes it.
 --
 -- One group of choices per product (e.g. "Size": Small / Large). Each option may have its own price
 -- (price_amount, minor units of the product's currency; NULL = the product's own price) and its own stock

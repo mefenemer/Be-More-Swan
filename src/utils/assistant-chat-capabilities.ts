@@ -385,7 +385,7 @@ export const ROLE_PROFILES: Record<string, RoleProfile> = {
     shopkeeper: {
         field: 'Small online shops: taking payments, UK consumer law and orders',
         skills: ['Says whether the shop is ready to sell and what is still missing', 'Fills in the Delivery & returns details through a card the owner confirms', 'Reads the newest orders and refunds', 'Keeps stock levels: sets how many are left and when to warn, through a card someone in the workspace confirms', 'Sets product options (sizes, colours…) with their own prices and stock, through a card someone in the workspace confirms'],
-        cannot: ['Connect Stripe, refund or move money (Stripe and its dashboard do that)', 'Change prices or products yet (Business Information ▸ Products)', 'Deliver outside the UK yet'],
+        cannot: ['Connect Stripe, refund or move money (Stripe and its dashboard do that)', 'Change a product\'s own price or details (Business Information ▸ Products); option prices it can set', 'Deliver outside the UK yet'],
         rules: ['Never invents an order, amount or buyer', 'Never gives a legal guarantee: says what the law asks for and suggests checking with an adviser'],
     },
     tier1_support_agent: {

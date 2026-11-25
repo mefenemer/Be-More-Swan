@@ -5848,7 +5848,6 @@ export const productOptions = pgTable("product_options", {
 
 // ── Business Information ▸ Reviews (db/z-reviews.sql) ─────────────────────────────────────────────
 // The customer's words, word for word. `hidden` reviews are not quoted but still count in the average.
-
 export const orgReviews = pgTable("org_reviews", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

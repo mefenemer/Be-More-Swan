@@ -98,6 +98,8 @@ async function main() {
         assert.ok(html.includes('data-option="4"><span><strong>Large</strong> · £12.50</span><span data-sold-out>'));
         assert.ok(html.includes('/delivery-returns'));
         assert.ok(html.includes('"name":"Small"') && html.includes('"price":"10.00"'), 'one Offer per option');
+        const section = renderSitePage(site([11]), '/shop', { ...live, canSell: true, products: { 11: { ...BLEND, stock: 0 } } }).html;
+        assert.ok(section.includes('"name":"Small"') && section.includes('"name":"Large"'), 'the products section\'s data uses the options too, not the product\'s old stock');
         const notSelling = renderSiteProduct(site([11]), { ...live, canSell: false }, BLEND)!;
         assert.ok(notSelling.includes('<strong>Small</strong> · £10') && !notSelling.includes('name="_o"') && !notSelling.includes('/delivery-returns'));
     });
@@ -182,7 +184,10 @@ async function main() {
     console.log('\nShop tab, chat, export and SQL');
 
     await check('the chat sees each product\'s options with their ids, prices and stock', () => {
-        assert.strictEqual(optionsWords(SIZES, 1250, 'GBP'), 'Size: Small [optionId 3] (£10, 4 left) · Large [optionId 4] (£12.50, sold out)');
+        assert.strictEqual(optionsWords(SIZES, 1250, 'GBP'), "Size: Small [optionId 3] (£10, 4 left) · Large [optionId 4] (the product's price, £12.50, sold out)");
+        const orch = read('netlify/functions/chat-orchestrator.ts');
+        assert.ok(orch.includes('an option listed as "the product\'s price" gets NO "price" key'), 'a chat edit never pins the product price onto an option');
+        assert.ok(orch.includes('You CAN set option prices through the product_options card.') && !orch.includes("change prices or products (Business Information"));
         const lines = stockSnapshotLines({ ready: true, items: [{ id: 11, name: 'House Blend', price: '£12.50', pence: 1250, currency: 'GBP', stock: null, lowStockAt: null, state: 'untracked' }] }, { 11: SIZES }).join('\n');
         assert.ok(lines.includes('productId 11: House Blend (£12.50) — OPTIONS (stock is per option; product_stock does not apply): Size: Small [optionId 3]'));
     });
