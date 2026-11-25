@@ -799,17 +799,28 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function ask(text) { document.getElementById('pa-input').value = text; chatSend(); }
+  // Buttons elsewhere on the page ("Help me write it" on the invite page form, the first-week list) ask from
+  // outside the chat. Bring the chat into view, or the question and answer happen off screen and the button
+  // seems to do nothing (issue #92). 'end' keeps the newest message and the input on screen, phone included.
+  function revealChat() {
+    const card = document.getElementById('pt-assistant-card');
+    if (!card) return;
+    const r = card.getBoundingClientRect();
+    if (r.top >= 0 && r.bottom <= window.innerHeight) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+  function ask(text) { document.getElementById('pa-input').value = text; chatSend({ reveal: true }); }
   function askStarter(k) { const st = data?.onboarding?.starters?.[k]; if (st) ask(st.prompt); }
 
-  async function chatSend() {
+  async function chatSend(opts = {}) {
     const input = document.getElementById('pa-input');
     const text = input.value.trim();
-    if (!text || chat.busy) return;
+    if (!text || chat.busy) { if (opts.reveal) revealChat(); return; }
     input.value = '';
     chat.turns.push({ role: 'user', content: text });
     chat.busy = true; document.getElementById('pa-send').disabled = true;
     chatRender();
+    if (opts.reveal) revealChat();
     try {
       const res = await fetch('/.netlify/functions/partner-assistant', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: chat.turns.map((t) => ({ role: t.role, content: t.content })) }) });
@@ -823,6 +834,7 @@
     } finally {
       chat.busy = false; document.getElementById('pa-send').disabled = false;
       chatRender();
+      if (opts.reveal) revealChat();   // the answer and its card make the chat taller
     }
   }
 
