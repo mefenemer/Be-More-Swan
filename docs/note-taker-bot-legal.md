@@ -30,13 +30,15 @@ Insert after the fal.ai row:
 
 | Sub-Processor | Purpose | Location | DPA / Security |
 |---|---|---|---|
-| Recall.ai | Meeting bot for the Note Taker: joins the Google Meet, Microsoft Teams or Zoom calls you send it to, makes the transcript (using its own sub-processor AssemblyAI, which deletes the audio once it has been turned into text, within 3 days at most), and deletes the recording once we have saved the transcript | Recordings and transcripts: EU (Frankfurt) for UK and EU workspaces; US for US workspaces. Recall support staff in the US may access data when needed | `recall.ai/data-processing-agreement` (UK Addendum included) |
+| Recall.ai (with AssemblyAI) | Meeting bot for the Note Taker (from 27 November 2026, only if you accept DPA 1.2 and send it to a meeting): joins the Google Meet or Microsoft Teams calls you send it to and records them only to make the transcript. Its own sub-processor AssemblyAI turns the audio into text and deletes the audio once it has made the text; if that deletion fails, the audio and text are deleted within 3 days, and AssemblyAI may keep limited billing and technical log records. We delete the recording and transcript at Recall.ai as soon as the minutes are written (we do not keep the transcript), and Recall.ai deletes anything left after 48 hours | Recordings and transcripts: EU (Frankfurt) for UK and EU workspaces; US for US workspaces. Recall.ai support staff in the US may access data when needed | `recall.ai/data-processing-agreement` (UK Addendum included) |
 
 AssemblyAI goes in Recall's row, not a row of its own: we contract with Recall, and Recall's DPA covers its sub-processors (their list is linked from Recall's trust centre). We name AssemblyAI anyway, because it hears the meeting audio.
 
 ✅ **Done 2026-11-20:** Recall's sub-processor list and DPA are saved in `docs/vendor-records/`. The DPA is self-executing (it applied when the owner accepted Recall's terms), so there is nothing to sign, and it includes the SCCs and UK Addendum that cover US support access. The owner is subscribed to Recall's sub-processor change notices (10 days' notice).
 
 ## 3. Privacy policy additions
+
+> ⚠️ **Superseded 2026-11-25.** This is the original draft. The published text is in `privacy.html` (§5 `#note-taker`, §6, §9). It differs: we never store the transcript (no "30 days"), deletion is "as soon as the minutes are written", the AssemblyAI wording is exact, and Zoom is not named until it ships.
 
 **§5 AI processing**, add a bullet after "Media generation":
 
@@ -57,6 +59,8 @@ AssemblyAI goes in Recall's row, not a row of its own: we contract with Recall, 
 **§8 transfers**: no change needed. "Some sub-processors process data outside the UK, chiefly in the United States" already covers US workspaces, and also covers Recall support staff in the US reaching UK and EU data when they need to (Recall's DPA has the SCCs and UK Addendum for that). UK and EU workspaces' recordings and transcripts stay in the EU, which has UK adequacy.
 
 ## 4. DPA 1.2 (both features), changes from 1.1
+
+> ⚠️ **Superseded 2026-11-25.** This is the original draft. The published text is `DPA_1_2_HTML` in `netlify/functions/get-dpa-content.ts`, which also adds the clause 5 paragraph that names Recall.ai and AssemblyAI as specifically authorised. It differs: we never store the transcript (no "30 days"), deletion is "as soon as the minutes are written", the AssemblyAI wording is exact, and Zoom is not named until it ships.
 
 Code: `CURRENT_DPA_VERSION = '1.2'` in `accept-dpa.ts`; new `DPA_1_2_HTML` and `DPA_EFFECTIVE_DATES['1.2']` in `get-dpa-content.ts`; 1.0 and 1.1 stay readable. The Email Assistant parts are copied **unchanged** from `docs/email-assistant-phase0.md` §5. The Note Taker parts are new.
 
@@ -106,6 +110,8 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 
 ## 7. Notices for the owner to send
 
+> ⚠️ **Superseded 2026-11-25.** This is the original draft. The published text is in `docs/note-taker-launch-notices-draft.md`. It differs: we never store the transcript (no "30 days"), deletion is "as soon as the minutes are written", the AssemblyAI wording is exact, and Zoom is not named until it ships.
+
 ### 7.1 Sub-processor notice (email to every workspace owner, at least 14 days before L)
 
 > **Subject:** A new sub-processor for the Note Taker: Recall.ai
@@ -142,7 +148,7 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 | People recorded without knowing | Medium / high | Bot's name says what it is; chat notice on joining says it is **recording** and links the privacy notice (changed 2026-11-25 after the legal review); video tile says "Taking notes & recording"; host must admit it and can remove it; Terms 9.3; reminder in the send dialog | Low |
 | All-party consent laws (US states) broken | Medium / high | Terms 9.3 puts the duty on the customer; help article names it; the in-call notice supports consent | Medium (customer's duty) |
 | Special category data in what is said | Medium / medium | DPA 13 exception limits use to transcript and minutes; prompt never infers or labels a category; meetings for medical or disciplinary purposes excluded; transcript not kept | Low |
-| Recording kept longer than needed | Low / high | `delete_media` straight after the transcript is saved (proven in Phase 0); failed jobs deleted within 24 hours; every bot is sent with a 48-hour Recall retention, so a failed delete cannot leave media at Recall for good (Recall's default is to keep it forever) | Low |
+| Recording kept longer than needed | Low / high | `delete_media` as soon as the minutes are written (proven in Phase 0); failed jobs deleted within 24 hours; every bot is sent with a 48-hour Recall retention, so a failed delete cannot leave media at Recall for good (Recall's default is to keep it forever) | Low |
 | Transfer to the US | Medium / medium | UK and EU workspaces on Recall's EU region, where recordings, transcripts and backups stay and AssemblyAI transcribes in the EU; US workspaces stay in the US. Recall support staff in the US may access data when needed (least privilege, multi-factor sign-in), covered by the SCCs and UK Addendum in Recall's DPA. Recall confirmed (24 November) that the DPA's "primary processing in the United States" (§6.1) is general wording for the whole service: for our eu-central-1 workspace, meeting content is processed and stored in the EU. Recall's logs and webhooks can hold meeting links, join times and participant names, never audio or video | Low |
 | Transcription provider keeps meeting audio or text | Low / medium | AssemblyAI deletes the audio once processed, keeping it up to 3 days only if that deletion fails; billing and log details may remain. Zero Data Retention would remove this, but only in English low-latency mode and with no transcript stored to fetch after the call (§10); owner chose accuracy mode with language detection instead | Low |
 | Bot joins the wrong meeting | Low / medium | Sent only by a person pasting a link or approving a chat card; duplicate-send guard; Remove from call / Cancel | Low |
