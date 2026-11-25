@@ -209,5 +209,28 @@ test.describe('Admin → Money → Task costs', () => {
         await page.locator('[data-tc-key="ai_music"]').fill('25');
         await page.locator('#tc-save').click();
         await expect(page.locator('#tc-status')).toContainText('30 days');
+        // Beside the button too, where the admin is looking (owner 2026-11-25: top-only looked like "nothing happens").
+        await expect(page.locator('#tc-save-status')).toBeVisible();
+        await expect(page.locator('#tc-save-status')).toContainText('30 days');
+    });
+
+    test('the chosen date and reason survive a repaint, and the date is said in words before saving', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Change at least one cost.' } }); return undefined; }
+            return STATE([ANNOUNCED]);
+        });
+        await openAdmin(page, api);
+        await expect(page.locator('#tc-date-words')).toHaveText('This change will start on 6 December 2026.');
+        await page.locator('#tc-date').fill('2027-01-01');
+        await expect(page.locator('#tc-date-words')).toHaveText('This change will start on 1 January 2027.');
+        await page.locator('#tc-reason').fill('Why it changes.');
+        await page.locator('#tc-save').click();
+        await expect(page.locator('#tc-save-status')).toContainText('Change at least one cost.');
+        // A reload of the page state (as after a 409, or a cancel elsewhere) keeps what was typed.
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('#tc-date')).toHaveValue('2027-01-01');
+        await expect(page.locator('#tc-reason')).toHaveValue('Why it changes.');
+        const post = api.called('admin-task-costs').find((c: any) => c.method === 'POST')!;
+        expect(post.body.effectiveDate).toBe('2027-01-01');
     });
 });
