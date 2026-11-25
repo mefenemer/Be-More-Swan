@@ -50,7 +50,7 @@ The **Live & upcoming** list above your Inbox shows each call: booked, joining, 
 
 It's free until **1 January 2027**. From then, it uses **1 task for each started 5 minutes** it's in the call with you, so a 1-hour meeting is 12 tasks. Nothing is charged if it isn't let in, or for the time it waits after everyone has left. Pasting notes or a transcript into a new meeting stays free.
 
-When you send it, your monthly allowance needs room for the whole time limit you chose. It is only charged for the time it was actually in the call. If your tasks run out before the minutes are written, they wait for up to a day. After that the recording is deleted and those minutes can't be written.
+When you send it, your monthly allowance needs room for the whole time limit you chose. It is only charged for the time it was actually in the call, and its minutes are always written, even if your allowance has run out in the meantime.
 
 ## What is kept, and where
 

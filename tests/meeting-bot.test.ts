@@ -493,7 +493,7 @@ await test('sendMeetingBot checks the flag, the assistant, DPA 1.2, the link and
     for (const before of ['MEETING_BOT_FLAG', "roleKey !== 'meeting_note_taker'", 'hasAcceptedBotDpa(', 'cleanMeetingLink(', 'hasTaskCapacity(', 'db.insert(meetingBots)']) {
         assert.ok(pos(before) < recall, `${before} comes before Recall`);
     }
-    assert.match(src, /export const BOT_DPA_VERSIONS = \['1\.2'\];/, 'only DPA 1.2 covers meetings the Note Taker joins');
+    assert.match(src, /export const BOT_DPA_MIN_VERSION = '1\.2';/, 'DPA 1.2 or later covers meetings the Note Taker joins');
     // Review of #769: "now" looks back only, so a recurring link's future booking never blocks today's call.
     assert.ok(fn.includes('lte(meetingBots.joinAt, new Date(now.getTime() + SCHEDULE_AHEAD_MS))'), 'the immediate check sees a booking about to join, not next week\'s');
     // Review round 2: the index and the conflict target cover OPEN bots only, so a cancelled or refused bot never blocks re-booking.

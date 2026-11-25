@@ -23,7 +23,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 // change 3, announced 2026-11-18; docs/ai-presenter-pricing-notice.md).
 // 2.5 (2026-11-27): clause 5.2 — the Note Taker in a meeting is 1 task per started 5 minutes from 1 January 2027
 // (announced 2026-11-25); new clause 9.3 — meetings: tell people, get any consent the law requires. The meeting bot
-// needs the SENDER to have accepted 2.5 (meeting-bot-db.ts BOT_TOS_VERSIONS).
+// needs the SENDER to have accepted 2.5 or later (meeting-bot-db.ts BOT_TOS_MIN_VERSION).
 export const CURRENT_TOS_VERSION = '2.5';
 
 const jwtSecret = process.env.JWT_SECRET;

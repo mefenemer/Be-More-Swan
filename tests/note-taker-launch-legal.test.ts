@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { CURRENT_DPA_VERSION, DPA_VERSIONS_STILL_VALID } from '../netlify/functions/accept-dpa';
 import { CURRENT_TOS_VERSION } from '../netlify/functions/accept-tos';
 import { DPA_EFFECTIVE_DATES, DPA_VERSIONS } from '../netlify/functions/get-dpa-content';
-import { BOT_DPA_VERSIONS, BOT_TOS_VERSIONS } from '../src/utils/meeting-bot-db';
+import { BOT_DPA_MIN_VERSION, BOT_TOS_MIN_VERSION, versionAtLeast } from '../src/utils/meeting-bot-db';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => { try { fn(); passed++; } catch (e) { console.error(`✗ ${name}`); throw e; } };
@@ -16,8 +16,12 @@ const v12 = dpaSrc.slice(dpaSrc.indexOf('const DPA_1_2_HTML = `'), dpaSrc.indexO
 test('versions: DPA 1.2 and Terms 2.5 are current, and they are what the bot requires', () => {
     assert.equal(CURRENT_DPA_VERSION, '1.2');
     assert.equal(CURRENT_TOS_VERSION, '2.5');
-    assert.deepEqual(BOT_DPA_VERSIONS, ['1.2']);
-    assert.deepEqual(BOT_TOS_VERSIONS, ['2.5']);
+    assert.equal(BOT_DPA_MIN_VERSION, '1.2');
+    assert.equal(BOT_TOS_MIN_VERSION, '2.5');
+    // "or later": the next Terms/DPA bump must not lock everyone out of the bot (review of #864).
+    assert.ok(versionAtLeast('2.5', '2.5') && versionAtLeast('2.6', '2.5') && versionAtLeast('2.10', '2.5') && versionAtLeast('3.0', '2.5'));
+    assert.ok(!versionAtLeast('2.4', '2.5') && !versionAtLeast('1.9', '2.5') && !versionAtLeast('', '2.5') && !versionAtLeast(null, '2.5') && !versionAtLeast('2.5-beta', '2.5'));
+    assert.ok(versionAtLeast('1.2', '1.2') && !versionAtLeast('1.1', '1.2') && !versionAtLeast('1.0', '1.2'));
     assert.ok(DPA_VERSIONS.includes('1.2') && DPA_VERSIONS.includes('1.1') && DPA_VERSIONS.includes('1.0'), 'every version stays readable');
     assert.equal(DPA_EFFECTIVE_DATES['1.2'], '2026-11-27');
     assert.deepEqual(DPA_VERSIONS_STILL_VALID, ['1.0', '1.1', '1.2'], 'accepting 1.2 is never needed to keep working');
@@ -62,6 +66,8 @@ test('Trust and privacy: the Recall row and the SAME carve-out sentence; privacy
         assert.ok(page.includes('if that deletion fails, the audio and text are deleted within 3 days'), `${name}: exact AssemblyAI wording`);
         assert.ok(!/within 3 days at most/.test(page), `${name}: no over-promise`);
         assert.ok(!/Zoom calls you send it to/.test(page), `${name}: no Zoom until it ships`);
+        assert.ok(!/as soon as we have saved the transcript/.test(page), `${name}: never claims we save the transcript (review of #864)`);
+        assert.ok(page.includes('delete the recording and transcript at Recall.ai as soon as the minutes are written'), `${name}: deletion matches the code`);
     }
     assert.match(read('privacy.html'), /<li id="note-taker">/);
     assert.match(read('src/utils/meeting-bot.ts'), /bemoreswan\.com\/privacy\.html#note-taker/);
@@ -74,6 +80,9 @@ test('acceptance screens: DPA modal and wizard say v1.2 and name the sub-process
     assert.match(ws, /What changed in Terms v2\.5/);
     assert.match(ws, /Terms of Service<\/a> \(v2\.5\)\./);
     assert.ok(!/\(v1\.1\) on behalf of my organisation/.test(ws));
+    assert.ok(!/deleted once the transcript is made/.test(ws), 'one deletion promise everywhere: once the minutes are written');
+    assert.ok(!/only these two features stay off/.test(ws), 'nothing gates the Email Assistant on DPA 1.2, so the modal must not say so');
+    assert.match(read('src/utils/meeting-bot.ts'), /the recording is deleted once the minutes are written\./);
     assert.match(read('onboarding-social-media.html'), /\(v1\.2\) on behalf of my organisation, including the sub-processors named in clause 5/);
 });
 
@@ -82,7 +91,7 @@ test('help article and Pricing say free until 1 January 2027, Meet + Teams only,
     assert.match(h, /WHERE NOT EXISTS \(SELECT 1 FROM help_articles WHERE title = 'The Note Taker Joining Your Calls'\)/);
     assert.match(h, /free until \*\*1 January 2027\*\*/);
     assert.match(h, /Zoom is coming later/);
-    assert.match(h, /they wait for up to a day/);
+    assert.match(h, /its minutes are always written, even if your allowance has run out/);
     assert.match(h, /We don't keep the transcript/);
     assert.match(read('pricing.html'), /Free until 1 January 2027, and nothing if it isn&rsquo;t let in/);
 });

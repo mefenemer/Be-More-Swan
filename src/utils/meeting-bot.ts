@@ -79,7 +79,7 @@ export function botName(businessName: string | null | undefined): string {
 /** The notice posted (and pinned where the platform allows) when the bot joins (plan §6). Pure. */
 export function joinMessage(businessName: string | null | undefined): string {
     // Says "recording" (legal review 2026-11-25: transparency, and US all-party-consent states) and links the privacy notice.
-    return `Hi, I'm ${shortBusiness(businessName)}'s Be More Swan Note Taker. I'm recording this call only to make a transcript for the minutes; the recording is deleted once the transcript is made. If you'd rather not be recorded, say so: the host can remove me at any time. Privacy: bemoreswan.com/privacy.html#note-taker`.slice(0, JOIN_MESSAGE_MAX);
+    return `Hi, I'm ${shortBusiness(businessName)}'s Be More Swan Note Taker. I'm recording this call only to make a transcript for the minutes; the recording is deleted once the minutes are written. If you'd rather not be recorded, say so: the host can remove me at any time. Privacy: bemoreswan.com/privacy.html#note-taker`.slice(0, JOIN_MESSAGE_MAX);
 }
 
 // ── Length, timing and charging ──────────────────────────────────────────────────────────────────

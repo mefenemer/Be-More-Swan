@@ -20,7 +20,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 // accept again at their next login (workspace.html) — see the note above DPA_1_1_HTML.
 // 1.2 (27 November 2026): names Recall.ai + AssemblyAI (Note Taker meetings, specifically authorised) and adds the
 // Email Assistant / Note Taker paragraphs to clause 13. Organisations on 1.0/1.1 keep working; only the meeting bot
-// (BOT_DPA_VERSIONS) needs 1.2.
+// (BOT_DPA_MIN_VERSION) needs 1.2 or later.
 export const CURRENT_DPA_VERSION = '1.2';
 
 /**

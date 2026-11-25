@@ -314,7 +314,7 @@ await test('both minutes views show the label: the stored card (Inbox + chat) an
 
 await test('sending needs the SENDER to have accepted Terms 2.5 (clause 9.3), checked after the DPA, in the one shared action', () => {
     const db = read('src/utils/meeting-bot-db.ts');
-    assert.match(db, /export const BOT_TOS_VERSIONS = \['2\.5'\];/);
+    assert.match(db, /export const BOT_TOS_MIN_VERSION = '2\.5';/);
     const send = db.slice(db.indexOf('export async function sendMeetingBot'));
     const dpa = send.indexOf("fail(409, 'dpa_required', DPA_NEEDED_MESSAGE)");
     const terms = send.indexOf("fail(409, 'terms_required', TERMS_NEEDED_MESSAGE)");

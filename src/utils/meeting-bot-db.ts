@@ -28,13 +28,27 @@ type Db = ReturnType<typeof getDb>;
 type BotRow = typeof meetingBots.$inferSelect;
 
 /**
- * The DPA versions that cover meetings the Note Taker joins (clause 13, docs/note-taker-bot-legal.md §4). A workspace must
- * have accepted one before a bot can be sent. 1.2 is drafted but not yet published, so today no workspace can.
+ * The first DPA version that names Recall.ai + AssemblyAI and covers meetings the Note Taker joins (clauses 5 and 13). A
+ * workspace must have accepted it, or any later version, before a bot can be sent.
  */
-export const BOT_DPA_VERSIONS = ['1.2'];
-/** Terms versions with clause 9.3 (Meetings: tell people, get any consent the law requires). The SENDER must have
- *  accepted one (legal review 2026-11-25: 9.3 is what puts the recording-consent duty on the customer). */
-export const BOT_TOS_VERSIONS = ['2.5'];
+export const BOT_DPA_MIN_VERSION = '1.2';
+/** The first Terms version with clause 9.3 (Meetings: tell people, get any consent the law requires). The SENDER must have
+ *  accepted it or a later one (legal review 2026-11-25). "Or later" so the next Terms bump doesn't lock everyone out
+ *  of the bot (review of #864). */
+export const BOT_TOS_MIN_VERSION = '2.5';
+
+/** "2.10" ≥ "2.5", compared number by number; anything unreadable is never at least the minimum. Pure. */
+export function versionAtLeast(version: string | null | undefined, min: string): boolean {
+    const parse = (v: string) => (/^\d+(\.\d+)*$/.test(v) ? v.split('.').map(Number) : null);
+    const a = parse(String(version ?? '').trim());
+    const b = parse(min);
+    if (!a || !b) return false;
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const x = a[i] ?? 0, y = b[i] ?? 0;
+        if (x !== y) return x > y;
+    }
+    return true;
+}
 export const DPA_NEEDED_MESSAGE = 'An owner or admin of your workspace needs to accept the updated Data Processing Agreement (version 1.2) before the Note Taker can join calls.';
 export const TERMS_NEEDED_MESSAGE = 'Please accept the updated Terms of Service (version 2.5) first: they say what you must tell people in the meeting. Reload the page to see them.';
 
@@ -103,15 +117,13 @@ export type SendBotResult =
 const fail = (status: number, code: string, error: string): SendBotResult => ({ ok: false, status, code, error });
 
 export async function hasAcceptedBotTerms(db: Db, userId: number): Promise<boolean> {
-    const [r] = await db.select({ id: tosAcceptances.id }).from(tosAcceptances)
-        .where(and(eq(tosAcceptances.userId, userId), inArray(tosAcceptances.version, BOT_TOS_VERSIONS))).limit(1);
-    return Boolean(r);
+    const rows = await db.selectDistinct({ version: tosAcceptances.version }).from(tosAcceptances).where(eq(tosAcceptances.userId, userId));
+    return rows.some((r) => versionAtLeast(r.version, BOT_TOS_MIN_VERSION));
 }
 
 export async function hasAcceptedBotDpa(db: Db, organisationId: number): Promise<boolean> {
-    const [r] = await db.select({ id: dpaAcceptances.id }).from(dpaAcceptances)
-        .where(and(eq(dpaAcceptances.organisationId, organisationId), inArray(dpaAcceptances.version, BOT_DPA_VERSIONS))).limit(1);
-    return Boolean(r);
+    const rows = await db.selectDistinct({ version: dpaAcceptances.version }).from(dpaAcceptances).where(eq(dpaAcceptances.organisationId, organisationId));
+    return rows.some((r) => versionAtLeast(r.version, BOT_DPA_MIN_VERSION));
 }
 
 /**
