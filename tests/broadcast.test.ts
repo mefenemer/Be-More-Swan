@@ -119,6 +119,21 @@ check('ElevenLabs notice: both lists name it, the copy keeps the 14-day objectio
     assert.match(read('privacy.html'), /<td[^>]*>ElevenLabs<\/td>/);
 });
 
+check('Recall.ai notice (Note Taker launch 27 Nov 2026): owners, both lists, every promise matches the code and the published pages', () => {
+    const tpl = NOTIFICATION_DEFAULTS.find((t) => t.templateKey === 'subprocessor_recall_notice')!;
+    const email = TEMPLATE_DEFAULTS.find((t) => t.triggerKey === 'subprocessor_recall_notice')!;
+    assert.ok(tpl && email, 'both templates exist');
+    assert.strictEqual(broadcastDef('subprocessor_recall_notice')?.audience, 'owners');
+    for (const s of ['Recall.ai', 'AssemblyAI', '27 November 2026', 'privacy@bemoreswan.com', 'do not keep the transcript']) {
+        assert.ok(tpl.message.includes(s), `in-app: ${s}`);
+        assert.ok(email.bodyHtml.includes(s), `email: ${s}`);
+    }
+    assert.ok(email.bodyHtml.includes('as soon as the minutes are written'), 'deletion matches the code and privacy/Trust');
+    assert.ok(email.bodyHtml.includes('if that deletion fails, the audio and text are deleted within 3 days'), 'exact AssemblyAI wording');
+    assert.ok(email.bodyHtml.includes('version 1.2'), 'the specific-authorisation basis');
+    assert.doesNotMatch(email.bodyHtml + tpl.message, /saved the transcript|30 days|Zoom|within 3 days at most|\btrain/i, 'no promise the code or Recall has not confirmed');
+});
+
 check('audience (owner, 2026-11-20): owners or everyone, picked per send, never widened by a missing field', () => {
     assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone']);
     assert.strictEqual(readAudience('owners'), 'owners');
