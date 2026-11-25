@@ -236,6 +236,23 @@ test.describe('Admin → Money → Task costs', () => {
         await expect(page.locator('#tc-announce')).toBeEnabled();
     });
 
+    test('an unsaved cost box holds Announce too, and discarding the draft clears the kept values', async ({ page, signedIn, api }) => {
+        let discarded = false;
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (discarded = true, { ok: true }) : (discarded ? STATE([]) : STATE([DRAFT]))));
+        await openAdmin(page, api);
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+        await page.locator('[data-tc-key="ai_music"]').fill('40');
+        await expect(page.locator('#tc-unsaved')).toContainText('costs and reason it was saved with');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+        await page.locator('[data-tc-key="ai_music"]').fill('25');
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+        await page.locator('#tc-date').fill('2027-01-01');
+        await page.locator('#tc-discard').click();
+        await expect(page.locator('#tc-status')).toContainText('Draft discarded');
+        await expect.poll(async () => page.locator('#tc-date').inputValue(), { timeout: 6000 }).toBe('2026-12-06');
+    });
+
     test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Choose the date the change starts.' } }); return undefined; }
