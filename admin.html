@@ -4673,7 +4673,12 @@ const tcDraft = () => (tcState && tcState.changes || []).find((c) => c.id === tc
 function tcUnsaved() {
   const d = tcDraft();
   if (!d) return false;
-  return (tcForm.date !== null && tcForm.date !== d.effectiveDate) || (tcForm.reason !== null && tcForm.reason !== d.reason);
+  if ((tcForm.date !== null && tcForm.date !== d.effectiveDate) || (tcForm.reason !== null && tcForm.reason !== d.reason)) return true;
+  // The cost boxes too (review of #879 round 2): each must show what the draft will announce for it, or today's cost.
+  return [...document.querySelectorAll('[data-tc-key]')].some((i) => {
+    const item = d.items.find((x) => x.key === i.dataset.tcKey);
+    return String(item ? item.newUnits : i.dataset.tcNow) !== i.value;
+  });
 }
 /** Shows "Not saved yet" and holds Announce while the form and the saved draft disagree. */
 function tcSyncUnsaved() {
@@ -4681,7 +4686,7 @@ function tcSyncUnsaved() {
   const note = document.getElementById('tc-unsaved');
   const unsaved = tcUnsaved();
   if (note) {
-    note.textContent = unsaved && d ? `Not saved yet: the draft still starts on ${tcLongDate(d.effectiveDate)} with the reason it was saved with. Press Update the draft before you test or announce it.` : '';
+    note.textContent = unsaved && d ? `Not saved yet: the draft still starts on ${tcLongDate(d.effectiveDate)} with the costs and reason it was saved with. Press Update the draft before you test or announce it.` : '';
     note.classList.toggle('hidden', !unsaved);
   }
   const go = document.getElementById('tc-announce');
@@ -4783,6 +4788,7 @@ function tcPaintCosts() {
   dateBox.addEventListener('input', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
   dateBox.addEventListener('change', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
   document.getElementById('tc-reason').addEventListener('input', (e) => { tcForm.reason = e.target.value; tcSyncUnsaved(); });
+  document.querySelectorAll('[data-tc-key]').forEach((i) => i.addEventListener('input', () => tcSyncUnsaved()));
   sayDate();
   tcSyncUnsaved();
   document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
@@ -4909,17 +4915,22 @@ function tcPaintHistory() {
 
 async function tcRun(btn, resource, payload, say) {
   btn.disabled = true;
+  let announced = false;
   try {
     const d = await tcCall(resource, payload);
-    // The draft these typed values belonged to is gone (announced, discarded, cancelled): start the next one clean.
-    if (resource === 'discard' || resource === 'announce' || resource === 'cancel') tcForm = { date: null, reason: null };
+    announced = resource === 'announce';
+    // The draft these typed values belonged to is gone (announced or discarded): start the next one clean.
+    // Cancelling an announced change leaves the draft alone, so its typed values stay (review of #879 round 2).
+    if (resource === 'discard' || resource === 'announce') tcForm = { date: null, reason: null };
     showTcStatus('success', say(d));
     setTimeout(loadTaskCostsAdmin, resource === 'test' ? 0 : 3000);
   } catch (err) {
     showTcStatus('error', err.message);
     if (err.status === 409) loadTaskCostsAdmin();
   } finally {
-    btn.disabled = false;
+    // Announce follows the unsaved/typed-number hold rather than simply coming back on (review of #879 round 2).
+    // After a successful announce it stays off until the repaint replaces the card.
+    if (btn.id === 'tc-announce') { if (!announced) tcSyncUnsaved(); } else btn.disabled = false;
   }
 }
 
