@@ -214,7 +214,8 @@ export default withLambda(async (event) => {
             const items = Object.fromEntries(change.items.map((i) => [i.key, i.newUnits]));
             const checked = validateChange({ items, effectiveDate: change.effectiveDate, reason: change.reason }, costs);
             if (!checked.ok) return json(400, { error: checked.error });
-            // Another admin may have announced a change to the same cost since this draft was saved.
+            // Another admin may have announced a change to the same cost since this draft was saved. This check sits outside the
+            // flip below and is safe only because one draft may exist at a time (db/z-task-costs.sql's one-draft index).
             const clash = clashWithAnnounced(checked.items, (await openChanges(db)).announced);
             if (clash) return json(409, { error: clash });
             const flipped = await db.transaction(async (tx) => {
@@ -231,10 +232,18 @@ export default withLambda(async (event) => {
             clearTaskCostCache();
             const failed = await startSend(id, 'announced');
             if (failed) {
-                // No notice went out, so it must not start on its date either. Back to a draft to try again.
-                await db.execute(sql`UPDATE task_cost_changes SET status = 'draft', announced_at = NULL, announced_by = NULL, updated_at = now() WHERE id = ${id}`);
+                // No notice went out, so it must not start on its date either. Back to a draft to try again; if another admin
+                // saved a draft meanwhile (only one draft may exist), cancel it instead. Never leave it announced unsent
+                // (review of #874: it would then be charged on its date with no notice, against terms 5.2).
+                let state = 'is still a draft';
+                try {
+                    await db.execute(sql`UPDATE task_cost_changes SET status = 'draft', announced_at = NULL, announced_by = NULL, updated_at = now() WHERE id = ${id}`);
+                } catch {
+                    await db.execute(sql`UPDATE task_cost_changes SET status = 'cancelled', cancelled_at = (now() AT TIME ZONE 'UTC'), cancelled_by = ${adminId}, updated_at = now() WHERE id = ${id}`);
+                    state = 'was cancelled, because another draft was saved meanwhile. Save it again';
+                }
                 clearTaskCostCache();
-                return json(502, { error: `${failed} Nothing was announced, and the change is still a draft.` });
+                return json(502, { error: `${failed} Nothing was announced, and the change ${state}.` });
             }
             await audit('task_cost_announced', String(id), { items: checked.items, effectiveDate: change.effectiveDate, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
             return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });

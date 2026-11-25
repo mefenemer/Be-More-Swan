@@ -279,4 +279,16 @@ check('several announced changes may wait at once, but never two on the same cos
     assert.ok(!/id="tc-cancel"|id="tc-resend"/.test(html), 'each announced card has its own buttons');
 });
 
+check('chat lists EVERY waiting change, and a failed announce never stays announced with no notice (review of #874)', () => {
+    const snap = read('src/utils/chat-plan-snapshot.ts');
+    assert.match(snap, /\(f\.upcoming \?\? \[\]\)\.map\(\(u\) => `\\n- A change to these starts on \$\{longDate\(u\.effectiveDate\)\}/);
+    assert.match(snap, /upcomingChanges\(db\)/);
+    assert.ok(!/upcomingChange\(/.test(snap));
+    const fn = read('netlify/functions/admin-task-costs.ts');
+    const fail = fn.slice(fn.indexOf('if (failed) {'), fn.indexOf("await audit('task_cost_announced'"));
+    assert.ok(fail.indexOf("SET status = 'draft'") > 0 && fail.indexOf("SET status = 'cancelled'") > fail.indexOf("SET status = 'draft'"), 'back to a draft, else cancelled');
+    assert.match(fail, /catch \{/);
+    assert.match(fail, /the change \$\{state\}/, 'the admin is told the real state');
+});
+
 console.log(`\n✓ task-costs: ${passed} checks passed`);

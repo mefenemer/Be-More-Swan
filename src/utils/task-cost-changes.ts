@@ -185,12 +185,12 @@ export function clashWithAnnounced(items: readonly { key: CostKey }[], announced
     return null;
 }
 
-/** The soonest announced change still to start, for chat to mention. Null when there is none, or on a fault. */
-export async function upcomingChange(db: Db): Promise<ChangeRow | null> {
+/** Every announced change still to start, soonest first, for chat to mention. Empty when there are none, or on a fault. */
+export async function upcomingChanges(db: Db): Promise<ChangeRow[]> {
     try {
-        return (await openChanges(db)).announced[0] ?? null;
+        return (await openChanges(db)).announced;
     } catch {
-        return null;
+        return [];
     }
 }
 
