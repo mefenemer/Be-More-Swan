@@ -35,7 +35,9 @@ import { listingIcs, listingRoute, listingSlugs, loadListingBySlug, loadSiteList
 import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing-post';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
-import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
+import { canSell, loadSiteProducts, startCheckout, type SiteProduct } from '../../src/utils/site-shop';
+import type { SiteDefinition } from '../../src/utils/site-definition';
+import type { RenderContext } from '../../src/utils/site-render';
 import { loadShopSettings, shopReady, shopTermsHtml, SHOP_TERMS_PATH } from '../../src/utils/shop-settings';
 import { safeBackPath } from '../../src/utils/site-forms';
 import { handleSiteForm, loadSiteForms, sentMessage } from '../../src/utils/site-forms';
@@ -109,6 +111,29 @@ async function subscribeInProcess(payload: Record<string, unknown>, meta: { orig
  */
 /** What a booking-only address (bookings set up, site not published) answers; everything else is "no website here yet". */
 const BOOKING_ONLY_PATHS = new Set(['/', BOOKING_PAGE_PATH, BOOK_PATH, FORM_SENT_PATH, '/robots.txt']);
+
+/**
+ * A product's own page, /shop/<id>-<name> (online shop Phase 1, site-product-page.ts). Null when the path is
+ * not a product page of THIS published site (the request carries on to the other routes). Its two reads are
+ * passed in, so tests/site-product-serve.test.ts drives this exact branch with stand-ins:
+ *   offered + active → 200 (HEAD: no body; a trailing slash is served too, its canonical link names the
+ *   address without it) · offered but archived/removed → 404 · an old name, other case or no name → 301 to
+ *   the current address, keeping the query (UTM tags on a shared link).
+ */
+export async function productPageResponse(req: {
+    path: string; query: string; method: string; definition: SiteDefinition; ctx: RenderContext;
+    loadProducts: () => Promise<Record<number, SiteProduct>>; canSell: () => Promise<boolean>;
+}): Promise<{ statusCode: number; headers: Record<string, string>; body: string } | null> {
+    const pr = productRoute(req.path);
+    if (!pr || !productSections(req.definition).has(pr.id)) return null;
+    const product = (await req.loadProducts())[pr.id];
+    if (!product) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(req.definition, '/__none', req.ctx).html };
+    const canonical = productPagePath(product);
+    if (canonical !== req.path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${req.query ? `?${req.query}` : ''}`, 'Cache-Control': 'public, max-age=300' }, body: '' };
+    const html = renderSiteProduct(req.definition, { ...req.ctx, canSell: await req.canSell(), products: { [product.id]: product } }, product);
+    if (!html) return null;
+    return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: req.method === 'HEAD' ? '' : html };
+}
 
 export const SITE_VARY = { 'Netlify-Vary': 'query, header=X-Site-Host', Vary: 'X-Site-Host' } as const;
 
@@ -325,17 +350,12 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
 
     // ── A product's own page: /shop/<id>-<name> (online shop Phase 1, site-product-page.ts) ──
     // Only while a products section on the published site offers it; an old name 301s to the current one.
-    const pr = productRoute(path);
-    if (pr && productSections(definition).has(pr.id)) {
-        const product = (await loadSiteProducts(db, site.organisationId, definition))[pr.id];
-        if (!product) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
-        const canonical = productPagePath(product);
-        // Keep the query (UTM tags on a shared link), as the domain redirect above does.
-        const q = String(event.queryStringParameters?.q || '');
-        if (canonical !== path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${q ? `?${q}` : ''}`, 'Cache-Control': 'public, max-age=300' } as Record<string, string>, body: '' };
-        const html = renderSiteProduct(definition, { ...ctx, canSell: await canSell(db, site.organisationId), products: { [product.id]: product } }, product);
-        if (html) return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : html };
-    }
+    const productPage = await productPageResponse({
+        path, query: String(event.queryStringParameters?.q || ''), method: event.httpMethod, definition, ctx,
+        loadProducts: () => loadSiteProducts(db, site.organisationId, definition),
+        canSell: () => canSell(db, site.organisationId),
+    });
+    if (productPage) return productPage;
 
     // An old address that moved (an imported page's former path — site-definition.ts redirects).
     const moved = redirectFor(definition, path);
