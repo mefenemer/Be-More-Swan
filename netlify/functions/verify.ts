@@ -11,6 +11,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findReferralOffer } from '../../src/utils/referral-offer';
 import { startTrialIfEligible } from '../../src/utils/trial';
+import { sendNewTrialAlert } from '../../src/utils/founder-alerts';
 import { recordLogin } from '../../src/utils/login-events';
 import { isSameLoginBrowser, maskEmail, readLoginRef, sessionUserId } from '../../src/utils/login-link';
 import jwt from 'jsonwebtoken';
@@ -131,6 +132,8 @@ export default withLambda(async (event) => {
             try {
                 const t = await startTrialIfEligible(db, { userId: user.id, organisationId: user.organisationId });
                 if (t.started && t.endsAt) trialEndsAt = t.endsAt;
+                // #91: a trial never reaches Stripe, so tell the founder here (never throws).
+                if (t.started) await sendNewTrialAlert({ db, userId: user.id, organisationId: user.organisationId, endsAt: t.endsAt ?? null });
             } catch (err) {
                 console.error('[verify] could not start the free trial (non-blocking)', { userId: user.id, err });
             }

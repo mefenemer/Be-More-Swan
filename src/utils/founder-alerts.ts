@@ -250,6 +250,83 @@ export async function sendNewSubscriberAlert(params: NewSubscriberAlertParams): 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// New free trial (Fix pipeline #91, 2026-11-25)
+//
+// Since the no-card free trial (2026-10-17) every new customer starts here, and a trial never reaches
+// Stripe — so the new-subscriber alert above, which fires when money is taken, told the founder nothing
+// about a sign-up until (and unless) they paid. verify.ts sends this when startTrialIfEligible actually
+// starts the trial: once per workspace, at the first email verification.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface NewTrialAlertData {
+    companyName: string;
+    fullName: string;
+    email: string | null;
+    planName: string;
+    /** YYYY-MM-DD the trial ends, or null when unknown. */
+    endsOn: string | null;
+    industry?: string | null;
+    websiteUrl?: string | null;
+    userId: number;
+    organisationId: number | null;
+    registeredOn?: string | null;
+}
+
+/** Pure renderer, like buildNewSubscriberAlertEmail. */
+export function buildNewTrialAlertEmail(d: NewTrialAlertData): { subject: string; html: string; text: string } {
+    const html = shell({
+        accent: '#047857',
+        headline: 'New free trial 🌱',
+        rowsHtml: [
+            row('Company', esc(d.companyName)),
+            row('Person', personCell(d.fullName, d.email)),
+            row('Plan', `${esc(d.planName)}<span style="font-weight:400;color:#5c564b;font-size:13px"> · no card taken</span>`),
+            row('Trial ends', esc(d.endsOn || 'unknown')),
+            d.industry   ? row('Industry', esc(d.industry)) : '',
+            d.websiteUrl ? row('Website', `<a href="${esc(d.websiteUrl)}" style="color:#047857">${esc(d.websiteUrl)}</a>`) : '',
+        ].join(''),
+        footerHtml: `
+              User #${esc(d.userId)} · Org #${esc(d.organisationId ?? '—')} ·
+              Registered ${esc(d.registeredOn || 'unknown')}<br>
+              Sent when they verified their email and the trial started. You'll get a "New subscriber" email if they pay.`,
+    });
+
+    const text = [
+        'New free trial',
+        `Company:    ${d.companyName}`,
+        `Person:     ${d.fullName || '(no name on record)'} <${d.email || '—'}>`,
+        `Plan:       ${d.planName} (no card taken)`,
+        `Trial ends: ${d.endsOn || 'unknown'}`,
+        `User #${d.userId} · Org #${d.organisationId ?? '—'}`,
+    ].join('\n');
+
+    return { subject: `🌱 New free trial: ${d.companyName}`, html, text };
+}
+
+/** Never throws: a failed alert must not block the login that started the trial. */
+export async function sendNewTrialAlert(params: { db: any; userId: number; organisationId: number | null; endsAt: Date | null; planName?: string }): Promise<void> {
+    try {
+        const { person, company, fullName, companyName } = await loadSubject(params.db, params.userId, params.organisationId);
+        const { subject, html, text } = buildNewTrialAlertEmail({
+            companyName,
+            fullName,
+            email:        person?.email ?? null,
+            planName:     params.planName || 'Free Trial',
+            endsOn:       params.endsAt ? params.endsAt.toISOString().slice(0, 10) : null,
+            industry:     company?.industry,
+            websiteUrl:   company?.websiteUrl,
+            userId:       params.userId,
+            organisationId: params.organisationId,
+            registeredOn: person?.createdAt ? new Date(person.createdAt).toISOString().slice(0, 10) : null,
+        });
+        await sendEmail({ to: FOUNDER_EMAIL, subject, html, text });
+        console.log(`[founder-alerts] new-trial alert sent to ${FOUNDER_EMAIL} for user ${params.userId} (org ${params.organisationId})`);
+    } catch (err: any) {
+        console.error('[founder-alerts] new-trial alert FAILED (non-blocking):', err?.message || err);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Plan upgrade
 //
 // Fires from billing-upgrade.ts rather than the customer.subscription.updated webhook
