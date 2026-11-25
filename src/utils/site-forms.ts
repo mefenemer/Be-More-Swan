@@ -19,6 +19,7 @@
 // The visitor always lands on a page in the site's own look: /_sent after a success (redirect, so
 // a refresh does not send it twice), or the reason it failed with a way back.
 
+import { productRoute, productSections } from './site-product-page';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, audienceForms, siteEnquiries, users } from '../../db/schema';
@@ -92,7 +93,10 @@ export function findSection(def: SiteDefinition, sectionId: string): Section | n
 export function safeBackPath(def: SiteDefinition, raw: unknown): string {
     const p = typeof raw === 'string' ? raw : '/';
     const known = new Set(def.pages.map((x) => (x.slug ? `/${x.slug}` : '/')));
-    return known.has(p) ? p : '/';
+    if (known.has(p)) return p;
+    // A product's own page (site-product-page.ts), while a products section offers that product.
+    const pr = productRoute(p);
+    return pr && productSections(def).has(pr.id) ? p : '/';
 }
 
 /**
