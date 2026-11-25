@@ -27,7 +27,7 @@
 // Recorded from the Connect webhook (stripe-connect-webhook.ts → recordPaidCheckout), not from the
 // success page: a visitor who closes the tab after paying has still paid.
 
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
@@ -39,6 +39,7 @@ import { checkRateLimit } from './rate-limit';
 const stripeClient = async () => (await import('./stripe')).getStripe();
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
+import { setOrderDone, type OrderStatus } from './shop-orders';
 import type { SiteDefinition } from './site-definition';
 import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import { loadShopSettings, shopReady, checkoutNote, returnsSummaryText, traderBlockHtml, SHOP_TERMS_PATH, type ShopSettings } from './shop-settings';
@@ -632,17 +633,12 @@ export async function recordRefund(db: Db, accountId: string, charge: Stripe.Cha
 }
 
 /** The Shopkeeper's Shop tab (shop.ts): the same rule as markOrderDone across the whole workspace's
- *  orders, since a Shopkeeper is not tied to one website. */
-export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<boolean> {
-    if (!Number.isInteger(orderId) || orderId <= 0) return false;
-    const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
-        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.organisationId, orgId), ne(siteOrders.status, 'refunded'))).returning({ id: siteOrders.id });
-    return !!row;
+ *  orders, since a Shopkeeper is not tied to one website. "Mark as new" goes back to posted if it was posted. */
+export async function markShopOrderDone(db: Db, orgId: number, orderId: number, done: boolean): Promise<OrderStatus | null> {
+    return setOrderDone(db, orgId, orderId, done);
 }
 
 export async function markOrderDone(db: Db, orgId: number, siteId: number, orderId: number, done: boolean): Promise<boolean> {
-    // A refunded order stays refunded: "Mark as done" never hides a refund.
-    const [row] = await db.update(siteOrders).set({ status: done ? 'done' : 'paid' })
-        .where(and(eq(siteOrders.id, orderId), eq(siteOrders.siteId, siteId), eq(siteOrders.organisationId, orgId), ne(siteOrders.status, 'refunded'))).returning({ id: siteOrders.id });
-    return !!row;
+    // A refunded order stays refunded: "Mark as done" never hides a refund (shop-orders.ts setOrderDone).
+    return !!(await setOrderDone(db, orgId, orderId, done, siteId));
 }

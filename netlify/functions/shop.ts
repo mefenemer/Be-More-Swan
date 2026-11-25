@@ -10,6 +10,9 @@
 //   payments_connect → Stripe's onboarding link for the workspace's Standard account (owner/admin)
 //   payments_refresh → re-read the account from Stripe (back from onboarding)
 //   order_done       { id, done }  → mark an order dealt with (or new again); a refund stays a refund
+//   order_update     { id, status: 'posted'|'done'|'new', trackingNumber?, trackingUrl? } → the Shop tab's "Mark as
+//                    posted" and the chat's order_update card; posted emails the buyer from the owner's own inbox
+//   orders_csv       → { filename, csv } every order (the newest 5000), for the Shop tab's "Download CSV"
 //   product_stock    { productId, stock?, lowStockAt? } → set a product's stock / low-stock level (any
 //                    member, like Business Information ▸ Products); the Shop tab's Stock card and the
 //                    chat's product_stock card send exactly this (shop-stock.ts, Phase 1)
@@ -36,6 +39,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
 import { loadProductOptions, saveProductOptions } from '../../src/utils/shop-options';
 import { loadOrderLines } from '../../src/utils/shop-basket';
+import { loadOrderPosting, markOrderPosted, ordersCsv, ordersPostingOn, postedMessage } from '../../src/utils/shop-orders';
 import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
 
 function json(statusCode: number, body: unknown) {
@@ -94,6 +98,9 @@ export default withLambda(async (event) => {
             // UK delivery choices (shop-delivery.ts) and the one each order chose.
             delivery: await loadDelivery(db, orgId),
             orderDelivery: orders.length ? await loadOrderDelivery(db, orgId, orders.map((o) => o.id)) : {},
+            // Posted orders' tracking (shop-orders.ts); postingOn = db/z-shop-orders.sql has reached this database.
+            orderPosting: orders.length ? await loadOrderPosting(db, orgId, orders.map((o) => o.id)) : {},
+            postingOn: await ordersPostingOn(db),
             canEdit, warnings,
         };
     }
@@ -134,6 +141,26 @@ export default withLambda(async (event) => {
     if (action === 'order_done') {
         if (!(await markShopOrderDone(db, orgId, Number(body.id), body.done !== false))) return json(404, { error: 'Order not found.' });
         return json(200, await view());
+    }
+
+    if (action === 'order_update') {
+        const orderId = Number(body.id);
+        if (body.status === 'posted') {
+            const r = await markOrderPosted(db, orgId, orderId, { trackingNumber: body.trackingNumber, trackingUrl: body.trackingUrl });
+            if (!r.ok) return json(r.status, { error: r.error });
+            return json(200, await view([postedMessage(r, orderId)]));
+        }
+        if (body.status !== 'done' && body.status !== 'new') return json(400, { error: 'Choose posted, done or new.' });
+        const now = await markShopOrderDone(db, orgId, orderId, body.status === 'done');
+        if (!now) return json(404, { error: 'Order not found, or it was refunded.' });
+        // Worded from where the order ended up: "new" on a posted order keeps it posted.
+        return json(200, await view([now === 'done' ? `Order ${orderId} marked as dealt with.` : now === 'posted' ? `Order ${orderId} is no longer marked as dealt with: it's back to Posted.` : `Order ${orderId} marked as new again.`]));
+    }
+
+    if (action === 'orders_csv') {
+        // Every buyer's name, email and address in one file: owner/admin only, like the shop's other settings.
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can download the orders.' });
+        return json(200, await ordersCsv(db, orgId));
     }
 
     if (action === 'product_stock') {

@@ -267,6 +267,7 @@ export const CARD_LABELS: Record<string, string> = {
     product_stock: 'Set how many of a product are in stock, or when to warn it is low',
     product_options: 'Set a product\'s options (sizes, colours…), each with its own price and stock',
     delivery_rates: 'Set the UK delivery choices buyers pick at checkout, with free-over thresholds and collection',
+    order_update: 'Mark an order as posted (with tracking, emailed to the buyer from your own inbox), dealt with, or new again',
     site_import_request: 'Import their existing website',
     site_picture: 'Put a picture on the website',
     site_publish_open: 'Open the Publish card (the owner publishes)',

@@ -92,7 +92,9 @@ check('orders are the workspace\'s (no website needed), and a refund stays a ref
     const fn = read('netlify/functions/shop.ts');
     assert.ok(fn.includes('.from(siteOrders).where(eq(siteOrders.organisationId, orgId))'));
     const shop = read('src/utils/site-shop.ts');
-    assert.ok(/export async function markShopOrderDone[\s\S]{0,400}eq\(siteOrders\.organisationId, orgId\), ne\(siteOrders\.status, 'refunded'\)/.test(shop));
+    // The whole workspace's orders (no siteId), through shop-orders.ts setOrderDone, which never touches a refund.
+    assert.ok(/export async function markShopOrderDone[\s\S]{0,300}return setOrderDone\(db, orgId, orderId, done\);/.test(shop));
+    assert.ok(/WHERE id = \$\{orderId\} AND organisation_id = \$\{orgId\}\$\{site\} AND status <> 'refunded'/.test(read('src/utils/shop-orders.ts')));
 });
 
 check('the tab: two steps, Stripe, the details form, orders; sends the same action as the chat card', () => {
@@ -128,7 +130,7 @@ check('snapshot: ready → CAN take orders; orders listed with what, how much, w
     assert.ok(t.includes('Stripe connected and taking payments') && t.includes('Delivery & returns details: complete.') && t.includes('the shop CAN take orders now'));
     assert.ok(t.includes('#77 2026-11-14: 2 × House Blend, £25, Jo — NEW'));
     assert.ok(t.includes('#78') && t.includes('— refunded') && t.includes('part refunded (£5)'));
-    assert.ok(t.includes('1 not yet marked as dealt with'));
+    assert.ok(t.includes('1 NEW, not yet posted or dealt with'));   // FR#35 order statuses: posted is not new
     assert.ok(t.includes('items that go off quickly') || t.includes('go off'), 'the exceptions they ticked');
     assert.ok(!t.includes('12 Mill Lane'), 'address not repeated into the prompt');
 });
