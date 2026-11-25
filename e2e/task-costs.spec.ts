@@ -231,6 +231,6 @@ test.describe('Admin → Money → Task costs', () => {
         await expect(page.locator('#tc-date')).toHaveValue('2027-01-01');
         await expect(page.locator('#tc-reason')).toHaveValue('Why it changes.');
         const post = api.called('admin-task-costs').find((c: any) => c.method === 'POST')!;
-        expect(post.body.effectiveDate).toBe('2027-01-01');
+        expect((post.body as any).effectiveDate).toBe('2027-01-01');
     });
 });
