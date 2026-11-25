@@ -98,13 +98,18 @@ test.describe('figures on the page follow the admin setting', () => {
     });
 });
 
-const STATE = (changes: unknown[], openChangeId: number | null) => ({
+// Several announced changes can wait at once, never two on one cost (#874): the draft and every waiting change are
+// listed in openChangeIds; costs a waiting change moves are in lockedKeys.
+const STATE = (changes: any[], openIds: number[] = changes.map((c) => c.id)) => ({
     costs: [
         { key: 'ai_music', label: 'AI music', value: 20, text: '20 tasks', min: 0, max: 1000, inUse: true },
         { key: 'ai_image', label: 'AI images', value: 1, text: '1 task', min: 0, max: 1000, inUse: true },
         { key: 'chat_messages', label: 'Chat (each charge)', value: 1, text: '1 task', min: 0, max: 1000, inUse: false },
     ],
-    openChangeId, changes,
+    openChangeIds: openIds,
+    draftChangeId: changes.find((c) => c.status === 'draft' && openIds.includes(c.id))?.id ?? null,
+    lockedKeys: Object.fromEntries(changes.filter((c) => c.status === 'announced' && openIds.includes(c.id)).flatMap((c) => c.items.map((i: any) => [i.key, c.effectiveDate]))),
+    changes,
     earliest: { rise: '2026-12-06', reduction: '2026-11-07' },
     minNoticeDays: 30, emailsGoToCustomers: false, you: 'admin@example.test',
 });
@@ -129,7 +134,7 @@ async function openAdmin(page: any, api: any) {
 test.describe('Admin → Money → Task costs', () => {
     test('saving a draft sends only what changed, with the date and reason', async ({ page, signedIn, api, pageErrors }) => {
         let saved = false;
-        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (saved = true, { id: 7 }) : (saved ? STATE([DRAFT], 7) : STATE([], null))));
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (saved = true, { id: 7 }) : (saved ? STATE([DRAFT]) : STATE([]))));
         await openAdmin(page, api);
         await page.locator('[data-tc-key="ai_music"]').fill('25');
         await page.locator('#tc-reason').fill('The AI music model costs us more to run.');
@@ -142,7 +147,7 @@ test.describe('Admin → Money → Task costs', () => {
     });
 
     test('announcing needs the number typed, and the server is told it', async ({ page, signedIn, api }) => {
-        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { started: true, waiting: 12, emailsGoToCustomers: false } : STATE([DRAFT], 7)));
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { started: true, waiting: 12, emailsGoToCustomers: false } : STATE([DRAFT])));
         await openAdmin(page, api);
         const go = page.locator('#tc-announce');
         await expect(go).toBeDisabled();
@@ -156,19 +161,36 @@ test.describe('Admin → Money → Task costs', () => {
         expect(post.body).toEqual({ id: 7, expected: 12 });
     });
 
-    test('an announced change locks the costs and shows who has accepted', async ({ page, signedIn, api }) => {
-        api.set('admin-task-costs', STATE([ANNOUNCED], 7));
+    test('an announced change locks only its own cost and shows who has accepted; the others stay editable', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', STATE([ANNOUNCED]));
         await openAdmin(page, api);
         await expect(page.locator('#tc-open')).toContainText('Announced: starts 6 December 2026');
         await expect(page.locator('#tc-open')).toContainText('3 of 8 workspaces accepted');
         await page.locator('#tc-open summary').click();
         await expect(page.locator('#tc-open')).toContainText('Love Cat');
         await expect(page.locator('[data-tc-key="ai_music"]')).toBeDisabled();
-        await expect(page.locator('#tc-save')).toHaveCount(0);
+        await expect(page.locator('[data-tc-key="ai_image"]')).toBeEnabled();
+        await expect(page.locator('#tc-save')).toHaveCount(1);
+        await expect(page.locator('#tc-costs')).toContainText('Changing on 6 December 2026');
+    });
+
+    test('two announced changes on different costs each get a card with their own Cancel', async ({ page, signedIn, api }) => {
+        const second = { ...ANNOUNCED, id: 9, effectiveDate: '2027-01-01', items: [{ key: 'ai_image', oldUnits: 1, newUnits: 2 }], acceptance: { workspaces: 8, accepted: 0, waiting: [] } };
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { cancelled: true } : STATE([ANNOUNCED, second])));
+        await openAdmin(page, api);
+        await expect(page.locator('[data-tc-card]')).toHaveCount(2);
+        await expect(page.locator('#tc-open')).toContainText('Announced: starts 6 December 2026');
+        await expect(page.locator('#tc-open')).toContainText('Announced: starts 1 January 2027');
+        await expect(page.locator('[data-tc-key="ai_music"]')).toBeDisabled();
+        await expect(page.locator('[data-tc-key="ai_image"]')).toBeDisabled();
+        await expect(page.locator('[data-tc-key="chat_messages"]')).toBeEnabled();
+        await page.locator('[data-tc-card="9"] [data-tc-cancel]').click();
+        await page.getByRole('button', { name: 'Cancel the change' }).click();
+        await expect.poll(() => api.called('admin-task-costs').find((c: any) => c.method === 'POST')?.body).toEqual({ id: 9 });
     });
 
     test('a cost nobody is charged saves on its own, with no notice', async ({ page, signedIn, api }) => {
-        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { id: 8 } : STATE([], null)));
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { id: 8 } : STATE([])));
         await openAdmin(page, api);
         await page.locator('[data-tc-key="chat_messages"]').fill('2');
         await page.locator('[data-tc-unused="chat_messages"]').click();
@@ -181,7 +203,7 @@ test.describe('Admin → Money → Task costs', () => {
     test('the server\'s refusal is shown, not swallowed', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'A cost going up needs 30 days\' notice (terms 5.2).' } }); return undefined; }
-            return STATE([], null);
+            return STATE([]);
         });
         await openAdmin(page, api);
         await page.locator('[data-tc-key="ai_music"]').fill('25');
