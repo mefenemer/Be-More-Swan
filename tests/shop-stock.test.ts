@@ -163,7 +163,7 @@ async function main() {
     await check('stock is taken only after the order row is new (a repeated webhook never takes it twice)', () => {
         const src = read('src/utils/site-shop.ts');
         const insertDone = src.indexOf('if (!order) return true;   // a retry of an order already recorded');
-        const take = src.indexOf('taken = await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity)');
+        const take = src.indexOf(': await takeStock(db, site.organisationId, Number(session.metadata?.bms_product), order.quantity)');
         assert.ok(insertDone > 0 && take > insertDone, 'takeStock runs after the retry check');
         assert.ok(src.includes('<p><strong>Stock:</strong> ${esc(stockLine)}</p>'), 'the line reaches the owner\'s email');
         assert.ok(src.includes('for (let attempt = 1; attempt <= 2; attempt++)') && src.includes('stockFailed ? STOCK_NOT_UPDATED_LINE'), 'a failed update is retried once, then the owner is told');

@@ -22,6 +22,8 @@ import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from '
 import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { productHomePage, productPagePath, productSections } from './site-product-page';
+import { allOptionsSoldOut, optionPence, type ProductOptions } from './shop-options';
+import { formatMoney } from './product-price';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
 import { describeCancellation } from './stay-quote';
@@ -41,7 +43,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; stock?: number | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; stock?: number | null; options?: ProductOptions | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -280,6 +282,7 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
 .ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
 .li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
+.pr .opts{list-style:none;padding:0;margin:12px 0 20px;display:grid;gap:10px}.pr .opts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:var(--r);background:rgba(0,0,0,.04)}.pr .opts form{margin:0}
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .st .facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 18px;padding:14px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.st .facts span{white-space:nowrap}.st .price{font-weight:700;font-size:1.1rem}
 .st .pics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.st .pics img{border-radius:var(--r);width:100%;aspect-ratio:3/2;object-fit:cover}.st .pics img:first-child{grid-column:1/-1}@media(min-width:700px){.st .pics{grid-template-columns:2fr 1fr 1fr}.st .pics img:first-child{grid-column:auto;grid-row:span 2;height:100%}}.st .fm{margin-bottom:36px}.st h2{margin-top:1.6em}
@@ -549,7 +552,13 @@ ${formButton(p.buttonLabel)}
                 let buy = '';
                 // Stock tracked and none left (shop-stock.ts): "Sold out" instead of a Buy button, in the
                 // editor's preview too, so the owner sees what buyers see.
-                if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
+                const hasOptions = !!pr.options?.options.length;
+                if (pr.buyPence !== null && hasOptions) {
+                    // Bought by option only (shop-options.ts): the choice and its price are on the product's page.
+                    if (allOptionsSoldOut(pr.options!.options)) buy = SOLD_OUT_HTML;
+                    else if (formState.preview) buy = `<p><button class="btn" type="button" disabled>Choose ${esc(pr.options!.group.toLowerCase())}</button></p>`;
+                    else if (formState.canSell) buy = `<p><a class="btn" href="${esc(href(productPagePath(pr)))}" data-choose-option>Choose ${esc(pr.options!.group.toLowerCase())}</a></p>`;
+                } else if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
                 else if (pr.buyPence !== null) {
                     if (formState.preview) buy = `<p><button class="btn" type="button" disabled>${esc(p.buyLabel)}</button></p>`;
                     else if (formState.canSell) buy = buyFormHtml(s.id, pr, p.buyLabel, formState.path);
@@ -982,8 +991,22 @@ ${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li
 const SOLD_OUT_HTML = '<p class="price" data-sold-out><strong>Sold out</strong></p>';
 
 /** The Buy form: which section and product, and the name and price the visitor SAW (checked at the click). */
-function buyFormHtml(sectionId: string, pr: SiteRenderProduct, label: string, backPath: string): string {
-    return `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}"><input type="hidden" name="_v" value="${pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
+function buyFormHtml(sectionId: string, pr: SiteRenderProduct, label: string, backPath: string, option?: { id: number; pence: number }): string {
+    return `<form method="post" action="${BUY_ACTION}"><input type="hidden" name="_s" value="${esc(sectionId)}"><input type="hidden" name="_pid" value="${pr.id}"><input type="hidden" name="_n" value="${esc(pr.name)}">${option ? `<input type="hidden" name="_o" value="${option.id}">` : ''}<input type="hidden" name="_v" value="${option ? option.pence : pr.buyPence}"><input type="hidden" name="_p" value="${esc(backPath)}"><button class="btn" type="submit">${esc(label)}</button></form>`;
+}
+
+/** A product's options on its page: each with its own price and its own Buy button (or Sold out). */
+function optionsHtml(sectionId: string, pr: SiteRenderProduct, label: string, path: string, selling: boolean): string {
+    const po = pr.options!;
+    const rows = po.options.map((o) => {
+        const pence = optionPence(pr.buyPence, o, pr.currency);
+        if (pence === null) return '';
+        const price = formatMoney(pence, pr.currency || 'GBP');
+        const action = o.stock != null && o.stock <= 0 ? '<span data-sold-out><strong>Sold out</strong></span>'
+            : selling ? buyFormHtml(sectionId, pr, label, path, { id: o.id, pence }) : '';
+        return `<li data-option="${o.id}"><span><strong>${esc(o.label)}</strong> · ${esc(price)}</span>${action}</li>`;
+    }).filter(Boolean).join('');
+    return `<h2>${esc(po.group)}</h2><ul class="opts">${rows}</ul>`;
 }
 
 /**
@@ -1002,10 +1025,14 @@ export function renderSiteProduct(def: SiteDefinition, ctx: RenderContext, pr: S
     const label = section && section.type === 'products' ? section.props.buyLabel : 'Buy now';
     const home = productHomePage(def, pr.id);
     const img = pr.imageAssetId ? assetUrlOf(pr.imageAssetId) || '' : '';
+    const selling = ctx.canSell === true && !ctx.preview;
+    const hasOptions = pr.buyPence !== null && !!pr.options?.options.length;
     let buy = '';
-    if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
-    else if (pr.buyPence !== null && ctx.canSell === true && !ctx.preview) buy = buyFormHtml(sectionId, pr, label, path);
-    const terms = buy && buy !== SOLD_OUT_HTML ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
+    if (hasOptions) buy = optionsHtml(sectionId, pr, label, path, selling);
+    else if (pr.buyPence !== null && pr.stock != null && pr.stock <= 0) buy = SOLD_OUT_HTML;
+    else if (pr.buyPence !== null && selling) buy = buyFormHtml(sectionId, pr, label, path);
+    const canBuySomething = hasOptions ? selling && !allOptionsSoldOut(pr.options!.options) : buy !== '' && buy !== SOLD_OUT_HTML;
+    const terms = canBuySomething ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
     const body = `<article><section><div class="w art li pr">
 <p class="meta"><a href="${esc(href(home ? home.path : '/'))}">← ${esc(home ? home.title : 'Home')}</a></p>
 <h1>${esc(pr.name)}</h1>
@@ -1014,7 +1041,11 @@ ${pr.price ? `<p class="price"><strong>${esc(pr.price)}</strong></p>` : ''}
 ${buy}${terms}
 ${pr.description ? `<div class="body">${paragraphs(pr.description)}</div>` : ''}
 </div></section></article>`;
-    const offer = pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl, ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {};
+    const optionOffers = hasOptions ? pr.options!.options.map((o) => ({ o, pence: optionPence(pr.buyPence, o, pr.currency) })).filter((x) => x.pence !== null).map(({ o, pence }) => ({
+        '@type': 'Offer', name: o.label, price: (pence! / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl,
+        ...(o.stock != null ? { availability: o.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}),
+    })) : null;
+    const offer = optionOffers ? { offers: optionOffers } : pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', url: pageUrl, ...(pr.stock != null ? { availability: pr.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}), seller: { '@type': 'Organization', name: s.siteName } } } : {};
     return documentHtml(def, null, ctx, body, {
         title: `${pr.name} | ${s.siteName}`,
         description: pr.description ? pr.description.replace(/\s+/g, ' ').slice(0, 160) : null,

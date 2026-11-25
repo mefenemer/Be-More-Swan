@@ -105,6 +105,7 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     websitePages: s.siteDirectories,
     websiteOrders: s.siteOrders,
     shopSettings: s.shopSettings,
+    productOptions: s.productOptions,
     bookings: s.bookings,
     bookingSettings: s.bookingSettings,
     bookableResources: s.bookableResources,

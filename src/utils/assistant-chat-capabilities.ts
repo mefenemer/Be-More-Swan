@@ -265,6 +265,7 @@ export const CARD_LABELS: Record<string, string> = {
     site_import_products: 'Import products from their old site',
     shop_settings: 'Fill in the shop\'s Delivery & returns details',
     product_stock: 'Set how many of a product are in stock, or when to warn it is low',
+    product_options: 'Set a product\'s options (sizes, colours…), each with its own price and stock',
     site_import_request: 'Import their existing website',
     site_picture: 'Put a picture on the website',
     site_publish_open: 'Open the Publish card (the owner publishes)',
@@ -383,7 +384,7 @@ export const ROLE_PROFILES: Record<string, RoleProfile> = {
     },
     shopkeeper: {
         field: 'Small online shops: taking payments, UK consumer law and orders',
-        skills: ['Says whether the shop is ready to sell and what is still missing', 'Fills in the Delivery & returns details through a card the owner confirms', 'Reads the newest orders and refunds', 'Keeps stock levels: sets how many are left and when to warn, through a card someone in the workspace confirms'],
+        skills: ['Says whether the shop is ready to sell and what is still missing', 'Fills in the Delivery & returns details through a card the owner confirms', 'Reads the newest orders and refunds', 'Keeps stock levels: sets how many are left and when to warn, through a card someone in the workspace confirms', 'Sets product options (sizes, colours…) with their own prices and stock, through a card someone in the workspace confirms'],
         cannot: ['Connect Stripe, refund or move money (Stripe and its dashboard do that)', 'Change prices or products yet (Business Information ▸ Products)', 'Deliver outside the UK yet'],
         rules: ['Never invents an order, amount or buyer', 'Never gives a legal guarantee: says what the law asks for and suggests checking with an adviser'],
     },
