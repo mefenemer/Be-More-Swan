@@ -3011,6 +3011,49 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('product_options', renderProductOptionsCard);
 
+  // { type: 'delivery_rates', rates: [{ name, price, freeOver?, days? }], collect: { on, note? } } — the shop's UK
+  // delivery choices (online shop Phase 1, shop-delivery.ts): shop.ts delivery_rates, the Shop tab Delivery card's
+  // same save. It REPLACES the choices. Nothing is saved until they click (owner/admin, checked by the server).
+  function renderDeliveryRatesCard(data) {
+    const d = data || {};
+    const rates = Array.isArray(d.rates) ? d.rates.filter((r) => r && String(r.name || '').trim()) : [];
+    const collect = d.collect && typeof d.collect === 'object' ? d.collect : { on: false };
+    const money = (v) => (v == null || v === '' ? '' : (Number(v) === 0 ? 'free' : `£${escapeHtml(String(v))}`));
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Delivery choices</p>
+      ${rates.length || collect.on ? `<ul class="mt-2 space-y-1">${rates.map((r) => `<li class="text-xs text-gray-900"><strong>${escapeHtml(r.name)}</strong> · ${money(r.price)}${r.freeOver ? ` · free over £${escapeHtml(String(r.freeOver))}` : ''}${r.days ? ` · ${escapeHtml(r.days)}` : ''}</li>`).join('')}${collect.on ? `<li class="text-xs text-gray-900"><strong>Collect in person</strong> · free${collect.note ? ` · ${escapeHtml(collect.note)}` : ''}</li>` : ''}</ul>`
+        : '<p class="text-xs text-gray-700 mt-2">No delivery choices: basket checkouts charge no delivery.</p>'}
+      <p class="text-xs text-gray-600 mt-2">This replaces your delivery choices. Buyers pick one when they check out, and the cost is added before they pay.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-dlv-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save delivery</button>
+        <button type="button" data-dlv-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-dlv-status role="status"></p>`;
+    const status = el.querySelector('[data-dlv-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dlv-cancel]')) { setBusy(true); say('Nothing saved.'); return; }
+      if (!e.target.closest('[data-dlv-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('shop:deliveryRates', {
+        bubbles: true,
+        detail: {
+          change: { rates: rates.map((r) => ({ name: r.name, price: r.price == null ? '' : r.price, freeOver: r.freeOver == null ? '' : r.freeOver, days: r.days || '' })), collect: { on: !!collect.on, note: collect.note || '' } },
+          respond({ ok: done, error, message }) {
+            if (!done) { setBusy(false); say(error || 'That didn\'t work — nothing was saved.', 'error'); return; }
+            say(message || 'Saved.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('delivery_rates', renderDeliveryRatesCard);
+
   // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
