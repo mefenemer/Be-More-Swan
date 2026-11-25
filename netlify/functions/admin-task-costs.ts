@@ -33,7 +33,7 @@ import {
     COST_KEYS, COST_KEY_LABELS, MAX_COST, costValue, formatCost, isCostKey, minCost,
 } from '../../src/config/task-weights';
 import {
-    MIN_NOTICE_DAYS_FOR_RISE, acceptanceStats, checkCostValue, costInUse, earliestStart, listChanges, noticeContext, noticeKey, openChange,
+    MIN_NOTICE_DAYS_FOR_RISE, acceptanceStats, checkCostValue, clashWithAnnounced, costInUse, earliestStart, listChanges, lockedCostKeys, noticeContext, noticeKey, openChanges,
     readChange, validateChange, type ChangeRow,
 } from '../../src/utils/task-cost-changes';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -104,7 +104,7 @@ export default withLambda(async (event) => {
         if (event.httpMethod === 'GET' && resource === 'state') {
             const now = new Date();
             const costs = await getTaskCosts(now);
-            const open = await openChange(db);
+            const open = await openChanges(db);
             const changes = await listChanges(db);
             const decorated = await Promise.all(changes.map(async (c) => {
                 if (c.status === 'draft') return { ...c, waiting: (await pendingRecipients(db, noticeKey(c.id), 'everyone')).length, ...(await preview(c)) };
@@ -122,7 +122,10 @@ export default withLambda(async (event) => {
                     key, label: COST_KEY_LABELS[key], value: costValue(costs, key), text: formatCost(key, costValue(costs, key)),
                     min: minCost(key), max: MAX_COST, inUse: costInUse(key, now),
                 })),
-                openChangeId: open?.id ?? null,
+                // The draft and every announced change still to start; costs those announced changes move can't be edited.
+                openChangeIds: [...open.announced.map((c) => c.id), ...(open.draft ? [open.draft.id] : [])],
+                draftChangeId: open.draft?.id ?? null,
+                lockedKeys: Object.fromEntries(lockedCostKeys(open.announced)),
                 changes: decorated,
                 earliest: { rise: earliestStart(true, now), reduction: earliestStart(false, now) },
                 minNoticeDays: MIN_NOTICE_DAYS_FOR_RISE,
@@ -139,10 +142,11 @@ export default withLambda(async (event) => {
             const costs = await getTaskCosts();
             const checked = validateChange(body, costs);
             if (!checked.ok) return json(400, { error: checked.error });
-            const open = await openChange(db);
-            if (open?.status === 'announced') return json(409, { error: `A change is already announced for ${open.effectiveDate}. Wait for it to start, or cancel it, before starting another.` });
+            const open = await openChanges(db);
+            const clash = clashWithAnnounced(checked.items, open.announced);
+            if (clash) return json(409, { error: clash });
             const row = await db.transaction(async (tx) => {
-                if (open) await tx.execute(sql`DELETE FROM task_cost_changes WHERE id = ${open.id} AND status = 'draft'`);
+                if (open.draft) await tx.execute(sql`DELETE FROM task_cost_changes WHERE id = ${open.draft.id} AND status = 'draft'`);
                 const made = await tx.execute<{ id: number }>(sql`
                     INSERT INTO task_cost_changes (status, effective_from, reason, created_by)
                     VALUES ('draft', ${`${checked.effectiveDate} 00:00:00`}::timestamp, ${checked.reason}, ${adminId}) RETURNING id`);
@@ -210,6 +214,9 @@ export default withLambda(async (event) => {
             const items = Object.fromEntries(change.items.map((i) => [i.key, i.newUnits]));
             const checked = validateChange({ items, effectiveDate: change.effectiveDate, reason: change.reason }, costs);
             if (!checked.ok) return json(400, { error: checked.error });
+            // Another admin may have announced a change to the same cost since this draft was saved.
+            const clash = clashWithAnnounced(checked.items, (await openChanges(db)).announced);
+            if (clash) return json(409, { error: clash });
             const flipped = await db.transaction(async (tx) => {
                 const rows = await tx.execute(sql`
                     UPDATE task_cost_changes SET status = 'announced', announced_at = (now() AT TIME ZONE 'UTC'), announced_by = ${adminId}, updated_at = now()
