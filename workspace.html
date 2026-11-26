@@ -7820,6 +7820,13 @@ function _rqApplyOverlayTimes(video, layer, post) {
         n.style.display = on ? '' : 'none';
         _rqApplyOverlayAnim(n, ov, t, cutDur, on);
     }
+    // The "Aa Style" door follows its box: a box outside its time window is not on screen, and a
+    // button floating over the video with nothing above it says nothing (issue #95 review).
+    const door = layer.querySelector('[data-pce-canvas-style]');
+    if (door) {
+        const sel = layer.querySelector(`.ioe-ov[data-id="${CSS.escape(door.getAttribute('data-pce-key') || '')}"]`);
+        door.style.display = sel && sel.style.display !== 'none' ? '' : 'none';
+    }
     // One playhead per timed block, each placed in ITS OWN axis — a clip's rows run 0→that clip's
     // length, so a single percentage of the whole cut would point at the wrong moment everywhere
     // but the first block.
@@ -22143,7 +22150,10 @@ document.addEventListener('post:textEdit', async (e) => {
             d.respond({ ok: false, error: _pceEl('pce-msg')?.textContent || 'The card couldn’t be saved just now.' });
             return;
         }
-        d.respond({ ok: true, message: 'Done — the card’s words are changed.' });
+        // A card's colours and font are its own design, set in its card editor; never dropped silently.
+        d.respond({ ok: true, message: d.style
+            ? 'Done — the card’s words are changed. Its colours and font are set in the card’s own editor, so those stay as they were.'
+            : 'Done — the card’s words are changed.' });
         return;
     }
     if (!ov && !d.replace && post.brandCard) { d.respond({ ok: false, error: 'A branded card’s colours and font are set in its own card editor, not here.' }); return; }

@@ -69,6 +69,9 @@ check('a box tapped on the picture offers its styling where the tap was', () => 
     const fn = ws.slice(ws.indexOf('function _pcePaintCanvasStyleDoor('), ws.indexOf('/** Watching the cut is not editing it. */'));
     assert.ok(fn.includes("b.setAttribute('data-pce-act', 'style-text');"), 'the door is not the same action as Aa');
     assert.ok(ws.includes('title="Font, colour, outline, background, emojis and animation"'), 'Aa still does not mention the outline');
+    const times = ws.slice(ws.indexOf('function _rqApplyOverlayTimes('), ws.indexOf('// Paint a post\'s saved text overlays as a live layer'));
+    assert.ok(times.includes("layer.querySelector('[data-pce-canvas-style]')"), 'the door floats over a video whose box is hidden at this moment');
+    assert.ok(ws.includes('Its colours and font are set in the card’s own editor'), 'a style on a branded card is dropped without a word');
     assert.ok(read('src/components/image-overlay-editor.js').includes("sharedSect('look', 'Font, colour, outline and background'"),
         'the section holding the outline is still called "How it looks"');
 });
