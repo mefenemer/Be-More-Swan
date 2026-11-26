@@ -110,6 +110,11 @@ check('wired: webhook on expiry, the sweep keeps reminded baskets, the Shop tab,
     assert.ok(mod.includes("if (!newsTicked(session.metadata as Record<string, string> | null)) return 'not_ticked';"), 'only ticked checkouts');
     assert.ok(mod.includes('account.stripeAccountId !== accountId'), 'metadata alone is never trusted');
     assert.ok(!/bemoreswan\.com|noreply@|fromLine\(/.test(mod), 'never a Be More Swan sender');
+    // review #907: every refusal applies to a typed, not-yet-Audience address; one reminder per address per week.
+    assert.ok(mod.includes('[email], { consentGivenHere: true })).get(email);') && mod.includes('if (!verdict?.sendable) {'));
+    assert.ok(mod.includes('AND o.reminder_email = site_baskets.reminder_email') && mod.includes('o.reminded_at > now() - make_interval(days => ${REMINDER_PER_ADDRESS_DAYS})'));
+    const consent = read('src/utils/audience-consent.ts');
+    assert.ok(consent.includes("if (!contact && !opts.consentGivenHere) {") && consent.includes("!(opts.consentGivenHere && contact.status === 'pending')"));
 });
 
 check('the SQL: additive columns, the result check, mirrored in db/schema.ts; the DB test runs in CI', () => {

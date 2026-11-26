@@ -15,8 +15,9 @@
 // HOW. Fixed wording, no AI, so no task is spent (owner Q6: 0). Sent ONLY on Email Marketing's route — the owner's
 // verified sending domain or their own connected Gmail/Outlook (resolveSendRoute) — never from a Be More Swan
 // address (owner rule 2026-11-17). No route → not sent; the Shop tab says so. The shared consent check runs
-// first: an address that unsubscribed, bounced, complained, opted out of outreach or paused is never reminded.
-// "Not in the Audience yet" is fine — buyers join it only when they pay.
+// first: an address that unsubscribed, bounced, complained, opted out of outreach, is on a suppressed domain or
+// paused is never reminded. "Not in the Audience yet" is fine — buyers join it only when they pay. One reminder per
+// address per business per week, however many baskets name it (the address is typed and unverified).
 //
 // ⚠️ Raw SQL on site_baskets' new columns (db/z-shop-checkout-reminder.sql). Before that SQL: no email is saved,
 // nothing is reminded, the Shop tab shows no reminder line, and checkout works as before.
@@ -39,6 +40,8 @@ type Db = ReturnType<typeof getDb>;
 
 /** A ticked checkout lapses after this long, and the reminder follows the lapse. Stripe allows 30 min–24 h. */
 export const REMINDER_CHECKOUT_MINUTES = 60;
+/** At most one reminder per address per business in this many days, however many baskets name it. */
+export const REMINDER_PER_ADDRESS_DAYS = 7;
 /** A Stripe retry later than this after the expiry sends nothing. */
 export const REMINDER_LATE_HOURS = 6;
 /** Where the reminder's unsubscribe link goes. */
@@ -161,6 +164,13 @@ export async function sendCheckoutReminder(db: Db, accountId: string, session: S
              WHERE id = ${basketId} AND organisation_id = ${site.organisationId} AND site_id = ${site.id}
                AND checkout_session_id = ${session.id} AND reminded_at IS NULL AND reminder_email IS NOT NULL
                AND jsonb_array_length(items) > 0
+               -- review #907: one reminder per address per business per week, however many baskets name it
+               -- (anyone can type a stranger's address; this caps what that can cost them and the owner's sender).
+               AND NOT EXISTS (
+                   SELECT 1 FROM site_baskets o
+                    WHERE o.organisation_id = site_baskets.organisation_id AND o.id <> site_baskets.id
+                      AND o.reminder_email = site_baskets.reminder_email
+                      AND o.reminded_at > now() - make_interval(days => ${REMINDER_PER_ADDRESS_DAYS}))
          RETURNING reminder_email AS email, checkout_lines -> ${session.id}::text AS lines`));
     } catch (err) {
         if (isMissingReminderColumn(err)) return 'nothing';
@@ -169,9 +179,11 @@ export async function sendCheckoutReminder(db: Db, accountId: string, session: S
     if (!claimed) return 'nothing';
     const email = normaliseEmail(claimed.email);
 
-    const verdict = (await checkAudienceConsentBulk(db, site.organisationId, [email])).get(email);
-    // Not in the Audience yet (they join when they pay), or unconfirmed elsewhere: the tick here is the consent.
-    if (!verdict || (!verdict.sendable && verdict.reason !== 'not_in_audience' && verdict.reason !== 'unconfirmed')) {
+    // The tick on our basket page is the consent, so "not in the Audience yet" (they join when they pay) or pending
+    // is fine — but every refusal still applies: an outreach opt-out, a suppressed domain, a pause (review #907:
+    // the address is typed, unverified, so these lists are what protect a stranger whose address was used).
+    const verdict = (await checkAudienceConsentBulk(db, site.organisationId, [email], { consentGivenHere: true })).get(email);
+    if (!verdict?.sendable) {
         await setResult(db, basketId, 'refused');
         return 'refused';
     }

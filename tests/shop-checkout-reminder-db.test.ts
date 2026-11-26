@@ -113,6 +113,30 @@ async function main() {
             assert.strictEqual(sent.length, before);
             assert.strictEqual((await row(b.id)).reminder_result, 'refused');
         });
+        await check('review #907: not in the Audience but opted out of outreach, or on a suppressed domain → refused', async () => {
+            await sql.unsafe(`INSERT INTO lead_opt_outs (organisation_id, email) VALUES (${ORG}, 'stopped@example.com')`);
+            const a = await basket({ email: 'stopped@example.com' });
+            assert.strictEqual(await remind(a.session), 'refused');
+            await sql.unsafe(`INSERT INTO suppression_list (organisation_id, domain) VALUES (${ORG}, 'blocked.example')`);
+            const b = await basket({ email: 'anyone@blocked.example' });
+            assert.strictEqual(await remind(b.session), 'refused');
+        });
+        await check('review #907: a pending contact (unconfirmed elsewhere) is reminded — the tick is the consent — unless paused', async () => {
+            await sql.unsafe(`INSERT INTO audience_contacts (organisation_id, email, status, source) VALUES (${ORG}, 'pend@example.com', 'pending', 'web_form')`);
+            const a = await basket({ email: 'pend@example.com' });
+            assert.strictEqual(await remind(a.session), 'sent');
+            await sql.unsafe(`INSERT INTO audience_contacts (organisation_id, email, status, source, paused_until) VALUES (${ORG}, 'quiet@example.com', 'pending', 'web_form', now() + interval '20 days')`);
+            const b = await basket({ email: 'quiet@example.com' });
+            assert.strictEqual(await remind(b.session), 'refused');
+        });
+        await check('review #907: one reminder per address per week, however many baskets name it', async () => {
+            const a = await basket({ email: 'repeat@example.com' });
+            assert.strictEqual(await remind(a.session), 'sent');
+            const b = await basket({ email: 'repeat@example.com' });
+            assert.strictEqual(await remind(b.session), 'nothing');
+            await sql.unsafe(`UPDATE site_baskets SET reminded_at = now() - interval '8 days' WHERE id = $1`, [a.id]);
+            assert.strictEqual(await remind(b.session), 'sent');
+        });
         await check('no sending domain and no mailbox (the real route check) → not sent, recorded as no_route', async () => {
             const b = await basket({ email: 'noroute@example.com' });
             assert.strictEqual(await remind(b.session, {}), 'no_route');
@@ -128,7 +152,7 @@ async function main() {
             const first = (await sql.unsafe(`SELECT id, checkout_session_id FROM site_baskets WHERE reminder_result = 'sent' ORDER BY id LIMIT 1`))[0];
             await sql.unsafe(`INSERT INTO site_orders (site_id, organisation_id, stripe_account_id, checkout_session_id, item_name, quantity, amount_total, currency, status, created_at)
                 VALUES (${SITE}, ${ORG}, '${ACCT}', $1, 'Fig candle', 2, 2400, 'gbp', 'paid', now() + interval '1 minute')`, [first.checkout_session_id]);
-            assert.deepStrictEqual(await loadReminderStats(db, ORG), { sent: 2, paid: 1, noRoute: 1 });
+            assert.deepStrictEqual(await loadReminderStats(db, ORG), { sent: 4, paid: 1, noRoute: 1 });
             assert.deepStrictEqual(await loadReminderStats(db, ORG + 1), { sent: 0, paid: 0, noRoute: 0 });
         });
         await check('the unsubscribe link: the address becomes unsubscribed (a row made), evidence kept, email cleared; repeat is fine', async () => {
