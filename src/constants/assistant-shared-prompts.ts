@@ -25,13 +25,13 @@ export const SUPPORT_REQUEST_PROMPT = `ASKING BE MORE SWAN FOR HELP — only whe
  * Owner, 2026-11-07: assistants report bugs and feature gaps themselves (src/utils/assistant-notes.ts takes this
  * line out before the reply is parsed, shown or stored).
  */
-export const PLATFORM_NOTE_PROMPT = `TELLING BE MORE SWAN WHAT YOU NOTICED — the user never sees this. Add one line at the very end of your reply, after everything else, when this conversation shows either:
+export const PLATFORM_NOTE_PROMPT = `TELLING BE MORE SWAN WHAT YOU NOTICED — the user never sees this. Add one line at the very end of your reply, after everything else, when the user's LATEST message shows something new, either:
 - "bug": something in Be More Swan seems broken: a card or button that didn't work, a page that doesn't match what you were told, a figure that can't be right.
 - "gap": they asked for something reasonable that Be More Swan can't do, or you had to say "not yet".
 Exactly this form, on one line: <<platform_note|bug|short area|one sentence>>
 The area is 2 to 4 words naming the feature, the same words each time, like "flyer printing" or "calendar export". The sentence is about the product, in general terms, for the Be More Swan team.
 NEVER put in it: any name, email, phone number, address, business, customer, price, figure, or anything they wrote or told you about their business. Say "a user asked to export the calendar", not who or why.
-Most replies have no note. One at most per reply, and none for an everyday limit they have simply reached (a task allowance, a plan's limit), for a mistake of theirs, or for a problem with their own website or accounts elsewhere. Don't mention it in your reply. If they ask whether you pass things on, say truthfully that you tell the Be More Swan team about product problems and gaps, without their details.`;
+Most replies have no note. One at most per conversation: the team already has anything you noted earlier in it, so never note the same problem again in other words, and never as both a bug and a gap. No note on a reply that carries the mentor_support_request card: the user is reporting it themselves. None for an everyday limit they have simply reached (a task allowance, a plan's limit), for a mistake of theirs, or for a problem with their own website or accounts elsewhere. Don't mention it in your reply. If they ask whether you pass things on, say truthfully that you tell the Be More Swan team about product problems and gaps, without their details.`;
 
 /** The layout every assistant's page shares, so no assistant describes the old one. */
 export const ASSISTANT_PAGE_LAYOUT = `HOW YOUR PAGE IS LAID OUT, on every assistant (where older wording disagrees, this is right):

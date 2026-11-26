@@ -4070,7 +4070,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const first = extractAssistantNote(replyText(response.content));
         let raw = first.text;
         const assistantNote = first.note;
-        if (assistantNote) await recordAssistantNote(db, { note: assistantNote, organisationId: orgId, assistantId: session.aiAssistantId, role: assistantRow.roleKey, names: [orgRow?.name, assistantRow.name] });
+        // Recorded below, once the reply's card is known: a reply carrying the user's own report card sends no note.
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
         let parsed = route.parseResponse(raw);
@@ -4952,6 +4952,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (hubRecords.length === 1 && hubRecords[0].recordType === 'meeting' && hubRecordIds.length === 1
             && uiElement && typeof uiElement === 'object') {
             uiElement = { ...(uiElement as Record<string, unknown>), recordId: hubRecordIds[0] };
+        }
+
+        // What the assistant noticed (src/utils/assistant-notes.ts): one note per chat, and none beside the user's own report
+        // card — prod 2026-11-26, one chat raised issues #93, #94, #96 and feature request #67 next to the user's #95.
+        if (assistantNote && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') {
+            await recordAssistantNote(db, { note: assistantNote, organisationId: orgId, assistantId: session.aiAssistantId, role: assistantRow.roleKey, names: [orgRow?.name, assistantRow.name], chatSessionId: session.id });
         }
 
         // One transaction: the shadow call's audit row (role 'system' — hidden from the

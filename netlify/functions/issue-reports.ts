@@ -2,7 +2,7 @@
 // Testing-phase "Report an Issue" — user-facing API.
 //
 // GET   /issue-reports                          → the caller's own reported issues (+ message threads)
-// POST  /issue-reports  { description, sourceLocation, sourceUrl, image? }
+// POST  /issue-reports  { description, sourceLocation, sourceUrl, image?, chatSessionId? }
 //                                               → file a new issue; emails the admin owner(s)
 // POST  /issue-reports  { issueId, message }    → add a reply (e.g. answer "More info required")
 // POST  /issue-reports  { issueId, action:'confirm-fixed' }
@@ -28,6 +28,7 @@ import {
     getAdminRecipients,
 } from '../../src/utils/issue-reports';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { linkUserReportToNotes } from '../../src/utils/assistant-notes';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -190,6 +191,9 @@ export default withLambda(async (event) => {
     // works on a database db/z-issue-severity.sql hasn't reached.
     const severity = isIssueSeverity(body.severity) ? body.severity : 'normal';
     if (severity !== 'normal') await setIssueSeverity(db, created.id, severity);
+
+    // Sent from an assistant's chat card: that chat's own assistant notes are duplicates of this (assistant-notes.ts). Never throws.
+    if (body.chatSessionId != null) await linkUserReportToNotes(db, { chatSessionId: body.chatSessionId, organisationId, userId, report: { table: 'issue_reports', id: created.id } });
 
     // Notify the admin owner(s) — non-blocking; never fail the user's submission over email.
     notifyAdmins(db, created.id, userId, description, sourceLocation, sourceUrl, !!imageData, event.headers, { severity, organisationId: organisationId ?? null })
