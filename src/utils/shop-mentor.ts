@@ -5,8 +5,9 @@
 // Facts, never a model's guess:
 //   • best seller of the last 7 days (units, from order lines and Buy orders — shop-sales.ts)
 //   • products at or below their low-stock level, and sold out (shop-stock.ts)
-//   • products that can be bought but haven't sold in 60 days (and are at least 60 days old, and the shop HAS sold
-//     something in that time — a shop nobody buys from yet isn't "slow", it's new)
+//   • products that can be bought, have sold online before, but haven't sold in 60 days (and are at least 60 days
+//     old, and the shop HAS sold something in that time — a shop nobody buys from yet isn't "slow", it's new);
+//     never one whose options are all sold out
 // Read by the morning summary (mentor-morning.ts: best seller + stock, by rules, no task) and the Mentor's workspace
 // snapshot (mentor-snapshot.ts: all three, so the weekly review and the chat may suggest a post about a slow product
 // or that the owner looks at its price). The owner sets every price: the Mentor never names one.
@@ -31,7 +32,7 @@ export interface ShopWatch {
     bestSeller: { name: string; units: number } | null;
     low: Array<{ name: string; left: number }>;
     soldOut: string[];
-    /** Buyable, at least SLOW_DAYS old, no sale in SLOW_DAYS. */
+    /** Buyable (options included), sold online before, at least SLOW_DAYS old, no sale in SLOW_DAYS. */
     slow: Array<{ id: number; name: string }>;
 }
 
@@ -59,6 +60,15 @@ export async function loadShopWatch(db: Db, orgId: number): Promise<ShopWatch | 
                  WHERE p.organisation_id = ${orgId} AND p.status = 'active'
                    AND p.id IN (${sql.join(buyable.map((i) => sql`${i.id}`), sql`, `)})
                    AND p.created_at < now() - make_interval(days => ${SLOW_DAYS})
+                   -- It HAS sold online before (review #910): proof it is for sale online, not sold in person only —
+                   -- "slow" means it used to sell and has stopped.
+                   AND (EXISTS (SELECT 1 FROM site_order_lines l JOIN site_orders o ON o.id = l.order_id
+                                 WHERE l.product_id = p.id AND o.organisation_id = ${orgId})
+                        OR EXISTS (SELECT 1 FROM site_orders o WHERE o.organisation_id = ${orgId} AND o.item_name = p.name))
+                   -- Not when every option is sold out: it can't be bought.
+                   AND NOT (EXISTS (SELECT 1 FROM product_options po WHERE po.product_id = p.id AND po.organisation_id = ${orgId} AND po.status = 'active')
+                        AND NOT EXISTS (SELECT 1 FROM product_options po WHERE po.product_id = p.id AND po.organisation_id = ${orgId} AND po.status = 'active'
+                                         AND (po.stock IS NULL OR po.stock > 0)))
                    AND NOT EXISTS (SELECT 1 FROM site_order_lines l JOIN site_orders o ON o.id = l.order_id
                                     WHERE l.product_id = p.id AND o.organisation_id = ${orgId} AND o.created_at > now() - make_interval(days => ${SLOW_DAYS}))
                    AND NOT EXISTS (SELECT 1 FROM site_orders o WHERE o.organisation_id = ${orgId} AND o.item_name = p.name
@@ -96,7 +106,7 @@ export function shopSnapshotForMentor(w: ShopWatch | null | undefined): string[]
     lines.push(`- Best seller, last 7 days: ${w.bestSeller ? `${w.bestSeller.name}, ${w.bestSeller.units} sold` : 'none yet (fewer than 2 of anything sold)'}`);
     lines.push(`- Low stock: ${w.low.length ? w.low.map((l) => `${l.name} (${l.left} left)`).join(', ') : 'none'}; sold out: ${w.soldOut.length ? w.soldOut.join(', ') : 'none'}`);
     if (w.slow.length) {
-        lines.push(`- NOT SOLD IN ${SLOW_DAYS} DAYS (buyable, listed at least ${SLOW_DAYS} days): ${w.slow.map((s) => `${s.name} (#${s.id})`).join(', ')}.`);
+        lines.push(`- NOT SOLD IN ${SLOW_DAYS} DAYS (sold online before, buyable, listed at least ${SLOW_DAYS} days): ${w.slow.map((s) => `${s.name} (#${s.id})`).join(', ')}.`);
         lines.push(`  You may suggest ONE of these at a time: a post about it (a draft request to the Social Media assistant, if one is active) or that the owner looks at its price, description or photo on the Shopkeeper's Shop tab. Say "you decide the price"; never propose a number, a discount or a sale yourself.`);
     }
     return lines;

@@ -21,7 +21,8 @@
 // Booking requests, enquiries, posts and actions belonging to an ARCHIVED assistant (or its site) are left
 // out — they wait on nobody, and their only home is hidden (archived-assistant-drafts.ts).
 //   Your shop     best seller of the last 7 days, low stock, sold out (shop-mentor.ts; online shop slice 8) — only
-//                 for a workspace with a shop; the email carries it on the "Yesterday" line
+//                 for a workspace with a shop, and only on a day another section has news (never sent on its own);
+//                 the email carries it on the "Yesterday" line
 //   Make next     the best-performing post of the last 14 days (post_insights), when its assistant is ACTIVE
 // "Which calls turned into sales" is never claimed: we only see what was booked, bought or marked won.
 //
@@ -247,8 +248,10 @@ export function buildMorningSummary(i: MorningInputs, day: string): MorningSumma
         if (i.won?.count) head.push(`${plural(i.won.count, 'deal')} won`);
     }
 
+    // Low stock and sold out are lasting states, not news (review #910): the shop section rides along on a day that
+    // already has something to say, and never on its own makes a summary go out.
     const shop = shopMorningLines(i.shop ?? null);
-    if (shop.length) sections.push({ key: 'shop', title: 'Your shop', lines: shop });
+    const shopAt = sections.length;
 
     const today: string[] = [];
     if (i.bookingsToday > 0) today.push(`${plural(i.bookingsToday, 'booking')} today`);
@@ -281,6 +284,7 @@ export function buildMorningSummary(i: MorningInputs, day: string): MorningSumma
         ] });
     }
 
+    if (shop.length && sections.length) sections.splice(shopAt, 0, { key: 'shop', title: 'Your shop', lines: shop });
     return { day, headline: head.join(' · ') || 'Your morning', sections };
 }
 

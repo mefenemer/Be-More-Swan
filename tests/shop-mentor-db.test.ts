@@ -36,7 +36,7 @@ async function main() {
     const sql = postgres(url, { max: 1 });
     try {
         await sql.unsafe(`CREATE SCHEMA ${schema}`);
-        for (const t of ['ai_assistants', 'site_orders', 'site_order_lines', 'org_products']) {
+        for (const t of ['ai_assistants', 'site_orders', 'site_order_lines', 'org_products', 'product_options']) {
             await sql.unsafe(`CREATE TABLE ${schema}.${t} (LIKE public.${t} INCLUDING ALL)`);
         }
         await sql.unsafe(`ALTER TABLE ${schema}.org_products ADD COLUMN IF NOT EXISTS stock INTEGER, ADD COLUMN IF NOT EXISTS low_stock_at INTEGER`);
@@ -76,15 +76,25 @@ async function main() {
             assert.deepStrictEqual(w?.low, [{ name: 'Lavender candle', left: 2 }]);
             assert.deepStrictEqual(w?.soldOut, ['Mug']);
         });
-        await check('not sold in 60 days: old enough and buyable only (not the new one, not the sold-out one, not one that sold)', async () => {
+        await check('not sold in 60 days: sold online before, old enough and buyable only', async () => {
             const names = (await loadShopWatch(db, ORG))!.slow.map((s) => s.name).sort();
-            assert.deepStrictEqual(names, ['Cedar candle', 'Unsold thing']);
+            assert.deepStrictEqual(names, ['Cedar candle'], 'Cedar sold 75 days ago and not since');
+            assert.ok(!names.includes('Unsold thing'), 'review #910: never sold online (maybe sold in person only) → never "slow"');
             assert.ok(!names.includes('Mug') && !names.includes('New candle') && !names.includes('Fig candle'));
             void MUG;
         });
+        await check('review #910: every option sold out → not "slow" (it can\'t be bought)', async () => {
+            const TEE = await product(ORG, 'T-shirt', { stock: null });
+            await sell(ORG, TEE, 'T-shirt', 1, 80);
+            await sql.unsafe(`INSERT INTO product_options (organisation_id, product_id, label, stock) VALUES (${ORG}, ${TEE}, 'S', 0), (${ORG}, ${TEE}, 'L', 0)`);
+            assert.ok(!(await loadShopWatch(db, ORG))!.slow.some((s) => s.name === 'T-shirt'));
+            await sql.unsafe(`UPDATE product_options SET stock = 3 WHERE product_id = ${TEE} AND label = 'L'`);
+            assert.ok((await loadShopWatch(db, ORG))!.slow.some((s) => s.name === 'T-shirt'), 'one option back → it is slow again');
+            await sql.unsafe(`UPDATE org_products SET status = 'archived' WHERE id = ${TEE}`);
+        });
         await check('a Buy-button order (no lines) counts as a sale by its item name', async () => {
-            await sell(ORG, null, 'Unsold thing', 1, 4);
-            assert.deepStrictEqual((await loadShopWatch(db, ORG))!.slow.map((s) => s.name), ['Cedar candle']);
+            await sell(ORG, null, 'Cedar candle', 1, 4);
+            assert.deepStrictEqual((await loadShopWatch(db, ORG))!.slow.map((s) => s.name), []);
         });
         await check('fewer than 2 sold in the week → no best seller; nothing sold in 60 days → nobody is "slow"', async () => {
             const QUIET = 33;

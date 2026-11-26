@@ -39,13 +39,17 @@ check('morning lines: best seller and stock, never "slow" (that is for the weekl
     assert.deepStrictEqual(shopMorningLines({ bestSeller: null, low: [], soldOut: [], slow: [{ id: 1, name: 'X' }] }), []);
 });
 
-check('the summary: a "Your shop" section after Yesterday; the email carries it on the Yesterday line', () => {
+check('the summary: "Your shop" after Yesterday, only on a day with other news; the email carries it on the Yesterday line', () => {
     const s = buildMorningSummary(none({ sales: [{ currency: 'gbp', count: 2, total: 2400 }], shop: W }), '2026-11-27');
     assert.deepStrictEqual(s.sections.map((x) => x.key), ['money', 'shop']);
     assert.ok(morningMessage(s).includes('Your shop\n• Best seller this week: Fig candle (6 sold)'));
     const v = morningEmailVars(s);
     assert.ok(v.money.startsWith('Yesterday: 2 website sales, £24') && v.money.includes(' · Your shop: Best seller this week: Fig candle (6 sold)'));
-    assert.strictEqual(morningEmailVars(buildMorningSummary(none({ shop: W }), '2026-11-27')).money.startsWith('Your shop: '), true);
+    // review #910: lasting stock states are not news — the shop alone never makes a summary go out.
+    assert.strictEqual(buildMorningSummary(none({ shop: W }), '2026-11-27').sections.length, 0, 'a quiet day with only a sold-out product sends nothing');
+    const withEnq = buildMorningSummary(none({ enquiriesOpen: 1, shop: W }), '2026-11-27');
+    assert.deepStrictEqual(withEnq.sections.map((x) => x.key), ['shop', 'enquiries']);
+    assert.ok(morningEmailVars(withEnq).money.startsWith('Your shop: '), 'still on the Yesterday line on a day with no sales');
     assert.strictEqual(buildMorningSummary(none({ shop: null }), '2026-11-27').sections.length, 0, 'no shop: nothing new');
 });
 
