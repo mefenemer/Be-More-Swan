@@ -1176,7 +1176,7 @@
     container.classList.add('ioe-stack');
     const draw = () => {
       container.innerHTML = sharedSect('text', 'Wording', textRowHtml(ov, typeof opts.suggestText === 'function'))
-        + sharedSect('look', 'How it looks', lookRowsHtml(ov))
+        + sharedSect('look', 'Font, colour, outline and background', lookRowsHtml(ov))
         + sharedSect('anim', 'How it appears', animRowsHtml(ov, !!opts.video));
       wireStyleControls(container, ov, {
         onChange: opts.onChange, onCommit: opts.onCommit, suggestText: opts.suggestText, rerender: draw,

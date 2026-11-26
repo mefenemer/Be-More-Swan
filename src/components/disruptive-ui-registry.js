@@ -5595,23 +5595,53 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   register('social_post_draft', renderSocialPostDraftCard);
 
-  // { type: 'post_text_edit', postId, find, replace, summary }
-  // One text box on a post's picture, selected in the post editor, shown before and after. "Use this"
-  // goes to the open editor (post:textEdit, workspace.html); nothing else can apply it.
+  // { type: 'post_text_edit', postId, find, replace?, style?, summary }
+  // One text box on a post's picture, shown before and after: its words, how it looks (style: font
+  // colour, font, outline, background — issue #95), or both. "Use this" goes to the open editor
+  // (post:textEdit, workspace.html); nothing else can apply it. The server checks the same shape
+  // (src/utils/chat-post-parts.ts); this re-checks because uiElementJson is redrawn on every reload.
+  const PT_HEX = /^#[0-9a-f]{6}$/i;
+  function postTextEditStyle(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const out = {};
+    if (PT_HEX.test(String(raw.color || ''))) out.color = raw.color.toLowerCase();
+    if (typeof raw.fontFamily === 'string' && raw.fontFamily.trim()) out.fontFamily = raw.fontFamily.trim().slice(0, 40);
+    for (const k of ['boxStroke', 'boxFill']) {
+      if (!(k in raw)) continue;
+      if (raw[k] === null) out[k] = null;
+      else if (PT_HEX.test(String(raw[k] || ''))) out[k] = raw[k].toLowerCase();
+    }
+    if (typeof raw.boxOpacity === 'number' && Number.isFinite(raw.boxOpacity)) out.boxOpacity = Math.min(1, Math.max(0, raw.boxOpacity));
+    return Object.keys(out).length ? out : null;
+  }
   function renderPostTextEditCard(ui, esc) {
     const postId = Number(ui.postId);
     const find = typeof ui.find === 'string' ? ui.find.trim() : '';
     const replace = typeof ui.replace === 'string' ? ui.replace.trim() : '';
-    if (!Number.isInteger(postId) || postId <= 0 || !find || !replace) return null;
+    const style = postTextEditStyle(ui.style);
+    if (!Number.isInteger(postId) || postId <= 0 || !find || (!replace && !style)) return null;
+    const swatch = (hex) => `<span class="inline-block w-3.5 h-3.5 rounded border border-gray-300 align-middle mr-1" style="background:${hex}"></span>`;
+    const looks = [];
+    if (style) {
+      if (style.color) looks.push(`Font colour: ${swatch(style.color)}${esc(style.color)}`);
+      if (style.fontFamily) looks.push(`Font: ${esc(style.fontFamily)}`);
+      if ('boxStroke' in style) looks.push(style.boxStroke ? `Outline: ${swatch(style.boxStroke)}${esc(style.boxStroke)}` : 'Outline: none');
+      if ('boxFill' in style) looks.push(style.boxFill ? `Background: ${swatch(style.boxFill)}${esc(style.boxFill)}` : 'Background: none');
+      if ('boxOpacity' in style) looks.push(`Background transparency: ${Math.round((1 - style.boxOpacity) * 100)}%`);
+    }
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to the words on the picture</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${replace ? 'Change to the words on the picture' : 'Change to how the text box looks'}</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${replace ? `
       <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
       <p class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300 whitespace-pre-line">${esc(find)}</p>
       <p class="text-xs font-bold text-gray-700 mt-3">Instead</p>
-      <p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(replace)}</p>
+      <p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(replace)}</p>` : `
+      <p class="text-xs font-bold text-gray-500 mt-3">Text box</p>
+      <p class="text-sm text-gray-900 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(find)}</p>`}
+      ${looks.length ? `<ul class="mt-3 space-y-1 text-sm text-gray-800" data-pt-looks>${looks.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-pt-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Use this</button>
         <button type="button" data-pt-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -5625,7 +5655,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (!e.target.closest('[data-pt-go]')) return;
       setBusy(true);
       say('Changing it…');
-      const detail = { postId, find, replace, handled: false, respond({ ok, error, message }) {
+      const detail = { postId, find, replace: replace || null, style, handled: false, respond({ ok, error, message }) {
         if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
         say(message || 'Done — the text box is changed.');
       } };
