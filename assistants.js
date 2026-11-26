@@ -7937,15 +7937,11 @@ function _applyDashboardRegistry(data) {
         window.AssistantLeadOutreach?.reset();
     }
     // The Email Assistant's Review is ONE list (assistant-mailbox.js renderReview), not lifecycle columns.
-    // After the reset() above, which shows the strip again for every other role. Its count is primed now,
-    // like a records queue's, so the tab says whether anything waits before it is opened.
+    // After the reset() above, which shows the strip again for every other role.
     if ((cfg.reviewQueue || {}).source === 'mailbox') {
         const strip = document.getElementById('detail-rq-colstrip');
         if (strip) { strip.classList.add('hidden'); strip.style.display = 'none'; }
-        const forId = data.id;
-        window.AssistantMailbox?.reviewCount?.().then((n) => {
-            if (Number(window._currentAssistantId) === Number(forId)) _setDetailRqTabBadge(n);
-        });
+        // Its count (badge, Needs-you card, pop-up) comes from _prefetchDetailRqBadge's 'mailbox' branch.
     }
 
     // Strategy tab — lead roles only (strategyTab: lead_qualifier) AND gated on the
@@ -10264,6 +10260,13 @@ async function _prefetchDetailRqBadge(assistantId) {
             const waiting = posts.filter((p) => wanted.has(p.status));
             count = waiting.length;
             items = waiting.map((p) => ({ id: p.id, label: p.title || 'Untitled article', sub: _nyWhen(p.updatedAt || p.createdAt) }));
+        } else if (rq.source === 'mailbox') {
+            // Email Assistant: the owner's waiting replies + clean-ups (assistant-mailbox.js). Without this
+            // branch it fell through to get-social-drafts, got 0, and blanked the badge and signals.
+            const sum = await window.AssistantMailbox?.reviewSummary?.();
+            if (!sum) return;
+            count = sum.count;
+            items = sum.items;
         } else if (rq.source === 'newsletter_issues') {
             // Email Marketing: the Review column's statuses. This fell through to get-social-drafts,
             // which holds no emails, and zeroed the Emails badge and the Autopilot card's waiting

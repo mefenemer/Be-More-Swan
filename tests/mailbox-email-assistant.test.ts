@@ -788,7 +788,9 @@ check('Review tab: lists waiting replies (with gaps) and clean-ups, and never se
     assert.ok(container.innerHTML.includes('Old newsletters') && container.innerHTML.includes('3 emails to archive'));
     assert.ok(container.innerHTML.indexOf('Replies waiting') < container.innerHTML.indexOf('Ready to clear'));
     assert.ok(calls.every((u) => !u.includes('seen=1')), 'looking at Review must not clear "needs you now"');
-    assert.strictEqual(await api.reviewCount(), 2);
+    const sum = await api.reviewSummary();
+    assert.strictEqual(sum.count, 2);
+    assert.strictEqual(JSON.stringify(sum.items.map((i: { label: string }) => i.label)), JSON.stringify(['Reply to jo@x.co', 'Old newsletters']));
 });
 
 check('Review tab: a button opens the Emails tab on that mailbox\'s Drafts / Clean-up', async () => {
@@ -822,6 +824,23 @@ check('Review tab: not the owner / no mailbox / flag off / a stale load each sho
     assert.ok(t.container.innerHTML.includes('Loading'), 'a load that is no longer the newest paints nothing');
 });
 
+check('Review tab: a failed read is an error, never "nothing waiting"', async () => {
+    let t = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { status: 500, body: { error: 'boom' } },
+    });
+    assert.strictEqual(await t.api.renderReview(t.container), null);
+    assert.ok(t.container.innerHTML.includes('Could not load') && !t.container.innerHTML.includes('Nothing waiting'));
+    assert.strictEqual(await t.api.reviewSummary(), null, 'the badge is left alone, not set to 0');
+    t = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }, { id: 8, address: 'me@home.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { body: { actions: [], cleanup: [] } },
+        [`${API_URL}?mailboxId=8&actions=1`]: { status: 500, body: {} },
+    });
+    await t.api.renderReview(t.container);
+    assert.ok(t.container.innerHTML.includes('Could not load me@home.co') && !t.container.innerHTML.includes('Nothing waiting'));
+});
+
 check('Review tab wiring: registry kind/source mailbox, rendered by the component, strip hidden, no "New" button', () => {
     const reg = read('src/components/assistant-dashboard-registry.js');
     const entry = reg.slice(reg.indexOf('    email_assistant: {'), reg.indexOf('    shopkeeper: {'));
@@ -834,6 +853,9 @@ check('Review tab wiring: registry kind/source mailbox, rendered by the componen
     const reset = a.indexOf("window.AssistantLeadOutreach?.reset();");
     const hide = a.indexOf("if ((cfg.reviewQueue || {}).source === 'mailbox') {");
     assert.ok(reset > -1 && hide > reset, 'the strip is hidden AFTER reset() shows it for every role');
+    // ONE path sets the count: the shared prefetch (badge, Needs-you card, pop-up) — no second racing call.
+    assert.ok(/rq\.source === 'mailbox'\) \{[\s\S]{0,400}window\.AssistantMailbox\?\.reviewSummary\?\.\(\);\s*if \(!sum\) return;/.test(a));
+    assert.ok(!/reviewCount/.test(a));
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));

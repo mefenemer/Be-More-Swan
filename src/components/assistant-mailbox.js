@@ -4,7 +4,7 @@
  *   window.AssistantMailbox.init({ hub, assistantId, assistantName })   (assistants.js, hubTab kind 'mailbox')
  *   window.AssistantMailbox.refresh()                                     (each time the tab opens)
  *   window.AssistantMailbox.renderReview(container)                       (the Review tab, reviewQueue source 'mailbox')
- *   window.AssistantMailbox.reviewCount()                                 (the Review tab's badge)
+ *   window.AssistantMailbox.reviewSummary()                               (the Review tab's badge + Needs-you rows)
  *
  * Reads netlify/functions/mailboxes.ts — the SIGNED-IN person's own mailboxes only:
  * connect an Outlook or Gmail mailbox, see email sorted into categories with a priority and a one-line
@@ -636,16 +636,19 @@
     const boxes = data.mailboxes || [];
     if (!boxes.length) return { state: 'no_mailbox', items: [] };
     const items = [];
+    const failed = [];
     await Promise.all(boxes.map(async (box) => {
-      const r = await fetch(`${API}?mailboxId=${encodeURIComponent(box.id)}&actions=1`, { credentials: 'same-origin' });
-      const a = await r.json().catch(() => ({}));
-      if (!r.ok) return;
+      const r = await fetch(`${API}?mailboxId=${encodeURIComponent(box.id)}&actions=1`, { credentials: 'same-origin' }).catch(() => null);
+      const a = r ? await r.json().catch(() => ({})) : {};
+      if (!r || !r.ok) { failed.push(box); return; }
       for (const d of (a.actions || []).filter((x) => x.kind === 'reply' && x.status === 'waiting')) items.push({ type: 'reply', box, d });
       for (const b of a.cleanup || []) items.push({ type: 'cleanup', box, b });
     }));
     // Replies first (a person is waiting), then clean-ups; one mailbox's items together.
+    // A failed read must never look like "nothing waiting": all failed → an error; some → named.
+    if (failed.length === boxes.length) throw new Error('Could not load your drafted replies and clean-ups. Please try again.');
     items.sort((x, y) => (x.type === y.type ? x.box.id - y.box.id : x.type === 'reply' ? -1 : 1));
-    return { state: 'ok', items, many: boxes.length > 1 };
+    return { state: 'ok', items, many: boxes.length > 1, failed: failed.map((b) => b.address || 'a mailbox') };
   }
 
   /** Pure: the Review list's HTML. */
@@ -653,7 +656,9 @@
     if (r.state === 'unavailable') return '<p class="text-sm text-gray-600 py-10 text-center">The Email Assistant is not switched on for this workspace yet.</p>';
     if (r.state === 'not_owner') return '<p class="text-sm text-gray-600 py-10 text-center">Only the mailbox\'s owner sees its drafted replies and clean-ups.</p>';
     if (r.state === 'no_mailbox') return '<p class="text-sm text-gray-600 py-10 text-center">Connect your mailbox on the Emails tab. Drafted replies and clean-ups wait here for your OK.</p>';
-    if (!r.items.length) return '<p class="text-sm text-gray-600 py-10 text-center">Nothing waiting for you. Open an email on the Emails tab and press "Draft a reply".</p>';
+    const failedNote = (r.failed || []).length
+      ? `<p class="text-sm font-semibold text-red-700 my-2">Could not load ${r.failed.map(esc).join(', ')} — what's waiting there isn't shown. Please try again.</p>` : '';
+    if (!r.items.length) return failedNote + (failedNote ? '' : '<p class="text-sm text-gray-600 py-10 text-center">Nothing waiting for you. Open an email on the Emails tab and press "Draft a reply".</p>');
     const where = (box) => (r.many ? `<span class="text-xs text-gray-500"> · ${esc(box.address)}</span>` : '');
     const head = (t) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-4 mb-1">${t}</p>`;
     const replies = r.items.filter((i) => i.type === 'reply');
@@ -681,14 +686,25 @@
         <button type="button" class="btn-secondary border px-3 py-1.5 text-sm font-bold rounded-lg" data-mbx-review="cleanup" data-mbx-box="${box.id}">Check clean-up</button>
       </li>`;
     };
-    return (replies.length ? head('Replies waiting for you') + `<ul class="divide-y divide-gray-100">${replies.map(replyRow).join('')}</ul>` : '')
+    return failedNote + (replies.length ? head('Replies waiting for you') + `<ul class="divide-y divide-gray-100">${replies.map(replyRow).join('')}</ul>` : '')
       + (cleanups.length ? head('Ready to clear') + `<ul class="divide-y divide-gray-100">${cleanups.map(cleanupRow).join('')}</ul>` : '')
       + '<p class="text-xs text-gray-500 mt-4">Nothing is sent or moved until you press the button for it on the Emails tab.</p>';
   }
 
-  /** The Review tab's count: waiting replies + clean-up batches (0 when not the owner). */
-  async function reviewCount() {
-    try { return (await reviewItems()).items.length; } catch { return 0; }
+  /**
+   * The Review tab's count and the compact header's Needs-you rows, for assistants.js
+   * _prefetchDetailRqBadge: { count, items: [{ id, label, sub }] }, or null when it couldn't be read
+   * (the caller then leaves the badge alone rather than saying 0). count 0 when not the owner.
+   */
+  async function reviewSummary() {
+    let r;
+    try { r = await reviewItems(); } catch { return null; }
+    return {
+      count: r.items.length,
+      items: r.items.map((i) => (i.type === 'reply'
+        ? { id: `reply-${i.d.id}`, label: `Reply to ${i.d.to || 'the sender'}`, sub: i.d.subject || '' }
+        : { id: `cleanup-${i.box.id}-${i.b.key}`, label: i.b.label, sub: `${(i.b.messageIds || []).length} to clear` })),
+    };
   }
 
   /**
@@ -748,5 +764,5 @@
     await refresh();
   }
 
-  window.AssistantMailbox = { init, refresh, renderReview, reviewCount, _test: { pillDefs, filtered, esc, gapsIn, reviewHtml } };
+  window.AssistantMailbox = { init, refresh, renderReview, reviewSummary, _test: { pillDefs, filtered, esc, gapsIn, reviewHtml } };
 })();
