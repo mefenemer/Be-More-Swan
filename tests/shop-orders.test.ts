@@ -276,7 +276,7 @@ const ORDER = { id: 7, status: 'paid', posted_at: null, tracking_number: null, t
         const chat = read('src/components/chat-session.js');
         assert.ok(chat.includes("container.addEventListener('shop:orderUpdate', onOrderUpdate);") && chat.includes("action: 'order_update', assistantId"));
         const orch = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(orch.includes('emit {"type":"order_update","orderId":') && orch.includes('| { "type": "order_update", … } }'));
+        assert.ok(orch.includes('emit {"type":"order_update","orderId":') && orch.includes('| { "type": "order_update", … } |'));
         assert.ok(read('src/config/chat-capabilities.generated.ts').includes('"order_update"'));
         assert.ok(read('src/utils/review-requests.ts').includes("inArray(siteOrders.status, ['paid', 'posted', 'done'])"));
         assert.ok(read('src/components/assistant-site-editor.js').includes("o.status === 'posted' ? '<span class=\"text-xs font-bold text-gray-700\">· Posted</span>'"));

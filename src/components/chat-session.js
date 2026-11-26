@@ -48,6 +48,17 @@
       placeholder: 'Type your message, or attach pictures and documents…',
       refused: 'use pictures, Word documents, PDFs or text files',
     },
+    // The Shopkeeper (online shop Phase 2): photos of products only — "add this as a product" (product_photo card).
+    shopkeeper: {
+      pictures: true,
+      docTypes: /(?!)/,
+      documents: false,   // no PDFs or text either (the server refuses them too: route flag pictureAttachments)
+      accept: 'image/*',
+      title: 'Add a photo of a product — upload or choose from your library',
+      srLabel: 'Attach a photo of a product',
+      placeholder: 'Type your message, or attach a photo of a product…',
+      refused: 'attach a photo (documents can\'t be used here)',
+    },
     meeting_note_taker: {
       pictures: false,
       docTypes: /\.(docx|pdf|txt|md|vtt|srt)$/i,
@@ -272,6 +283,7 @@
         if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
         const isImage = /^image\//.test(file.type);
         const kind = isImage ? (attachCfg.pictures ? 'image' : null)
+          : attachCfg.documents === false ? null
           : attachCfg.docTypes.test(file.name) || file.type === 'application/pdf' || /^text\//.test(file.type) ? 'document' : null;
         if (!kind) { showError(`"${file.name}" can't be attached — ${attachCfg.refused}.`); continue; }
         if (kind === 'document' && file.size > DOC_MAX_BYTES) { showError(`"${file.name}" is too large (the limit is 4 MB).`); continue; }
@@ -322,7 +334,7 @@
           renderChips();
           inputEl.focus();
         },
-        documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },
+        ...(attachCfg.documents === false ? {} : { documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } } }),
       });
     }
     function onChipsClick(e) {
@@ -2430,6 +2442,37 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A product_photo card (Phase 2): the draft is shop.ts product_photo_draft (the Shop tab's same call, 1 task);
+    // the add is Business Information's own save, org-products.ts POST (the Products tab's "Add").
+    function onProductPhotoDraft(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/shop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'product_photo_draft', assistantId, assetId: d.assetId }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then((r) => respond({ ok: true, draft: r.draft || {}, charged: r.charged || 0 }))
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    function onProductPhotoAdd(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/org-products', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(d.product || {}),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      })
+        .then(() => { respond({ ok: true }); document.dispatchEvent(new CustomEvent('shop:changed', { detail: { assistantId } })); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // A delivery_rates card — shop.ts delivery_rates, the Shop tab Delivery card's same save (shop-delivery.ts).
     function onDeliveryRates(e) {
       const d = e.detail || {};
@@ -2864,6 +2907,8 @@
     container.addEventListener('site:shopSettings', onShopSettings);
     container.addEventListener('shop:productStock', onProductStock);
     container.addEventListener('shop:productOptions', onProductOptions);
+    container.addEventListener('shop:productPhotoDraft', onProductPhotoDraft);
+    container.addEventListener('shop:productPhotoAdd', onProductPhotoAdd);
     container.addEventListener('shop:deliveryRates', onDeliveryRates);
     container.addEventListener('shop:orderUpdate', onOrderUpdate);
     container.addEventListener('site:words', onSiteWords);
@@ -3000,6 +3045,8 @@
         container.removeEventListener('site:shopSettings', onShopSettings);
         container.removeEventListener('shop:productStock', onProductStock);
         container.removeEventListener('shop:productOptions', onProductOptions);
+        container.removeEventListener('shop:productPhotoDraft', onProductPhotoDraft);
+        container.removeEventListener('shop:productPhotoAdd', onProductPhotoAdd);
         container.removeEventListener('shop:deliveryRates', onDeliveryRates);
         container.removeEventListener('shop:orderUpdate', onOrderUpdate);
         container.removeEventListener('site:words', onSiteWords);

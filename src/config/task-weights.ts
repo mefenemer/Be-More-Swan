@@ -66,6 +66,9 @@ export const DEFAULT_TASK_WEIGHTS = {
     // Nobody can be charged before launch: the meeting_bot flag stays off until the 30-day Terms notice has run
     // (docs/note-taker-bot-legal.md §1).
     meeting_bot_call: 1,
+    // A product drafted from one photo by the Shopkeeper (docs/online-shop-review-plan.md §12, owner Q5, 2026-11-26):
+    // one vision call; never charged when the photo shows no product (src/utils/shop-product-photo.ts).
+    product_from_photo: 1,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -157,6 +160,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     carousel: 'Carousels',
     meeting_pickup: 'Meetings picked up',
     meeting_bot_call: 'Note Taker in calls (per 5 minutes)',
+    product_from_photo: 'Products from a photo',
     // No "every 10 messages" here: how often chat is charged is now a setting (chat_messages_per_task).
     chat_messages: 'Chat',
     editing_helper: 'Editing helpers',

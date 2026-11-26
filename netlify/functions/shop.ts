@@ -50,6 +50,8 @@ import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from
 import { purgeCache } from '@netlify/functions';
 import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
 import { loadShopSales, monthSummary, salesMonthWords } from '../../src/utils/shop-sales';
+import { draftProductFromPhoto } from '../../src/utils/shop-product-photo';
+import { getTaskCosts } from '../../src/utils/task-costs';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -122,6 +124,8 @@ export default withLambda(async (event) => {
             // "This month" on the Orders card (shop-sales.ts, Phase 2 slice 1): UK months, after refunds, per currency.
             sales: orders.length ? await loadShopSales(db, orgId).then((s) => { const m = monthSummary(s); return { thisMonth: salesMonthWords(m.thisMonth), lastMonth: salesMonthWords(m.lastMonth) }; })
                 .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
+            // Product from a photo (shop-product-photo.ts): its task cost, for the button's label.
+            photoTaskCost: (await getTaskCosts()).weights.product_from_photo,
             canEdit, warnings,
         };
     }
@@ -222,6 +226,15 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
+    }
+
+    // Product from a photo (Phase 2 slice 3, shop-product-photo.ts): a name and description drafted from one of the
+    // workspace's pictures, never a price. Saves nothing — the Shop tab form and the chat card then add the product
+    // through Business Information's own save (org-products.ts POST). Anyone who can add products can draft one.
+    if (action === 'product_photo_draft') {
+        const r = await draftProductFromPhoto(db, { orgId, assistantId: assistant.id, assetId: Number(body.assetId) });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, { draft: r.draft, charged: r.charged });
     }
 
     if (action === 'delivery_rates') {
