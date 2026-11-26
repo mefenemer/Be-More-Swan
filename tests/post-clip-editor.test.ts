@@ -2059,12 +2059,12 @@ check('watching the cut closes it; adding text opens it', () => {
 check('every text row has a door to it, and says what is behind it', () => {
     // Without this the feature would have no way in at all, now that a selection no longer opens it.
     assert.ok(workspace.includes("data-pce-act=\"style-text\""), 'no row offers styling');
-    assert.ok(workspace.includes('title="Emojis, font, colour, size and animation"'),
+    assert.ok(workspace.includes('title="Font, colour, outline, background, emojis and animation"'),
         'the button does not say what it does, which is the question being asked');
     // The panel names the box it is styling and what is on offer; "Wording / How it looks / How it
     // appears" describe themselves only once you are already reading them.
     const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
-    assert.ok(fn.includes('Emojis, font, colour, size and how it animates in.'),
+    assert.ok(fn.includes('Font, colour, size, box outline and background, emojis and how it animates in.'),
         'the panel opens without saying what it can do');
     assert.ok(fn.includes("data-pce-act=\"close-text-look\""), 'there is no way to close it');
     // A toggle, because the button reads as one.
