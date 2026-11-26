@@ -28,16 +28,21 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
         console.error('[poll-mailboxes] could not list mailboxes', err instanceof Error ? err.message : err);
         return [] as number[];
     });
+    // Most urgent first, so a run that hits its time limit loses the least: reads, then push, then the rest.
+    // Reads are dispatched 10 at a time (each waits up to 5 s for the background function to accept).
+    let dispatched = 0;
+    for (let i = 0; i < due.length; i += 10) {
+        dispatched += (await Promise.all(due.slice(i, i + 10).map((id) => triggerMailboxSync(id)))).filter(Boolean).length;
+    }
+    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day — within a
+    // time budget; anything left is first in line next run, and the log shows it as `deferred`.
+    const watches = await ensureWatches(getDb());
     // Drafted replies and clean-up records are kept 30 days after they were acted on, then deleted.
     const pruned = await pruneOldActions(getDb()).catch(() => 0);
     // The Email Assistant's morning note, once a day per mailbox (07:00–11:59 local; latched in its settings).
     let digests = 0;
     const active = await getDb().select().from(mailboxes).where(eq(mailboxes.status, 'active')).catch(() => []);
     for (const box of active) if (await sendMorningDigest(getDb(), box)) digests++;
-    let dispatched = 0;
-    for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
-    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day.
-    const watches = await ensureWatches(getDb());
     console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned, digests, watches });
     return { due: due.length, dispatched };
 }

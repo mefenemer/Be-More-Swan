@@ -42,11 +42,13 @@ export const WATCH_RETRY_MS = 6 * 60 * 60 * 1000;
 /**
  * Put a mailbox to the back of the queue for WATCH_RETRY_MS. ⚠️ Written as watch_expires_at = now +
  * RENEW_WITHIN_MS + WATCH_RETRY_MS, so the renewal query picks it up again after WATCH_RETRY_MS. That
- * date does NOT mean push works: polling goes by last_push_at (mailbox-sync.ts mailboxesDueForSync).
+ * date does NOT mean push works: polling goes by last_push_at (mailbox-sync.ts mailboxesDueForSync),
+ * which is cleared here so the mailbox is back on the 10-minute poll at once. If an older watch is in
+ * fact still delivering, its next push sets last_push_at again.
  */
 async function retryWatchLater(db: Db, mailboxId: number): Promise<void> {
     await db.update(mailboxes)
-        .set({ watchExpiresAt: sql`now() + make_interval(secs => ${(RENEW_WITHIN_MS + WATCH_RETRY_MS) / 1000})` })
+        .set({ watchExpiresAt: sql`now() + make_interval(secs => ${(RENEW_WITHIN_MS + WATCH_RETRY_MS) / 1000})`, lastPushAt: null })
         .where(eq(mailboxes.id, mailboxId)).catch(() => undefined);
 }
 
@@ -164,9 +166,17 @@ export async function recordPush(db: Db, mailboxIds: number[]): Promise<{ record
     if (!ids.length) return { recorded: 0, dispatched: 0 };
     const rows = await db.update(mailboxes).set({ lastPushAt: new Date() })
         .where(and(inArray(mailboxes.id, ids), eq(mailboxes.status, 'active')))
-        .returning({ id: mailboxes.id, lockedUntil: mailboxes.syncLockUntil });
+        .returning({ id: mailboxes.id, organisationId: mailboxes.organisationId, lockedUntil: mailboxes.syncLockUntil });
+    // A workspace without the Email Assistant isn't read at all: don't wake a function just to find that out.
+    // (One Gmail address can be connected in several workspaces, only some with the flag.)
+    const flagOn = new Map<number, Promise<boolean>>();
+    const on = (orgId: number) => {
+        if (!flagOn.has(orgId)) flagOn.set(orgId, isFeatureEnabled(orgId, EMAIL_ASSISTANT_FLAG).catch(() => false));
+        return flagOn.get(orgId)!;
+    };
+    const allowed = (await Promise.all(rows.map(async (r) => (await on(r.organisationId)) ? r : null))).filter((r) => r !== null);
     // In parallel: Graph wants its answer within about 3 seconds.
-    const free = rows.filter((r) => !(r.lockedUntil && r.lockedUntil.getTime() > Date.now()));
+    const free = allowed.filter((r) => !(r.lockedUntil && r.lockedUntil.getTime() > Date.now()));
     const sent = await Promise.all(free.map((r) => triggerMailboxSync(r.id)));
     return { recorded: rows.length, dispatched: sent.filter(Boolean).length };
 }
@@ -238,14 +248,22 @@ export async function mailboxesNeedingWatch(db: Db): Promise<MailboxRow[]> {
         .orderBy(sql`${mailboxes.watchExpiresAt} ASC NULLS FIRST`).limit(WATCHES_PER_RUN);
 }
 
-/** Every poll run: start or renew what is due. Never throws. */
-export async function ensureWatches(db: Db): Promise<Record<WatchOutcome, number>> {
-    const out: Record<WatchOutcome, number> = { started: 0, renewed: 0, off: 0, failed: 0 };
+/** How long a poll run may spend on watches before leaving the rest for the next run. */
+export const WATCH_BUDGET_MS = 12_000;
+
+/**
+ * Every poll run: start or renew what is due, until `deadline` (the run itself has a time limit, and a
+ * Graph subscription waits for Graph's check of our URL). What is left over is counted as `deferred`
+ * and is first in line next run (the query orders by expiry). Never throws.
+ */
+export async function ensureWatches(db: Db, deadline: number = Date.now() + WATCH_BUDGET_MS): Promise<Record<WatchOutcome | 'deferred', number>> {
+    const out: Record<WatchOutcome | 'deferred', number> = { started: 0, renewed: 0, off: 0, failed: 0, deferred: 0 };
     const due = await mailboxesNeedingWatch(db).catch((err) => {
         console.error('[mailbox-push] could not list mailboxes', err instanceof Error ? err.message : err);
         return [] as MailboxRow[];
     });
     for (const box of due) {
+        if (Date.now() > deadline) { out.deferred++; continue; }
         // A workspace without the Email Assistant gets no push (its mailbox isn't read at all); asked again later.
         if (!(await isFeatureEnabled(box.organisationId, EMAIL_ASSISTANT_FLAG).catch(() => false))) { out.off++; await retryWatchLater(db, box.id); continue; }
         out[await ensureWatch(db, box)]++;

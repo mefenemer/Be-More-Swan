@@ -210,6 +210,22 @@ check('reconnecting clears the watch expiry, so push starts again at the next po
     const c = code('netlify/functions/mailbox-oauth.ts');
     assert.ok(/status: 'active', lastError: null,[\s\S]{0,300}watchExpiresAt: null,/.test(c));
 });
+check('the poll run reads first, then watches within a budget, then digests (review of #906)', () => {
+    const c = code('netlify/functions/poll-mailboxes.ts');
+    const reads = c.indexOf('triggerMailboxSync(id)'), watches = c.indexOf('await ensureWatches(getDb())'), digests = c.indexOf('sendMorningDigest(getDb(), box)');
+    assert.ok(reads > -1 && watches > reads && digests > watches);
+    assert.ok(/due\.slice\(i, i \+ 10\)\.map/.test(c), 'reads dispatched in parallel batches');
+    const p = code('src/utils/mailbox-push.ts');
+    assert.ok(/if \(Date\.now\(\) > deadline\) \{ out\.deferred\+\+; continue; \}/.test(p));
+});
+check('a failed watch also clears last_push_at, so the mailbox is back on the 10-minute poll at once', () => {
+    assert.ok(/make_interval\(secs => \$\{\(RENEW_WITHIN_MS \+ WATCH_RETRY_MS\) \/ 1000\}\)`, lastPushAt: null \}/.test(code('src/utils/mailbox-push.ts')));
+});
+check('a push for a workspace without the flag wakes no function', () => {
+    const p = code('src/utils/mailbox-push.ts');
+    assert.ok(/organisationId: mailboxes\.organisationId, lockedUntil/.test(p));
+    assert.ok(/const free = allowed\.filter/.test(p));
+});
 check('schema mirrors db/z-mailbox-push.sql', () => {
     const s = code('db/schema.ts');
     const sqlFile = readFileSync(join(root, 'db/z-mailbox-push.sql'), 'utf8');
