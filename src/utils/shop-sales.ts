@@ -102,6 +102,11 @@ async function bestSellerRows(db: Db, orgId: number, windowSql: ReturnType<typeo
     }
 }
 
+/** Best sellers of the last `days` days (the Mentor's morning summary, shop-mentor.ts). */
+export async function bestSellersSince(db: Db, orgId: number, days: number, limit = BEST_SELLERS): Promise<BestSeller[]> {
+    return rankBestSellers(await bestSellerRows(db, orgId, sql`created_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})`), limit);
+}
+
 /** Everything "Ask your shop" needs, in four small queries. */
 export async function loadShopSales(db: Db, orgId: number): Promise<ShopSales> {
     const [now] = asRows<{ month: string }>(await db.execute(sql`SELECT to_char(now() AT TIME ZONE 'Europe/London', 'YYYY-MM') AS month`));
