@@ -42,6 +42,7 @@ import { writerFor } from '../../src/utils/mail-writer';
 import { oneClickUnsubscribe, parseListUnsubscribe } from '../../src/utils/one-click-unsubscribe';
 import { providerName, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 import { resolveNowNotification } from '../../src/utils/mailbox-notify';
+import { stopWatch } from '../../src/utils/mailbox-push';
 import {
     ActionError, applyCleanup, cleanupSuggestions, dismissReply, draftGaps, draftReply, editReply, listActions, sendReply, undoCleanup,
     CLEANUP_CHUNK, UNDO_DAYS, type DraftMode,
@@ -176,6 +177,8 @@ export default withLambda(async (event) => {
     if (!box) return json(404, { error: 'Mailbox not found.' });
 
     if (body.action === 'disconnect') {
+        // Stop push first, while the token still works (a Google revoke ends a Gmail watch anyway).
+        await stopWatch(db, box);
         await disconnectMailbox(db, ctx.organisationId, ctx.userId, box.id);
         return json(200, {
             ok: true,

@@ -749,6 +749,10 @@ export const mailboxes = pgTable("mailboxes", {
   lastSyncAt: timestamp("last_sync_at"),
   lastError: text("last_error"),
   syncLockUntil: timestamp("sync_lock_until"),
+  // Push (db/z-mailbox-push.sql): NULL watch_expires_at = no push, polled every 10 minutes.
+  watchExpiresAt: timestamp("watch_expires_at"),
+  watchId: text("watch_id"),                                  // Graph subscription id
+  lastPushAt: timestamp("last_push_at"),
   settings: jsonb("settings").notNull().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

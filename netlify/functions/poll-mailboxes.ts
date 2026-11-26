@@ -1,6 +1,7 @@
 // netlify/functions/poll-mailboxes.ts — every 10 minutes, wake a read for each mailbox that is due
-// (docs/email-assistant-plan.md §4.3, the Phase 1 mechanism; push notifications come in Phase 3 and
-// this stays as the safety net).
+// (docs/email-assistant-plan.md §4.2–4.3). With push on (Phase 3b, mailbox-push.ts) new mail arrives by
+// push and this is the safety net (a watched mailbox is read every 30 minutes); it also starts and
+// renews the watches.
 //
 // ⚠️ Netlify runs scheduled functions on PRODUCTION only, and answers a direct URL call to one with a
 // bare 403 before this handler runs. Staging is poked through run-poll-mailboxes.ts instead.
@@ -11,6 +12,7 @@ import { mailboxesDueForSync, triggerMailboxSync } from '../../src/utils/mailbox
 import { pruneOldActions } from '../../src/utils/mailbox-actions';
 import { mayRunScheduled } from '../../src/utils/scheduled-run-auth';
 import { sendMorningDigest } from '../../src/utils/mailbox-notify';
+import { ensureWatches } from '../../src/utils/mailbox-push';
 import { mailboxes } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -34,7 +36,9 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
     for (const box of active) if (await sendMorningDigest(getDb(), box)) digests++;
     let dispatched = 0;
     for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
-    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned, digests });
+    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day.
+    const watches = await ensureWatches(getDb());
+    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned, digests, watches });
     return { due: due.length, dispatched };
 }
 
