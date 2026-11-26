@@ -10,6 +10,10 @@
 //   • Neutral wording, nothing to sell — a request for feedback, not marketing.
 //   • The Google link (if set) goes to EVERY customer, whatever they might say: no review gating.
 //   • A review sent in waits as 'pending' until the owner approves it; nothing is published unseen.
+//   • SHOP ORDERS go only from the owner's own verified sending domain or connected Gmail/Outlook (Email Marketing's
+//     resolveSendRoute; owner Q1 2026-11-26, online shop slice 7) — never "via Be More Swan". With no route the order
+//     is NOT claimed, so it is asked about once a route exists (within the look-back); the Shop tab says why.
+//     Bookings still go from fromLine() — the same problem, a separate fix.
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { and, eq, gt, gte, inArray, isNotNull, sql } from 'drizzle-orm';
@@ -17,6 +21,8 @@ import type { getDb } from '../../db/client';
 import { bookings, organisations, orgProducts, reviewOptOuts, reviewRequests, reviewSettings, siteOrders, sites, users, aiAssistants } from '../../db/schema';
 import { emailKey, fromLine } from './bookings';
 import { sendEmail } from './email';
+import { resolveSendRoute, type SendRoute } from './newsletter-send';
+import { deliverStep } from './newsletter-sequence';
 import { esc, REVIEW_PATH } from './site-render';
 import { siteOrigin } from './site-hosting';
 
@@ -95,10 +101,18 @@ export function reviewRequestUrl(origin: string, id: number, extra = ''): string
 
 // ── The email ───────────────────────────────────────────────────────────────────────────────────
 
-export function reviewRequestEmail(p: { business: string; firstName: string | null; about: string | null; link: string; stopLink: string; googleUrl: string | null }): { subject: string; html: string } {
+export function reviewRequestEmail(p: { business: string; firstName: string | null; about: string | null; link: string; stopLink: string; googleUrl: string | null }): { subject: string; html: string; text: string } {
     const hi = p.firstName ? `Hi ${esc(p.firstName)},` : 'Hello,';
     return {
         subject: `How did we do? — ${p.business}`,
+        // The plain-text part (a mailbox send needs one; shop orders, slice 7).
+        text: [
+            p.firstName ? `Hi ${p.firstName},` : 'Hello,', '',
+            `Thank you for choosing ${p.business}${p.about ? ` for ${p.about}` : ''}. Would you tell us how it went? It takes a minute, and it helps us and other customers.`, '',
+            `Leave a review: ${p.link}`,
+            ...(p.googleUrl ? ['', `Or, if you prefer, review us on Google: ${p.googleUrl}`] : []), '',
+            `This is the only email you'll get about it. Don't ask me for reviews again: ${p.stopLink}`,
+        ].join('\n'),
         html: `<p>${hi}</p>
 <p>Thank you for choosing ${esc(p.business)}${p.about ? ` for ${esc(p.about)}` : ''}. Would you tell us how it went? It takes a minute, and it helps us and other customers.</p>
 <p><a href="${esc(p.link)}" style="display:inline-block;padding:10px 18px;background:#111;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">Leave a review</a></p>
@@ -133,12 +147,14 @@ async function dueBookings(db: Db, now: Date): Promise<Candidate[]> {
 }
 
 /** Paid website orders the delay ago, after asking was switched on, not yet asked. */
-async function dueOrders(db: Db, now: Date): Promise<Candidate[]> {
+async function dueOrders(db: Db, now: Date, orgIds: number[]): Promise<Candidate[]> {
+    if (!orgIds.length) return [];
     const rows = await db.select({ id: siteOrders.id, organisationId: siteOrders.organisationId, siteId: siteOrders.siteId, name: siteOrders.customerName, email: siteOrders.customerEmail, item: siteOrders.itemName })
         .from(siteOrders)
         .innerJoin(reviewSettings, eq(reviewSettings.organisationId, siteOrders.organisationId))
         .where(and(
             eq(reviewSettings.askAfterOrders, true), isNotNull(reviewSettings.enabledAt), inArray(siteOrders.status, ['paid', 'posted', 'done']), isNotNull(siteOrders.customerEmail),
+            inArray(siteOrders.organisationId, orgIds),
             sql`${siteOrders.createdAt} <= ${now.toISOString()}::timestamp - make_interval(days => ${reviewSettings.orderDelayDays})`,
             gte(siteOrders.createdAt, sql`${reviewSettings.enabledAt}`),
             gt(siteOrders.createdAt, new Date(now.getTime() - (REVIEW_REQUEST_RULES.lookbackDays + 30) * 86_400_000)),
@@ -160,8 +176,22 @@ export async function skipReason(db: Db, orgId: number, email: string, now: Date
 }
 
 /** One hourly run: claim each due booking / order, then email (or record why not). Returns emails sent. */
-export async function sendDueReviewRequests(db: Db, now: Date): Promise<number> {
-    const due = [...await dueBookings(db, now), ...await dueOrders(db, now)];
+/** The route a shop order's review request goes on, or why there is none. Pure-ish wrapper so tests can stub it. */
+export type RouteResolver = (db: Db, orgId: number, senderName: string) => Promise<{ route: SendRoute } | { error: string }>;
+const defaultRoute: RouteResolver = (db, orgId, senderName) => resolveSendRoute(db, orgId, { recipientCount: 1, senderName });
+
+export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: RouteResolver; deliver?: typeof deliverStep } = {}): Promise<number> {
+    // Shop orders go only on the owner's own route (slice 7): resolve it first for every workspace asking after orders,
+    // and look for due orders ONLY where one exists — so workspaces still waiting for a route can't fill the batch.
+    const routes = new Map<number, SendRoute>();
+    const asking = await db.select({ id: reviewSettings.organisationId, name: organisations.name }).from(reviewSettings)
+        .innerJoin(organisations, eq(organisations.id, reviewSettings.organisationId))
+        .where(and(eq(reviewSettings.askAfterOrders, true), isNotNull(reviewSettings.enabledAt)));
+    for (const o of asking) {
+        const r = await (deps.route ?? defaultRoute)(db, o.id, o.name || 'Our business').catch((err) => ({ error: err instanceof Error ? err.message : String(err) }));
+        if ('route' in r) routes.set(o.id, r.route);
+    }
+    const due = [...await dueBookings(db, now), ...await dueOrders(db, now, [...routes.keys()])];
     if (!due.length) return 0;
     const orgIds = [...new Set(due.map((d) => d.organisationId))];
     const siteIds = [...new Set(due.map((d) => d.siteId).filter((x): x is number => x !== null))];
@@ -172,6 +202,9 @@ export async function sendDueReviewRequests(db: Db, now: Date): Promise<number> 
     ]);
     let sent = 0;
     for (const d of due) {
+        // A shop order is due only where its workspace has a route (above); without one it stays UNCLAIMED and goes later.
+        const orderRoute: SendRoute | null = d.orderId ? routes.get(d.organisationId) ?? null : null;
+        if (d.orderId && !orderRoute) continue;
         // Claim first: the unique index on booking_id / order_id means only one run gets the row.
         const [claim] = await db.insert(reviewRequests).values({
             organisationId: d.organisationId, siteId: d.siteId, bookingId: d.bookingId, orderId: d.orderId,
@@ -185,12 +218,13 @@ export async function sendDueReviewRequests(db: Db, now: Date): Promise<number> 
         const settings = reviewRequestSettingsFrom(settingRows.find((r) => r.organisationId === d.organisationId));
         const origin = siteOrigin(site!.slug!);
         const [owner] = site!.aiAssistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, site!.aiAssistantId)).limit(1) : [];
-        const { subject, html } = reviewRequestEmail({
+        const { subject, html, text } = reviewRequestEmail({
             business, firstName: firstNameOf(d.name), about: d.about,
             link: reviewRequestUrl(origin, claim.id), stopLink: reviewRequestUrl(origin, claim.id, '&stop=1'), googleUrl: settings.googleReviewUrl,
         });
         try {
-            await sendEmail({ to: d.email, from: fromLine(business), ...(owner?.email ? { replyTo: owner.email } : {}), subject, html });
+            if (orderRoute) await (deps.deliver ?? deliverStep)(db, orderRoute, d.organisationId, { to: d.email, subject, html, text, listUnsubscribe: null });
+            else await sendEmail({ to: d.email, from: fromLine(business), ...(owner?.email ? { replyTo: owner.email } : {}), subject, html });
             await db.update(reviewRequests).set({ sentAt: new Date() }).where(eq(reviewRequests.id, claim.id));
             sent++;
         } catch (err) {
@@ -211,6 +245,22 @@ export async function loadReviewRequest(db: Db, orgId: number, id: number, token
 /** "Don't ask me again" — remembered for this business only. */
 export async function optOutOfReviewRequests(db: Db, orgId: number, email: string): Promise<void> {
     await db.insert(reviewOptOuts).values({ organisationId: orgId, emailKey: emailKey(email) }).onConflictDoNothing();
+}
+
+/**
+ * The Shop tab's line (slice 7): asking after orders is on, but there is no way to send from the owner's own
+ * address — so nothing goes until there is. Null when asking is off or a route exists. Never throws.
+ */
+export async function orderReviewRequestsBlocked(db: Db, orgId: number, route: RouteResolver = defaultRoute): Promise<string | null> {
+    try {
+        const s = await reviewSettingsFor(db, orgId);
+        if (!s.askAfterOrders) return null;
+        const r = await route(db, orgId, '');
+        return 'error' in r ? 'Review requests after orders are on, but none can be sent yet: they go only from your own address. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending, and waiting requests go out by themselves.' : null;
+    } catch (err) {
+        console.error('[review-requests] route check failed', err instanceof Error ? err.message : err);
+        return null;
+    }
 }
 
 export async function reviewSettingsFor(db: Db, orgId: number): Promise<ReviewRequestSettings> {

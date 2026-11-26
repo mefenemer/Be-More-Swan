@@ -20,6 +20,7 @@ import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting }
 import { loadShopSales, salesSnapshotLines, type ShopSales } from './shop-sales';
 import { loadReminderStats, reminderStatsWords } from './shop-checkout-reminder';
 import { waitingCounts } from './shop-waitlist';
+import { orderReviewRequestsBlocked } from './review-requests';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -47,6 +48,8 @@ export interface ShopSnapshotInput {
     reminders?: string | null;
     /** People waiting to hear a product is back, by product id (shop-waitlist.ts, Phase 2 slice 6). */
     waiting?: Record<number, number>;
+    /** Review requests after orders are on but have no route to send from (review-requests.ts, slice 7); null = fine/off. */
+    reviewBlocked?: string | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -128,6 +131,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     const waitingRows = Object.entries(input.waiting || {}).filter(([, n]) => n > 0)
         .map(([id, n]) => ({ name: input.stock?.items.find((i) => i.id === Number(id))?.name || `product #${id}`, n }));
     lines.push('', `WAITING LISTS ("Tell me when it's back" on a sold-out product's page; one service email each, never added to the Audience): ${waitingRows.length ? waitingRows.map((w) => `${w.name} — ${w.n} waiting`).join('; ') : 'nobody waiting'}. When a stock save makes a waiting product buyable again, you (the Shopkeeper) ask in Team Chat whether to email them; the owner sends with "Email them" there or on the Shop tab's Stock card. You can't send them from this chat — say where the button is.`);
+    lines.push('', `REVIEW REQUESTS AFTER ORDERS (Audience ▸ Reviews switches them on): sent only from the business's verified sending domain or connected Gmail/Outlook, never a Be More Swan address.${input.reviewBlocked ? ` RIGHT NOW: ${input.reviewBlocked}` : ''}`);
     lines.push('', `ABANDONED-CHECKOUT REMINDERS: automatic, no setting. A basket buyer who ticks "Send me news" types their email on the basket page; if their checkout lapses unpaid (after 1 hour) they get ONE reminder with a link back to their basket, sent from the business's verified sending domain or connected Gmail/Outlook only (no route = not sent). Never to anyone who didn't tick. Fixed wording, no tasks spent. This week: ${input.reminders || 'none sent'}`);
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
@@ -161,5 +165,6 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const sales = orders.length ? await loadShopSales(db, orgId).catch((err) => { console.error('[shop-snapshot] sales read failed', err instanceof Error ? err.message : err); return null; }) : null;
     const reminders = reminderStatsWords(await loadReminderStats(db, orgId));
     const waiting = await waitingCounts(db, orgId);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting });
+    const reviewBlocked = await orderReviewRequestsBlocked(db, orgId);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting, reviewBlocked });
 }
