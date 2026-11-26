@@ -22,7 +22,8 @@ import { createNotification } from './notify';
 import { resolveActionNotifications } from './notification-actions';
 import { dayWindows, localNow, safeTimeZone, SEND_FROM_HOUR, SEND_UNTIL_HOUR } from './mentor-morning';
 import { cleanupSuggestions } from './mailbox-actions';
-import type { MailboxRow } from './mailboxes';
+import { EMAIL_ASSISTANT_FLAG, type MailboxRow } from './mailboxes';
+import { isFeatureEnabled } from './feature-flags';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,6 +39,16 @@ async function emailAssistantId(db: Db, orgId: number): Promise<number | null> {
         .where(and(eq(aiAssistants.organisationId, orgId), eq(masterAssistants.roleKey, 'email_assistant'), isNull(aiAssistants.archivedAt)))
         .limit(1);
     return row?.id ?? null;
+}
+
+/**
+ * Whether this workspace can open the Email Assistant at all: the flag is on AND it has one that isn't
+ * archived. Neither notification is sent otherwise — a note for a feature the owner can't open, with no
+ * "Open emails" button, is noise. Returns the assistant id, or null.
+ */
+async function reachableAssistantId(db: Db, orgId: number): Promise<number | null> {
+    if (!(await isFeatureEnabled(orgId, EMAIL_ASSISTANT_FLAG))) return null;
+    return emailAssistantId(db, orgId);
 }
 
 /** "2 emails need you now" / "1 email needs you now". Pure. */
@@ -57,14 +68,15 @@ export async function notifyNowEmails(db: Db, box: Pick<MailboxRow, 'id' | 'orga
                 eq(notifications.isRead, false), sql`${notifications.metadata}->>'mailboxId' = ${String(box.id)}`))
             .limit(1);
         if (open) return false;
-        const assistantId = await emailAssistantId(db, box.organisationId);
+        const assistantId = await reachableAssistantId(db, box.organisationId);
+        if (!assistantId) return false;
         return await createNotification(db, NOW_TYPE, {
             userId: box.userId,
-            ...(assistantId ? { assistantId } : {}),
+            assistantId,
             // Explicit so the stored column is right without notifications-categorization.sql re-applied.
             category: 'suggested_action',
             context: { emails: { now: nowPhrase(nowCount) }, mailbox: { address: box.address } },
-            metadata: { mailboxId: box.id, ...(assistantId ? { assistantId } : {}) },
+            metadata: { mailboxId: box.id, assistantId },
         });
     } catch (err) {
         console.error('[mailbox-notify] now notification failed', { mailboxId: box.id, err: err instanceof Error ? err.message : err });
@@ -101,6 +113,9 @@ export async function sendMorningDigest(db: Db, box: MailboxRow, now: Date = new
         const tz = safeTimeZone(bs?.tz);
         const { date: dayStr, hour } = localNow(now, tz);
         if (hour < SEND_FROM_HOUR || hour > SEND_UNTIL_HOUR) return false;
+        // Before the latch, so a workspace that turns the assistant back on still gets today's note.
+        const assistantId = await reachableAssistantId(db, box.organisationId);
+        if (!assistantId) return false;
 
         // Latch first: only one tick per day gets past this.
         const won = await db.update(mailboxes)
@@ -121,13 +136,12 @@ export async function sendMorningDigest(db: Db, box: MailboxRow, now: Date = new
         const line = digestLine({ needsYou: c?.needsYou ?? 0, now: c?.now ?? 0, sortedYesterday: y?.n ?? 0, toClear });
         if (!line) return false;
 
-        const assistantId = await emailAssistantId(db, box.organisationId);
         return await createNotification(db, DIGEST_TYPE, {
             userId: box.userId,
-            ...(assistantId ? { assistantId } : {}),
+            assistantId,
             category: 'state_change',
             context: { digest: { line }, mailbox: { address: box.address } },
-            metadata: { mailboxId: box.id, ...(assistantId ? { assistantId } : {}) },
+            metadata: { mailboxId: box.id, assistantId },
         });
     } catch (err) {
         console.error('[mailbox-notify] morning digest failed', { mailboxId: box.id, err: err instanceof Error ? err.message : err });

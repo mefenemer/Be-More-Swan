@@ -146,8 +146,9 @@ export default withLambda(async (event) => {
         };
 
         if (access !== 'owner') return json(200, { available, access, providers, mailboxes: cards, stats, messages: [] });
-        // The owner is looking at their email now: the "needs you now" card has done its job.
-        if (!qp.mailboxId) await resolveNowNotification(db, ctx.userId);
+        // The owner opened the Emails tab (seen=1 — the Results cards' load doesn't send it): the
+        // "needs you now" card has done its job.
+        if (qp.seen === '1' && !qp.mailboxId) await resolveNowNotification(db, ctx.userId);
 
         const wanted = qp.mailboxId ? own.filter((b) => b.id === Number(qp.mailboxId)) : own;
         const rows = wanted.length ? await db.select({

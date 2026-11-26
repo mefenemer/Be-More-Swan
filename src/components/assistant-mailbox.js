@@ -80,7 +80,8 @@
   }
 
   async function load() {
-    const res = await fetch(API, { credentials: 'same-origin' });
+    // seen=1: this IS the Emails tab, so the "needs you now" notification has done its job (the Results cards don't send it).
+    const res = await fetch(API + '?seen=1', { credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Could not load your email.');
     state.data = data;

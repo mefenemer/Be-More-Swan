@@ -674,8 +674,10 @@ check('"needs you now": one open per mailbox, sent from the sync when something 
     assert.ok(/eq\(notifications\.type, NOW_TYPE\), isNull\(notifications\.resolvedAt\)/.test(n) && /metadata\}->>'mailboxId' = \$\{String\(box\.id\)\}/.test(n));
     assert.ok(/category: 'suggested_action'/.test(n) && /category: 'state_change'/.test(n), 'category passed so it is right before the SQL is re-applied');
     const sync = code('src/utils/mailbox-sync.ts');
-    assert.ok(/if \(r\.priority === 'now'\) newNow\+\+;/.test(sync) && /if \(newNow\) await notifyNowEmails\(db, box, newNow\);/.test(sync));
-    assert.ok(/if \(!qp\.mailboxId\) await resolveNowNotification\(db, ctx\.userId\);/.test(code('netlify/functions/mailboxes.ts')));
+    assert.ok(/if \(newNow\) await notifyNowEmails\(db, box, newNow\);/.test(sync));
+    assert.ok(/if \(qp\.seen === '1' && !qp\.mailboxId\) await resolveNowNotification\(db, ctx\.userId\);/.test(code('netlify/functions/mailboxes.ts')));
+    // Only the Emails tab sends seen=1 — loading the Results cards must not clear it.
+    assert.ok(/fetch\(API \+ '\?seen=1'/.test(read('src/components/assistant-mailbox.js')));
 });
 
 check('the morning note: 07:00–11:59 in the workspace\'s time zone, latched once a day before anything is sent', () => {
@@ -735,6 +737,20 @@ check('it can\'t be hired or seen by accident: catalogue row HIDDEN (not a publi
     for (const f of ['netlify/functions/mailboxes.ts', 'netlify/functions/mailbox-oauth.ts', 'src/utils/mailbox-sync.ts']) {
         assert.ok(/isFeatureEnabled\([^)]*EMAIL_ASSISTANT_FLAG\)/.test(code(f)), f);
     }
+});
+
+check('no email notification for a workspace that can\'t open the assistant (flag off or archived), and the gate runs before the daily latch', () => {
+    const src = code('src/utils/mailbox-notify.ts');
+    assert.ok(/isFeatureEnabled\(orgId, EMAIL_ASSISTANT_FLAG\)/.test(src));
+    assert.strictEqual((src.match(/const assistantId = await reachableAssistantId\(db, box\.organisationId\);\s*if \(!assistantId\) return false;/g) || []).length, 2);
+    const digest = src.slice(src.indexOf('export async function sendMorningDigest'));
+    assert.ok(digest.indexOf('reachableAssistantId(') > -1 && digest.indexOf('reachableAssistantId(') < digest.indexOf('const won = await'));
+});
+
+check('"needs you now" counts only mail that arrived recently — a first 14-day read or a late AI sort is not news', () => {
+    const src = code('src/utils/mailbox-sync.ts');
+    assert.ok(/export const NOW_NOTIFY_MAX_AGE_MS = 6 \* 60 \* 60 \* 1000;/.test(src));
+    assert.ok(/if \(r\.priority === 'now' && at && Date\.now\(\) - at\.getTime\(\) <= NOW_NOTIFY_MAX_AGE_MS\) newNow\+\+;/.test(src));
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
