@@ -204,7 +204,7 @@ export function shopTermsHtml(s: ShopSettings, deliveryChoices: string | null = 
         + (s.extraTerms ? `<h2>Other terms</h2>${para(s.extraTerms)}` : '')
         + '<h2>Payment</h2><p>Payments are taken securely by Stripe on our behalf. We never see your card details.</p>'
         // Privacy wording for the buyer (online shop Phase 1: a shop page has no other page that says it).
-        + '<h2>Your details</h2><p>We use the name, email address and delivery address you give at checkout only to send your order, to contact you about it, and to keep the records the law asks us to keep.</p>'
+        + '<h2>Your details</h2><p>We use the name, email address and delivery address you give at checkout only to send your order, to contact you about it, and to keep the records the law asks us to keep. If you tick "Send me news" in your basket, your email address and name also join our mailing list; every email has an unsubscribe link.</p>'
         + `<h2>Cancellation form</h2><p>Copy this into an email or letter if you'd like to use it.</p>${cancellationFormHtml(s)}`
         + '</div></section>';
 }
