@@ -33,6 +33,7 @@ check('the owner\'s email says what happened, and never re-adds someone who unsu
     assert.ok(buyerAudienceLine({ result: 'added', contactId: 1 })!.includes('joined your Audience'));
     assert.ok(buyerAudienceLine({ result: 'already', contactId: 1, status: 'subscribed' })!.includes('already in your Audience'));
     assert.ok(buyerAudienceLine({ result: 'already', contactId: 1, status: 'unsubscribed' })!.includes('were not added back'));
+    assert.ok(buyerAudienceLine({ result: 'already', contactId: 1, status: 'bounced' })!.includes('can\'t be emailed (it bounced or was reported before)'));
     assert.strictEqual(buyerAudienceLine({ result: 'no_email' }), null);
     assert.strictEqual(buyerAudienceLine(null), null);
 });
@@ -41,7 +42,12 @@ check('added as single opt-in with the "Shop buyer" tag and a written consent re
     const mod = read('src/utils/shop-buyer-audience.ts');
     assert.strictEqual(SHOP_BUYER_TAG, 'Shop buyer');
     assert.ok(mod.includes("consentBasis: 'single_opt_in'") && mod.includes("source: 'web_form'") && mod.includes('sourceDetail: { siteOrderId: input.orderId }'));
-    assert.ok(mod.includes('await applyTagsByName(db, input.organisationId, contact.id, [SHOP_BUYER_TAG]);') && mod.includes("event: 'confirmed'") && mod.includes('(unticked by default)'));
+    // review #901: one transaction; the consent record BEFORE the tag; the box's exact words.
+    assert.ok(mod.includes('return db.transaction(async (tx) => {'));
+    assert.ok(mod.indexOf('await recordConsentEvent(t, {') < mod.indexOf('await applyTagsByName(t, input.organisationId, contact.id, [SHOP_BUYER_TAG]);'));
+    assert.ok(mod.includes("event: 'confirmed'") && mod.includes('(unticked by default)') && mod.includes('String(input.words || newsBoxLabel(\'\')).slice(0, 450)'));
+    assert.ok(read('src/utils/site-shop.ts').includes("[NEWS_WORDS_METADATA_KEY]: newsBoxLabel(req.businessName ?? '').slice(0, 450)"));
+    assert.ok(read('.github/workflows/ci.yml').includes('run: npx tsx tests/shop-buyer-audience-db.test.ts'));
 });
 
 check('wired only after the order is PAID and recorded, from the ticked metadata; a failure never stops the order', () => {
