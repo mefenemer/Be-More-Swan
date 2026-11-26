@@ -46,7 +46,7 @@ async function main() {
         const A = 21, B = 22;
         for (const [org, slug] of [[A, 'alpha'], [B, 'beta']] as const) {
             await sql.unsafe(`INSERT INTO organisations (id, name, slug) VALUES (${org}, 'Shop ${slug}', 'rr-${slug}')`);
-            await sql.unsafe(`INSERT INTO sites (id, organisation_id, ai_assistant_id, slug, draft, status) VALUES (${org * 10}, ${org}, 1, '${slug}', '{}'::jsonb, 'published')`);
+            await sql.unsafe(`INSERT INTO sites (id, organisation_id, ai_assistant_id, slug, draft, status) VALUES (${org * 10}, ${org}, ${org * 10 + 1}, '${slug}', '{}'::jsonb, 'published')`);
             await sql.unsafe(`INSERT INTO review_settings (organisation_id, ask_after_orders, order_delay_days, enabled_at) VALUES (${org}, true, 7, now() - interval '30 days')`);
         }
         let n = 0;
