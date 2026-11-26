@@ -26,6 +26,10 @@ export const NEWS_METADATA_KEY = 'bms_news';
 /** The exact words of the box the buyer saw, carried to the paid order as consent evidence (review #901). */
 export const NEWS_WORDS_METADATA_KEY = 'bms_news_words';
 
+/** The basket page's email box, shown once the box is ticked (the abandoned-checkout reminder, shop-checkout-reminder.ts). */
+export const EMAIL_FIELD = '_email';
+export const EMAIL_HINT = 'Your email address. If you don\'t finish paying, we\'ll send you one reminder about your basket.';
+
 /** The box's words on the basket page. Pure. */
 export function newsBoxLabel(businessName: string): string {
     return `Send me news and offers from ${String(businessName || 'this business').trim() || 'this business'} by email. You can unsubscribe at any time.`;

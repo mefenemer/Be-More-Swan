@@ -6,11 +6,13 @@
 // Set up in the Stripe dashboard → Developers → Webhooks → Add endpoint →
 // "Events on Connected accounts", URL https://bemoreswan.com/.netlify/functions/stripe-connect-webhook,
 // events: checkout.session.completed, checkout.session.async_payment_succeeded, account.updated
-// (and, optionally, checkout.session.expired — unpaid deposit holds also lapse on their own).
+// and checkout.session.expired (unpaid deposit holds also lapse on their own; the shop's abandoned-checkout
+// reminder needs it — without it no reminder is ever sent).
 //
 //   checkout.session.completed / async_payment_succeeded → a booking deposit (booking-deposits.ts),
 //                                                           else record the order (site-shop.ts), if paid
-//   checkout.session.expired                              → let an unpaid deposit hold go now
+//   checkout.session.expired                              → let an unpaid deposit hold go now, or send a basket's
+//                                                           one abandoned-checkout reminder (shop-checkout-reminder.ts)
 //   account.updated                                       → keep charges_enabled & co. in step
 //
 // Fails closed without the secret. Repeat deliveries are harmless: orders are unique per session.
@@ -19,7 +21,9 @@ import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { STRIPE_API_VERSION } from '../../src/utils/stripe';
-import { recordPaidCheckout, recordRefund, syncConnectAccount } from '../../src/utils/site-shop';
+import { connectAccountFor, recordPaidCheckout, recordRefund, syncConnectAccount } from '../../src/utils/site-shop';
+import { sendCheckoutReminder } from '../../src/utils/shop-checkout-reminder';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { depositPaid, releaseHold } from '../../src/utils/booking-deposits';
 import { balanceCharge, stayBalancePaid, stayModeFor, stayPaymentSettled } from '../../src/utils/stay-charges';
 import { formatMoney } from '../../src/utils/product-price';
@@ -112,6 +116,11 @@ export default withLambda(async (event) => {
             const session = evt.data.object as Stripe.Checkout.Session;
             const id = Number(session.metadata?.bms_booking);
             if (session.metadata?.bms_kind === 'booking_deposit' && Number.isInteger(id)) await releaseHold(db, id);
+            // A shop basket's checkout lapsed: its one reminder, only if the buyer ticked "Send me news" (slice 5).
+            else if (session.metadata?.bms_basket) {
+                const r = await sendCheckoutReminder(db, evt.account, session, { baseUrl: resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>), connectAccountFor });
+                if (r !== 'not_ticked') console.log('[stripe-connect-webhook] checkout reminder', { session: session.id, result: r });
+            }
         } else if (evt.type === 'account.updated') {
             await syncConnectAccount(db, evt.data.object as Stripe.Account);
         } else if (evt.type === 'charge.refunded') {

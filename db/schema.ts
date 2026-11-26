@@ -6627,9 +6627,17 @@ export const siteBaskets = pgTable("site_baskets", {
   items: jsonb().notNull().default([]),
   checkoutLines: jsonb("checkout_lines"),
   checkoutSessionId: text("checkout_session_id"),
+  // The abandoned-checkout reminder (db/z-shop-checkout-reminder.sql, src/utils/shop-checkout-reminder.ts).
+  reminderEmail: text("reminder_email"),
+  checkoutExpiresAt: timestamp("checkout_expires_at"),
+  remindedAt: timestamp("reminded_at"),
+  reminderResult: text("reminder_result"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  check("site_baskets_reminder_result_check", sql`${t.reminderResult} IS NULL OR ${t.reminderResult} IN ('sent', 'no_route', 'refused', 'failed')`),
+  index("site_baskets_org_reminded_idx").on(t.organisationId, t.remindedAt).where(sql`${t.remindedAt} IS NOT NULL`),
+]);
 
 // A paid basket order's lines (online shop Phase 1, db/z-shop-basket.sql). Mirrored here ONLY for the workspace
 // data export; the app reads and writes it with raw SQL in src/utils/shop-basket.ts (missing table = no lines).
