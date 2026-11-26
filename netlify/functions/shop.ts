@@ -31,6 +31,7 @@
 // Nothing here moves money: refunds and payouts stay in the business's own Stripe dashboard.
 
 import { loadReminderStats, reminderStatsWords } from '../../src/utils/shop-checkout-reminder';
+import { orderReviewRequestsBlocked } from '../../src/utils/review-requests';
 import { askBackInStock, productBuyable, sendBackInStock, sendResultWords, waitingCounts } from '../../src/utils/shop-waitlist';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -127,6 +128,8 @@ export default withLambda(async (event) => {
             // "This month" on the Orders card (shop-sales.ts, Phase 2 slice 1): UK months, after refunds, per currency.
             sales: orders.length ? await loadShopSales(db, orgId).then((s) => { const m = monthSummary(s); return { thisMonth: salesMonthWords(m.thisMonth), lastMonth: salesMonthWords(m.lastMonth) }; })
                 .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
+            // Review requests after orders are on but can't be sent from the owner's own address (review-requests.ts, slice 7).
+            reviewBlocked: await orderReviewRequestsBlocked(db, orgId),
             // People waiting to hear a product is back (shop-waitlist.ts, Phase 2 slice 6), by product id.
             waiting: await waitingCounts(db, orgId),
             // Abandoned-checkout reminders this week (shop-checkout-reminder.ts, Phase 2 slice 5), in words; null = none.

@@ -367,3 +367,7 @@ jobs:
       # the Team Chat question once, sends claimed with refusals skipped, batches and the sweep — on Postgres.
       - name: Shop back-in-stock waiting lists
         run: npx tsx tests/shop-waitlist-db.test.ts
+      # Review requests after shop orders (src/utils/review-requests.ts, online shop Phase 2): only from the owner's own
+      # address; without one the order stays unclaimed and goes later, never using up the batch — on Postgres.
+      - name: Shop review requests from the owner's address
+        run: npx tsx tests/shop-review-requests-db.test.ts
