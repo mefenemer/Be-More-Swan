@@ -1,7 +1,7 @@
 // src/utils/mailbox-sync.ts — read a mailbox's new email and sort it (docs/email-assistant-plan.md §4).
 //
-// Woken by mailbox-sync-background.ts: right after a mailbox connects, and every 10 minutes by
-// poll-mailboxes.ts. One run:
+// Woken by mailbox-sync-background.ts: right after a mailbox connects, by a push when new mail arrives
+// (mailbox-push.ts), and by poll-mailboxes.ts (every 10 minutes, or 30 when push is on). One run:
 //   1. takes the mailbox's lease (sync_lock_until) — ONE reader at a time per mailbox, across instances;
 //   2. reads the inbox's changes from the saved cursor (Graph delta / Gmail history), stores headers, marks removals;
 //   3. sorts what is still pending: private senders, the user's sender rules, headers, then AI;
@@ -283,13 +283,18 @@ async function aiSortedToday(db: Db, mailboxId: number): Promise<number> {
     return row?.n ?? 0;
 }
 
-/** Active mailboxes due a run: not read for 9+ minutes and not mid-run. */
+/**
+ * Active mailboxes due a run, not mid-run: not read for 9+ minutes, or, when push is on for the mailbox
+ * (a watch that hasn't expired), 29+ minutes — push brings new mail, and this poll only catches a lost
+ * push (plan §4.2) or a change push doesn't report (Outlook's subscription covers new mail only).
+ */
 export async function mailboxesDueForSync(db: Db, limit = 50): Promise<number[]> {
     const rows = await db.select({ id: mailboxes.id }).from(mailboxes)
         .where(and(
             eq(mailboxes.status, 'active'),
             sql`(${mailboxes.syncLockUntil} IS NULL OR ${mailboxes.syncLockUntil} < now())`,
-            sql`(${mailboxes.lastSyncAt} IS NULL OR ${mailboxes.lastSyncAt} < now() - interval '9 minutes')`,
+            sql`(${mailboxes.lastSyncAt} IS NULL OR ${mailboxes.lastSyncAt} < now() - CASE
+                WHEN ${mailboxes.watchExpiresAt} > now() THEN interval '29 minutes' ELSE interval '9 minutes' END)`,
         ))
         .orderBy(sql`${mailboxes.lastSyncAt} ASC NULLS FIRST`).limit(limit);
     return rows.map((r) => r.id);
