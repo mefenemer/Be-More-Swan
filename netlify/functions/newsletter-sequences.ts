@@ -42,6 +42,16 @@ import { loadBrandNewsletterTheme } from '../../src/utils/brand-theme';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveSendRoute } from '../../src/utils/newsletter-send';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { FIRST_ORDER_TRIGGER } from '../../src/utils/shop-first-order-flow';
+
+/** The trigger check refused a value (db/z-shop-first-order-flow.sql not applied yet) — say so, not a bare 500. */
+function isTriggerCheck(err: unknown): boolean {
+    const e = err as { code?: string; cause?: { code?: string; constraint_name?: string }; constraint_name?: string };
+    return (e?.code ?? e?.cause?.code) === '23514' && /trigger_check/.test(String(e?.constraint_name ?? e?.cause?.constraint_name ?? err));
+}
+const NEEDS_FIRST_ORDER_UPDATE = { code: 'NEEDS_UPDATE', error: 'This workspace is not yet set up for first-order flows. Nothing was changed — try again after the next update.' };
+/** "Everyone who subscribes" and "first order": at most one flow of each may be on. */
+const ONE_ON = (t: string) => t === 'subscribed' || t === FIRST_ORDER_TRIGGER;
 
 const json = (statusCode: number, obj: unknown) => ({
     statusCode,
@@ -126,6 +136,8 @@ export default withLambda(async (event: HandlerEvent) => {
                     eq(audienceForms.organisationId, ctx.organisationId),
                     sequence.triggerEvent === 'form'
                         ? eq(audienceForms.sequenceId, sequence.id)
+                        // A first-order flow is started by the shop, never by a form (slice 4b).
+                        : sequence.triggerEvent === FIRST_ORDER_TRIGGER ? sql`false`
                         : sql`${audienceForms.sequenceId} IS NULL AND ${audienceForms.status} = 'active'`,
                 ))
                 .orderBy(asc(audienceForms.name));
@@ -230,11 +242,13 @@ export default withLambda(async (event: HandlerEvent) => {
         // used to REPLACE the one welcome sequence's emails. Matched by trigger + name + identical
         // emails only, so a second press of Save is a no-op rather than a duplicate.
         const formTrigger = body.trigger === 'form';
-        const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email flow' : 'Welcome sequence');
+        const firstOrderTrigger = body.trigger === FIRST_ORDER_TRIGGER;
+        const savedTrigger = formTrigger ? 'form' : firstOrderTrigger ? FIRST_ORDER_TRIGGER : 'subscribed';
+        const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email flow' : firstOrderTrigger ? 'First order thank-you' : 'Welcome sequence');
         const [existing] = await db.select().from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, orgId),
-                eq(newsletterSequences.triggerEvent, formTrigger ? 'form' : 'subscribed'),
+                eq(newsletterSequences.triggerEvent, savedTrigger),
                 eq(newsletterSequences.name, campaignName),
             )).limit(1);
         const current = existing
@@ -275,7 +289,7 @@ export default withLambda(async (event: HandlerEvent) => {
             const [seq] = await tx.insert(newsletterSequences).values({
                 organisationId: orgId,
                 assistantId,
-                triggerEvent: formTrigger ? 'form' : 'subscribed',
+                triggerEvent: savedTrigger,
                 name: campaignName,
                 createdBy: ctx.userId,
             }).returning();
@@ -293,6 +307,7 @@ export default withLambda(async (event: HandlerEvent) => {
             return seq;
         }); } catch (err) {
             if (isOldIndex(err)) return json(409, { code: 'NEEDS_UPDATE', error: 'You already have a campaign for everyone who subscribes, and this workspace is not yet set up for a second one. Save these emails as "People who fill in a form" for now.' });
+            if (isTriggerCheck(err)) return json(409, NEEDS_FIRST_ORDER_UPDATE);
             throw err;
         }
         return json(200, { sequence, deduped: false, replaced: false, stepCount: steps.length });
@@ -546,23 +561,31 @@ export default withLambda(async (event: HandlerEvent) => {
     // The welcome sequence is just a campaign with the first audience (2026-10-06). Moving an ON
     // campaign to "everyone" while another "everyone" one is on is refused, as switching on is.
     if (action === 'setTrigger') {
-        const to = body.trigger === 'form' ? 'form' : body.trigger === 'subscribed' ? 'subscribed' : null;
+        const to = body.trigger === 'form' ? 'form' : body.trigger === 'subscribed' ? 'subscribed' : body.trigger === FIRST_ORDER_TRIGGER ? FIRST_ORDER_TRIGGER : null;
         if (!to) return json(400, { error: 'Choose who receives this campaign.' });
         if (to === sequence.triggerEvent) return json(200, { sequence });
-        if (to === 'subscribed' && sequence.isEnabled) {
+        if (ONE_ON(to) && sequence.isEnabled) {
             const [other] = await db.select({ name: newsletterSequences.name }).from(newsletterSequences)
                 .where(and(
                     eq(newsletterSequences.organisationId, orgId),
-                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                    eq(newsletterSequences.triggerEvent, to),
                     eq(newsletterSequences.isEnabled, true),
                     ne(newsletterSequences.id, sequence.id),
                 )).limit(1);
-            if (other) return json(409, { code: 'ANOTHER_EVERYONE_ON', error: `"${other.name}" is already on for everyone who subscribes. Switch it off first, or switch this campaign off before changing who receives it.` });
+            if (other) return json(409, to === 'subscribed'
+                ? { code: 'ANOTHER_EVERYONE_ON', error: `"${other.name}" is already on for everyone who subscribes. Switch it off first, or switch this campaign off before changing who receives it.` }
+                : { code: 'ANOTHER_FIRST_ORDER_ON', error: `"${other.name}" is already on for shop buyers' first orders. Switch it off first, or switch this flow off before changing who receives it.` });
         }
-        const [updated] = await db.update(newsletterSequences)
-            .set({ triggerEvent: to, updatedAt: new Date() })
-            .where(and(eq(newsletterSequences.id, sequence.id), eq(newsletterSequences.organisationId, orgId)))
-            .returning();
+        let updated;
+        try {
+            [updated] = await db.update(newsletterSequences)
+                .set({ triggerEvent: to, updatedAt: new Date() })
+                .where(and(eq(newsletterSequences.id, sequence.id), eq(newsletterSequences.organisationId, orgId)))
+                .returning();
+        } catch (err) {
+            if (isTriggerCheck(err)) return json(409, NEEDS_FIRST_ORDER_UPDATE);
+            throw err;
+        }
         return json(200, { sequence: updated });
     }
 
@@ -585,22 +608,25 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!n) return json(400, { error: 'Write at least one email before switching this on.' });
         }
 
-        // Only ONE "everyone who subscribes" campaign may be on (the database enforces it too). If
+        // Only ONE "everyone who subscribes" (or "first order") flow may be on (the database enforces it too). If
         // another is on, ask — `takeOver: true` switches that one off and this one on, together.
         let other: { id: number; name: string } | undefined;
-        if (enable && sequence.triggerEvent === 'subscribed') {
+        if (enable && ONE_ON(sequence.triggerEvent)) {
             [other] = await db.select({ id: newsletterSequences.id, name: newsletterSequences.name })
                 .from(newsletterSequences)
                 .where(and(
                     eq(newsletterSequences.organisationId, orgId),
-                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                    eq(newsletterSequences.triggerEvent, sequence.triggerEvent),
                     eq(newsletterSequences.isEnabled, true),
                     ne(newsletterSequences.id, sequence.id),
                 )).limit(1);
             if (other && body.takeOver !== true) {
-                return json(409, {
+                return json(409, sequence.triggerEvent === 'subscribed' ? {
                     code: 'ANOTHER_EVERYONE_ON', otherId: other.id, otherName: other.name,
                     error: `"${other.name}" already goes to everyone who subscribes. Only one such campaign can be on at a time.`,
+                } : {
+                    code: 'ANOTHER_FIRST_ORDER_ON', otherId: other.id, otherName: other.name,
+                    error: `"${other.name}" already goes to shop buyers after their first order. Only one such flow can be on at a time.`,
                 });
             }
         }

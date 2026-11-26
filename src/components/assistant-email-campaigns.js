@@ -53,7 +53,7 @@
       : c.steps > 0
         ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Off — ready to switch on</span>'
         : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Off — no emails yet</span>';
-    const kind = c.triggerEvent === 'subscribed' ? 'Everyone who subscribes' : 'People who fill in a linked sign-up form';
+    const kind = c.triggerEvent === 'subscribed' ? 'Everyone who subscribes' : c.triggerEvent === 'first_order' ? 'Shop buyers, after their first order' : 'People who fill in a linked sign-up form';
     const stat = (label, value) => `<div><p class="text-[11px] text-gray-500">${label}</p><p class="text-sm font-bold text-gray-900">${value}</p></div>`;
     return `<div class="p-4 sm:p-5">
       <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -80,7 +80,7 @@
     const head = `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
           <h2 class="text-lg font-extrabold text-gray-900">Email flows</h2>
-          <p class="text-sm text-gray-500 mt-1">Series of emails that send by themselves when someone subscribes or fills in a sign-up form.</p>
+          <p class="text-sm text-gray-500 mt-1">Series of emails that send by themselves when someone subscribes, fills in a sign-up form or places a first order in your shop.</p>
         </div>
         <button type="button" data-email-campaign-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">+ New email flow</button>
       </div>`;
