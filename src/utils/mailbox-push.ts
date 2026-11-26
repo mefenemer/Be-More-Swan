@@ -248,7 +248,7 @@ export async function mailboxesNeedingWatch(db: Db): Promise<MailboxRow[]> {
         .orderBy(sql`${mailboxes.watchExpiresAt} ASC NULLS FIRST`).limit(WATCHES_PER_RUN);
 }
 
-/** How long a poll run may spend on watches before leaving the rest for the next run. */
+/** How long ensureWatches may spend when its caller gives no deadline. */
 export const WATCH_BUDGET_MS = 12_000;
 
 /**

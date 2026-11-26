@@ -22,7 +22,15 @@ export const config = { schedule: '*/10 * * * *' };
 export const mayPoll = mayRunScheduled;
 
 /** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
+/**
+ * Watch work stops starting this long after the run began, leaving room for prune and digests inside the
+ * ~30 s a scheduled function gets (26 s for staging's run-poll-mailboxes). Counted from the START of the
+ * run, so slow read dispatch eats into it instead of pushing the run past its limit.
+ */
+export const WATCH_DEADLINE_FROM_START_MS = 16_000;
+
 export async function pollDueMailboxes(): Promise<{ due: number; dispatched: number }> {
+    const runStart = Date.now();
     const due = await mailboxesDueForSync(getDb()).catch((err) => {
         // The table may not exist yet (z-mailboxes.sql not applied): nothing to do, not an outage.
         console.error('[poll-mailboxes] could not list mailboxes', err instanceof Error ? err.message : err);
@@ -34,9 +42,9 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
     for (let i = 0; i < due.length; i += 10) {
         dispatched += (await Promise.all(due.slice(i, i + 10).map((id) => triggerMailboxSync(id)))).filter(Boolean).length;
     }
-    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day — within a
-    // time budget; anything left is first in line next run, and the log shows it as `deferred`.
-    const watches = await ensureWatches(getDb());
+    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day — until
+    // WATCH_DEADLINE_FROM_START_MS into the run; anything left is first in line next run, logged as `deferred`.
+    const watches = await ensureWatches(getDb(), runStart + WATCH_DEADLINE_FROM_START_MS);
     // Drafted replies and clean-up records are kept 30 days after they were acted on, then deleted.
     const pruned = await pruneOldActions(getDb()).catch(() => 0);
     // The Email Assistant's morning note, once a day per mailbox (07:00–11:59 local; latched in its settings).

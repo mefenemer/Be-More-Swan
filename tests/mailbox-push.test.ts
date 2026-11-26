@@ -202,7 +202,7 @@ check('disconnect stops the watch before the token is deleted; the poll run star
     const m = code('netlify/functions/mailboxes.ts');
     const stop = m.indexOf('await stopWatch(db, box);');
     assert.ok(stop > -1 && stop < m.indexOf('await disconnectMailbox(db, ctx.organisationId'));
-    assert.ok(/const watches = await ensureWatches\(getDb\(\)\);/.test(code('netlify/functions/poll-mailboxes.ts')));
+    assert.ok(/const watches = await ensureWatches\(getDb\(\), runStart \+ WATCH_DEADLINE_FROM_START_MS\);/.test(code('netlify/functions/poll-mailboxes.ts')));
     // A workspace without the Email Assistant flag gets no watch.
     assert.ok(/isFeatureEnabled\(box\.organisationId, EMAIL_ASSISTANT_FLAG\)/.test(code('src/utils/mailbox-push.ts')));
 });
@@ -212,11 +212,14 @@ check('reconnecting clears the watch expiry, so push starts again at the next po
 });
 check('the poll run reads first, then watches within a budget, then digests (review of #906)', () => {
     const c = code('netlify/functions/poll-mailboxes.ts');
-    const reads = c.indexOf('triggerMailboxSync(id)'), watches = c.indexOf('await ensureWatches(getDb())'), digests = c.indexOf('sendMorningDigest(getDb(), box)');
+    const reads = c.indexOf('triggerMailboxSync(id)'), watches = c.indexOf('await ensureWatches(getDb(), runStart'), digests = c.indexOf('sendMorningDigest(getDb(), box)');
     assert.ok(reads > -1 && watches > reads && digests > watches);
     assert.ok(/due\.slice\(i, i \+ 10\)\.map/.test(c), 'reads dispatched in parallel batches');
     const p = code('src/utils/mailbox-push.ts');
     assert.ok(/if \(Date\.now\(\) > deadline\) \{ out\.deferred\+\+; continue; \}/.test(p));
+    // The deadline counts from the START of the run (review of #912), and staging's trigger has the time for it.
+    assert.ok(/const runStart = Date\.now\(\);/.test(c) && /ensureWatches\(getDb\(\), runStart \+ WATCH_DEADLINE_FROM_START_MS\)/.test(c));
+    assert.ok(/\[functions\.run-poll-mailboxes\]\s*\n\s*timeout = 26/.test(readFileSync(join(root, 'netlify.toml'), 'utf8')));
 });
 check('a failed watch also clears last_push_at, so the mailbox is back on the 10-minute poll at once', () => {
     assert.ok(/make_interval\(secs => \$\{\(RENEW_WITHIN_MS \+ WATCH_RETRY_MS\) \/ 1000\}\)`, lastPushAt: null \}/.test(code('src/utils/mailbox-push.ts')));
