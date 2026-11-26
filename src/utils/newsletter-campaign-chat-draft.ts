@@ -11,7 +11,7 @@
 //    PREVIOUS email). Two numbers that must agree will, eventually, not — so the delay is RECOMPUTED
 //    from the days here and the model's own delay is ignored. A Day-7 email saved with a delay of 7
 //    would arrive on Day 11.
-//  • "STARTS BY ITSELF" IS NOT THE MODEL'S CALL. Only the `subscribed` trigger can enrol anybody
+//  • "STARTS BY ITSELF" IS NOT THE MODEL'S CALL. Only AUTOMATIC_TRIGGERS can enrol anybody
 //    (newsletter_sequences_trigger_check). A card that said a renewal campaign would start on its own
 //    would be a promise nothing keeps, so the flag is derived from the event, never read.
 //  • NO INVENTED LINKS. A call to action or a body link survives only when its exact URL appears in
@@ -31,7 +31,7 @@ export type CampaignType = typeof CAMPAIGN_TYPES[number];
  * newsletter_sequences_trigger_check (db/schema.ts, db/form-builder.sql) — a test holds them together, and the prompt's
  * "TRIGGERS THAT START BY THEMSELVES" line is held to this list.
  */
-export const AUTOMATIC_TRIGGERS = ['subscribed', 'form'] as const;
+export const AUTOMATIC_TRIGGERS = ['subscribed', 'form', 'first_order'] as const;
 
 /** The prompt caps a campaign at 7; the welcome sequence holds 8 (MAX_STEPS). Below both. */
 export const MAX_CAMPAIGN_EMAILS = 7;
@@ -64,7 +64,7 @@ export interface NewsletterCampaignDraft {
     campaignType: CampaignType;
     goal: string;
     audience: string;
-    trigger: { event: 'subscribed' | 'form' | 'custom'; description: string; startsAutomatically: boolean };
+    trigger: { event: 'subscribed' | 'form' | 'first_order' | 'custom'; description: string; startsAutomatically: boolean };
     tone: string;
     newsletters: CampaignEmail[];
     /** What was changed on the way in, so the card can say so rather than silently editing. */
@@ -174,7 +174,7 @@ export function campaignDraftFromUiElement(uiElement: unknown, suppliedText = ''
     const campaignType: CampaignType = (CAMPAIGN_TYPES as readonly string[]).includes(String(c.campaignType))
         ? c.campaignType as CampaignType : 'custom';
     const trig = c.trigger && typeof c.trigger === 'object' ? c.trigger as Record<string, unknown> : {};
-    const event: 'subscribed' | 'form' | 'custom' = trig.event === 'subscribed' ? 'subscribed' : trig.event === 'form' ? 'form' : 'custom';
+    const event: 'subscribed' | 'form' | 'first_order' | 'custom' = trig.event === 'subscribed' ? 'subscribed' : trig.event === 'form' ? 'form' : trig.event === 'first_order' ? 'first_order' : 'custom';
 
     return {
         stage,

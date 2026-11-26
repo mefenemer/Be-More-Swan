@@ -33,6 +33,8 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
 import { createNotification } from './notify';
 import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
+import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
+import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
 // Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
@@ -328,7 +330,7 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
 export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
 
 /** The Checkout Session for a whole basket — pure. Quantities were chosen on the basket page. */
-export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null }): Stripe.Checkout.SessionCreateParams {
+export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null; news?: boolean; businessName?: string }): Stripe.Checkout.SessionCreateParams {
     const back = basketPagePath(req.basketId);
     // UK delivery rates (shop-delivery.ts): the buyer picks one on Stripe's page; a rate is free over its threshold.
     // In pounds only: a basket priced in another currency is checked out without them (Stripe needs one currency).
@@ -354,6 +356,8 @@ export function basketCheckoutParams(req: { origin: string; site: SiteRow; baske
         metadata: {
             bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_basket: req.basketId,
             bms_item_name: orderSummaryName(req.lines), bms_page: BASKET_PATH,
+            // The basket page's "Send me news" box, ticked (shop-buyer-audience.ts). Absent = not ticked.
+            ...(req.news ? { [NEWS_METADATA_KEY]: '1', [NEWS_WORDS_METADATA_KEY]: newsBoxLabel(req.businessName ?? '').slice(0, 450) } : {}),
         },
     };
 }
@@ -402,7 +406,7 @@ async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOu
     const collectAddress = priced.lines.some((l) => { const s = sections.find((x) => x.id === l.sectionId); return s?.type === 'products' && s.props.collectAddress; });
     try {
         const session = await (await stripeClient()).checkout.sessions.create(
-            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId) }),
+            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId), news: req.body.get('_news') === '1', businessName: req.definition.settings.siteName }),
             { stripeAccount: ready.account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');
@@ -526,6 +530,15 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         }).catch((err) => console.error('[site-shop] notification failed', err));
     }
     await sendStockAlerts(db, { orgId: site.organisationId, ownerUserId: owner?.userId ?? null, orderId: order.id, alerts: stockAlerts });
+    // Phase 2: a buyer who ticked "Send me news" on the basket page joins the Audience, now that they've paid.
+    let audience: BuyerAudienceResult | null = null;
+    if (newsTicked(session.metadata as Record<string, string> | null)) {
+        audience = await addShopBuyerToAudience(db, { organisationId: site.organisationId, email: order.customerEmail, name: order.customerName, orderId: order.id, words: session.metadata?.[NEWS_WORDS_METADATA_KEY] ?? null, sourceUrl: order.pagePath })
+            .catch((err) => { console.error('[site-shop] buyer → Audience failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) }); return null; });
+    }
+    // Slice 4b: their first order starts the "first order" email flow (or, newly subscribed, the welcome flow).
+    if (audience) await enrolShopBuyer(db, { organisationId: site.organisationId, email: order.customerEmail, orderId: order.id, audience });
+    const audienceLine = buyerAudienceLine(audience);
     if (owner?.email) {
         const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
         const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
@@ -540,6 +553,7 @@ ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}<
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
 ${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : ''}
+${audienceLine ? `<p>${esc(audienceLine)}</p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }

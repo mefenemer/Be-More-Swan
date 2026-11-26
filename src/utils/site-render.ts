@@ -25,6 +25,7 @@ import { productHomePage, productPagePath, productSections } from './site-produc
 import { allOptionsSoldOut, optionPence, type ProductOptions } from './shop-options';
 import { formatMoney } from './product-price';
 import { BASKET_PATH, basketTotal, checkoutBlocker, type PricedLine } from './shop-basket';
+import { newsBoxLabel } from './shop-buyer-audience';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
 import { describeCancellation } from './stay-quote';
@@ -1109,7 +1110,8 @@ export function renderSiteBasket(def: SiteDefinition, ctx: RenderContext, v: Bas
         const blocker = checkoutBlocker(v.lines) ?? (v.canSell ? null : 'Online payments aren\'t available right now. Please get in touch with the business to buy these.');
         const checkout = blocker
             ? `<p class="fine" data-basket-blocked>${esc(blocker)}</p>`
-            : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<button class="btn" type="submit">Check out</button></form>`;
+            // Phase 2 (shop-buyer-audience.ts): an UNTICKED news box; ticked, the buyer joins the Audience once they've paid.
+            : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<p class="fine" data-basket-news><label><input type="checkbox" name="_news" value="1"> ${esc(newsBoxLabel(s.siteName))}</label></p><button class="btn" type="submit">Check out</button></form>`;
         body = `<h1>Your basket</h1>${notes}<ul class="opts basket">${rows}</ul>
 <p class="price"><strong>Total: ${esc(formatMoney(basketTotal(v.lines), currency))}</strong></p>
 ${v.delivery ? `<p data-basket-delivery><strong>Delivery:</strong> ${esc(v.delivery)}. You choose on the next page; the cost is added there before you pay.</p>` : ''}
