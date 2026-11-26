@@ -79,6 +79,8 @@ async function main() {
         await order({ at: ukMonthStart('-30 minutes'), item: 'Mug', total: 800, buyer: 'Late', status: 'done' });
         // 13 months ago: outside the 12 months listed. Another workspace's order: never counted.
         await order({ at: ukMonthStart('-13 months'), item: 'Mug', total: 800, status: 'done' });
+        // Two months ago: one order, refunded in full — the month is still listed (review #894).
+        await order({ at: ukMonthStart('-1 month -5 days'), item: 'Mug', total: 800, status: 'refunded', refunded: 800 });
         await order({ org: OTHER, at: ukMonthStart('1 day'), item: 'Secret', total: 99900 });
 
         const s = await loadShopSales(db, ORG);
@@ -86,13 +88,15 @@ async function main() {
 
         await check('this UK month: orders not refunded in full; sold after refunds; currencies kept apart', () => {
             assert.strictEqual(thisMonth.orders, 5);
+            assert.strictEqual(thisMonth.refunded, 1);
             assert.deepStrictEqual(thisMonth.sold, { GBP: 3400 + 1200 + 0 + 500 + 1200, EUR: 1000 });
         });
         await check('an order 30 minutes before the UK month began is last month\'s; 13 months ago is not listed', () => {
             assert.strictEqual(lastMonth.month, previousMonth(s.thisMonth));
             assert.strictEqual(lastMonth.orders, 1);
             assert.deepStrictEqual(lastMonth.sold, { GBP: 800 });
-            assert.strictEqual(s.months.length, 2);
+            assert.strictEqual(s.months.length, 3);
+            assert.deepStrictEqual(s.months[2], { month: previousMonth(previousMonth(s.thisMonth)), orders: 0, sold: { GBP: 0 }, refunded: 1 });
         });
         await check('best sellers by units: basket lines by the product\'s name today, Buy orders by their item name', () => {
             assert.deepStrictEqual(s.bestThisMonth.map((b) => [b.name, b.units]), [['Fig candle', 4], ['Mug', 3]]);
@@ -107,8 +111,8 @@ async function main() {
         });
         await check('the snapshot lines quote it', () => {
             const text = salesSnapshotLines(s).join('\n');
-            assert.ok(text.includes('5 orders, £63 + €10 sold'), text);
-            assert.ok(text.includes('1. Fig candle: 4 sold, £48'), text);
+            assert.ok(text.includes('5 orders, £63 + €10 sold (1 more refunded in full)'), text);
+            assert.ok(text.includes('1. Fig candle: 4 sold\n'), text);
             assert.ok(text.includes('WAITING TO BE POSTED (paid, not yet posted or dealt with): 2 orders'), text);
         });
         await check('no order-lines table: falls back to orders alone', async () => {

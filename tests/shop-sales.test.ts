@@ -67,7 +67,10 @@ check('snapshot lines: months, together-total, both best-seller windows, waiting
     assert.ok(t.includes('November 2026 is this month, so far'));
     assert.ok(t.includes('- October 2026: 3 orders, £30 + €5 sold'));
     assert.ok(t.includes('Last 12 months together: 4 orders, £42 + €5 sold. Months not listed had no orders.'));
-    assert.ok(t.includes('1. Fig candle: 1 sold, £12') && t.includes('BEST SELLERS LAST 90 DAYS: nothing sold yet.'));
+    assert.ok(t.includes('1. Fig candle: 1 sold\n') && t.includes('BEST SELLERS LAST 90 DAYS: nothing sold yet.'));
+    // review #894: a month with only full refunds is listed, so "not listed = no orders" holds.
+    const refundedOnly = salesSnapshotLines({ ...base, months: [{ month: '2026-03', orders: 0, sold: {}, refunded: 1 }] }).join('\n');
+    assert.ok(refundedOnly.includes('- March 2026: 0 orders, £0 sold (1 more refunded in full)'));
     assert.ok(t.includes(`31 orders; the oldest ${WAITING_SHOWN} listed`) && t.includes('- #1 2026-11-01: 1 × Mug, Jo') && t.includes('- #2 2026-11-01: 1 × Mug, a buyer'));
     assert.ok(salesSnapshotLines(base).join('\n').includes('WAITING TO BE POSTED: none'));
     assert.deepStrictEqual(salesSnapshotLines(null), []);

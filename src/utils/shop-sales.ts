@@ -28,7 +28,7 @@ export const WAITING_SHOWN = 30;
 export const BEST_SELLER_DAYS = 90;
 
 export interface MoneyByCurrency { [currency: string]: number }
-export interface MonthTotal { month: string /* YYYY-MM, UK */; orders: number; sold: MoneyByCurrency }
+export interface MonthTotal { month: string /* YYYY-MM, UK */; orders: number; sold: MoneyByCurrency; /** Orders refunded in full (not in `orders`). */ refunded?: number }
 export interface BestSeller { name: string; units: number; sold: MoneyByCurrency }
 export interface WaitingOrder { id: number; date: string /* YYYY-MM-DD, UK */; itemName: string; quantity: number; customerName: string | null }
 export interface ShopSales {
@@ -106,9 +106,10 @@ async function bestSellerRows(db: Db, orgId: number, windowSql: ReturnType<typeo
 export async function loadShopSales(db: Db, orgId: number): Promise<ShopSales> {
     const [now] = asRows<{ month: string }>(await db.execute(sql`SELECT to_char(now() AT TIME ZONE 'Europe/London', 'YYYY-MM') AS month`));
     const thisMonth = now?.month ?? new Date().toISOString().slice(0, 7);
-    const monthRows = asRows<{ month: string; currency: string; orders: number; sold: number }>(await db.execute(sql`
+    const monthRows = asRows<{ month: string; currency: string; orders: number; refunded: number; sold: number }>(await db.execute(sql`
         SELECT to_char(${UK}, 'YYYY-MM') AS month, upper(currency) AS currency,
-               count(*) FILTER (WHERE status <> 'refunded')::int AS orders, sum(amount_total - refunded_amount)::int AS sold
+               count(*) FILTER (WHERE status <> 'refunded')::int AS orders,
+               count(*) FILTER (WHERE status = 'refunded')::int AS refunded, sum(amount_total - refunded_amount)::int AS sold
           FROM site_orders
          WHERE organisation_id = ${orgId}
            AND ${UK} >= date_trunc('month', now() AT TIME ZONE 'Europe/London') - make_interval(months => ${SALES_MONTHS - 1})
@@ -116,8 +117,9 @@ export async function loadShopSales(db: Db, orgId: number): Promise<ShopSales> {
     const months: MonthTotal[] = [];
     for (const r of monthRows) {
         let m = months.find((x) => x.month === r.month);
-        if (!m) { m = { month: r.month, orders: 0, sold: {} }; months.push(m); }
+        if (!m) { m = { month: r.month, orders: 0, sold: {}, refunded: 0 }; months.push(m); }
         m.orders += Number(r.orders) || 0;
+        m.refunded = (m.refunded ?? 0) + (Number(r.refunded) || 0);
         addMoney(m.sold, r.currency, Number(r.sold) || 0);
     }
     const [thisRows, recentRows, waitingRows, waitingTotal] = await Promise.all([
@@ -129,7 +131,8 @@ export async function loadShopSales(db: Db, orgId: number): Promise<ShopSales> {
         db.execute(sql`SELECT count(*)::int AS n FROM site_orders WHERE organisation_id = ${orgId} AND status = 'paid'`),
     ]);
     return {
-        months: months.filter((m) => m.orders > 0 || Object.values(m.sold).some((v) => v !== 0)),
+        // Every month with any order, a refunded-in-full one included, so "a month not listed had no orders" is true (review #894).
+        months,
         thisMonth,
         bestThisMonth: rankBestSellers(thisRows),
         bestRecent: rankBestSellers(recentRows),
@@ -146,7 +149,7 @@ export function monthSummary(s: ShopSales): { thisMonth: MonthTotal; lastMonth: 
 
 /** "12 orders, £340 sold" — the Shop tab's month line. Pure. */
 export function salesMonthWords(m: MonthTotal): string {
-    return `${m.orders} order${m.orders === 1 ? '' : 's'}, ${moneyWords(m.sold)} sold`;
+    return `${m.orders} order${m.orders === 1 ? '' : 's'}, ${moneyWords(m.sold)} sold${m.refunded ? ` (${m.refunded} more refunded in full)` : ''}`;
 }
 
 /** The SALES and WAITING lines of the chat snapshot. Pure. */
@@ -154,7 +157,7 @@ export function salesSnapshotLines(s: ShopSales | null | undefined): string[] {
     if (!s) return [];
     const out: string[] = ['', `SALES (every order, UK months; "sold" is after refunds; ${monthName(s.thisMonth)} is this month, so far):`];
     if (!s.months.length) out.push(`- No orders in the last ${SALES_MONTHS} months.`);
-    for (const m of s.months) out.push(`- ${monthName(m.month)}: ${m.orders} order${m.orders === 1 ? '' : 's'}, ${moneyWords(m.sold)} sold`);
+    for (const m of s.months) out.push(`- ${monthName(m.month)}: ${salesMonthWords(m)}`);
     if (s.months.length) {
         const n = s.months.reduce((a, m) => a + m.orders, 0);
         const sold: MoneyByCurrency = {};
@@ -162,7 +165,7 @@ export function salesSnapshotLines(s: ShopSales | null | undefined): string[] {
         out.push(`- Last ${SALES_MONTHS} months together: ${n} order${n === 1 ? '' : 's'}, ${moneyWords(sold)} sold. Months not listed had no orders.`);
     }
     const best = (label: string, list: BestSeller[]) => list.length
-        ? [`BEST SELLERS ${label} (by units):`, ...list.map((b, i) => `${i + 1}. ${b.name}: ${b.units} sold, ${moneyWords(b.sold)}`)]
+        ? [`BEST SELLERS ${label} (by units sold; no amounts here — use SALES for money):`, ...list.map((b, i) => `${i + 1}. ${b.name}: ${b.units} sold`)]
         : [`BEST SELLERS ${label}: nothing sold yet.`];
     out.push('', ...best('THIS MONTH', s.bestThisMonth), ...best(`LAST ${BEST_SELLER_DAYS} DAYS`, s.bestRecent));
     if (!s.waitingCount) {
