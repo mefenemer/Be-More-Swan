@@ -375,3 +375,7 @@ jobs:
       # "not sold in 60 days" (old enough, buyable, the shop selling, never another workspace's orders) — on Postgres.
       - name: Shop facts for the Business Mentor
         run: npx tsx tests/shop-mentor-db.test.ts
+      # Bring your Shopify shop across (src/utils/site-import-store.ts, online shop Phase 2): descriptions and variants as
+      # options (own prices, unavailable sold out) land in Business Information; existing products untouched — on Postgres.
+      - name: Shop Shopify import with options
+        run: npx tsx tests/shop-shopify-options-db.test.ts
