@@ -16,6 +16,7 @@ import { resolveBaseUrl } from './base-url';
 import { isFeatureEnabled } from './feature-flags';
 import { EMAIL_ASSISTANT_FLAG, MailboxError, getMailboxAccessToken, labelsOn, parseMailboxSettings, type MailboxRow } from './mailboxes';
 import { writerFor } from './mail-writer';
+import { notifyNowEmails } from './mailbox-notify';
 import { senderMatches, categoryLabel } from './email-sort';
 import { mailboxActions } from '../../db/schema';
 import { cursorExpired, providerHttpError, readerFor } from './mail-reader';
@@ -81,6 +82,9 @@ async function takeLease(db: Db, mailboxId: number): Promise<MailboxRow | null> 
     return rows[0] ?? null;
 }
 
+/** A "now" email older than this when it is sorted doesn't raise the "needs you now" notification. */
+export const NOW_NOTIFY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 export interface SyncOutcome { ran: boolean; read: number; sorted: number; aiSorted: number; labelled: number; ruleArchived: number; error?: string }
 
 /** One read-and-sort run for a mailbox. Never throws. */
@@ -134,12 +138,18 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
 
         // Newly sorted emails whose category is then written into the mailbox (labels, when on).
         const toLabel: { providerMessageId: string; category: string }[] = [];
+        let newNow = 0;
         const providerIdOf = new Map(pending.map((m) => [m.id, m.providerMessageId]));
+        const receivedAtOf = new Map(pending.map((m) => [m.id, m.receivedAt]));
         const save = async (id: number, r: SortResult) => {
             await db.update(mailboxMessages).set({
                 category: r.category, priority: r.priority, summary: r.summary, reason: r.reason, sortedBy: r.sortedBy, updatedAt: new Date(),
             }).where(eq(mailboxMessages.id, id));
             out.sorted++;
+            // Only mail that ARRIVED recently counts as "needs you now": a first read (14 days), a re-read after
+            // the cursor expired, or mail held back by the daily AI limit is sorted late and is not news.
+            const at = receivedAtOf.get(id);
+            if (r.priority === 'now' && at && Date.now() - at.getTime() <= NOW_NOTIFY_MAX_AGE_MS) newNow++;
             const pid = providerIdOf.get(id);
             // Private stays unlabelled: a "Private" label would point at exactly what the owner wants left alone.
             if (pid && r.category !== 'private') toLabel.push({ providerMessageId: pid, category: categoryLabel(r.category) });
@@ -192,7 +202,10 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
             }
         }
 
-        // ── 4. The owner's archive rules (D5: a rule may archive, never trash) ──
+        // ── 4. Tell the owner when something new is time-critical (once; counts only) ──
+        if (newNow) await notifyNowEmails(db, box, newNow);
+
+        // ── 5. The owner's archive rules (D5: a rule may archive, never trash) ──
         if (writer && settings.archiveRules.length) out.ruleArchived = await runArchiveRules(db, box, writer, token, settings.archiveRules);
     } catch (err) {
         if (err instanceof MailboxError) lastError = err.message;

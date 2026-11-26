@@ -658,9 +658,21 @@ page only — no real mailbox has been connected yet). As built:
   - Checked on the fixture page: all five cards render via the registry; reply card drafts and blocks Send
     on a gap; clean-up card reads the live batch; rule card saves; tab shows Labels/Rules/Unsubscribe.
     **Not checked against a real mailbox.**
-- **Still open after 2b:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per
-  email, which needs real email from people in a connected mailbox; a Review-tab listing (approvals live on
-  the Emails tab); notifications ("3 emails need you") in the bell/Inbox and the morning summary section.
+- **Notifications ✅ BUILT 2026-11-26** (`src/utils/mailbox-notify.ts`), to the mailbox's OWNER only, counts and
+  their own address only:
+  - `email_needs_you` (Needs you): newly sorted mail includes something Now. One open per mailbox; cleared when
+    the owner opens the Emails tab.
+  - `email_morning_digest` (an update): once a day, 07:00–11:59 in the workspace's time zone, from the
+    10-minute poll — "3 emails need you (1 now) · 12 sorted yesterday · 5 ready to clear"; nothing sent when
+    all are 0; latched in `mailboxes.settings.lastDigestDay` before sending.
+  - **Changed from §2.3:** not a section in the Business Mentor's morning summary. That summary is per
+    workspace and goes to every owner and admin; email is one person's, and the Mentor never reads
+    mailboxes. The Email Assistant sends its own note in the same window instead.
+  - New preference category "Email Assistant" (in-app on, email off, push off). Both types added to
+    notification-actions.ts, the preferences and `db/notifications-categorization.sql` (⚠️ re-run that file on
+    BOTH DBs; until then the call site passes the category, so nothing breaks).
+- **Still open:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per email, which
+  needs real email from people in a connected mailbox; a Review-tab listing (approvals live on the Emails tab).
 
 **Phase 3: Gmail** — split in two (2026-11-13):
 - **3a ✅ BUILT 2026-11-13** (branch `claude/email-assistant-phase1`): Gmail connect on the separate mail

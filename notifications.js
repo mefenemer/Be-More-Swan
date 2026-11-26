@@ -290,6 +290,8 @@ window.NotifKit = (function () {
             site_enquiry_received: ['Open enquiries', 'siteenquiries'], site_order_received: ['Open orders', 'siteorders'],
             site_payments_ready: ['Open orders', 'siteorders'],
             site_booking_received: ['Open bookings', 'sitebookings'], site_booking_changed: ['Open bookings', 'sitebookings'],
+            // The Email Assistant (mailbox-notify.ts): its Emails tab.
+            email_needs_you: ['Open emails', 'datahub'], email_morning_digest: ['Open emails', 'datahub'],
         };
         if (SITE_TABS[notif.type] && meta.assistantId) {
             const [label, tab] = SITE_TABS[notif.type];

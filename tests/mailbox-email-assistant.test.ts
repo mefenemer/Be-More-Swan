@@ -35,6 +35,8 @@ import { mergeOutlookCategories } from '../src/utils/mail-writer/graph';
 import { isPrivateAddress, oneClickUnsubscribe, parseListUnsubscribe, safeUrlShape } from '../src/utils/one-click-unsubscribe';
 import { ruleMatches } from '../src/utils/mailbox-sync';
 import { labelsOn } from '../src/utils/mailboxes';
+import { digestLine, nowPhrase } from '../src/utils/mailbox-notify';
+import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): void {
@@ -643,6 +645,58 @@ check('rules / labels / unsubscribe are owner-only like every other action; the 
     for (const a of ["action: 'add_rule'", "action: 'remove_rule'", "action: 'set_labels'", "action: 'unsubscribe'"]) assert.ok(js.includes(a), a);
 });
 
+
+console.log('\nNotifications');
+
+check('wording: counts only, singular and plural; a morning with nothing to say sends nothing', () => {
+    assert.strictEqual(nowPhrase(1), '1 email needs you now');
+    assert.strictEqual(nowPhrase(3), '3 emails need you now');
+    assert.strictEqual(digestLine({ needsYou: 3, now: 1, sortedYesterday: 12, toClear: 5 }), '3 emails need you (1 now) · 12 sorted yesterday · 5 ready to clear');
+    assert.strictEqual(digestLine({ needsYou: 0, now: 0, sortedYesterday: 4, toClear: 0 }), 'Nothing needs you · 4 sorted yesterday');
+    assert.strictEqual(digestLine({ needsYou: 0, now: 0, sortedYesterday: 0, toClear: 0 }), null);
+});
+
+check('both templates carry counts and the owner\'s own address only — never a sender, subject or summary', () => {
+    for (const key of ['email_needs_you', 'email_morning_digest']) {
+        const t = NOTIFICATION_DEFAULTS.find((d) => d.templateKey === key);
+        assert.ok(t, key);
+        const vars = t!.variables.map((x) => x.key).sort();
+        assert.ok(vars.every((k) => ['emails.now', 'digest.line', 'mailbox.address'].includes(k)), `${key}: ${vars.join(', ')}`);
+        assert.ok(!/from|subject|summary|sender/i.test(`${t!.title} ${t!.message}`), key);
+    }
+    const src = code('src/utils/mailbox-notify.ts');
+    assert.ok((src.match(/userId: box\.userId,/g) ?? []).length === 2, 'both go to the mailbox owner only');
+    assert.ok(!/fromAddress|fromName|subject|summary/.test(src.replace(/summary\s*\(plan/g, '')), 'no email detail is read into a notification');
+});
+
+check('"needs you now": one open per mailbox, sent from the sync when something new is Now, cleared on opening the tab', () => {
+    const n = code('src/utils/mailbox-notify.ts');
+    assert.ok(/eq\(notifications\.type, NOW_TYPE\), isNull\(notifications\.resolvedAt\)/.test(n) && /metadata\}->>'mailboxId' = \$\{String\(box\.id\)\}/.test(n));
+    assert.ok(/category: 'suggested_action'/.test(n) && /category: 'state_change'/.test(n), 'category passed so it is right before the SQL is re-applied');
+    const sync = code('src/utils/mailbox-sync.ts');
+    assert.ok(/if \(newNow\) await notifyNowEmails\(db, box, newNow\);/.test(sync));
+    assert.ok(/if \(qp\.seen === '1' && !qp\.mailboxId\) await resolveNowNotification\(db, ctx\.userId\);/.test(code('netlify/functions/mailboxes.ts')));
+    // Only the Emails tab sends seen=1 — loading the Results cards must not clear it.
+    assert.ok(/fetch\(API \+ '\?seen=1'/.test(read('src/components/assistant-mailbox.js')));
+});
+
+check('the morning note: 07:00–11:59 in the workspace\'s time zone, latched once a day before anything is sent', () => {
+    const n = code('src/utils/mailbox-notify.ts');
+    assert.ok(/if \(hour < SEND_FROM_HOUR \|\| hour > SEND_UNTIL_HOUR\) return false;/.test(n));
+    assert.ok(n.indexOf("jsonb_set(coalesce(${mailboxes.settings}, '{}'::jsonb), '{lastDigestDay}'") < n.indexOf('createNotification(db, DIGEST_TYPE'), 'latch first');
+    assert.ok(/<> \$\{dayStr\}`\)\)/.test(n), 'only a mailbox not yet sent today passes the latch');
+    assert.ok(/sendMorningDigest\(getDb\(\), box\)/.test(code('netlify/functions/poll-mailboxes.ts')));
+});
+
+check('both types are mapped everywhere a type must be (category, SQL, preferences, click → Emails tab)', () => {
+    for (const t of ['email_needs_you', 'email_morning_digest']) {
+        assert.ok(read('src/utils/notification-actions.ts').includes(`${t}: '`), `${t} category`);
+        assert.ok(read('db/notifications-categorization.sql').includes(`WHEN '${t}'`), `${t} SQL`);
+        assert.ok(read('src/utils/notification-prefs.ts').includes(`'${t}'`), `${t} prefs`);
+        assert.ok(read('notifications.js').includes(`${t}: ['Open emails', 'datahub']`), `${t} click`);
+    }
+});
+
 console.log('\nThe role');
 
 check('it is a built role: manifest, registry (Emails tab of kind mailbox), set-up schema, chat route', () => {
@@ -683,6 +737,20 @@ check('it can\'t be hired or seen by accident: catalogue row HIDDEN (not a publi
     for (const f of ['netlify/functions/mailboxes.ts', 'netlify/functions/mailbox-oauth.ts', 'src/utils/mailbox-sync.ts']) {
         assert.ok(/isFeatureEnabled\([^)]*EMAIL_ASSISTANT_FLAG\)/.test(code(f)), f);
     }
+});
+
+check('no email notification for a workspace that can\'t open the assistant (flag off or archived), and the gate runs before the daily latch', () => {
+    const src = code('src/utils/mailbox-notify.ts');
+    assert.ok(/isFeatureEnabled\(orgId, EMAIL_ASSISTANT_FLAG\)/.test(src));
+    assert.strictEqual((src.match(/const assistantId = await reachableAssistantId\(db, box\.organisationId\);\s*if \(!assistantId\) return false;/g) || []).length, 2);
+    const digest = src.slice(src.indexOf('export async function sendMorningDigest'));
+    assert.ok(digest.indexOf('reachableAssistantId(') > -1 && digest.indexOf('reachableAssistantId(') < digest.indexOf('const won = await'));
+});
+
+check('"needs you now" counts only mail that arrived recently — a first 14-day read or a late AI sort is not news', () => {
+    const src = code('src/utils/mailbox-sync.ts');
+    assert.ok(/export const NOW_NOTIFY_MAX_AGE_MS = 6 \* 60 \* 60 \* 1000;/.test(src));
+    assert.ok(/if \(r\.priority === 'now' && at && Date\.now\(\) - at\.getTime\(\) <= NOW_NOTIFY_MAX_AGE_MS\) newNow\+\+;/.test(src));
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
