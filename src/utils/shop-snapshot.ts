@@ -64,7 +64,7 @@ export function stockSnapshotLines(stock: ShopSnapshotInput['stock'], options: S
     for (const it of shown) {
         const po = options?.[it.id];
         out.push(po?.options.length
-            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option; product_stock does not apply): ${optionsWords(po, it.pence ?? null, it.currency)}`
+            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option, set with product_options; product_stock only sets lowStockAt here, which warns for EACH option${it.lowStockAt != null ? `, now ${it.lowStockAt}` : ', none set'}): ${optionsWords(po, it.pence ?? null, it.currency)}`
             : `- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}; no options`);
     }
     return out;

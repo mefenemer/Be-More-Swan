@@ -189,7 +189,7 @@ async function main() {
         assert.ok(orch.includes('an option listed as "the product\'s price" gets NO "price" key'), 'a chat edit never pins the product price onto an option');
         assert.ok(orch.includes('You CAN set option prices through the product_options card.') && !orch.includes("change prices or products (Business Information"));
         const lines = stockSnapshotLines({ ready: true, items: [{ id: 11, name: 'House Blend', price: '£12.50', pence: 1250, currency: 'GBP', stock: null, lowStockAt: null, state: 'untracked' }] }, { 11: SIZES }).join('\n');
-        assert.ok(lines.includes('productId 11: House Blend (£12.50) — OPTIONS (stock is per option; product_stock does not apply): Size: Small [optionId 3]'));
+        assert.ok(lines.includes('productId 11: House Blend (£12.50) — OPTIONS (stock is per option, set with product_options; product_stock only sets lowStockAt here, which warns for EACH option, none set): Size: Small [optionId 3]'));
     });
 
     await check('one server action for the Shop tab editor and the chat card', () => {

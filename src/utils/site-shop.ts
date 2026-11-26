@@ -32,6 +32,7 @@ import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
 import { createNotification } from './notify';
+import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
 import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
 // Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
@@ -475,6 +476,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         return { taken: null, failed: true };
     };
     let stockLine: string | null;
+    // Phase 2 "stock that talks": what this order took down to its low level or to 0 (once per crossing).
+    const stockAlerts: StockAlert[] = [];
     let orderLines: OrderLine[] | null = null;
     let linesFailed = false;
     // The delivery the buyer chose on Stripe (shop-delivery.ts): its name from the shipping rate, its cost.
@@ -493,6 +496,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         for (const l of lines) {
             const r = await takeOne(l.productId, l.optionId, l.qty);
             failed ||= r.failed;
+            const crossed = stockCrossing(r.taken, l.name);
+            if (crossed) stockAlerts.push(crossed);
             const note = stockAfterOrderLine(r.taken, l.qty);
             if (note) notes.push(`${l.name}: ${note}`);
         }
@@ -504,6 +509,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         const optionId = Number(session.metadata?.bms_option);
         const r = await takeOne(Number(session.metadata?.bms_product), Number.isInteger(optionId) && optionId > 0 ? optionId : null, order.quantity);
         stockLine = r.failed ? STOCK_NOT_UPDATED_LINE : stockAfterOrderLine(r.taken, order.quantity);
+        const crossed = stockCrossing(r.taken, order.itemName);
+        if (crossed) stockAlerts.push(crossed);
     }
 
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
@@ -518,6 +525,7 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             metadata: { assistantId: site.aiAssistantId, siteId: site.id, orderId: order.id },
         }).catch((err) => console.error('[site-shop] notification failed', err));
     }
+    await sendStockAlerts(db, { orgId: site.organisationId, ownerUserId: owner?.userId ?? null, orderId: order.id, alerts: stockAlerts });
     if (owner?.email) {
         const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
         const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
