@@ -165,17 +165,44 @@ export function isMissingBasketTable(err: unknown): boolean {
 const asRows = <T>(r: unknown): T[] => (Array.isArray(r) ? r : ((r as { rows?: T[] })?.rows ?? [])) as T[];
 
 /** Whether this workspace sells by basket: an active, unarchived Shopkeeper, and the tables exist. */
+async function basketOnQuery(db: Db, orgId: number): Promise<boolean> {
+    const [r] = asRows<{ enabled: boolean }>(await db.execute(sql`
+        SELECT (EXISTS (SELECT 1 FROM ai_assistants WHERE organisation_id = ${orgId} AND is_active
+                         AND lifecycle_status <> 'archived' AND configuration->>'type' = 'shopkeeper')
+                AND to_regclass('public.site_baskets') IS NOT NULL) AS enabled`));
+    return !!r?.enabled;
+}
+
 export async function basketOn(db: Db, orgId: number): Promise<boolean> {
     try {
-        const [r] = asRows<{ enabled: boolean }>(await db.execute(sql`
-            SELECT (EXISTS (SELECT 1 FROM ai_assistants WHERE organisation_id = ${orgId} AND is_active
-                             AND lifecycle_status <> 'archived' AND configuration->>'type' = 'shopkeeper')
-                    AND to_regclass('public.site_baskets') IS NOT NULL) AS enabled`));
-        return !!r?.enabled;
+        return await basketOnQuery(db, orgId);
     } catch (err) {
         console.error('[shop-basket] basketOn failed', err instanceof Error ? err.message : err);
         return false;
     }
+}
+
+const basketOnSeen = new Map<number, { on: boolean; at: number }>();
+const BASKET_ON_TTL_MS = 60_000;
+
+/**
+ * basketOn for page views, remembered per workspace for a minute while the function instance lives (review #885:
+ * one query fewer on every uncached page). A minute matches the pages' own public cache, so archiving the
+ * Shopkeeper hides the basket no later than a cached page would. Checkout keeps the fresh basketOn.
+ */
+export async function basketOnCached(db: Db, orgId: number): Promise<boolean> {
+    const seen = basketOnSeen.get(orgId);
+    if (seen && Date.now() - seen.at < BASKET_ON_TTL_MS) return seen.on;
+    let on: boolean;
+    try { on = await basketOnQuery(db, orgId); }
+    catch (err) {
+        // A failed read isn't remembered (review #887): this view goes without the basket, the next one asks again.
+        console.error('[shop-basket] basketOn failed', err instanceof Error ? err.message : err);
+        return false;
+    }
+    if (basketOnSeen.size > 5000) basketOnSeen.clear();
+    basketOnSeen.set(orgId, { on, at: Date.now() });
+    return on;
 }
 
 /** A fresh basket of this site (null: none, another site's, or older than a day). */

@@ -99,12 +99,14 @@
   }
 
   async function support(d) {
+    // From a chat: its id, so that chat's own assistant notes are closed as duplicates of this report (assistant-notes.ts).
+    const chatSessionId = Number.isInteger(d.chatSessionId) ? d.chatSessionId : undefined;
     if (d.destination === 'issue') {
-      await post('/.netlify/functions/issue-reports', { description: `${d.subject}\n\n${d.description}`, sourceLocation: d.from ? `${d.from} chat` : 'Business Mentor chat', sourceUrl: window.location.href });
+      await post('/.netlify/functions/issue-reports', { description: `${d.subject}\n\n${d.description}`, sourceLocation: d.from ? `${d.from} chat` : 'Business Mentor chat', sourceUrl: window.location.href, chatSessionId });
     } else if (d.destination === 'feature') {
       // An idea → Feature requests at Pending Review (feature-requests.ts), the same as Help & Support ▸
       // Feature Requests. Title and description are capped there at 200 / 5000.
-      await post('/.netlify/functions/feature-requests', { title: String(d.subject || '').slice(0, 200), description: String(d.description || '').slice(0, 5000), category: 'app_core' });
+      await post('/.netlify/functions/feature-requests', { title: String(d.subject || '').slice(0, 200), description: String(d.description || '').slice(0, 5000), category: 'app_core', chatSessionId });
     } else {
       // Billing / security → that category, so support-tickets.ts gives it the direct route (support-priority.ts).
       const category = d.topic === 'billing' || d.topic === 'security' ? d.topic : (d.from || 'Business Mentor');

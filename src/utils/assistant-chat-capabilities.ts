@@ -240,7 +240,7 @@ export const CARD_LABELS: Record<string, string> = {
     platforms_proposal: 'Choose which platforms it uses',
     post_action_proposal: 'Approve, schedule, move or delete posts',
     post_picture: "Change the post's picture",
-    post_text_edit: 'Change words in the post or its picture',
+    post_text_edit: 'Change the words on the picture, or how a text box looks (outline, background, colour, font)',
     qr_code: 'Make a QR code',
     redraft_upcoming_proposal: 'Redraft upcoming posts to a note',
     review_decisions: 'Show or hide customer reviews',

@@ -634,7 +634,7 @@
     "overview": [
       "The Shopkeeper Assistant gets your shop ready to take money and keeps your orders in one place. Connect your own Stripe account and buyers pay you directly: Be More Swan takes no fee on your sales, ever. Stripe charges its usual card fees.",
       "Before anyone can pay, UK law says they must see who they are buying from, a real address, how and when you deliver and their right to cancel. Tell the Shopkeeper in your own words and it puts those details on a card for you to check and save. Buy buttons stay hidden until they are in place, so you can't take money without them.",
-      "Buyers buy on a website made with the Website Assistant, or, with no website, on a shop page of your own at its own address. Every paid order lands on the Shop tab and in your email. Mark it as posted and the buyer gets their tracking details from your own Gmail or Outlook. You can ask the Shopkeeper in chat whether you're ready to sell or what has come in."
+      "Buyers buy on a website made with the Website Assistant, or, with no website, on a shop page of your own at its own address. Every paid order lands on the Shop tab and in your email. Mark it as posted and, if your Gmail or Outlook is connected, the buyer gets their tracking details from it. You can ask the Shopkeeper in chat whether you're ready to sell or what has come in."
     ],
     "highlights": [
       "0% fee on your sales",
@@ -658,13 +658,13 @@
       },
       {
         "title": "Sell",
-        "body": "Buy buttons show on your products, and each order arrives on the Shop tab and in your email."
+        "body": "Buyers add your products to a basket and pay on Stripe. Each order arrives on the Shop tab and in your email."
       }
     ],
     "features": [
       {
         "title": "Two steps to ready",
-        "body": "The Shop tab shows where you stand: connect Stripe, then fill in your Delivery & returns details. Buy buttons show on your products once both are done.",
+        "body": "The Shop tab shows where you stand: connect Stripe, then fill in your Delivery & returns details. Your products can be bought once both are done.",
         "image": "/images/assistants/shopkeeper/shop.jpg",
         "alt": "The Shop tab: a two-step checklist, Connect Stripe, Delivery & returns and Orders"
       },
@@ -686,7 +686,7 @@
       },
       {
         "title": "Orders in one place",
-        "body": "Every paid order in your workspace, newest first, with what was bought, how much and who bought it. Mark each one as dealt with once it's sent, or ask in chat for any new orders."
+        "body": "Every paid order in your workspace, newest first, with what was bought, how much and who bought it. Mark one as posted, with a tracking number if you have one, and, if your Gmail or Outlook is connected, the buyer gets an email from it. Download them all as a spreadsheet (CSV), or ask in chat for any new orders."
       }
     ],
     "faqs": [

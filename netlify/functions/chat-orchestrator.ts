@@ -141,7 +141,7 @@ import { mergeFlyerWords, briefEditFromUiElement, VISUAL_BRIEF_EDIT_TYPE, type B
 import { BRAND_STYLE_TYPE, brandStyleFromUiElement, type BrandStyleCard } from '../../src/utils/chat-brand-style';
 import { DESIGN_EDIT_TYPE, designEditFromUiElement, type DesignEditCard } from '../../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startDesignFromChat, userChoseAiPicture } from '../../src/utils/brief-from-chat';
-import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
+import { describeTextBoxes, postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { whyNowState, whyNowAgeLabel, WHY_NOW_FRESH_DAYS, WHY_NOW_GONE_DAYS } from '../../src/config/lead-why-now';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
@@ -1311,16 +1311,18 @@ async function retireSupersededChatDraft(
 const EDITABLE_POST_STATUSES = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
 
 /** Appended AFTER the role prompt, so it overrides the "saved for real" paragraph in it. */
-function draftTargetPromptBlock(target: { id: number; platform: string | null; caption: string | null; hashtags: string | null }): string {
+function draftTargetPromptBlock(target: { id: number; platform: string | null; caption: string | null; hashtags: string | null; textBoxes?: string[] }): string {
     const { platform } = target;
     return [
         `IMPORTANT — this conversation is about a ${platform ? `${platform} post` : 'post'} the user already has open in the post editor. This OVERRIDES anything above about drafted posts being saved automatically.`,
         `Nothing you draft in this conversation is saved anywhere. Under your reply the user is shown a button that puts your caption into the post they are editing, and only they can press it. That button carries the CAPTION only, so no branded card is made here however the instructions above read — the post already has its own picture controls in the editor the user is sitting in.`,
         `So: still return the post draft object exactly as specified whenever you have enough to write finished copy${platform ? `, with "platforms": ["${platform}"] — that is this post's platform, so never draft for another one` : ''}. But do NOT say you have saved, drafted or scheduled it, do NOT suggest a posting time, and do NOT mention a link to review or approve it — none of that happens here. Keep "reply" to one short sentence offering the caption.`,
         `THE POST THEY HAVE OPEN is #${target.id}. Its saved caption, for when they say "it" or "this":\n---\n${String(target.caption || '').slice(0, 2500) || '(no caption yet)'}\n---${target.hashtags ? `\nHashtags: ${target.hashtags.slice(0, 300)}` : ''}\nFor a change to its words, always return the post draft object, keeping their facts and inventing nothing. Everything else you can do to a post (approve, move, voiceover and so on) still works on this one, by a post_action_proposal naming #${target.id}.`,
+        `ITS TEXT BOXES (words on the picture, as saved, with how each looks now): ${target.textBoxes && target.textBoxes.length ? `\n${target.textBoxes.map((t) => `- ${t}`).join('\n')}\nWhen they ask to change a text box's words or look ("the text box", "the outline", "make the writing bigger font"), use the post_text_edit card below on the box they mean; with several and no way to tell which, ask.` : 'none. Words they can see on the picture are part of the picture itself; a text box is added in the editor with "+ Add text".'}`,
         `A PART THEY SELECTED — their message may start "About this part of my post #N:" followed by what they want.
 - "the caption": return the post draft object with the new caption.
 - "the text box": change ONLY that box with { "type": "post_text_edit", "postId": N, "find": "<its words EXACTLY as quoted>", "replace": "<the new words, about as short>", "summary": "<one sentence: what changes>" }.
+  To change how the box LOOKS, add "style" (and leave out "replace" when the words stay): { "type": "post_text_edit", "postId": N, "find": "<its words EXACTLY>", "style": { "color": "#rrggbb" (font colour), "fontFamily": "Arial" | "Helvetica" | "Georgia" | "Times New Roman" | "Courier New" | "Verdana" | "Trebuchet MS" | "Impact" | "Comic Sans MS", "boxStroke": "#rrggbb" or null (the box outline; null = no outline), "boxFill": "#rrggbb" or null (the box background; null = none), "boxOpacity": 0 to 1 (how solid the background is; 1 = solid) }, "summary": "…" }. Include ONLY the fields they asked to change. Font SIZE and position are not on the card: those are set in the editor (drag the box; the size slider under "Aa Style").
 - "the picture" with its words listed, when they want those WORDS changed: a post_text_edit card as for a text box, "find" = the words of the one text box (or the branded card's words) EXACTLY as listed. A branded card's words are at most 120 characters. When it says any words are part of the picture itself, they cannot be changed: say so plainly, and offer a new picture (the post_picture card below) or a text box they add on the picture in the editor.
 - "the picture" or "the video", when they want a different one: { "type": "post_picture", "postId": N, "kind": "image" | "video", "description": "<what it should show, in a sentence, or \"\" to leave it to them>" } — add "source": "library" when they want one of their own from My Content (the card opens their library to pick from). You cannot make, find or place a picture yourself: the card opens the post's picture step, and they choose there.
 For either card, say the card is there for them to use. Never say it has been changed, and never say you are making or finding a picture.`,
@@ -3463,7 +3465,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // can only ever resolve to this org's own row.
         Number.isInteger(forPostId)
             ? db
-                .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform, caption: scheduledPosts.caption, hashtags: scheduledPosts.hashtags })
+                .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform, caption: scheduledPosts.caption, hashtags: scheduledPosts.hashtags, imageOverlays: scheduledPosts.imageOverlays })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.id, forPostId), eq(scheduledPosts.organisationId, orgId)))
                 .limit(1)
@@ -3485,7 +3487,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const emailTarget = issueRow && !['sending', 'sent'].includes(issueRow.status ?? '') ? issueRow : null;
 
     const draftTarget = targetRow && EDITABLE_POST_STATUSES.includes(targetRow.status ?? '')
-        ? { id: targetRow.id, platform: targetRow.platform ?? null, caption: targetRow.caption ?? null, hashtags: targetRow.hashtags ?? null }
+        ? { id: targetRow.id, platform: targetRow.platform ?? null, caption: targetRow.caption ?? null, hashtags: targetRow.hashtags ?? null, textBoxes: describeTextBoxes(targetRow.imageOverlays) }
         : null;
 
     // Every route's prompt is grounded in this — the business the assistant actually works
@@ -4068,7 +4070,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const first = extractAssistantNote(replyText(response.content));
         let raw = first.text;
         const assistantNote = first.note;
-        if (assistantNote) await recordAssistantNote(db, { note: assistantNote, organisationId: orgId, assistantId: session.aiAssistantId, role: assistantRow.roleKey, names: [orgRow?.name, assistantRow.name] });
+        // Recorded below, once the reply's card is known: a reply carrying the user's own report card sends no note.
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
         let parsed = route.parseResponse(raw);
@@ -4950,6 +4952,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (hubRecords.length === 1 && hubRecords[0].recordType === 'meeting' && hubRecordIds.length === 1
             && uiElement && typeof uiElement === 'object') {
             uiElement = { ...(uiElement as Record<string, unknown>), recordId: hubRecordIds[0] };
+        }
+
+        // What the assistant noticed (src/utils/assistant-notes.ts): one note per chat, and none beside the user's own report
+        // card — prod 2026-11-26, one chat raised issues #93, #94, #96 and feature request #67 next to the user's #95.
+        if (assistantNote && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') {
+            await recordAssistantNote(db, { note: assistantNote, organisationId: orgId, assistantId: session.aiAssistantId, role: assistantRow.roleKey, names: [orgRow?.name, assistantRow.name], chatSessionId: session.id });
         }
 
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
