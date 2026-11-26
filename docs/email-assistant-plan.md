@@ -702,8 +702,13 @@ page only — no real mailbox has been connected yet). As built:
     within a day. Disconnect stops the watch first. `db/z-mailbox-push.sql` adds `watch_expires_at`,
     `watch_id`, `last_push_at` (⚠️ both DBs before deploy).
   - A push wakes the reader unless that mailbox is mid-run; a push that lands mid-run causes one more
-    run afterwards. A watched mailbox is polled every 30 minutes instead of 10.
-  - Tests: tests/mailbox-push.test.ts (19 checks). Not yet tried against real Google / Microsoft.
+    run afterwards. A mailbox is polled every 30 minutes instead of 10 only once push is proven (a push
+    in the last day); a set-up that never delivers keeps the 10-minute poll. A watch that fails to start,
+    or a workspace without the flag, is tried again after 6 hours. Disconnect never calls Gmail's
+    `users.stop` (it would end push for every connection of that Google account).
+  - Known, left: Gmail's watch also fires on our own label writes, so a labelling run is followed by one
+    cheap extra run.
+  - Tests: tests/mailbox-push.test.ts (22 checks). Not yet tried against real Google / Microsoft.
   - Before Gmail push reaches customers: Google Cloud sub-processor notice, 14 days.
 - Then: record the demo video for both uses (Email Assistant + Part B), submit the restricted-scope
   review, do CASA.

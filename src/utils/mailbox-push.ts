@@ -24,7 +24,7 @@ import { resolveBaseUrl } from './base-url';
 import { isFeatureEnabled } from './feature-flags';
 import { EMAIL_ASSISTANT_FLAG, getMailboxAccessToken, type MailboxRow } from './mailboxes';
 import { providerHttpError } from './mail-reader';
-import { createGraphSubscription, deleteGraphSubscription, renewGraphSubscription, startGmailWatch, stopGmailWatch } from './mail-reader/watch';
+import { createGraphSubscription, deleteGraphSubscription, renewGraphSubscription, startGmailWatch } from './mail-reader/watch';
 import { triggerMailboxSync } from './mailbox-sync';
 
 type Db = ReturnType<typeof getDb>;
@@ -33,6 +33,22 @@ type Db = ReturnType<typeof getDb>;
 export const RENEW_WITHIN_MS = 24 * 60 * 60 * 1000;
 /** Watches started or renewed per poll run (the rest wait 10 minutes). */
 const WATCHES_PER_RUN = 20;
+/**
+ * After a watch fails to start, or for a workspace without the Email Assistant, wait this long before
+ * trying that mailbox again — so they never fill the per-run places ahead of mailboxes that can be watched.
+ */
+export const WATCH_RETRY_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Put a mailbox to the back of the queue for WATCH_RETRY_MS. ⚠️ Written as watch_expires_at = now +
+ * RENEW_WITHIN_MS + WATCH_RETRY_MS, so the renewal query picks it up again after WATCH_RETRY_MS. That
+ * date does NOT mean push works: polling goes by last_push_at (mailbox-sync.ts mailboxesDueForSync).
+ */
+async function retryWatchLater(db: Db, mailboxId: number): Promise<void> {
+    await db.update(mailboxes)
+        .set({ watchExpiresAt: sql`now() + make_interval(secs => ${(RENEW_WITHIN_MS + WATCH_RETRY_MS) / 1000})` })
+        .where(eq(mailboxes.id, mailboxId)).catch(() => undefined);
+}
 
 /** The path Graph posts to (also its lifecycle URL). */
 export const GRAPH_PUSH_PATH = '/.netlify/functions/mail-push-graph';
@@ -149,12 +165,10 @@ export async function recordPush(db: Db, mailboxIds: number[]): Promise<{ record
     const rows = await db.update(mailboxes).set({ lastPushAt: new Date() })
         .where(and(inArray(mailboxes.id, ids), eq(mailboxes.status, 'active')))
         .returning({ id: mailboxes.id, lockedUntil: mailboxes.syncLockUntil });
-    let dispatched = 0;
-    for (const r of rows) {
-        if (r.lockedUntil && r.lockedUntil.getTime() > Date.now()) continue;
-        if (await triggerMailboxSync(r.id)) dispatched++;
-    }
-    return { recorded: rows.length, dispatched };
+    // In parallel: Graph wants its answer within about 3 seconds.
+    const free = rows.filter((r) => !(r.lockedUntil && r.lockedUntil.getTime() > Date.now()));
+    const sent = await Promise.all(free.map((r) => triggerMailboxSync(r.id)));
+    return { recorded: rows.length, dispatched: sent.filter(Boolean).length };
 }
 
 /** Active Gmail mailboxes for an address (one address can be connected by several people). */
@@ -208,6 +222,7 @@ export async function ensureWatch(db: Db, box: MailboxRow): Promise<WatchOutcome
     } catch (err) {
         // The mailbox keeps being polled; the next run tries again. Token problems surface through the sync.
         console.error('[mailbox-push] watch failed', { mailboxId: box.id, status: providerHttpError(err)?.status ?? null, err: err instanceof Error ? err.message : err });
+        await retryWatchLater(db, box.id);
         return 'failed';
     }
 }
@@ -231,8 +246,8 @@ export async function ensureWatches(db: Db): Promise<Record<WatchOutcome, number
         return [] as MailboxRow[];
     });
     for (const box of due) {
-        // A workspace without the Email Assistant gets no push (its mailbox isn't read at all).
-        if (!(await isFeatureEnabled(box.organisationId, EMAIL_ASSISTANT_FLAG).catch(() => false))) { out.off++; continue; }
+        // A workspace without the Email Assistant gets no push (its mailbox isn't read at all); asked again later.
+        if (!(await isFeatureEnabled(box.organisationId, EMAIL_ASSISTANT_FLAG).catch(() => false))) { out.off++; await retryWatchLater(db, box.id); continue; }
         out[await ensureWatch(db, box)]++;
     }
     return out;
@@ -240,11 +255,13 @@ export async function ensureWatches(db: Db): Promise<Record<WatchOutcome, number
 
 /** Stop a mailbox's watch at the provider (on disconnect). Best effort; never throws. */
 export async function stopWatch(db: Db, box: Pick<MailboxRow, 'id' | 'vaultRefKey' | 'provider' | 'watchId' | 'watchExpiresAt'>): Promise<void> {
-    if (!box.watchExpiresAt && !box.watchId) return;
+    if (box.provider !== 'outlook' || !box.watchId) return;
     try {
         const token = await getMailboxAccessToken(db, box);
-        if (box.provider === 'gmail') await stopGmailWatch(token);
-        else if (box.provider === 'outlook' && box.watchId) await deleteGraphSubscription(token, box.watchId);
+        // ⚠️ Not Gmail's users.stop: it ends the watch for the whole Google account, and someone else in
+        // another workspace may have connected the same address. The disconnect's Google revoke ends a
+        // watch that was only ours, and pushes for an address with no mailbox are ignored.
+        if (box.provider === 'outlook' && box.watchId) await deleteGraphSubscription(token, box.watchId);
     } catch {
         // A watch nobody renews ends by itself within 7 days, and its pushes find no mailbox.
     }

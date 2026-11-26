@@ -284,9 +284,11 @@ async function aiSortedToday(db: Db, mailboxId: number): Promise<number> {
 }
 
 /**
- * Active mailboxes due a run, not mid-run: not read for 9+ minutes, or, when push is on for the mailbox
- * (a watch that hasn't expired), 29+ minutes — push brings new mail, and this poll only catches a lost
- * push (plan §4.2) or a change push doesn't report (Outlook's subscription covers new mail only).
+ * Active mailboxes due a run, not mid-run: not read for 9+ minutes, or 29+ minutes when push is PROVEN
+ * for the mailbox (a watch that hasn't expired AND a push in the last day) — then push brings new mail,
+ * and this poll only catches a lost push (plan §4.2) or a change push doesn't report (Outlook's
+ * subscription covers new mail only). A watch that never delivers (a wrong Pub/Sub or Graph set-up)
+ * keeps the 10-minute poll.
  */
 export async function mailboxesDueForSync(db: Db, limit = 50): Promise<number[]> {
     const rows = await db.select({ id: mailboxes.id }).from(mailboxes)
@@ -294,7 +296,8 @@ export async function mailboxesDueForSync(db: Db, limit = 50): Promise<number[]>
             eq(mailboxes.status, 'active'),
             sql`(${mailboxes.syncLockUntil} IS NULL OR ${mailboxes.syncLockUntil} < now())`,
             sql`(${mailboxes.lastSyncAt} IS NULL OR ${mailboxes.lastSyncAt} < now() - CASE
-                WHEN ${mailboxes.watchExpiresAt} > now() THEN interval '29 minutes' ELSE interval '9 minutes' END)`,
+                WHEN ${mailboxes.watchExpiresAt} > now() AND ${mailboxes.lastPushAt} > now() - interval '1 day'
+                THEN interval '29 minutes' ELSE interval '9 minutes' END)`,
         ))
         .orderBy(sql`${mailboxes.lastSyncAt} ASC NULLS FIRST`).limit(limit);
     return rows.map((r) => r.id);

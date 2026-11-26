@@ -170,9 +170,23 @@ check('Graph webhook: validation answered first; every notification checked agai
     assert.ok(c.indexOf('validationToken') < c.indexOf("event.httpMethod !== 'POST'"));
     assert.ok(/if \(!box \|\| !clientStateMatches\(box\.id, n\.clientState\)\) continue;/.test(c));
 });
-check('a watched mailbox is polled every 29+ minutes, an unwatched one every 9', () => {
+check('30-minute poll only when push is proven (watch AND a push in the last day); otherwise 10', () => {
     const c = code('src/utils/mailbox-sync.ts');
-    assert.ok(/WHEN \$\{mailboxes\.watchExpiresAt\} > now\(\) THEN interval '29 minutes' ELSE interval '9 minutes' END/.test(c));
+    assert.ok(/WHEN \$\{mailboxes\.watchExpiresAt\} > now\(\) AND \$\{mailboxes\.lastPushAt\} > now\(\) - interval '1 day'\s*THEN interval '29 minutes' ELSE interval '9 minutes' END/.test(c));
+});
+check('a failing watch or a flag-off workspace waits 6 hours, so it never blocks the per-run places (review of #906)', () => {
+    const c = code('src/utils/mailbox-push.ts');
+    assert.ok(/await retryWatchLater\(db, box\.id\);\s*return 'failed';/.test(c));
+    assert.ok(/out\.off\+\+; await retryWatchLater\(db, box\.id\); continue;/.test(c));
+});
+check("disconnect never calls Gmail's users.stop (it would end push for every connection of that address)", () => {
+    const c = code('src/utils/mailbox-push.ts');
+    assert.ok(!/stopGmailWatch/.test(c));
+    assert.ok(/if \(box\.provider !== 'outlook' \|\| !box\.watchId\) return;/.test(c));
+});
+check('Graph: dispatches run in parallel; reauthorization renews only with the flag on', () => {
+    assert.ok(/await Promise\.all\(free\.map\(\(r\) => triggerMailboxSync\(r\.id\)\)\)/.test(code('src/utils/mailbox-push.ts')));
+    assert.ok(/isFeatureEnabled\(row\.organisationId, EMAIL_ASSISTANT_FLAG\)[^\n]*ensureWatch\(db, row\)/.test(code('netlify/functions/mail-push-graph.ts')));
 });
 check('a push during a run causes one more run, only after a run that worked', () => {
     const start = new Date('2026-11-26T10:00:00Z');
@@ -182,7 +196,7 @@ check('a push during a run causes one more run, only after a run that worked', (
     const c = code('netlify/functions/mailbox-sync-background.ts');
     assert.ok(/if \(outcome\.ran && !outcome\.error\) \{/.test(c));
     // recordPush skips a mailbox mid-run (no function call per push during a long first read).
-    assert.ok(/if \(r\.lockedUntil && r\.lockedUntil\.getTime\(\) > Date\.now\(\)\) continue;/.test(code('src/utils/mailbox-push.ts')));
+    assert.ok(/!\(r\.lockedUntil && r\.lockedUntil\.getTime\(\) > Date\.now\(\)\)/.test(code('src/utils/mailbox-push.ts')));
 });
 check('disconnect stops the watch before the token is deleted; the poll run starts and renews watches', () => {
     const m = code('netlify/functions/mailboxes.ts');

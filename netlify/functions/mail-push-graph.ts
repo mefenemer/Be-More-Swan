@@ -16,6 +16,8 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { mailboxes } from '../../db/schema';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { EMAIL_ASSISTANT_FLAG } from '../../src/utils/mailboxes';
 import {
     clearWatch, clientStateMatches, ensureWatch, mailboxForSubscription, parseGraphNotifications, pushConfigured, recordPush,
 } from '../../src/utils/mailbox-push';
@@ -50,7 +52,7 @@ export default withLambda(async (event) => {
             if (n.lifecycleEvent === 'subscriptionRemoved') { await clearWatch(db, box.id); toRead.push(box.id); continue; }
             if (n.lifecycleEvent === 'reauthorizationRequired') {
                 const [row] = await db.select().from(mailboxes).where(eq(mailboxes.id, box.id)).limit(1);
-                if (row) await ensureWatch(db, row);
+                if (row && await isFeatureEnabled(row.organisationId, EMAIL_ASSISTANT_FLAG).catch(() => false)) await ensureWatch(db, row);
                 continue;
             }
             toRead.push(box.id); // a new email, or 'missed'

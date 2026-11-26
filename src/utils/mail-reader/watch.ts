@@ -4,7 +4,7 @@
 //
 // Gmail: users.watch on the INBOX label → Google publishes `{ emailAddress, historyId }` to our Pub/Sub
 //        topic, which pushes it to mail-push-gmail.ts. A watch lasts 7 days; calling watch again renews it.
-//        No id: one watch per mailbox, and users.stop ends it.
+//        No id, and one watch per Google ACCOUNT: we never call users.stop (see mailbox-push.ts stopWatch).
 // Graph: a subscription on the Inbox's messages (new mail only) → Graph POSTs the subscription id and our
 //        clientState to mail-push-graph.ts. At most 10,080 minutes for mail; PATCH renews it.
 //
@@ -43,11 +43,6 @@ export async function startGmailWatch(token: string, topicName: string): Promise
     const ms = Number(data.expiration);
     // Gmail says 7 days; if the reply has no usable expiry, assume a day so renewal comes round soon.
     return { expiresAt: new Date(Number.isFinite(ms) && ms > Date.now() ? ms : Date.now() + 86_400_000) };
-}
-
-/** Stop the Gmail watch. Best effort: a revoked grant stops it anyway. */
-export async function stopGmailWatch(token: string): Promise<void> {
-    await call(`${GMAIL}/stop`, token, 'POST', {}, 'gmail');
 }
 
 /** The expiry to ask Graph for, as Graph wants it. Pure. */
