@@ -353,5 +353,9 @@ jobs:
       # recorded when they end up subscribed (pending → single opt-in), refusals never lifted — proven on Postgres.
       - name: Shop buyers to Audience
         run: npx tsx tests/shop-buyer-audience-db.test.ts
+      # Website enquirers who tick "Send me news" or whom the owner adds (src/utils/enquiry-audience.ts): consent always
+      # recorded when they end up subscribed (pending → single opt-in / manual entry), refusals never lifted — on Postgres.
+      - name: Website enquirers to Audience
+        run: npx tsx tests/enquiry-audience-db.test.ts
       - name: Shop first-order email flows
         run: npx tsx tests/shop-first-order-flow-db.test.ts
