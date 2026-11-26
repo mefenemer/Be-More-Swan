@@ -151,6 +151,8 @@ export interface RenderContext {
     query?: string;
     /** The basket (shop-basket.ts): on for a Shopkeeper workspace; id/count when this address carries ?b=. */
     basket?: { on: boolean; id: string | null; count: number } | null;
+    /** "Tell me when it's back" can be offered (db/z-shop-waitlist.sql is on this database; shop-waitlist.ts). */
+    waitlist?: boolean;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -1073,7 +1075,8 @@ export function renderSiteProduct(def: SiteDefinition, ctx: RenderContext, pr: S
     else if (pr.buyPence !== null && selling) buy = buyFormHtml(sectionId, pr, label, path);
     const canBuySomething = hasOptions ? selling && !allOptionsSoldOut(pr.options!.options) : buy !== '' && buy !== SOLD_OUT_HTML;
     const wholeSoldOut = pr.buyPence !== null && (hasOptions ? allOptionsSoldOut(pr.options!.options) : pr.stock != null && pr.stock <= 0);
-    const waitlist = wholeSoldOut ? waitlistFormHtml(sectionId, pr, path) : '';
+    // Only once the waiting-list table is on this database (review #908): no box that can only say "not switched on".
+    const waitlist = wholeSoldOut && ctx.waitlist === true ? waitlistFormHtml(sectionId, pr, path) : '';
     const terms = canBuySomething ? `<p class="fine"><a href="${esc(href(SHOP_TERMS_PATH))}">Delivery &amp; returns</a></p>` : '';
     const body = `<article><section><div class="w art li pr">
 <p class="meta"><a href="${esc(href(home ? home.path : '/'))}">← ${esc(home ? home.title : 'Home')}</a></p>

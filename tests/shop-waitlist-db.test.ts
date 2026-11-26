@@ -41,6 +41,8 @@ async function main() {
         for (const t of ['organisations', 'sites', 'org_products', 'product_options', 'shop_waitlist', 'audience_contacts', 'lead_opt_outs', 'suppression_list', 'team_messages', 'ai_assistants', 'master_assistants']) {
             await sql.unsafe(`CREATE TABLE ${schema}.${t} (LIKE public.${t} INCLUDING ALL)`);
         }
+        // org_products.stock / low_stock_at are raw-SQL columns (db/z-shop-stock.sql), not in db/schema.ts — so not in CI's tables.
+        await sql.unsafe(`ALTER TABLE ${schema}.org_products ADD COLUMN IF NOT EXISTS stock INTEGER, ADD COLUMN IF NOT EXISTS low_stock_at INTEGER`);
         await sql.unsafe(`SET search_path TO ${schema}`);
         const db = drizzle({ client: sql }) as never;
         const ORG = 8, SITE = 80;
@@ -120,6 +122,15 @@ async function main() {
             await setStock(BIG, 100);
             const r = await sendBackInStock(db, { orgId: ORG, productId: BIG, deps });
             assert.deepStrictEqual(r.ok && [r.sent, r.left], [SEND_BATCH, 5]);
+        });
+        await check('review #908: a slow click stops at the time budget; the rest stay waiting (never marked without an email)', async () => {
+            const SLOW = await product('Slow candle', 0);
+            for (let i = 0; i < 6; i++) await join(SLOW, `s${i}@example.com`);
+            await setStock(SLOW, 10);
+            let t = 0;
+            const r = await sendBackInStock(db, { orgId: ORG, productId: SLOW, deps, now: () => (t += 2500) });
+            assert.ok(r.ok && r.sent >= 1 && r.sent < 6 && r.left === 6 - r.sent, JSON.stringify(r));
+            assert.strictEqual(Number((await sql.unsafe(`SELECT count(*)::int AS n FROM shop_waitlist WHERE product_id = ${SLOW} AND notified_at IS NOT NULL`))[0].n), r.ok ? r.sent : -1);
         });
         await check('the sweep: emailed rows go after 90 days, waiting rows after a year; newer ones stay', async () => {
             const OLD = await product('Old candle', 0);

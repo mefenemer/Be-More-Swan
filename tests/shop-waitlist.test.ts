@@ -28,7 +28,7 @@ const DEF = normaliseSiteDefinition({
     settings: { siteName: 'Kudzu Candles' },
     pages: [{ title: 'Home', slug: '', sections: [{ type: 'hero', props: { headline: 'x' } }] }, { title: 'Shop', slug: 'shop', sections: [{ type: 'products', props: { heading: 'Candles', productIds: [7] } }] }],
 }).definition;
-const live = { origin: 'https://kudzu.bemoreswan.site', preview: false, reportUrl: '#', creditUrl: null, canSell: true } as never;
+const live = { origin: 'https://kudzu.bemoreswan.site', preview: false, reportUrl: '#', creditUrl: null, canSell: true, waitlist: true } as never;
 const base = { id: 7, name: 'Lavender candle', description: null, price: '£12', buyPence: 1200, imageAssetId: null };
 const page = (p: object, basket = true, ctx: object = live) => renderSiteProduct(DEF, { ...(ctx as object), ...(basket ? { basket: { on: true, id: null, count: 0 } } : {}) } as never, { ...base, ...p } as never)!;
 
@@ -49,6 +49,7 @@ check('the product page: the box only under a WHOLLY sold-out product, only in a
     assert.ok(!page({ stock: null }).includes('data-waitlist'), 'untracked: no box');
     assert.ok(!page({ stock: 0 }, false).includes('data-waitlist'), 'no basket (website-only shop): no box');
     assert.ok(!page({ stock: 0 }, true, { ...(live as object), preview: true }).includes('data-waitlist'), 'preview: no box');
+    assert.ok(!page({ stock: 0 }, true, { ...(live as object), waitlist: false }).includes('data-waitlist'), 'review #908: no box before db/z-shop-waitlist.sql');
     const opts = (stocks: Array<number | null>) => ({ stock: null, options: { group: 'Size', options: stocks.map((st, i) => ({ id: i + 1, label: `S${i}`, priceAmount: null, stock: st })) } });
     assert.ok(page(opts([0, 0])).includes('data-waitlist'), 'every option sold out: box');
     assert.ok(!page(opts([0, 2])).includes('data-waitlist'), 'one option left: no box');
@@ -67,7 +68,7 @@ check('the email: the product, a link to it, why they got it; never a price; esc
     const m = backInStockEmail({ business: 'Kudzu <Candles>', product: 'Lavender candle', productUrl: 'https://kudzu.bemoreswan.site/shop/7-lavender-candle' });
     assert.strictEqual(m.subject, 'Lavender candle is back in stock — Kudzu <Candles>');
     assert.ok(m.html.includes('Kudzu &lt;Candles&gt;') && m.html.includes('href="https://kudzu.bemoreswan.site/shop/7-lavender-candle"'));
-    assert.ok(m.html.includes('only email') && m.text.includes('because you asked on our website'));
+    assert.ok(m.html.includes('only email') && m.text.includes('If that wasn\'t you, ignore it'), 'review #908: says what to do if they never asked');
     assert.ok(!/£|\d+\.\d\d/.test(m.html + m.text));
     assert.ok(!backInStockEmail({ business: 'K', product: 'P', productUrl: null }).html.includes('href='));
 });
@@ -82,6 +83,11 @@ check('wired: /_buy notify, stock saves ask, the answer sends, Shop tab button, 
     assert.ok((api.match(/const before = await productBuyable\(db, orgId, Number\(body\.productId\)\)/g) || []).length === 2, 'both stock saves');
     assert.ok(api.includes("if (action === 'waitlist_send') {") && api.includes('waiting: await waitingCounts(db, orgId),'));
     const team = read('src/utils/team-messages.ts');
+    // review #908: only the owner or an admin may answer "Email them", refused before the question is claimed.
+    assert.ok(team.includes("const OWNER_ONLY_ANSWERS: Partial<Record<QuestionKey, string[]>> = { back_in_stock: ['send'] };"));
+    assert.ok(team.indexOf("args.role !== 'owner' && args.role !== 'admin'") < team.indexOf('// Claim it first, so two clicks'));
+    assert.ok(read('netlify/functions/team.ts').includes('answerQuestion(db, { orgId, userId, role, messageId, value: body.value })'));
+    assert.ok(read('netlify/functions/site-serve.ts').includes('waitlistOn: () => waitlistReady(db)'));
     assert.ok(team.includes("export type QuestionKey = 'start_now' | 'brief_video' | 'back_in_stock';") && team.includes("return sendResultWords(name, await sendBackInStock(db, { orgId: a.orgId, productId: a.ref }));"));
     assert.ok(read('src/components/assistant-shop.js').includes("post({ action: 'waitlist_send', productId: Number(waitSend.dataset.waitlistSend) })"));
     assert.ok(read('src/utils/shop-snapshot.ts').includes('WAITING LISTS ("Tell me when it\'s back"'));

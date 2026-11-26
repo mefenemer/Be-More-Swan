@@ -14,7 +14,8 @@
 //    (unsubscribed, bounced, complained, outreach opt-out, suppressed domain, pause): those are skipped and marked.
 //    At most SEND_BATCH per click, so one click fits in a function's time; the rest wait for the next click.
 //
-// ⚠️ Raw SQL on shop_waitlist (db/z-shop-waitlist.sql). Before it: no box on the page, nothing asked, no counts.
+// ⚠️ Raw SQL on shop_waitlist (db/z-shop-waitlist.sql). Before it: no box on the page (waitlistReady), nothing
+// asked, no counts.
 
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -35,6 +36,8 @@ export const WAITLIST_LIMIT = { maxAttempts: 10, windowSecs: 3600 };
 export const WAITLIST_MAX_PER_PRODUCT = 2000;
 /** Emails sent per click; the rest wait for the next click. */
 export const SEND_BATCH = 40;
+/** Stop starting new sends after this long, so a click finishes inside a function's 10-second limit. */
+export const SEND_BUDGET_MS = 6500;
 
 const asRows = <T>(r: unknown): T[] => (Array.isArray(r) ? r : ((r as { rows?: T[] })?.rows ?? [])) as T[];
 const numOrNull = (v: unknown) => (v == null ? null : Number(v));
@@ -44,6 +47,19 @@ export function isMissingWaitlist(err: unknown): boolean {
     const e = err as { code?: string; cause?: { code?: string }; message?: string } | null;
     const code = e?.code ?? e?.cause?.code;
     return code === '42P01' || code === '42703' || /relation "?shop_waitlist"? does not exist/i.test(String(e?.message ?? ''));
+}
+
+let readySeen: { ready: boolean; at: number } | null = null;
+/** Is db/z-shop-waitlist.sql on this database? Cached: yes for good, no for a minute. Never throws. */
+export async function waitlistReady(db: Db): Promise<boolean> {
+    if (readySeen && (readySeen.ready || Date.now() - readySeen.at < 60_000)) return readySeen.ready;
+    try {
+        const [r] = asRows<{ ok: boolean }>(await db.execute(sql`SELECT to_regclass('shop_waitlist') IS NOT NULL AS ok`));
+        readySeen = { ready: !!r?.ok, at: Date.now() };
+    } catch {
+        readySeen = { ready: false, at: Date.now() };
+    }
+    return readySeen.ready;
 }
 
 /** Can the product be bought right now? The same rule the product page uses: options → any option left; else stock. Pure. */
@@ -152,12 +168,12 @@ export function backInStockEmail(o: { business: string; product: string; product
     const html = `<p>Hello,</p>
 <p>You asked ${esc(business)} to tell you when <strong>${esc(o.product)}</strong> was back in stock. It is now${o.productUrl ? '' : ' — visit our website to buy it'}.</p>
 ${o.productUrl ? `<p><a href="${esc(o.productUrl)}">See ${esc(o.product)}</a></p>` : ''}
-<p style="font-size:12px;color:#666">This is the only email you'll get about it: you're no longer on the waiting list. You're getting it because you asked on our website.</p>`;
+<p style="font-size:12px;color:#666">This is the only email you'll get about it: you're no longer on the waiting list. You're getting it because someone asked on our website to be told at this address. If that wasn't you, ignore it: you won't hear from us again about it.</p>`;
     const text = [
         'Hello,', '',
         `You asked ${business} to tell you when ${o.product} was back in stock. It is now${o.productUrl ? '' : ' — visit our website to buy it'}.`,
         ...(o.productUrl ? ['', `See it: ${o.productUrl}`] : []), '',
-        'This is the only email you\'ll get about it: you\'re no longer on the waiting list. You\'re getting it because you asked on our website.',
+        'This is the only email you\'ll get about it: you\'re no longer on the waiting list. You\'re getting it because someone asked on our website to be told at this address. If that wasn\'t you, ignore it: you won\'t hear from us again about it.',
     ].join('\n');
     return { subject, html, text };
 }
@@ -165,10 +181,11 @@ ${o.productUrl ? `<p><a href="${esc(o.productUrl)}">See ${esc(o.product)}</a></p
 export type SendResult = { ok: true; sent: number; skipped: number; failed: number; left: number } | { ok: false; error: string };
 
 /**
- * Email the people waiting for a product (the owner's click). Never more than SEND_BATCH; each row is claimed before
- * its send and released if the send fails. Refused addresses are marked skipped and never emailed.
+ * Email the people waiting for a product (the owner's click). Never more than SEND_BATCH, and no new send after
+ * SEND_BUDGET_MS; each row is claimed just before its send and released if the send fails. Refused addresses are
+ * marked skipped and never emailed.
  */
-export async function sendBackInStock(db: Db, o: { orgId: number; productId: number; deps?: { resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep } }): Promise<SendResult> {
+export async function sendBackInStock(db: Db, o: { orgId: number; productId: number; now?: () => number; deps?: { resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep } }): Promise<SendResult> {
     const product = await productBuyable(db, o.orgId, o.productId);
     if (!product) return { ok: false, error: 'That product isn\'t in your Business Information any more, so nobody was emailed.' };
     if (!product.buyable) return { ok: false, error: `${product.name} is still sold out, so nobody was emailed. Add stock first.` };
@@ -179,17 +196,23 @@ export async function sendBackInStock(db: Db, o: { orgId: number; productId: num
     const routed = await (o.deps?.resolveRoute ?? resolveSendRoute)(db, o.orgId, { recipientCount: Math.min(waiting, SEND_BATCH), senderName: business });
     if ('error' in routed) return { ok: false, error: `Nobody was emailed: ${routed.error}` };
 
-    // Claim this click's batch (oldest first) — a second click or tab can't take the same rows.
-    const claimed = asRows<{ id: number; email: string; slug: string | null }>(await db.execute(sql`
-        UPDATE shop_waitlist w SET notified_at = now()
-         WHERE w.id IN (SELECT id FROM shop_waitlist WHERE organisation_id = ${o.orgId} AND product_id = ${o.productId} AND notified_at IS NULL
-                         ORDER BY id LIMIT ${SEND_BATCH} FOR UPDATE SKIP LOCKED)
-     RETURNING w.id, w.email, (SELECT slug FROM sites s WHERE s.id = w.site_id) AS slug`));
-    const verdicts = await checkAudienceConsentBulk(db, o.orgId, claimed.map((c) => c.email), { consentGivenHere: true });
+    // One row at a time, claimed right before its send (review #908): a function cut off by its time limit leaves
+    // every unsent row still waiting, never "notified" without an email. Stops at SEND_BATCH or the time budget.
+    const now = o.now ?? (() => Date.now());
+    const started = now();
     let sent = 0, skipped = 0, failed = 0;
-    for (const c of claimed) {
+    const tried = new Set<number>();
+    while (sent + skipped + failed < SEND_BATCH && now() - started < SEND_BUDGET_MS) {
+        const [c] = asRows<{ id: number; email: string; slug: string | null }>(await db.execute(sql`
+            UPDATE shop_waitlist w SET notified_at = now()
+             WHERE w.id = (SELECT id FROM shop_waitlist WHERE organisation_id = ${o.orgId} AND product_id = ${o.productId} AND notified_at IS NULL
+                              ${tried.size ? sql`AND id NOT IN (${sql.join([...tried].map((n) => sql`${n}`), sql`, `)})` : sql``}
+                            ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+         RETURNING w.id, w.email, (SELECT slug FROM sites s WHERE s.id = w.site_id) AS slug`));
+        if (!c) break;
+        tried.add(Number(c.id));
         const email = normaliseEmail(c.email);
-        const v = verdicts.get(email);
+        const v = (await checkAudienceConsentBulk(db, o.orgId, [email], { consentGivenHere: true })).get(email);
         if (!v?.sendable) {
             await db.execute(sql`UPDATE shop_waitlist SET skip_reason = ${v?.reason ?? 'consent_check_failed'} WHERE id = ${c.id}`);
             skipped++;

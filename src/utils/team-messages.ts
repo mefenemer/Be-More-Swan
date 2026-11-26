@@ -496,7 +496,7 @@ export async function postTeamChatReply(db: Db, r: {
 }
 
 /** Answer a question. Runs the question's own handler; says what happened in the thread. */
-export async function answerQuestion(db: Db, args: { orgId: number; userId: number; messageId: number; value: string }): Promise<{ ok: true; said: string } | { ok: false; status: number; error: string }> {
+export async function answerQuestion(db: Db, args: { orgId: number; userId: number; role?: string; messageId: number; value: string }): Promise<{ ok: true; said: string } | { ok: false; status: number; error: string }> {
     const [m] = await db.select().from(teamMessages)
         .where(and(eq(teamMessages.id, args.messageId), eq(teamMessages.organisationId, args.orgId))).limit(1);
     const q = m?.question as TeamQuestion | null;
@@ -504,6 +504,12 @@ export async function answerQuestion(db: Db, args: { orgId: number; userId: numb
     if (m.answeredAt) return { ok: false, status: 409, error: 'That question has already been answered.' };
     const choice = q.choices.find((c) => c.value === args.value);
     if (!choice) return { ok: false, status: 400, error: 'That is not one of the answers.' };
+    // Emailing customers is the owner's (or an admin's) decision, as on the Shop tab (review #908). Refused BEFORE the
+    // claim, so the question stays open for them.
+    const ownerOnly = OWNER_ONLY_ANSWERS[q.key];
+    if (ownerOnly && ownerOnly.includes(args.value) && args.role !== 'owner' && args.role !== 'admin') {
+        return { ok: false, status: 403, error: 'Only the workspace owner or an admin can do that. The question stays open for them.' };
+    }
 
     // Claim it first, so two clicks (or two tabs) answer once.
     const claimed = await db.update(teamMessages)
@@ -535,6 +541,9 @@ export async function openQuestionExists(db: Db, orgId: number, key: QuestionKey
         .limit(1);
     return !!r;
 }
+
+/** Answers only the workspace owner or an admin may give (they act outside the workspace, e.g. email customers). */
+const OWNER_ONLY_ANSWERS: Partial<Record<QuestionKey, string[]>> = { back_in_stock: ['send'] };
 
 type Handler = (db: Db, a: { orgId: number; ref: number; value: string }) => Promise<string>;
 
