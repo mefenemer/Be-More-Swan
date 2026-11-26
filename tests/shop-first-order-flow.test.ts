@@ -69,6 +69,7 @@ check('the API: setTrigger, importCampaign and the one-on rule know first_order;
     const seqUtil = read('src/utils/newsletter-sequence.ts');
     assert.ok(seqUtil.includes("if (seq.triggerEvent === 'first_order' && args.via !== 'shop') return { enrolled: false, reason: 'no_sequence' };"));
     assert.ok(read('src/utils/shop-first-order-flow.ts').includes("sequenceId: flow!.id, via: 'shop' }"));
+    assert.ok(read('netlify/functions/audience-forms.ts').includes("else if (seq.triggerEvent === 'first_order') { def.campaign = { sequenceId: null, skipWelcome: false };"), 'a form never links to a first-order flow');
 });
 
 check('Email Studio: the "Who receives it" choice, the new-flow tile, the swap, the lists', () => {
