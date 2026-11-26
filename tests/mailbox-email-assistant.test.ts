@@ -12,6 +12,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -751,6 +752,110 @@ check('"needs you now" counts only mail that arrived recently — a first 14-day
     const src = code('src/utils/mailbox-sync.ts');
     assert.ok(/export const NOW_NOTIFY_MAX_AGE_MS = 6 \* 60 \* 60 \* 1000;/.test(src));
     assert.ok(/if \(r\.priority === 'now' && at && Date\.now\(\) - at\.getTime\(\) <= NOW_NOTIFY_MAX_AGE_MS\) newNow\+\+;/.test(src));
+});
+
+// ── Review tab: the owner's drafted replies + clean-ups, run for real in a sandbox ──────────────────
+function loadMailboxComponent(responses: Record<string, { status?: number; body: unknown }>) {
+    const calls: string[] = [];
+    const win: Record<string, any> = { _detailHubKind: 'mailbox', activated: [] as string[] };
+    win._activateMainTab = (t: string) => win.activated.push(t);
+    const fetch = async (url: string) => {
+        calls.push(url);
+        const r = responses[url] ?? { status: 404, body: { error: 'nope' } };
+        return { ok: (r.status ?? 200) < 400, status: r.status ?? 200, json: async () => r.body };
+    };
+    runInNewContext(read('src/components/assistant-mailbox.js'), { window: win, document: { getElementById: () => null }, fetch, console, URLSearchParams, setTimeout });
+    const container = { innerHTML: '', dataset: {} as Record<string, string>, listener: null as any, addEventListener(_: string, fn: any) { this.listener = fn; } };
+    return { api: win.AssistantMailbox, win, calls, container };
+}
+const API_URL = '/.netlify/functions/mailboxes';
+
+check('Review tab: lists waiting replies (with gaps) and clean-ups, and never sends seen=1', async () => {
+    const { api, calls, container } = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { body: {
+            actions: [
+                { id: 1, kind: 'reply', status: 'waiting', messageId: 11, to: 'jo@x.co', subject: 'Prices?', body: 'Hi Jo, it is [check: price].', gaps: ['price'] },
+                { id: 2, kind: 'reply', status: 'sent', messageId: 12, to: 'al@x.co', subject: 'Old' },
+            ],
+            cleanup: [{ key: 'old-news', label: 'Old newsletters', op: 'archive', messageIds: [1, 2, 3] }],
+        } },
+    });
+    const n = await api.renderReview(container);
+    assert.strictEqual(n, 2, 'one waiting reply + one batch; the sent reply is not waiting');
+    assert.ok(container.innerHTML.includes('Reply to jo@x.co') && container.innerHTML.includes('1 gap to fill'));
+    assert.ok(!container.innerHTML.includes('al@x.co'));
+    assert.ok(container.innerHTML.includes('Old newsletters') && container.innerHTML.includes('3 emails to archive'));
+    assert.ok(container.innerHTML.indexOf('Replies waiting') < container.innerHTML.indexOf('Ready to clear'));
+    assert.ok(calls.every((u) => !u.includes('seen=1')), 'looking at Review must not clear "needs you now"');
+    const sum = await api.reviewSummary();
+    assert.strictEqual(sum.count, 2);
+    assert.strictEqual(JSON.stringify(sum.items.map((i: { label: string }) => i.label)), JSON.stringify(['Reply to jo@x.co', 'Old newsletters']));
+});
+
+check('Review tab: a button opens the Emails tab on that mailbox\'s Drafts / Clean-up', async () => {
+    const { api, win, container } = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { body: { actions: [{ id: 1, kind: 'reply', status: 'waiting', messageId: 11, to: 'jo@x.co', subject: 'S', body: 'B' }], cleanup: [] } },
+    });
+    await api.renderReview(container);
+    const btn = { dataset: { mbxReview: 'drafts', mbxBox: '7' } };
+    container.listener({ target: { closest: () => btn } });
+    assert.deepStrictEqual(win.activated, ['datahub']);
+    // Another role's Review tab reuses the container: its clicks must not jump to Emails.
+    win._detailHubKind = 'records';
+    container.listener({ target: { closest: () => btn } });
+    assert.deepStrictEqual(win.activated, ['datahub']);
+});
+
+check('Review tab: not the owner / no mailbox / flag off / a stale load each show nothing of the email', async () => {
+    let t = loadMailboxComponent({ [API_URL]: { body: { available: true, access: 'counts_only', mailboxes: [{ id: 7 }] } } });
+    assert.strictEqual(await t.api.renderReview(t.container), 0);
+    assert.ok(t.container.innerHTML.includes('Only the mailbox'));
+    assert.ok(!t.calls.some((u) => u.includes('actions=1')), 'a non-owner never asks for drafts');
+    t = loadMailboxComponent({ [API_URL]: { body: { available: true, access: 'owner', mailboxes: [] } } });
+    await t.api.renderReview(t.container);
+    assert.ok(t.container.innerHTML.includes('Connect your mailbox'));
+    t = loadMailboxComponent({ [API_URL]: { body: { available: false, mailboxes: [] } } });
+    await t.api.renderReview(t.container);
+    assert.ok(t.container.innerHTML.includes('not switched on'));
+    t = loadMailboxComponent({ [API_URL]: { body: { available: true, access: 'owner', mailboxes: [] } } });
+    assert.strictEqual(await t.api.renderReview(t.container, { isCurrent: () => false }), null);
+    assert.ok(t.container.innerHTML.includes('Loading'), 'a load that is no longer the newest paints nothing');
+});
+
+check('Review tab: a failed read is an error, never "nothing waiting"', async () => {
+    let t = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { status: 500, body: { error: 'boom' } },
+    });
+    assert.strictEqual(await t.api.renderReview(t.container), null);
+    assert.ok(t.container.innerHTML.includes('Could not load') && !t.container.innerHTML.includes('Nothing waiting'));
+    assert.strictEqual(await t.api.reviewSummary(), null, 'the badge is left alone, not set to 0');
+    t = loadMailboxComponent({
+        [API_URL]: { body: { available: true, access: 'owner', mailboxes: [{ id: 7, address: 'me@shop.co' }, { id: 8, address: 'me@home.co' }] } },
+        [`${API_URL}?mailboxId=7&actions=1`]: { body: { actions: [], cleanup: [] } },
+        [`${API_URL}?mailboxId=8&actions=1`]: { status: 500, body: {} },
+    });
+    await t.api.renderReview(t.container);
+    assert.ok(t.container.innerHTML.includes('Could not load me@home.co') && !t.container.innerHTML.includes('Nothing waiting'));
+});
+
+check('Review tab wiring: registry kind/source mailbox, rendered by the component, strip hidden, no "New" button', () => {
+    const reg = read('src/components/assistant-dashboard-registry.js');
+    const entry = reg.slice(reg.indexOf('    email_assistant: {'), reg.indexOf('    shopkeeper: {'));
+    assert.ok(/reviewQueue: \{\s*kind: 'mailbox',\s*source: 'mailbox',/.test(entry));
+    assert.ok(!/recordType: 'email_action'/.test(entry), 'nothing reads assistant_records for email');
+    const a = code('assistants.js');
+    assert.ok(/source === 'mailbox'\) return _detailRqRenderMailbox\(\);/.test(a));
+    assert.ok(/window\.AssistantMailbox\.renderReview\(container, \{ isCurrent: \(\) => seq === _detailRqRenderSeq \}\)/.test(a));
+    assert.ok(/toggleBtn\('detail-rq-primary-btn', !rqIsMailbox && /.test(a));
+    const reset = a.indexOf("window.AssistantLeadOutreach?.reset();");
+    const hide = a.indexOf("if ((cfg.reviewQueue || {}).source === 'mailbox') {");
+    assert.ok(reset > -1 && hide > reset, 'the strip is hidden AFTER reset() shows it for every role');
+    // ONE path sets the count: the shared prefetch (badge, Needs-you card, pop-up) — no second racing call.
+    assert.ok(/rq\.source === 'mailbox'\) \{[\s\S]{0,400}window\.AssistantMailbox\?\.reviewSummary\?\.\(\);\s*if \(!sum\) return;/.test(a));
+    assert.ok(!/reviewCount/.test(a));
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
