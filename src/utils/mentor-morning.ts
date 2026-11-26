@@ -20,6 +20,8 @@
 //                 (pending_actions — so the 09:00 digest can skip whoever was emailed this), open Mentor suggestions
 // Booking requests, enquiries, posts and actions belonging to an ARCHIVED assistant (or its site) are left
 // out — they wait on nobody, and their only home is hidden (archived-assistant-drafts.ts).
+//   Your shop     best seller of the last 7 days, low stock, sold out (shop-mentor.ts; online shop slice 8) — only
+//                 for a workspace with a shop; the email carries it on the "Yesterday" line
 //   Make next     the best-performing post of the last 14 days (post_insights), when its assistant is ACTIVE
 // "Which calls turned into sales" is never claimed: we only see what was booked, bought or marked won.
 //
@@ -44,6 +46,7 @@ import { createNotification } from './notify';
 import { isEmailEnabled } from './notification-prefs';
 import { sendTemplatedEmail } from './email';
 import { recordPlatformIncident } from './platform-incident';
+import { loadShopWatch, shopMorningLines, type ShopWatch } from './shop-mentor';
 import { resolveBaseUrl } from './base-url';
 
 type Db = any;
@@ -120,6 +123,8 @@ export interface MorningInputs {
     openSuggestions: number;
     /** The best-performing post of the last 14 days, when its assistant is active. */
     bestPost: { assistantId: number; assistantName: string; platform: string; interactions: number; caption: string } | null;
+    /** The shop's best seller this week and stock (shop-mentor.ts); null/absent = no shop. */
+    shop?: ShopWatch | null;
 }
 
 export async function loadMorningInputs(db: Db, orgId: number, today: string, timeZone: string, now = new Date()): Promise<MorningInputs> {
@@ -190,12 +195,13 @@ export async function loadMorningInputs(db: Db, orgId: number, today: string, ti
         bookingsToday: Number(bk?.today ?? 0), bookingRequests: Number(bk?.requests ?? 0),
         enquiriesOpen: Number(enq?.open ?? 0), enquiriesYesterday: Number(enq?.yesterday ?? 0),
         postsAwaitingReview: Number(posts?.n ?? 0), actionsAwaiting: Number(acts?.n ?? 0), openSuggestions, bestPost,
+        shop: await loadShopWatch(db, orgId),
     };
 }
 
 // ── The summary (pure) ────────────────────────────────────────────────────────────────────────────
 
-export type MorningKey = 'money' | 'today' | 'enquiries' | 'needs_you' | 'next';
+export type MorningKey = 'money' | 'shop' | 'today' | 'enquiries' | 'needs_you' | 'next';
 export interface MorningSummary {
     /** The local date it is for, and the date it describes ("yesterday"). */
     day: string;
@@ -240,6 +246,9 @@ export function buildMorningSummary(i: MorningInputs, day: string): MorningSumma
         if (sold) head.push(plural(sold, 'sale'));
         if (i.won?.count) head.push(`${plural(i.won.count, 'deal')} won`);
     }
+
+    const shop = shopMorningLines(i.shop ?? null);
+    if (shop.length) sections.push({ key: 'shop', title: 'Your shop', lines: shop });
 
     const today: string[] = [];
     if (i.bookingsToday > 0) today.push(`${plural(i.bookingsToday, 'booking')} today`);
@@ -287,14 +296,17 @@ export function morningEmailVars(s: MorningSummary): Record<string, string> {
         const x = s.sections.find((y) => y.key === k);
         return x ? `${x.title}: ${x.lines.join('; ')}` : '';
     };
-    return { headline: s.headline, money: line('money'), today: line('today'), enquiries: line('enquiries'), needs_you: line('needs_you'), next: line('next') };
+    // The shop rides on the "Yesterday" slot: the email template has no slot of its own for it (its stored copy would
+    // need editing in Admin), and the two read naturally together.
+    const money = [line('money'), line('shop')].filter(Boolean).join(' · ');
+    return { headline: s.headline, money, today: line('today'), enquiries: line('enquiries'), needs_you: line('needs_you'), next: line('next') };
 }
 
 /** Pure: the Mentor's chat prompt line — its settings, and how to change them with the set-up card. */
 export function renderMorningSettingsForMentor(mentorId: number, ctx: unknown): string {
     const st = morningSettings(ctx);
     const state = st.quiet ? 'off while Quiet mode is on' : st.on ? `on, at ${SEND_FROM_HOUR}am in the workspace's time zone` : 'switched off';
-    return `YOUR MORNING SUMMARY: ${state}. Built from facts, never by you: yesterday's website sales, deposits and deals marked won; today's bookings and booking requests; open website enquiries; posts and your suggestions waiting; the best post of the last two weeks. Nothing is sent on a day with nothing to say, and it uses no tasks. It lands in the owners' and admins' chat with you; how each is told is "Business Mentor morning summary" in My Account ▸ Notifications (email is off unless they switch it on). It cannot see phone calls — never say it can. To switch it on or off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "morningSummary" ("on" / "off"), "asked": true.`;
+    return `YOUR MORNING SUMMARY: ${state}. Built from facts, never by you: yesterday's website sales, deposits and deals marked won; the shop's best seller this week, low stock and sold-out products; today's bookings and booking requests; open website enquiries; posts and your suggestions waiting; the best post of the last two weeks. Nothing is sent on a day with nothing to say, and it uses no tasks. It lands in the owners' and admins' chat with you; how each is told is "Business Mentor morning summary" in My Account ▸ Notifications (email is off unless they switch it on). It cannot see phone calls — never say it can. To switch it on or off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "morningSummary" ("on" / "off"), "asked": true.`;
 }
 
 // ── Dispatch and delivery ─────────────────────────────────────────────────────────────────────────
