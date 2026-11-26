@@ -1042,9 +1042,16 @@ async function withShopFeed(fromPages: NonNullable<ImportReport['products']>, pl
         const seen = new Set(fromPages.map((p) => p.name.trim().toLowerCase()));
         // A product read off a page AND in the feed keeps the page's reading, plus what only the feed knows (online shop
         // slice 9): its description, and its variants as options — then the feed's price too (the page's says "From").
-        const byName = new Map(feed.map((p) => [p.name.trim().toLowerCase(), p]));
+        // Matched by the page's /products/<handle> link first (two products can share a title — review #911), then by
+        // name only when that name is unique in the feed.
+        const handleOf = (href: string | null | undefined) => href?.match(/\/products\/([^/?#]+)/)?.[1]?.toLowerCase() ?? null;
+        const byHandle = new Map(feed.flatMap((p) => { const h = handleOf(p.href); return h ? [[h, p] as const] : []; }));
+        const nameCount = new Map<string, number>();
+        for (const p of feed) { const k = p.name.trim().toLowerCase(); nameCount.set(k, (nameCount.get(k) ?? 0) + 1); }
+        const byName = new Map(feed.filter((p) => nameCount.get(p.name.trim().toLowerCase()) === 1).map((p) => [p.name.trim().toLowerCase(), p]));
         const out = fromPages.map((p) => {
-            const f = byName.get(p.name.trim().toLowerCase());
+            const h = handleOf(p.href);
+            const f = (h ? byHandle.get(h) : undefined) ?? byName.get(p.name.trim().toLowerCase());
             if (!f) return p;
             return { ...p, description: p.description ?? f.description ?? null, ...(f.options ? { options: f.options, price: f.price ?? p.price } : {}) };
         });

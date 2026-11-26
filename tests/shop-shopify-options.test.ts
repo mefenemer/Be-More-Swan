@@ -45,6 +45,8 @@ check('variants → one choice group, each its own price (null = the cheapest), 
     assert.strictEqual(shopifyOptions(two as never)!.group, 'Size / Colour');
     const many = { ...tee, variants: Array.from({ length: FEED_MAX_OPTIONS + 1 }, (_, i) => ({ title: `V${i}`, price: '10' })) };
     assert.strictEqual(shopifyOptions(many as never), null, `more than ${FEED_MAX_OPTIONS} variants keeps "From £x"`);
+    const free = { ...tee, variants: [{ title: 'Sample', price: '0.00' }, { title: 'Full', price: '20' }] };
+    assert.strictEqual(shopifyOptions(free as never), null, 'review #911: a free variant is never sold at another\'s price');
 });
 
 check('the feed: a product with options is priced at its cheapest (buyable); description as plain text; picture and page as before', () => {
@@ -70,7 +72,11 @@ check('plain description: tags and scripts out, entities decoded, cut at a word 
 check('wired: page products get the feed\'s details; the save adds descriptions and options; the owner is told', () => {
     const imp = read('src/utils/site-import.ts');
     assert.ok(imp.includes("return { ...p, description: p.description ?? f.description ?? null, ...(f.options ? { options: f.options, price: f.price ?? p.price } : {}) };"));
+    assert.ok(imp.includes('const f = (h ? byHandle.get(h) : undefined) ?? byName.get(p.name.trim().toLowerCase());'), 'review #911: matched by handle first, a name only when unique');
+    assert.ok(imp.includes('nameCount.get(p.name.trim().toLowerCase()) === 1'));
     const store = read('src/utils/site-import-store.ts');
+    assert.ok(store.includes("await db.update(orgProducts).set({ priceType: 'text', priceAmount: null, price: `From ${row.price ?? ''}`.trim().slice(0, 60) })"), 'review #911: options failed → back to "From" text');
+    assert.ok(store.includes('const row = rowByName.get(productFieldsFromImport(p).name.trim().toLowerCase());'), 'paired by name, not position');
     assert.ok(store.includes('description: p.description ? p.description.slice(0, PRODUCT_LIMITS.description) : null,'));
     assert.ok(store.includes("if (!p.options?.options.length || !row || row.priceType !== 'fixed') continue;") && store.includes("stock: o.soldOut ? 0 : ''"));
     assert.ok(read('netlify/functions/sites.ts').includes("came with ${r.withOptions === 1 ? 'its' : 'their'} options"));

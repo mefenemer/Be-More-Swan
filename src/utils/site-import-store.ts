@@ -374,7 +374,7 @@ const PRODUCT_PICTURES_PER_REQUEST = 12;
  * feed (online shop slice 9) its description comes too, and its variants become options with their own prices,
  * unavailable ones sold out (stock left empty otherwise: the feed has no counts).
  */
-export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?: unknown; userId: number | null }): Promise<{ ok: true; added: number; skipped: number; withoutPicture: number; withOptions: number } | { ok: false; status: number; error: string }> {
+export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?: unknown; userId: number | null }): Promise<{ ok: true; added: number; skipped: number; withoutPicture: number; withOptions: number; optionsFailed: string[] } | { ok: false; status: number; error: string }> {
     const row = await loadImport(db, site.id);
     const all = (row?.report as ImportReport | null)?.products ?? [];
     if (!row || !all.length) return { ok: false, status: 404, error: 'There are no products from your old shop to add.' };
@@ -404,6 +404,7 @@ export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?:
     }
     const start = have.reduce((m, h) => Math.max(m, h.sortOrder ?? -1), -1) + 1;
     let withOptions = 0;
+    const optionsFailed: string[] = [];
     if (adding.length) {
         const inserted = await db.insert(orgProducts).values(adding.map((p, i) => {
             const f = productFieldsFromImport(p);
@@ -414,21 +415,28 @@ export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?:
                 // The shop's own description (Shopify feed, online shop slice 9), within Business Information's limit.
                 description: p.description ? p.description.slice(0, PRODUCT_LIMITS.description) : null,
             };
-        })).returning({ id: orgProducts.id, priceType: orgProducts.priceType });
+        })).returning({ id: orgProducts.id, name: orgProducts.name, priceType: orgProducts.priceType, price: orgProducts.price });
+        // Paired by name, not by position (review #911: a multi-row INSERT's RETURNING order isn't promised).
+        const rowByName = new Map(inserted.map((r) => [r.name.trim().toLowerCase(), r]));
         // Its variants as options (slice 9), through the Shop tab's own save — only for a product with a fixed price
-        // (an option is bought at its own price, or the product's). Best effort: a failure leaves the product as added.
-        for (const [i, p] of adding.entries()) {
-            const row = inserted[i];
+        // (an option is bought at its own price, or the product's).
+        for (const p of adding) {
+            const row = rowByName.get(productFieldsFromImport(p).name.trim().toLowerCase());
             if (!p.options?.options.length || !row || row.priceType !== 'fixed') continue;
             const r = await saveProductOptions(db, orgId, row.id, {
                 group: p.options.group,
                 options: p.options.options.map((o) => ({ label: o.label, price: o.price == null ? '' : o.price.toFixed(2), stock: o.soldOut ? 0 : '' })),
             }).catch((err: unknown) => ({ ok: false as const, status: 500, error: err instanceof Error ? err.message : String(err) }));
-            if (r.ok) withOptions++;
-            else console.error('[site-import-store] options not added', { productId: row.id, error: r.error });
+            if (r.ok) { withOptions++; continue; }
+            // review #911: without its options it must not be on sale at the cheapest variant's price (an XL at the S
+            // price). Back to the "From £x" text it had before options existed — not buyable until the owner sets it.
+            console.error('[site-import-store] options not added; price set back to text', { productId: row.id, error: r.error });
+            await db.update(orgProducts).set({ priceType: 'text', priceAmount: null, price: `From ${row.price ?? ''}`.trim().slice(0, 60) })
+                .where(and(eq(orgProducts.id, row.id), eq(orgProducts.organisationId, orgId)));
+            optionsFailed.push(row.name);
         }
     }
-    return { ok: true, added: adding.length, skipped: wanted.length - adding.length, withoutPicture: pictures.filter((x) => x === null).length, withOptions };
+    return { ok: true, added: adding.length, skipped: wanted.length - adding.length, withoutPicture: pictures.filter((x) => x === null).length, withOptions, optionsFailed };
 }
 
 /** The old blog's posts, for the chat's line about a ready import. */

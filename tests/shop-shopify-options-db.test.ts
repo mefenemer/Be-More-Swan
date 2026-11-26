@@ -50,6 +50,9 @@ async function main() {
             { name: 'Gift card', price: 'Ask us', href: null, image: null, description: null,
               options: { group: 'Amount', options: [{ label: '£10', price: 10, soldOut: false }, { label: '£20', price: 20, soldOut: false }] } },
             { name: 'Mug', price: '£9.00', href: null, image: null, description: 'Stoneware.', options: null },
+            // An option the Shop tab's save refuses (below the smallest price Stripe takes) → the whole options save fails.
+            { name: 'Bad hoodie', price: '£30.00', href: null, image: null, description: null,
+              options: { group: 'Size', options: [{ label: 'S', price: null, soldOut: false }, { label: 'XL', price: 0.01, soldOut: false }] } },
         ];
         await sql.unsafe(`INSERT INTO site_imports (site_id, organisation_id, source_url, pictures, status, report) VALUES (${SITE}, ${ORG}, 'https://old.example', 'skip', 'ready', $1::jsonb)`,
             [JSON.stringify({ products })]);
@@ -61,7 +64,7 @@ async function main() {
         await check('ticked products added: description kept, the T-shirt with its 3 sizes; the Mug already there by name, untouched', async () => {
             r = await addImportedProducts(db, site, { userId: null });
             assert.ok(r.ok, JSON.stringify(r));
-            assert.deepStrictEqual(r.ok && [r.added, r.skipped, r.withOptions], [2, 1, 1]);
+            assert.deepStrictEqual(r.ok && [r.added, r.skipped, r.withOptions], [3, 1, 1]);
             const t = await row('Logo T-shirt');
             assert.deepStrictEqual([t.price_type, Number(t.price_amount), t.description], ['fixed', 2000, 'Soft organic cotton.\nUnisex fit']);
             assert.strictEqual((await row('Mug')).description, 'My own words', 'never overwritten');
@@ -77,6 +80,13 @@ async function main() {
             const g = await row('Gift card');
             assert.notStrictEqual(g.price_type, 'fixed');
             assert.strictEqual((await sql.unsafe(`SELECT 1 FROM product_options WHERE product_id = ${g.id}`)).length, 0);
+        });
+        await check('review #911: options that fail to save → the product goes back to a "From" text price (not buyable) and is named', async () => {
+            const h = await row('Bad hoodie');
+            assert.deepStrictEqual([h.price_type, h.price_amount], ['text', null]);
+            assert.strictEqual((await sql.unsafe(`SELECT price FROM org_products WHERE id = ${h.id}`))[0].price, 'From £30');
+            assert.deepStrictEqual(r.ok && r.optionsFailed, ['Bad hoodie']);
+            assert.strictEqual((await sql.unsafe(`SELECT 1 FROM product_options WHERE product_id = ${h.id} AND status = 'active'`)).length, 0);
         });
     } finally {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});

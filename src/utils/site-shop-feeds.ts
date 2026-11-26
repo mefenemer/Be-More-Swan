@@ -42,7 +42,8 @@ export function plainDescription(html: unknown, max = 1200): string | null {
 /**
  * A Shopify product's variants as our options (online shop slice 9): one group named after its option names
  * ("Size", "Size / Colour"), each variant's title as the label, its own price when it differs from the cheapest,
- * sold out when Shopify marks it unavailable. Null for a single "Default Title" variant, or more than FEED_MAX_OPTIONS. Pure.
+ * sold out when Shopify marks it unavailable. Null for a single "Default Title" variant, more than FEED_MAX_OPTIONS, or
+ * any variant without a price above 0. Pure.
  */
 export function shopifyOptions(p: Record<string, unknown>): ImportedProduct['options'] {
     const variants = Array.isArray(p.variants) ? (p.variants as Array<Record<string, unknown>>) : [];
@@ -50,8 +51,9 @@ export function shopifyOptions(p: Record<string, unknown>): ImportedProduct['opt
     const names = (Array.isArray(p.options) ? (p.options as Array<Record<string, unknown>>) : [])
         .map((o) => String(o?.name ?? '').trim()).filter((n) => n && n.toLowerCase() !== 'title');
     const group = (names.join(' / ') || 'Option').slice(0, 40);
-    const prices = variants.map((v) => Number(v.price)).filter((x) => isFinite(x) && x > 0);
-    if (!prices.length) return null;
+    const prices = variants.map((v) => Number(v.price));
+    // A free or unpriced variant (review #911): never sold at another variant's price — keep "From £x" instead.
+    if (prices.some((x) => !isFinite(x) || x <= 0)) return null;
     const low = Math.min(...prices);
     const seen = new Set<string>();
     const options: NonNullable<ImportedProduct['options']>['options'] = [];
