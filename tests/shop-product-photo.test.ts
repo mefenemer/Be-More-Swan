@@ -65,7 +65,7 @@ check('charged as product_from_photo (1 task by default), checked first, recorde
 check('Shop tab and chat card both draft via shop.ts product_photo_draft and add via org-products.ts POST, price typed by the owner', () => {
     assert.ok(read('netlify/functions/shop.ts').includes("if (action === 'product_photo_draft') {"));
     const tab = read('src/components/assistant-shop.js');
-    assert.ok(tab.includes("post({ action: 'product_photo_draft', assetId: state.photo.asset.id })") && tab.includes("fetch('/.netlify/functions/org-products', {") && tab.includes('Price in pounds (you set this)'));
+    assert.ok(tab.includes("post({ action: 'product_photo_draft', assetId: asset.id })") && tab.includes("fetch('/.netlify/functions/org-products', {") && tab.includes('Price in pounds (you set this)'));
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.ok(reg.includes("register('product_photo', renderProductPhotoCard);") && reg.includes("'shop:productPhotoDraft'") && reg.includes("'shop:productPhotoAdd'") && reg.includes('Price in pounds (you set this)'));
     const chat = read('src/components/chat-session.js');
@@ -75,10 +75,22 @@ check('Shop tab and chat card both draft via shop.ts product_photo_draft and add
 
 check('Shopkeeper chat: photos on, the card in its reply types, never describes the photo or sets a price', () => {
     const orch = read('netlify/functions/chat-orchestrator.ts');
-    assert.ok(orch.includes('usesShopSnapshot: true,\n        // Photos of products') && orch.includes('        acceptsAttachments: true,\n        buildRolePrompt: (rc) => {\n            const sells'));
+    assert.ok(orch.includes('usesShopSnapshot: true,\n        // Photos of products') && orch.includes('        acceptsAttachments: true,\n        pictureAttachments: true,\n        buildRolePrompt: (rc) => {\n            const sells'));
     assert.ok(orch.includes('{"type":"product_photo","assetId":') && orch.includes('You can\'t see the picture yourself: never describe it') && orch.includes('You never set or suggest a price.'));
     assert.ok(orch.includes("${cost(rc.taskCosts, 'product_from_photo')}"));
     assert.ok(read('src/config/chat-capabilities.generated.ts').includes('"product_photo"'));
+});
+
+check('review #899: photo fetched safely with a size cap; drafting is race-safe; an added product can\'t be added twice; no documents', () => {
+    const mod = read('src/utils/shop-product-photo.ts');
+    assert.ok(mod.includes('await safeFetchBinary(url, { maxBytes: PRODUCT_PHOTO_MAX_BYTES, timeoutMs: 20_000 })') && !mod.includes('await fetch(url'));
+    const tab = read('src/components/assistant-shop.js');
+    assert.ok(tab.includes('const asset = state.photo.asset;') && tab.includes('if (state.photo !== pending) return;') && tab.includes("${p.busy ? '' : `${btn('data-photo-pick', 'Choose another')}"));
+    assert.ok(tab.includes('added = true;') && tab.includes('if (!added) state.photo = { ...keep, error: err.message };'));
+    const chat = read('src/components/chat-session.js');
+    assert.ok(chat.includes('documents: false,') && chat.includes(": attachCfg.documents === false ? null") && chat.includes("...(attachCfg.documents === false ? {} : { documents:"));
+    const orch = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(orch.includes('        pictureAttachments: true,\n') && orch.includes("if (attachRoute?.pictureAttachments && attached.some((a) => a.kind !== 'image')) return json(400,"));
 });
 
 console.log(`\n${passed}/${total} passed`);

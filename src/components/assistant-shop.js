@@ -196,7 +196,7 @@
     if (!p.draft) {
       return card(`${head}${intro}<div class="flex flex-wrap items-center gap-3 mt-3">${pic}
         ${btn('data-photo-draft', p.busy ? 'Reading the photo…' : `Write it from the photo (${esc(taskWord(Number(d.photoTaskCost) || 0))})`, true).replace('<button', p.busy ? '<button disabled' : '<button')}
-        ${btn('data-photo-pick', 'Choose another')}${btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
+        ${p.busy ? '' : `${btn('data-photo-pick', 'Choose another')}${btn('data-photo-cancel', 'Cancel')}`}</div>${msg}`);
     }
     return card(`${head}<div class="flex flex-wrap gap-3 mt-3">${pic}<div class="flex-1" style="min-width:14rem">
         <label class="block text-[11px] font-bold text-gray-600">Name<input type="text" maxlength="80" data-photo-name value="${esc(p.draft.name)}" class="${inputCls} mt-1"></label>
@@ -204,7 +204,7 @@
         <label class="block text-[11px] font-bold text-gray-600 mt-2">Price in pounds (you set this)<input type="text" inputmode="decimal" data-photo-price placeholder="e.g. 12.50" class="${inputCls} mt-1" style="max-width:9rem"></label>
       </div></div>
       <p class="text-xs text-gray-500 mt-2">Check the words: they come from the picture only. It's added to Business Information ▸ Products with this photo, and can then be bought online.</p>
-      <div class="flex flex-wrap gap-2 mt-3">${btn('data-photo-add', p.busy ? 'Adding…' : 'Add product', true).replace('<button', p.busy ? '<button disabled' : '<button')}${btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
+      <div class="flex flex-wrap gap-2 mt-3">${btn('data-photo-add', p.busy ? 'Adding…' : 'Add product', true).replace('<button', p.busy ? '<button disabled' : '<button')}${p.busy ? '' : btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
   }
 
   const poundsOf = (p) => (p == null ? '' : (p / 100).toFixed(2).replace(/\.00$/, ''));
@@ -363,13 +363,19 @@
       return;
     }
     if (t('[data-photo-cancel]')) { state.photo = null; render(); return; }
-    if (t('[data-photo-draft]') && state.photo && state.photo.asset) {
-      state.photo = { asset: state.photo.asset, busy: true };
+    if (t('[data-photo-draft]') && state.photo && state.photo.asset && !state.photo.busy) {
+      // review #899: the photo is kept here, and a reply for a photo no longer on the card is thrown away.
+      const asset = state.photo.asset;
+      const pending = { asset, busy: true };
+      state.photo = pending;
       render();
+      let next;
       try {
-        const r = await post({ action: 'product_photo_draft', assetId: state.photo.asset.id });
-        state.photo = { asset: state.photo.asset, draft: r.draft };
-      } catch (err) { state.photo = { asset: state.photo.asset, error: err.message }; }
+        const r = await post({ action: 'product_photo_draft', assetId: asset.id });
+        next = { asset, draft: r.draft };
+      } catch (err) { next = { asset, error: err.message }; }
+      if (state.photo !== pending) return;
+      state.photo = next;
       render();
       return;
     }
@@ -382,8 +388,10 @@
       const keep = { asset: state.photo.asset, draft: { name, description } };
       if (!name) { state.photo = { ...keep, error: 'Give it a name.' }; render(); return; }
       if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0) { state.photo = { ...keep, error: 'Type the price in pounds, e.g. 12.50.' }; render(); return; }
+      if (state.photo.busy) return;
       state.photo = { ...keep, busy: true };
       render();
+      let added = false;
       try {
         const r = await fetch('/.netlify/functions/org-products', {
           method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
@@ -391,10 +399,12 @@
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'It couldn\'t be added. Please try again.');
+        // review #899: added — the form never comes back, even if refreshing the tab fails, so it can't be added twice.
+        added = true;
         state.photo = null;
-        await load();
         state.stockSaved = `Added "${name}". Set how many you have in Stock above.`;
-      } catch (err) { state.photo = { ...keep, error: err.message }; }
+        await load().catch(() => { state.stockSaved = `Added "${name}". Refresh the page to see it in Stock.`; });
+      } catch (err) { if (!added) state.photo = { ...keep, error: err.message }; }
       render();
       return;
     }

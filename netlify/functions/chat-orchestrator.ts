@@ -370,6 +370,8 @@ interface AssistantRoute {
     /** Attachments are meeting transcripts (meeting-transcript.ts): documents only, .vtt/.srt accepted,
      *  up to ~2 hours of talk, and the newest one reaches the model in full. Needs acceptsAttachments. */
     transcriptAttachments?: boolean;
+    /** Attachments are pictures only (the Shopkeeper: photos of products); a document is refused. Needs acceptsAttachments. */
+    pictureAttachments?: boolean;
     /** Which of this assistant's own queues the handler reads for this turn (rc.contentSnapshot). */
     contentSnapshot?: 'posts' | 'blog' | 'emails';
     /** When true the handler reads the organisation's Audience for this turn (rc.audienceSnapshot). */
@@ -2371,8 +2373,9 @@ Return STRICT JSON (no markdown, no prose outside the JSON): { "reply": "your me
         model: DEFAULT_MODEL,
         maxTokens: 1200,
         usesShopSnapshot: true,
-        // Photos of products (Phase 2 "product from a photo"): the product_photo card. Documents aren't offered here.
+        // Photos of products (Phase 2 "product from a photo"): the product_photo card. Documents are refused.
         acceptsAttachments: true,
+        pictureAttachments: true,
         buildRolePrompt: (rc) => {
             const sells = onboardingValue(rc, 'whatYouSell');
             const where = onboardingValue(rc, 'hasWebsite');
@@ -3328,9 +3331,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     if (Array.isArray(body.attachments) && body.attachments.length) {
         // Which assistant the files are for decides how they are read (a transcript may be far longer
         // than a website page). Looked up here, org-scoped, because the session is resolved further down.
-        const transcripts = !!ROUTES[await attachmentRoleKey(db, orgId, body) ?? '']?.transcriptAttachments;
+        const attachRoute = ROUTES[await attachmentRoleKey(db, orgId, body) ?? ''];
+        const transcripts = !!attachRoute?.transcriptAttachments;
         try { attached = await readAttachments(db, orgId, body.attachments, { transcripts }); }
         catch (err) { return json(400, { error: err instanceof Error ? err.message : 'Those files couldn\'t be attached.' }); }
+        // review #899: a pictures-only chat (the Shopkeeper) never takes a document's words into its prompt.
+        if (attachRoute?.pictureAttachments && attached.some((a) => a.kind !== 'image')) return json(400, { error: 'Only photos can be attached here — attach a photo of the product.' });
         const words = attached.filter((a) => a.text).map((a) => a.text).join('\n\n');
         if (words) {
             const blocked = await enforcePromptModeration({ text: words.slice(0, 20000), userId, organisationId: orgId, source: 'chat_attachment' });

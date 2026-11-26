@@ -52,6 +52,7 @@
     shopkeeper: {
       pictures: true,
       docTypes: /(?!)/,
+      documents: false,   // no PDFs or text either (the server refuses them too: route flag pictureAttachments)
       accept: 'image/*',
       title: 'Add a photo of a product — upload or choose from your library',
       srLabel: 'Attach a photo of a product',
@@ -282,6 +283,7 @@
         if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
         const isImage = /^image\//.test(file.type);
         const kind = isImage ? (attachCfg.pictures ? 'image' : null)
+          : attachCfg.documents === false ? null
           : attachCfg.docTypes.test(file.name) || file.type === 'application/pdf' || /^text\//.test(file.type) ? 'document' : null;
         if (!kind) { showError(`"${file.name}" can't be attached — ${attachCfg.refused}.`); continue; }
         if (kind === 'document' && file.size > DOC_MAX_BYTES) { showError(`"${file.name}" is too large (the limit is 4 MB).`); continue; }
@@ -332,7 +334,7 @@
           renderChips();
           inputEl.focus();
         },
-        documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },
+        ...(attachCfg.documents === false ? {} : { documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } } }),
       });
     }
     function onChipsClick(e) {

@@ -17,6 +17,7 @@ import { gatewayRoleModel } from './assistant-model';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { hasTaskCapacity, recordCompletedWork } from './work-metering';
 import { getTaskCosts } from './task-costs';
+import { safeFetchBinary, SafeFetchError } from './safe-fetch';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -76,11 +77,13 @@ export async function draftProductFromPhoto(db: Db, o: { orgId: number; assistan
     let bytes: Buffer;
     let mediaType: string;
     try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        bytes = Buffer.from(await res.arrayBuffer());
-        mediaType = (res.headers.get('content-type') || a.mimeType || 'image/jpeg').split(';')[0].trim().toLowerCase();
+        // review #899: safeFetchBinary, never plain fetch — an asset's externalUrl is set by a member (no fetching
+        // private addresses), and the size cap stops the download instead of reading it all first.
+        const res = await safeFetchBinary(url, { maxBytes: PRODUCT_PHOTO_MAX_BYTES, timeoutMs: 20_000 });
+        bytes = Buffer.from(res.bytes);
+        mediaType = (res.contentType || a.mimeType || 'image/jpeg').split(';')[0].trim().toLowerCase();
     } catch (err) {
+        if (err instanceof SafeFetchError && err.reason === 'too_large') return { ok: false, status: 400, error: 'That photo is too large to read. Try a smaller copy (under 3.5 MB).' };
         console.error('[shop-product-photo] photo fetch failed', { assetId: o.assetId, message: err instanceof Error ? err.message : String(err) });
         return { ok: false, status: 502, error: 'That photo couldn\'t be opened. Try again, or try another one.' };
     }

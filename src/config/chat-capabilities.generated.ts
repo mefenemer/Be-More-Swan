@@ -192,7 +192,8 @@ export const GENERATED_CHAT_MANIFEST = {
         "shopkeeper": {
             "flags": [
                 "usesShopSnapshot",
-                "acceptsAttachments"
+                "acceptsAttachments",
+                "pictureAttachments"
             ],
             "contentSnapshot": null,
             "offersOwnCards": true,
@@ -320,6 +321,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesSiteSnapshot",
         "acceptsAttachments",
         "transcriptAttachments",
+        "pictureAttachments",
         "contentSnapshot",
         "usesAudienceSnapshot",
         "usesMeetingsSnapshot",
