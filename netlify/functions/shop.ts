@@ -29,6 +29,7 @@
 // one chat card (disruptive-ui-registry.js `shop_settings`) saves through one path for both roles.
 // Nothing here moves money: refunds and payouts stay in the business's own Stripe dashboard.
 
+import { loadReminderStats, reminderStatsWords } from '../../src/utils/shop-checkout-reminder';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -124,6 +125,8 @@ export default withLambda(async (event) => {
             // "This month" on the Orders card (shop-sales.ts, Phase 2 slice 1): UK months, after refunds, per currency.
             sales: orders.length ? await loadShopSales(db, orgId).then((s) => { const m = monthSummary(s); return { thisMonth: salesMonthWords(m.thisMonth), lastMonth: salesMonthWords(m.lastMonth) }; })
                 .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
+            // Abandoned-checkout reminders this week (shop-checkout-reminder.ts, Phase 2 slice 5), in words; null = none.
+            reminders: reminderStatsWords(await loadReminderStats(db, orgId)),
             // Product from a photo (shop-product-photo.ts): its task cost, for the button's label.
             photoTaskCost: (await getTaskCosts()).weights.product_from_photo,
             canEdit, warnings,

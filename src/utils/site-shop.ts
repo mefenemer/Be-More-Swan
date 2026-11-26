@@ -33,6 +33,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
 import { createNotification } from './notify';
 import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
+import { checkoutNewsChoice, EMAIL_FIELD, reminderCheckoutParams, saveReminderEmail } from './shop-checkout-reminder';
 import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
 import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
@@ -330,7 +331,7 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
 export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
 
 /** The Checkout Session for a whole basket — pure. Quantities were chosen on the basket page. */
-export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null; news?: boolean; businessName?: string }): Stripe.Checkout.SessionCreateParams {
+export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null; news?: boolean; businessName?: string; reminderEmail?: string | null; now?: Date }): Stripe.Checkout.SessionCreateParams {
     const back = basketPagePath(req.basketId);
     // UK delivery rates (shop-delivery.ts): the buyer picks one on Stripe's page; a rate is free over its threshold.
     // In pounds only: a basket priced in another currency is checked out without them (Stripe needs one currency).
@@ -353,6 +354,9 @@ export function basketCheckoutParams(req: { origin: string; site: SiteRow; baske
         ...(req.shop ? { custom_text: { submit: { message: checkoutNote(req.shop, `${req.origin}${SHOP_TERMS_PATH}`) } } } : {}),
         success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent('/')}`,
         cancel_url: `${req.origin}${back}`,
+        // Ticked with an email (shop-checkout-reminder.ts): the email is filled in on Stripe's page, and the checkout
+        // lapses after an hour so its one reminder follows soon after. Unticked: Stripe's defaults.
+        ...(req.news ? reminderCheckoutParams(req.reminderEmail ?? null, req.now ?? new Date()) : {}),
         metadata: {
             bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_basket: req.basketId,
             bms_item_name: orderSummaryName(req.lines), bms_page: BASKET_PATH,
@@ -402,15 +406,19 @@ async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOu
     if ('kind' in ready) return ready;
     const limited = await rateLimited(db, req.ip, basketPagePath(basket.id));
     if (limited) return limited;
+    // "Send me news" ticked needs the email typed beside it (shop-checkout-reminder.ts); unticked keeps none.
+    const newsChoice = checkoutNewsChoice(req.body.get('_news') === '1', req.body.get(EMAIL_FIELD));
+    if (!newsChoice.ok) return { kind: 'error', status: 400, title: 'Please check your email address', message: newsChoice.error, backPath: basketPagePath(basket.id) };
     const sections = req.definition.pages.flatMap((p) => p.sections);
     const collectAddress = priced.lines.some((l) => { const s = sections.find((x) => x.id === l.sectionId); return s?.type === 'products' && s.props.collectAddress; });
     try {
         const session = await (await stripeClient()).checkout.sessions.create(
-            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId), news: req.body.get('_news') === '1', businessName: req.definition.settings.siteName }),
+            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId), news: req.body.get('_news') === '1', businessName: req.definition.settings.siteName, reminderEmail: newsChoice.email }),
             { stripeAccount: ready.account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');
         await markBasketCheckout(db, basket.id, req.site.id, priced.lines.map((l) => ({ productId: l.productId, optionId: l.optionId, name: l.name, unit: l.unit, qty: l.qty })), session.id);
+        await saveReminderEmail(db, { basketId: basket.id, siteId: req.site.id, sessionId: session.id, email: newsChoice.email, expiresAt: newsChoice.email && session.expires_at ? new Date(session.expires_at * 1000) : null });
         return { kind: 'redirect', location: session.url };
     } catch (err) {
         console.error('[site-shop] basket checkout failed', { siteId: req.site.id, message: err instanceof Error ? err.message : String(err) });

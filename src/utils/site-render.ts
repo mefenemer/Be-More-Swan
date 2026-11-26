@@ -25,7 +25,7 @@ import { productHomePage, productPagePath, productSections } from './site-produc
 import { allOptionsSoldOut, optionPence, type ProductOptions } from './shop-options';
 import { formatMoney } from './product-price';
 import { BASKET_PATH, basketTotal, checkoutBlocker, type PricedLine } from './shop-basket';
-import { newsBoxLabel } from './shop-buyer-audience';
+import { EMAIL_FIELD, EMAIL_HINT, newsBoxLabel } from './shop-buyer-audience';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
 import { describeCancellation } from './stay-quote';
@@ -286,7 +286,7 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
 .ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
 .li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
-.pr .opts{list-style:none;padding:0;margin:12px 0 20px;display:grid;gap:10px}.pr .opts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:var(--r);background:rgba(0,0,0,.04)}.pr .opts form{margin:0}.pr .basket li{align-items:flex-start}.pr .basket .qty select{margin:0 6px}.basket-link{margin-top:16px}
+.pr .opts{list-style:none;padding:0;margin:12px 0 20px;display:grid;gap:10px}.pr .opts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:var(--r);background:rgba(0,0,0,.04)}.pr .opts form{margin:0}.pr .basket li{align-items:flex-start}.pr [data-basket-news]{margin:0 0 16px}.pr [data-basket-news-email]{display:grid;gap:6px;margin-top:10px;max-width:420px}.pr [data-basket-news-email] input{font:inherit;padding:10px 12px;border:1px solid rgba(0,0,0,.3);border-radius:var(--r)}.pr [data-basket-news]:not(:has(input[type=checkbox]:checked)) [data-basket-news-email]{display:none}.pr .basket .qty select{margin:0 6px}.basket-link{margin-top:16px}
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .st .facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 18px;padding:14px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.st .facts span{white-space:nowrap}.st .price{font-weight:700;font-size:1.1rem}
 .st .pics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.st .pics img{border-radius:var(--r);width:100%;aspect-ratio:3/2;object-fit:cover}.st .pics img:first-child{grid-column:1/-1}@media(min-width:700px){.st .pics{grid-template-columns:2fr 1fr 1fr}.st .pics img:first-child{grid-column:auto;grid-row:span 2;height:100%}}.st .fm{margin-bottom:36px}.st h2{margin-top:1.6em}
@@ -1111,7 +1111,7 @@ export function renderSiteBasket(def: SiteDefinition, ctx: RenderContext, v: Bas
         const checkout = blocker
             ? `<p class="fine" data-basket-blocked>${esc(blocker)}</p>`
             // Phase 2 (shop-buyer-audience.ts): an UNTICKED news box; ticked, the buyer joins the Audience once they've paid.
-            : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<p class="fine" data-basket-news><label><input type="checkbox" name="_news" value="1"> ${esc(newsBoxLabel(s.siteName))}</label></p><button class="btn" type="submit">Check out</button></form>`;
+            : `<form method="post" action="${BUY_ACTION}">${hid('_a', 'checkout')}${bid}${back}<div class="fine" data-basket-news><label><input type="checkbox" name="_news" value="1"> ${esc(newsBoxLabel(s.siteName))}</label><label data-basket-news-email>${esc(EMAIL_HINT)} <input type="email" name="${EMAIL_FIELD}" autocomplete="email" maxlength="254" inputmode="email"></label></div><button class="btn" type="submit">Check out</button></form>`;
         body = `<h1>Your basket</h1>${notes}<ul class="opts basket">${rows}</ul>
 <p class="price"><strong>Total: ${esc(formatMoney(basketTotal(v.lines), currency))}</strong></p>
 ${v.delivery ? `<p data-basket-delivery><strong>Delivery:</strong> ${esc(v.delivery)}. You choose on the next page; the cost is added there before you pay.</p>` : ''}

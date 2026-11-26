@@ -286,6 +286,7 @@
     return card(`<div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
       ${d.canEdit ? btn('data-shop-csv', 'Download CSV') : ''}</div>
       ${d.sales ? `<p class="text-xs text-gray-600 mt-1" data-shop-sales>This month: <span class="font-bold text-gray-900">${esc(d.sales.thisMonth)}</span> · Last month: ${esc(d.sales.lastMonth)}</p>` : ''}
+      ${d.reminders ? `<p class="text-xs text-gray-600 mt-1" data-shop-reminders>${esc(d.reminders)}</p>` : ''}
       ${state.ordersSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.ordersSaved)}</p>` : ''}
       ${state.ordersError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.ordersError)}</p>` : ''}
       <ul class="space-y-2 mt-3">${shown.map((o) => {

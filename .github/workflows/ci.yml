@@ -359,3 +359,7 @@ jobs:
         run: npx tsx tests/enquiry-audience-db.test.ts
       - name: Shop first-order email flows
         run: npx tsx tests/shop-first-order-flow-db.test.ts
+      # The abandoned-checkout reminder (src/utils/shop-checkout-reminder.ts, online shop Phase 2): ticked checkouts only,
+      # the basket's latest checkout, never twice, never to a refused address, no route = not sent — on Postgres.
+      - name: Shop abandoned-checkout reminder
+        run: npx tsx tests/shop-checkout-reminder-db.test.ts

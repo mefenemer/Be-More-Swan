@@ -18,6 +18,7 @@ import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './
 import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop-page';
 import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
 import { loadShopSales, salesSnapshotLines, type ShopSales } from './shop-sales';
+import { loadReminderStats, reminderStatsWords } from './shop-checkout-reminder';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -41,6 +42,8 @@ export interface ShopSnapshotInput {
     shopPage?: ShopPageState | null;
     /** Totals over every order, best sellers and every order waiting to be posted (shop-sales.ts, Phase 2). */
     sales?: ShopSales | null;
+    /** This week's abandoned-checkout reminders, in words (shop-checkout-reminder.ts, Phase 2 slice 5); null = none. */
+    reminders?: string | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -119,6 +122,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     lines.push(...stockSnapshotLines(input.stock, input.options));
     lines.push(...deliverySnapshotLines(input.delivery));
     lines.push(...shopPageSnapshotLines(input.shopPage));
+    lines.push('', `ABANDONED-CHECKOUT REMINDERS: automatic, no setting. A basket buyer who ticks "Send me news" types their email on the basket page; if their checkout lapses unpaid (after 1 hour) they get ONE reminder with a link back to their basket, sent from the business's verified sending domain or connected Gmail/Outlook only (no route = not sent). Never to anyone who didn't tick. Fixed wording, no tasks spent. This week: ${input.reminders || 'none sent'}`);
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
@@ -149,5 +153,6 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
     const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
     const sales = orders.length ? await loadShopSales(db, orgId).catch((err) => { console.error('[shop-snapshot] sales read failed', err instanceof Error ? err.message : err); return null; }) : null;
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales });
+    const reminders = reminderStatsWords(await loadReminderStats(db, orgId));
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders });
 }

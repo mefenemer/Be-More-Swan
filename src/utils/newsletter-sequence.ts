@@ -192,7 +192,7 @@ export async function haltEnrolmentsForContact(
     }
 }
 
-async function deliverStep(
+export async function deliverStep(
     db: Db,
     route: SendRoute,
     organisationId: number,
