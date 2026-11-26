@@ -164,7 +164,7 @@ Use plain text, not a `data-task-cost` span, until the cost is live, as was done
 
 **Outcome:** acceptable with the measures above (Recall confirmed no model training on 26 November). No prior consultation with the ICO needed. Review at L + 3 months, or when calendar auto-join (v2) or Zoom ships.
 
-**Sign-off:** ______________________ (owner, Be More Swan Ltd) · Date: ____ November 2026
+**Sign-off:** ✅ Signed electronically by Catherine Fenemer (owner, Be More Swan Ltd) on 26 November 2026, approving this section as at staging commit 3b390bd4. Signed copy: `docs/legal/note-taker-dpia-signed-2026-11-26.pdf`
 
 ## 9. Also to check in plan step 2 (code)
 
