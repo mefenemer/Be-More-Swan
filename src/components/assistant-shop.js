@@ -55,8 +55,8 @@
     const ready = s.every((x) => x.done);
     return card(`<p class="text-sm font-black text-gray-900">${ready ? '✓ Your shop can take orders' : 'Get your shop ready to sell'}</p>
       <p class="text-xs text-gray-500 mt-1">${ready
-        ? 'Buy buttons show on your products. Buyers pay you directly through Stripe; Be More Swan takes no fee.'
-        : 'Two steps. Buy buttons show on your products once both are done.'}</p>
+        ? 'Your products can be bought now. Buyers pay you directly through Stripe; Be More Swan takes no fee.'
+        : 'Two steps. Your products can be bought once both are done.'}</p>
       <ol class="mt-3 space-y-1">${s.map((x, i) => `<li class="text-xs ${x.done ? 'text-green-700' : 'text-gray-800'} font-semibold">${x.done ? '✓' : `${i + 1}.`} ${esc(x.label)}${x.done ? '' : ' — not done yet'}</li>`).join('')}</ol>`, ready ? 'border-green-200' : 'border-amber-200');
   }
 
