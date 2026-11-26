@@ -67,6 +67,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // suggested_action — important, do-something, dismissible
     onboarding_prompt: 'suggested_action', onboarding_incomplete: 'suggested_action',
     hitl_approval_required: 'suggested_action', review_red_urgency: 'suggested_action',
+    // The Email Assistant: newly sorted email that is time-critical ("Now") — lapsing, so an action item.
+    // One open per mailbox; resolved when the owner opens the Emails tab (mailbox-notify.ts).
+    email_needs_you: 'suggested_action',
     task_limit_warning: 'suggested_action',
     // Abuse Prevention US2: an admin is asked to invite someone who hit a connection collision.
     workspace_access_request: 'suggested_action',
@@ -202,6 +205,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     mentor_weekly_review: 'state_change',
     // The Mentor's morning summary (mentor-morning.ts): yesterday's sales, today's bookings. News, not a task.
     mentor_morning_summary: 'state_change',
+    // The Email Assistant's morning note (mailbox-notify.ts): counts only. News, not a task.
+    email_morning_digest: 'state_change',
     // Someone paid for something on the website (site-shop.ts, from the Connect webhook). The money
     // is already in their Stripe account; the card is the news, not a task.
     site_order_received: 'state_change',

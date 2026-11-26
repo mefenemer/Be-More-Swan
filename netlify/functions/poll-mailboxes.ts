@@ -10,6 +10,9 @@ import { getDb } from '../../db/client';
 import { mailboxesDueForSync, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 import { pruneOldActions } from '../../src/utils/mailbox-actions';
 import { mayRunScheduled } from '../../src/utils/scheduled-run-auth';
+import { sendMorningDigest } from '../../src/utils/mailbox-notify';
+import { mailboxes } from '../../db/schema';
+import { eq } from 'drizzle-orm';
 
 export const config = { schedule: '*/10 * * * *' };
 
@@ -25,9 +28,13 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
     });
     // Drafted replies and clean-up records are kept 30 days after they were acted on, then deleted.
     const pruned = await pruneOldActions(getDb()).catch(() => 0);
+    // The Email Assistant's morning note, once a day per mailbox (07:00–11:59 local; latched in its settings).
+    let digests = 0;
+    const active = await getDb().select().from(mailboxes).where(eq(mailboxes.status, 'active')).catch(() => []);
+    for (const box of active) if (await sendMorningDigest(getDb(), box)) digests++;
     let dispatched = 0;
     for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
-    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned });
+    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned, digests });
     return { due: due.length, dispatched };
 }
 
