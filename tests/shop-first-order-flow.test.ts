@@ -64,6 +64,11 @@ check('the API: setTrigger, importCampaign and the one-on rule know first_order;
     assert.ok(api.includes('if (enable && ONE_ON(sequence.triggerEvent))') && api.includes("code: 'ANOTHER_FIRST_ORDER_ON'"));
     assert.ok((api.match(/if \(isTriggerCheck\(err\)\) return json\(409, NEEDS_FIRST_ORDER_UPDATE\)/g) || []).length === 2);
     assert.ok(api.includes(': sequence.triggerEvent === FIRST_ORDER_TRIGGER ? sql`false`'), 'no sign-up forms listed for a first-order flow');
+    // review #903: forms linked by id can't make a flow first-order; the enable race answers in the right words.
+    assert.ok(api.includes("code: 'FORMS_LINKED'") && api.includes("Another flow for shop buyers\\' first orders was just switched on"));
+    const seqUtil = read('src/utils/newsletter-sequence.ts');
+    assert.ok(seqUtil.includes("if (seq.triggerEvent === 'first_order' && args.via !== 'shop') return { enrolled: false, reason: 'no_sequence' };"));
+    assert.ok(read('src/utils/shop-first-order-flow.ts').includes("sequenceId: flow!.id, via: 'shop' }"));
 });
 
 check('Email Studio: the "Who receives it" choice, the new-flow tile, the swap, the lists', () => {

@@ -69,10 +69,13 @@ export async function enrolShopBuyer(db: Db, o: { organisationId: number; email:
         const choice = chooseBuyerFlow({ subscribed, newlySubscribed: a.result === 'added', firstOrder, firstOrderFlowOn: !!flow });
         const base = { organisationId: o.organisationId, contactId: a.contactId, email };
         if (choice === 'first_order') {
-            const r = await enrolInSequence(db, { ...base, sequenceId: flow!.id });
-            return r.enrolled ? 'first_order' : 'none';
+            const r = await enrolInSequence(db, { ...base, sequenceId: flow!.id, via: 'shop' });
+            if (r.enrolled) return 'first_order';
+            // review #903: the first-order flow couldn't take them (no enabled emails, a failure) — a buyer this tick
+            // just subscribed still gets the welcome flow, as they would with no first-order flow at all.
+            if (a.result !== 'added') return 'none';
         }
-        if (choice === 'welcome') {
+        if (choice === 'welcome' || choice === 'first_order') {
             const r = await enrolInWelcomeSequence(db, base);
             return r.enrolled ? 'welcome' : 'none';
         }

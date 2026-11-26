@@ -564,6 +564,12 @@ export default withLambda(async (event: HandlerEvent) => {
         const to = body.trigger === 'form' ? 'form' : body.trigger === 'subscribed' ? 'subscribed' : body.trigger === FIRST_ORDER_TRIGGER ? FIRST_ORDER_TRIGGER : null;
         if (!to) return json(400, { error: 'Choose who receives this campaign.' });
         if (to === sequence.triggerEvent) return json(200, { sequence });
+        // review #903: a flow sign-up forms still start can't become a first-order flow — say which forms to unlink.
+        if (to === FIRST_ORDER_TRIGGER) {
+            const linked = await db.select({ name: audienceForms.name }).from(audienceForms)
+                .where(and(eq(audienceForms.organisationId, orgId), eq(audienceForms.sequenceId, sequence.id))).limit(5);
+            if (linked.length) return json(409, { code: 'FORMS_LINKED', error: `Sign-up forms still start this flow (${linked.map((f) => `"${f.name}"`).join(', ')}). Unlink them in Audience ▸ Sign-up forms first, or make a new flow for shop buyers.` });
+        }
         if (ONE_ON(to) && sequence.isEnabled) {
             const [other] = await db.select({ name: newsletterSequences.name }).from(newsletterSequences)
                 .where(and(
@@ -649,7 +655,9 @@ export default withLambda(async (event: HandlerEvent) => {
             // the partial unique index refused it. Same answer as the check, not a bare 500.
             const e = err as { code?: string; cause?: { code?: string } };
             if ((e?.code ?? e?.cause?.code) === '23505') {
-                return json(409, { code: 'ANOTHER_EVERYONE_ON', error: 'Another campaign for everyone who subscribes was just switched on. Reload and try again.' });
+                return json(409, sequence.triggerEvent === FIRST_ORDER_TRIGGER
+                    ? { code: 'ANOTHER_FIRST_ORDER_ON', error: 'Another flow for shop buyers\' first orders was just switched on. Reload and try again.' }
+                    : { code: 'ANOTHER_EVERYONE_ON', error: 'Another campaign for everyone who subscribes was just switched on. Reload and try again.' });
             }
             throw err;
         }

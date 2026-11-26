@@ -19,6 +19,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { closeDbPools } from '../db/client';
 import { enrolShopBuyer, isFirstOrder } from '../src/utils/shop-first-order-flow';
+import { enrolInSequence } from '../src/utils/newsletter-sequence';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -106,6 +107,21 @@ async function main() {
             const r = await enrolShopBuyer(db, { organisationId: ORG, email: 'offflow@example.com', orderId: id, audience: { result: 'added', contactId: 105 } });
             assert.strictEqual(r, 'welcome');
             await sql.unsafe(`UPDATE newsletter_sequences SET is_enabled = true WHERE id = ${firstOrderFlow}`);
+        });
+        await check('review #903: a sign-up form still linked to a first-order flow by id never enrols anybody into it', async () => {
+            const r = await enrolInSequence(db, { organisationId: ORG, contactId: 106, email: 'form@example.com', sequenceId: firstOrderFlow });
+            assert.deepStrictEqual(r, { enrolled: false, reason: 'no_sequence' });
+            assert.deepStrictEqual(await enrolledIn(106), []);
+        });
+        await check('review #903: first-order flow on but with no enabled emails → a newly subscribed buyer still gets the welcome flow', async () => {
+            await sql.unsafe(`UPDATE newsletter_sequence_steps SET is_enabled = false WHERE sequence_id = ${firstOrderFlow}`);
+            const id = await order(ORG, 'nosteps@example.com');
+            const r = await enrolShopBuyer(db, { organisationId: ORG, email: 'nosteps@example.com', orderId: id, audience: { result: 'added', contactId: 107 } });
+            assert.strictEqual(r, 'welcome');
+            assert.deepStrictEqual(await enrolledIn(107), ['subscribed']);
+            const id2 = await order(ORG, 'nosteps2@example.com');
+            assert.strictEqual(await enrolShopBuyer(db, { organisationId: ORG, email: 'nosteps2@example.com', orderId: id2, audience: { result: 'already', contactId: 108, status: 'subscribed' } }), 'none');
+            await sql.unsafe(`UPDATE newsletter_sequence_steps SET is_enabled = true WHERE sequence_id = ${firstOrderFlow}`);
         });
         await check('the database: first_order allowed, an unknown trigger refused, only ONE first-order flow on', async () => {
             await flow(ORG, 'first_order', false, 'Second, off');   // a second one switched OFF is fine
