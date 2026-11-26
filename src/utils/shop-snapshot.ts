@@ -17,6 +17,7 @@ import { loadProductOptions, optionsWords, type ProductOptions } from './shop-op
 import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
 import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop-page';
 import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
+import { loadShopSales, salesSnapshotLines, type ShopSales } from './shop-sales';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,6 +39,8 @@ export interface ShopSnapshotInput {
     postingOn?: boolean;
     /** The shop page for a business with no website (shop-page.ts). */
     shopPage?: ShopPageState | null;
+    /** Totals over every order, best sellers and every order waiting to be posted (shop-sales.ts, Phase 2). */
+    sales?: ShopSales | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -126,6 +129,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
             lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}`);
         }
         if (input.postingOn === false) lines.push('- Marking orders as posted isn\'t switched on yet: don\'t offer the order_update card with status "posted".');
+        lines.push(...salesSnapshotLines(input.sales));
     }
     return lines.join('\n');
 }
@@ -144,5 +148,6 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const delivery = await loadDelivery(db, orgId);
     const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
     const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage });
+    const sales = orders.length ? await loadShopSales(db, orgId).catch((err) => { console.error('[shop-snapshot] sales read failed', err instanceof Error ? err.message : err); return null; }) : null;
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales });
 }

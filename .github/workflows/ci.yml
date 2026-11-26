@@ -341,3 +341,7 @@ jobs:
       # raw SQL on db/z-platform-incidents.sql's columns and its partial unique index.
       - name: CI test failure ticket
         run: npx tsx tests/ci-test-incident-db.test.ts
+      # "Ask your shop" (src/utils/shop-sales.ts, online shop Phase 2): UK-month totals of UTC timestamps,
+      # after refunds and per currency, and best sellers from basket lines + Buy orders — only Postgres proves them.
+      - name: Shop sales totals
+        run: npx tsx tests/shop-sales-db.test.ts
