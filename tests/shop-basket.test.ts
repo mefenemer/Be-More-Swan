@@ -140,6 +140,18 @@ async function main() {
         assert.ok(empty.includes('Your basket is empty.') && empty.includes('Continue shopping'));
     });
 
+    await check('Phase 2: the basket page offers an UNTICKED "Send me news" box inside the Check out form; ticked → metadata, unticked → none', () => {
+        const lines = priceBasket([{ productId: 11, optionId: null, sectionId: SID, qty: 1 }], PRODUCTS, DEF).lines;
+        const html = renderSiteBasket(DEF, live, { id: ID, lines, dropped: [], canSell: true, continuePath: '/shop' });
+        const form = html.slice(html.indexOf('name="_a" value="checkout"'), html.indexOf('Check out</button>'));
+        assert.ok(form.includes('<input type="checkbox" name="_news" value="1">') && !form.includes('checked'), 'inside the checkout form, never pre-ticked');
+        assert.ok(form.includes('by email. You can unsubscribe at any time.'));
+        const blocked = renderSiteBasket(DEF, live, { id: ID, lines, dropped: [], canSell: false, continuePath: '/shop' });
+        assert.ok(!blocked.includes('name="_news"'), 'no box when checkout is blocked');
+        assert.strictEqual(basketCheckoutParams({ origin: live.origin, site: row, basketId: ID, lines, collectAddress: false, shop: null, news: true }).metadata!.bms_news, '1');
+        assert.ok(!('bms_news' in basketCheckoutParams({ origin: live.origin, site: row, basketId: ID, lines, collectAddress: false, shop: null }).metadata!));
+    });
+
     console.log('\nCheckout and the paid order');
 
     await check('one Stripe Checkout for the whole basket: each line at its Business Information price and quantity', () => {
