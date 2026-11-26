@@ -199,7 +199,10 @@ export async function linkUserReportToNotes(db: Db, input: { chatSessionId: unkn
             SELECT 1 FROM chat_sessions WHERE id = ${chat} AND organisation_id = ${input.organisationId} AND user_id = ${input.userId}`) as unknown[];
         if (!own.length) return;
         const ref = `${input.report.table === 'issue_reports' ? 'issue' : 'feature request'} #${input.report.id}`;
-        for (const n of (await raisedInChat(db, chat)).filter((r) => r.by === 'assistant')) {
+        const notes = (await raisedInChat(db, chat)).filter((r) => r.by === 'assistant');
+        // Marked first, so a failure below can't leave the chat sending notes again.
+        await markChat(db, chat, { table: input.report.table, id: input.report.id, by: 'user' });
+        for (const n of notes) try {
             if (n.table === 'issue_reports') {
                 const closed = await db.execute(sql`
                     UPDATE issue_reports SET status = 'closed', resolved_at = now(), updated_at = now()
@@ -221,8 +224,10 @@ export async function linkUserReportToNotes(db: Db, input: { chatSessionId: unkn
                      WHERE id = ${n.id} AND submitted_by IS NULL AND status = 'pending_review'
                        AND COALESCE(description, '') NOT LIKE '%Noticed by assistants % times.'`);
             }
+        } catch (err) {
+            // One note that can't be linked (its ticket deleted, say) doesn't stop the others.
+            console.warn('[assistant-notes] could not link one note (non-blocking):', n.table, n.id, (err as Error)?.message);
         }
-        await markChat(db, chat, { table: input.report.table, id: input.report.id, by: 'user' });
     } catch (err) {
         console.warn('[assistant-notes] could not link the user report (non-blocking):', (err as Error)?.message);
     }
