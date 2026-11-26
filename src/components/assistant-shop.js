@@ -150,6 +150,16 @@
   }
 
   /** Stock: one row per product that can be bought online (a fixed price in Business Information). */
+  // "Tell me when it's back" (Phase 2 slice 6): how many are waiting, and — once it can be bought again — the button
+  // that emails them from the owner's own domain or mailbox (shop.ts waitlist_send; Team Chat asks the same).
+  function waitingLine(it, po, n, canEdit) {
+    if (!n) return '';
+    const soldOut = po && po.options && po.options.length ? po.options.every((o) => o.stock != null && o.stock <= 0) : it.state === 'sold_out';
+    const who = `${n} ${n === 1 ? 'person is' : 'people are'} waiting to hear it's back`;
+    if (soldOut) return `<p class="text-xs text-gray-600 mt-2" data-waiting="${esc(it.id)}">${esc(who)}. When you add stock, ${esc(state.assistantName || 'your Shopkeeper')} asks you in Team Chat whether to email them.</p>`;
+    return `<div class="flex flex-wrap items-center gap-3 mt-2" data-waiting="${esc(it.id)}"><p class="text-xs font-semibold text-emerald-800">${esc(who)}.</p>${canEdit ? btn(`data-waitlist-send="${esc(it.id)}"`, `Email them (${esc(n)})`, true) : ''}</div>`;
+  }
+
   function stockCard(d) {
     const st = d.stock || { ready: false, items: [] };
     const head = '<p class="text-sm font-black text-gray-900">Stock</p>';
@@ -174,6 +184,7 @@
             ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
             ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
           </div>`}
+          ${waitingLine(it, po, (d.waiting || {})[it.id] || 0, d.canEdit)}
           ${optionsEditor(it, po)}
         </li>`;
       }).join('')}</ul>
@@ -464,6 +475,16 @@
       render();
       return;
     }
+    const waitSend = t('[data-waitlist-send]');
+    if (waitSend) {
+      state.stockSaved = null; state.stockError = null; waitSend.disabled = true;
+      try {
+        state.data = await post({ action: 'waitlist_send', productId: Number(waitSend.dataset.waitlistSend) });
+        state.stockSaved = (state.data.warnings || [])[0] || 'Sent.';
+      } catch (err) { state.stockError = err.message; }
+      render();
+      return;
+    }
     const stockSave = t('[data-stock-save]');
     if (stockSave) {
       const row = stockSave.closest('[data-stock-row]');
@@ -570,5 +591,5 @@
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard, shopPageCard } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, waitingLine, ordersCard, shopPageCard } };
 })();

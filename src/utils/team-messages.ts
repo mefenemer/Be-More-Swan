@@ -23,7 +23,8 @@
 // WORK (brief, started, ready, done…) are still never composed by a model.
 //
 // Questions carry answer buttons. Each question KEY has one handler here, and answering runs it —
-// "Start now?" releases the waiting work; "Video too?" adds video to the brief.
+// "Start now?" releases the waiting work; "Video too?" adds video to the brief; "Back in stock — email the people
+// waiting?" emails them from the owner's own route (shop-waitlist.ts).
 //
 // Never throws on the write path: a feed message must never fail the work it describes.
 
@@ -43,7 +44,7 @@ export interface TeamLink {
     chatSessionId?: number; chatMessageId?: number; replyTo?: number;
 }
 export interface TeamQuestion { key: QuestionKey; ref: number; choices: Array<{ value: string; label: string }> }
-export type QuestionKey = 'start_now' | 'brief_video';
+export type QuestionKey = 'start_now' | 'brief_video' | 'back_in_stock';
 
 /** Longest message a person may send; the feed is for notes, not documents. */
 export const MAX_MESSAGE_CHARS = 1000;
@@ -526,6 +527,15 @@ export async function answerQuestion(db: Db, args: { orgId: number; userId: numb
     return { ok: true, said };
 }
 
+/** Is a question with this key and ref still waiting for an answer? (So a repeat event doesn't ask twice.) */
+export async function openQuestionExists(db: Db, orgId: number, key: QuestionKey, ref: number): Promise<boolean> {
+    const [r] = await db.select({ id: teamMessages.id }).from(teamMessages)
+        .where(and(eq(teamMessages.organisationId, orgId), isNull(teamMessages.answeredAt),
+            sql`${teamMessages.question} ->> 'key' = ${key}`, sql`(${teamMessages.question} ->> 'ref')::int = ${ref}`))
+        .limit(1);
+    return !!r;
+}
+
 type Handler = (db: Db, a: { orgId: number; ref: number; value: string }) => Promise<string>;
 
 const QUESTION_HANDLERS: Record<QuestionKey, Handler> = {
@@ -552,5 +562,14 @@ const QUESTION_HANDLERS: Record<QuestionKey, Handler> = {
         return a.value === 'ai_video'
             ? 'Added AI video. The next round you ask for includes a clip, and its credit cost is shown before you ask.'
             : 'Added stock video. The next round you ask for includes video options, free.';
+    },
+    // A sold-out product is back and people asked to be told (shop-waitlist.ts): email them, or not now. Lazy import:
+    // shop-waitlist imports this module.
+    back_in_stock: async (db, a) => {
+        const { sendBackInStock, sendResultWords, productBuyable } = await import('./shop-waitlist');
+        const p = await productBuyable(db, a.orgId, a.ref);
+        const name = p?.name || 'That product';
+        if (a.value !== 'send') return `Fine — they stay on the waiting list. Email them any time from the Shop tab's Stock card.`;
+        return sendResultWords(name, await sendBackInStock(db, { orgId: a.orgId, productId: a.ref }));
     },
 };

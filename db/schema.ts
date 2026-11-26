@@ -6653,6 +6653,22 @@ export const siteOrderLines = pgTable("site_order_lines", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// "Tell me when it's back" (db/z-shop-waitlist.sql, src/utils/shop-waitlist.ts): one row per person waiting for a product.
+export const shopWaitlist = pgTable("shop_waitlist", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+  productId: integer("product_id").notNull().references(() => orgProducts.id, { onDelete: "cascade" }),
+  email: text().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  notifiedAt: timestamp("notified_at"),
+  skipReason: text("skip_reason"),
+}, (t) => [
+  check("shop_waitlist_email_check", sql`char_length(${t.email}) BETWEEN 3 AND 254`),
+  uniqueIndex("shop_waitlist_waiting_uidx").on(t.productId, sql`lower(${t.email})`).where(sql`${t.notifiedAt} IS NULL`),
+  index("shop_waitlist_org_product_idx").on(t.organisationId, t.productId).where(sql`${t.notifiedAt} IS NULL`),
+]);
+
 // What UK consumer law needs a buyer to see (db/z-shop-settings.sql, src/utils/shop-settings.ts):
 // one row per workspace; the Delivery & returns page and the buyer's email are drawn from it.
 export const shopSettings = pgTable("shop_settings", {
