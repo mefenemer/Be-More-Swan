@@ -345,3 +345,7 @@ jobs:
       # after refunds and per currency, and best sellers from basket lines + Buy orders — only Postgres proves them.
       - name: Shop sales totals
         run: npx tsx tests/shop-sales-db.test.ts
+      # "Stock that talks" (src/utils/shop-stock-alerts.ts, online shop Phase 2): stock taken per order returns
+      # before/after/level (an option's = its product's), so alerts fire once into low and once at sold out.
+      - name: Shop stock alerts
+        run: npx tsx tests/shop-stock-alerts-db.test.ts

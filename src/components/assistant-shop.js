@@ -157,7 +157,7 @@
     if (!st.items.length) return card(`${head}<p class="text-xs text-gray-500 mt-1">No products can be bought online yet. Give a product a fixed price in <strong>Business Information ▸ Products &amp; Services</strong> and it appears here.</p>`);
     const num = (attr, value, label) => `<label class="block text-[11px] font-bold text-gray-600">${esc(label)}<input type="number" min="0" max="100000" step="1" inputmode="numeric" ${attr} value="${value == null ? '' : esc(value)}" class="${inputCls} mt-1" style="max-width:7rem"></label>`;
     return card(`${head}
-      <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid.</p>
+      <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid. When an order takes something down to your warning level, or sells the last one, you get a notification and ${esc(state.assistantName || 'your Shopkeeper')} tells you in Team Chat.</p>
       <ul class="space-y-2 mt-3">${st.items.map((it) => {
         const [label, cls] = STOCK_PILL[it.state] || STOCK_PILL.untracked;
         const po = (d.options || {})[it.id];
@@ -166,7 +166,10 @@
             <p class="text-xs font-bold text-gray-900">${esc(it.name)} <span class="font-normal text-gray-500">· ${esc(it.price)}</span></p>
             ${po ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">Stock per option</span>' : `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>`}
           </div>
-          ${po ? '' : `<div class="flex flex-wrap items-end gap-3 mt-2">
+          ${po ? `<div class="flex flex-wrap items-end gap-3 mt-2" data-stock-low-options>
+            ${num('data-stock-low', it.lowStockAt, 'Warn me when any option gets to')}
+            ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
+          </div>` : `<div class="flex flex-wrap items-end gap-3 mt-2">
             ${num('data-stock-count', it.stock, 'In stock')}
             ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
             ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
@@ -387,7 +390,9 @@
       try {
         state.data = await post({
           action: 'product_stock', productId: Number(stockSave.dataset.stockSave),
-          stock: row.querySelector('[data-stock-count]').value, lowStockAt: row.querySelector('[data-stock-low]').value,
+          // A product with options has only the warning box (it applies to each option); its stock is per option.
+          ...(row.querySelector('[data-stock-count]') ? { stock: row.querySelector('[data-stock-count]').value } : {}),
+          lowStockAt: row.querySelector('[data-stock-low]').value,
         });
         state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
       } catch (err) { state.stockError = err.message; }

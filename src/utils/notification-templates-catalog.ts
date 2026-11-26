@@ -430,6 +430,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A paid order took a product (or option) down to its low-stock level or to 0 (shop-stock-alerts.ts,
+        // online shop Phase 2). Title and message are written from the counts; the Shopkeeper also says it in Team Chat.
+        templateKey: 'shop_stock_alert',
+        name: 'Low stock or sold out',
+        category: 'Assistants',
+        type: 'shop_stock_alert',
+        title: '{{stock.title}}',
+        message: '{{stock.message}}',
+        variables: [
+            v('stock.title', 'What ran low', 'Low stock: 3 left of Lavender candle'),
+            v('stock.message', 'What to do', "3 left of Lavender candle — that's the low-stock level you set. Set a new count on the Shop tab when more arrive."),
+        ],
+    },
+    {
         // Someone messaged the business's Facebook Page or Instagram account (meta-webhook.ts →
         // social-messages.ts notifyConversationOpened): one card per conversation that starts waiting.
         templateKey: 'social_message_received',
