@@ -30,6 +30,14 @@ type Db = ReturnType<typeof getDb>;
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export const REVIEW_REQUEST_RULES = { notTwiceWithinDays: 30, lookbackDays: 30, batch: 200 } as const;
+/** Shop orders (slice 7, review #909): asked at most this many days after their delay. */
+export const ORDER_LATE_DAYS = 21;
+/** Shop orders: at most this many per workspace per hourly run (a mailbox has a daily limit; the rest go next hour). */
+export const ORDERS_PER_WORKSPACE_PER_RUN = 25;
+/** Stop claiming new requests after this long, so a run finishes inside the scheduled function's 30 s. */
+export const RUN_BUDGET_MS = 20_000;
+/** A shop-order request claimed but neither sent nor skipped this long ago was cut off mid-run: it is asked again. */
+export const STALE_CLAIM_MINUTES = 60;
 
 // ── Settings ────────────────────────────────────────────────────────────────────────────────────
 
@@ -157,7 +165,9 @@ async function dueOrders(db: Db, now: Date, orgIds: number[]): Promise<Candidate
             inArray(siteOrders.organisationId, orgIds),
             sql`${siteOrders.createdAt} <= ${now.toISOString()}::timestamp - make_interval(days => ${reviewSettings.orderDelayDays})`,
             gte(siteOrders.createdAt, sql`${reviewSettings.enabledAt}`),
-            gt(siteOrders.createdAt, new Date(now.getTime() - (REVIEW_REQUEST_RULES.lookbackDays + 30) * 86_400_000)),
+            // At most 3 weeks past its delay (review #909): an order that waited for the owner to connect a sending
+            // address isn't asked about months later.
+            sql`${siteOrders.createdAt} > ${now.toISOString()}::timestamp - make_interval(days => ${reviewSettings.orderDelayDays} + ${ORDER_LATE_DAYS})`,
             sql`NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.order_id = ${siteOrders.id})`,
         )).limit(REVIEW_REQUEST_RULES.batch);
     return rows.map((r) => ({ organisationId: r.organisationId, siteId: r.siteId, bookingId: null, orderId: r.id, name: r.name, email: r.email!, about: r.item ? `your ${r.item}` : 'your order' }));
@@ -180,7 +190,13 @@ export async function skipReason(db: Db, orgId: number, email: string, now: Date
 export type RouteResolver = (db: Db, orgId: number, senderName: string) => Promise<{ route: SendRoute } | { error: string }>;
 const defaultRoute: RouteResolver = (db, orgId, senderName) => resolveSendRoute(db, orgId, { recipientCount: 1, senderName });
 
-export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: RouteResolver; deliver?: typeof deliverStep } = {}): Promise<number> {
+export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: RouteResolver; deliver?: typeof deliverStep; clock?: () => number } = {}): Promise<number> {
+    const clock = deps.clock ?? (() => Date.now());
+    const started = clock();
+    // A shop-order request a killed run claimed but never sent: release it so it is due again (review #909).
+    await db.execute(sql`
+        DELETE FROM review_requests WHERE order_id IS NOT NULL AND sent_at IS NULL AND skipped_reason IS NULL
+           AND created_at < now() - make_interval(mins => ${STALE_CLAIM_MINUTES})`).catch((err: unknown) => console.error('[review-requests] stale claim release failed', err instanceof Error ? err.message : err));
     // Shop orders go only on the owner's own route (slice 7): resolve it first for every workspace asking after orders,
     // and look for due orders ONLY where one exists — so workspaces still waiting for a route can't fill the batch.
     const routes = new Map<number, SendRoute>();
@@ -201,10 +217,18 @@ export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: R
         db.select().from(reviewSettings).where(inArray(reviewSettings.organisationId, orgIds)),
     ]);
     let sent = 0;
+    const ordersThisRun = new Map<number, number>();
     for (const d of due) {
+        // Out of time: everything not yet claimed stays due for the next run (review #909).
+        if (clock() - started > RUN_BUDGET_MS) break;
         // A shop order is due only where its workspace has a route (above); without one it stays UNCLAIMED and goes later.
         const orderRoute: SendRoute | null = d.orderId ? routes.get(d.organisationId) ?? null : null;
         if (d.orderId && !orderRoute) continue;
+        if (d.orderId) {
+            const n = ordersThisRun.get(d.organisationId) ?? 0;
+            if (n >= ORDERS_PER_WORKSPACE_PER_RUN) continue;   // the rest go next hour, unclaimed
+            ordersThisRun.set(d.organisationId, n + 1);
+        }
         // Claim first: the unique index on booking_id / order_id means only one run gets the row.
         const [claim] = await db.insert(reviewRequests).values({
             organisationId: d.organisationId, siteId: d.siteId, bookingId: d.bookingId, orderId: d.orderId,
@@ -223,7 +247,8 @@ export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: R
             link: reviewRequestUrl(origin, claim.id), stopLink: reviewRequestUrl(origin, claim.id, '&stop=1'), googleUrl: settings.googleReviewUrl,
         });
         try {
-            if (orderRoute) await (deps.deliver ?? deliverStep)(db, orderRoute, d.organisationId, { to: d.email, subject, html, text, listUnsubscribe: null });
+            // Replies reach the owner, as before, when the sending domain names no reply-to address (review #909).
+            if (orderRoute) await (deps.deliver ?? deliverStep)(db, { ...orderRoute, replyTo: orderRoute.replyTo || owner?.email || null }, d.organisationId, { to: d.email, subject, html, text, listUnsubscribe: null });
             else await sendEmail({ to: d.email, from: fromLine(business), ...(owner?.email ? { replyTo: owner.email } : {}), subject, html });
             await db.update(reviewRequests).set({ sentAt: new Date() }).where(eq(reviewRequests.id, claim.id));
             sent++;

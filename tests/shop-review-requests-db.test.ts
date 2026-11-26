@@ -15,7 +15,8 @@ import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { closeDbPools } from '../db/client';
-import { orderReviewRequestsBlocked, sendDueReviewRequests } from '../src/utils/review-requests';
+import { orderReviewRequestsBlocked, sendDueReviewRequests, ORDERS_PER_WORKSPACE_PER_RUN, ORDER_LATE_DAYS } from '../src/utils/review-requests';
+import { emailKey } from '../src/utils/bookings';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -92,12 +93,56 @@ async function main() {
             assert.ok((await rows(A)).some((r) => Number(r.order_id) === a2));
         });
         await check('"don\'t ask me again" still wins (claimed, skipped, not sent)', async () => {
-            await sql.unsafe(`INSERT INTO review_opt_outs (organisation_id, email_key) VALUES (${A}, 'stop@alpha.example')`);
+            await sql.unsafe(`INSERT INTO review_opt_outs (organisation_id, email_key) VALUES (${A}, $1)`, [emailKey('stop@alpha.example')]);
             await order(A, 'stop@alpha.example');
             const before = sent.length;
             await sendDueReviewRequests(db, new Date(), { route: route as never, deliver });
             assert.strictEqual(sent.length, before);
             assert.ok((await rows(A)).some((r) => r.skipped_reason === 'opted_out'));
+        });
+        // ── review #909 ──
+        const C = 23;
+        await sql.unsafe(`INSERT INTO organisations (id, name, slug) VALUES (${C}, 'Shop gamma', 'rr-gamma')`);
+        await sql.unsafe(`INSERT INTO users (id, email) VALUES (501, 'owner@gamma.example')`);
+        await sql.unsafe(`INSERT INTO ai_assistants (id, user_id, organisation_id, name, model) VALUES (${C * 10 + 1}, 501, ${C}, 'Web', 'x')`);
+        await sql.unsafe(`INSERT INTO sites (id, organisation_id, ai_assistant_id, slug, draft, status) VALUES (${C * 10}, ${C}, ${C * 10 + 1}, 'gamma', '{}'::jsonb, 'published')`);
+        await sql.unsafe(`INSERT INTO review_settings (organisation_id, ask_after_orders, order_delay_days, enabled_at) VALUES (${C}, true, 7, now() - interval '60 days')`);
+        const domainRoute = { route: { provider: 'resend' as const, from: 'Shop gamma <hello@gamma.example>', replyTo: null, engagementTracked: false } };
+        const routeC = async (_db: unknown, orgId: number) => (orgId === C ? domainRoute : { error: 'none' });
+        const seen: Array<{ to: string; replyTo: string | null }> = [];
+        const deliverC = (async (_db: unknown, r: { replyTo: string | null }, _org: number, m: { to: string }) => { seen.push({ to: m.to, replyTo: r.replyTo }); return null; }) as never;
+
+        await check(`review #909: at most ${ORDERS_PER_WORKSPACE_PER_RUN} per workspace per run; the rest stay due (unclaimed) for the next run`, async () => {
+            for (let i = 0; i < ORDERS_PER_WORKSPACE_PER_RUN + 5; i++) await order(C, `c${i}@gamma.example`);
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC }), ORDERS_PER_WORKSPACE_PER_RUN);
+            assert.strictEqual((await rows(C)).length, ORDERS_PER_WORKSPACE_PER_RUN, 'the rest have no row');
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC }), 5);
+        });
+        await check('review #909: a domain with no reply-to → replies go to the owner, as before', async () => {
+            assert.ok(seen.length && seen.every((x) => x.replyTo === 'owner@gamma.example'), JSON.stringify(seen.slice(0, 2)));
+        });
+        await check('review #909: out of time → stops claiming; the rest stay due', async () => {
+            for (let i = 0; i < 4; i++) await order(C, `t${i}@gamma.example`);
+            let t = 0;
+            const sentNow = await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC, clock: () => (t += 8_000) });
+            assert.ok(sentNow >= 1 && sentNow < 4, String(sentNow));
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC }), 4 - sentNow);
+        });
+        await check('review #909: a claim a killed run never sent is released and asked again, once', async () => {
+            const id = await order(C, 'cut@gamma.example');
+            await sql.unsafe(`INSERT INTO review_requests (organisation_id, site_id, order_id, customer_email, created_at) VALUES (${C}, ${C * 10}, ${id}, 'cut@gamma.example', now() - interval '2 hours')`);
+            const before = seen.length;
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC }), 1);
+            assert.deepStrictEqual(seen.slice(before).map((x) => x.to), ['cut@gamma.example']);
+            const r = await sql.unsafe(`SELECT sent_at FROM review_requests WHERE order_id = ${id}`);
+            assert.ok(r.length === 1 && r[0].sent_at);
+        });
+        await check(`review #909: an order more than ${ORDER_LATE_DAYS} days past its delay is not asked about`, async () => {
+            const old = Number((await sql.unsafe(
+                `INSERT INTO site_orders (site_id, organisation_id, stripe_account_id, checkout_session_id, item_name, quantity, amount_total, currency, customer_email, status, created_at)
+                 VALUES (${C * 10}, ${C}, 'acct_x', 'cs_rr_old', 'Mug', 1, 800, 'gbp', 'late@gamma.example', 'paid', now() - interval '35 days') RETURNING id`))[0].id);
+            await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC });
+            assert.strictEqual((await sql.unsafe(`SELECT 1 FROM review_requests WHERE order_id = ${old}`)).length, 0);
         });
     } finally {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});

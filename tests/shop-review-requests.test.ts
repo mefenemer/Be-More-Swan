@@ -35,8 +35,13 @@ check('shop orders: routes resolved first, due orders only where one exists, sen
     assert.ok(src.includes('inArray(siteOrders.organisationId, orgIds),'));
     assert.ok(send.includes('if (d.orderId && !orderRoute) continue;'), 'no route: never claimed');
     assert.ok(send.indexOf('if (d.orderId && !orderRoute) continue;') < send.indexOf('db.insert(reviewRequests)'));
-    assert.ok(send.includes('if (orderRoute) await (deps.deliver ?? deliverStep)(db, orderRoute, d.organisationId,'));
+    assert.ok(send.includes('if (orderRoute) await (deps.deliver ?? deliverStep)(db, { ...orderRoute,'));
     assert.ok(send.includes('else await sendEmail({ to: d.email, from: fromLine(business)'), 'bookings: a separate fix');
+    // review #909: a time budget, a per-workspace cap, stale claims released, replies to the owner, a late window.
+    assert.ok(send.includes('if (clock() - started > RUN_BUDGET_MS) break;') && send.includes('if (n >= ORDERS_PER_WORKSPACE_PER_RUN) continue;'));
+    assert.ok(send.includes('DELETE FROM review_requests WHERE order_id IS NOT NULL AND sent_at IS NULL AND skipped_reason IS NULL'));
+    assert.ok(send.includes('replyTo: orderRoute.replyTo || owner?.email || null'));
+    assert.ok(src.includes('make_interval(days => ${reviewSettings.orderDelayDays} + ${ORDER_LATE_DAYS})'));
 });
 
 check('the owner is told: Shop tab line, chat snapshot, and beside the switch in Audience ▸ Reviews', () => {
