@@ -34,6 +34,7 @@ import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, us
 import { createNotification } from './notify';
 import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
 import { checkoutNewsChoice, EMAIL_FIELD, reminderCheckoutParams, saveReminderEmail } from './shop-checkout-reminder';
+import { joinWaitlist, WAITLIST_ACTION, WAITLIST_LIMIT } from './shop-waitlist';
 import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
 import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
@@ -142,7 +143,9 @@ export async function refreshConnectAccount(db: Db, orgId: number): Promise<Conn
 
 export type BuyOutcome =
     | { kind: 'redirect'; location: string }
-    | { kind: 'error'; status: 400 | 404 | 409 | 429 | 503; title: string; message: string; backPath: string };
+    | { kind: 'error'; status: 400 | 404 | 409 | 429 | 503; title: string; message: string; backPath: string }
+    // A page that says something went right (the waiting list, shop-waitlist.ts) — drawn like an error notice, status 200.
+    | { kind: 'notice'; status: 200; title: string; message: string; backPath: string };
 
 /** A product as a site shows it — read from Business Information (org_products), never from the site. */
 export interface SiteProduct {
@@ -290,7 +293,7 @@ export const NEW_BASKET_LIMIT = { maxAttempts: 30, windowSecs: 3600 };
 async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip', limit = BUY_LIMIT): Promise<BuyOutcome | null> {
     try {
         const limited = await checkRateLimit(db, key, ip, limit);
-        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: key === 'site_basket_ip' ? 'Too many baskets were started from here just now.' : 'Too many checkouts were started from here just now.', backPath: back };
+        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: key === 'site_basket_ip' ? 'Too many baskets were started from here just now.' : key === 'site_waitlist_ip' ? 'Too many waiting-list requests were sent from here just now.' : 'Too many checkouts were started from here just now.', backPath: back };
     } catch (err) {
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
     }
@@ -300,6 +303,8 @@ async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip'
 export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome> {
     // A basket action (shop-basket.ts): add / set / remove / checkout, all posted to /_buy.
     const act = String(req.body.get('_a') || '');
+    // "Tell me when it's back" on a sold-out product's page (shop-waitlist.ts, Phase 2 slice 6).
+    if (act === WAITLIST_ACTION) return waitlistAction(db, req);
     if (act) return basketAction(db, req, act);
     const back = req.backPath;
     const r = await resolveBuy(db, req);
@@ -324,6 +329,24 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
         console.error('[site-shop] checkout failed', { siteId: req.site.id, message: err instanceof Error ? err.message : String(err) });
         return { kind: 'error', status: 503, title: 'Checkout couldn\'t be started', message: 'Nothing was charged. Please try again in a minute.', backPath: back };
     }
+}
+
+/** A sold-out product's "Tell me when it's back" box: the address joins that product's waiting list. */
+async function waitlistAction(db: Db, req: BuyRequest): Promise<BuyOutcome> {
+    const back = req.backPath;
+    const orgId = req.site.organisationId;
+    const productId = Number(req.body.get('_pid'));
+    const sectionId = String(req.body.get('_s') || '');
+    const notHere: BuyOutcome = { kind: 'error', status: 404, title: 'That item isn\'t here any more', message: 'The page may have changed since you opened it. Go back and have another look.', backPath: back };
+    // Shopkeeper workspaces only (the Shopkeeper asks the owner), and the section must be on the PUBLISHED site and offer it.
+    if (!(await basketOn(db, orgId))) return notHere;
+    const section = req.definition.pages.flatMap((p) => p.sections).find((x) => x.id === sectionId);
+    if (!section || section.type !== 'products' || !Number.isInteger(productId) || !section.props.productIds.includes(productId)) return notHere;
+    const limited = await rateLimited(db, req.ip, back, 'site_waitlist_ip', WAITLIST_LIMIT);
+    if (limited) return limited;
+    const r = await joinWaitlist(db, { orgId, siteId: req.site.id, productId, email: req.body.get(EMAIL_FIELD) });
+    if (!r.ok) return { kind: 'error', status: r.status, title: r.status === 409 ? 'Please have another look' : 'That didn\'t work', message: r.error, backPath: back };
+    return { kind: 'notice', status: 200, title: 'We\'ll tell you when it\'s back', message: 'We\'ll send you one email when it\'s back in stock. That\'s all: it doesn\'t sign you up to anything else.', backPath: back };
 }
 
 // ── The basket (Shopkeeper workspaces, shop-basket.ts) ─────────────────────────────────────────

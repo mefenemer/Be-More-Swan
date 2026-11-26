@@ -37,6 +37,8 @@ export const BASKET_LINE_MAX_QTY = 10;
 export const BASKET_FRESH_HOURS = 24;
 export const BASKET_KEEP_DAYS = 7;
 export const BASKET_PATH = '/basket';
+/** A sold-out product page's "Tell me when it's back" form posts this as _a (shop-waitlist.ts). */
+export const WAITLIST_ACTION = 'notify';
 
 export interface BasketItem { productId: number; optionId: number | null; sectionId: string; qty: number }
 

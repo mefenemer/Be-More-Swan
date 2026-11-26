@@ -19,6 +19,7 @@ import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop
 import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
 import { loadShopSales, salesSnapshotLines, type ShopSales } from './shop-sales';
 import { loadReminderStats, reminderStatsWords } from './shop-checkout-reminder';
+import { waitingCounts } from './shop-waitlist';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -44,6 +45,8 @@ export interface ShopSnapshotInput {
     sales?: ShopSales | null;
     /** This week's abandoned-checkout reminders, in words (shop-checkout-reminder.ts, Phase 2 slice 5); null = none. */
     reminders?: string | null;
+    /** People waiting to hear a product is back, by product id (shop-waitlist.ts, Phase 2 slice 6). */
+    waiting?: Record<number, number>;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -122,6 +125,9 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     lines.push(...stockSnapshotLines(input.stock, input.options));
     lines.push(...deliverySnapshotLines(input.delivery));
     lines.push(...shopPageSnapshotLines(input.shopPage));
+    const waitingRows = Object.entries(input.waiting || {}).filter(([, n]) => n > 0)
+        .map(([id, n]) => ({ name: input.stock?.items.find((i) => i.id === Number(id))?.name || `product #${id}`, n }));
+    lines.push('', `WAITING LISTS ("Tell me when it's back" on a sold-out product's page; one service email each, never added to the Audience): ${waitingRows.length ? waitingRows.map((w) => `${w.name} — ${w.n} waiting`).join('; ') : 'nobody waiting'}. When a stock save makes a waiting product buyable again, you (the Shopkeeper) ask in Team Chat whether to email them; the owner sends with "Email them" there or on the Shop tab's Stock card. You can't send them from this chat — say where the button is.`);
     lines.push('', `ABANDONED-CHECKOUT REMINDERS: automatic, no setting. A basket buyer who ticks "Send me news" types their email on the basket page; if their checkout lapses unpaid (after 1 hour) they get ONE reminder with a link back to their basket, sent from the business's verified sending domain or connected Gmail/Outlook only (no route = not sent). Never to anyone who didn't tick. Fixed wording, no tasks spent. This week: ${input.reminders || 'none sent'}`);
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
@@ -154,5 +160,6 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
     const sales = orders.length ? await loadShopSales(db, orgId).catch((err) => { console.error('[shop-snapshot] sales read failed', err instanceof Error ? err.message : err); return null; }) : null;
     const reminders = reminderStatsWords(await loadReminderStats(db, orgId));
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders });
+    const waiting = await waitingCounts(db, orgId);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting });
 }

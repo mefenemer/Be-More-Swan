@@ -363,3 +363,7 @@ jobs:
       # the basket's latest checkout, never twice, never to a refused address, no route = not sent — on Postgres.
       - name: Shop abandoned-checkout reminder
         run: npx tsx tests/shop-checkout-reminder-db.test.ts
+      # "Tell me when it's back" (src/utils/shop-waitlist.ts, online shop Phase 2): one waiting row per person per product,
+      # the Team Chat question once, sends claimed with refusals skipped, batches and the sweep — on Postgres.
+      - name: Shop back-in-stock waiting lists
+        run: npx tsx tests/shop-waitlist-db.test.ts

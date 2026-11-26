@@ -6,6 +6,7 @@
 // runs daily. Mirrors netlify/functions/archive-cleanup.ts.
 
 import { sweepBaskets } from '../../src/utils/shop-basket';
+import { sweepWaitlist } from '../../src/utils/shop-waitlist';
 import { and, eq, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, adminAuditLog } from '../../db/schema';
@@ -25,6 +26,9 @@ export default withLambda(async () => {
     // Shop baskets untouched for a week go (shop-basket.ts; a week covers a late Stripe webhook). Never fatal.
     const baskets = await sweepBaskets(db).catch((err) => { console.error('[purge-archived-assistants] basket sweep failed', err instanceof Error ? err.message : err); return 0; });
     if (baskets) console.log(`[purge-archived-assistants] deleted ${baskets} shop basket(s) older than a week`);
+    // "Tell me when it's back" lists (shop-waitlist.ts): emailed rows after 90 days, waiting rows after a year.
+    const waitlist = await sweepWaitlist(db);
+    if (waitlist) console.log(`[purge-archived-assistants] deleted ${waitlist} old waiting-list row(s)`);
 
     const expired = await db
         .select({ id: aiAssistants.id, organisationId: aiAssistants.organisationId })
