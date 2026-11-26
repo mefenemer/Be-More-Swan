@@ -3,6 +3,8 @@
  *
  *   window.AssistantMailbox.init({ hub, assistantId, assistantName })   (assistants.js, hubTab kind 'mailbox')
  *   window.AssistantMailbox.refresh()                                     (each time the tab opens)
+ *   window.AssistantMailbox.renderReview(container)                       (the Review tab, reviewQueue source 'mailbox')
+ *   window.AssistantMailbox.reviewCount()                                 (the Review tab's badge)
  *
  * Reads netlify/functions/mailboxes.ts — the SIGNED-IN person's own mailboxes only:
  * connect an Outlook or Gmail mailbox, see email sorted into categories with a priority and a one-line
@@ -24,6 +26,7 @@
     draftText: new Map(),     // action id → the text in the editor (saved on blur, sent as shown)
     cleanupSel: new Map(),    // batch key → Set of message ids still ticked
     cleanupOpen: new Set(),   // batch keys showing their emails
+    openDraftsAfterLoad: false, // the Review tab sent the user here to finish a draft
   };
   const GAP_RE = /\[check:[^\]]*\]/gi;
 
@@ -514,7 +517,7 @@
       if (t.dataset.mbxPill) {
         state.pill = t.dataset.mbxPill;
         // In Drafts, every draft is open and editable straight away.
-        if (state.pill === 'drafts') state.actions.filter((a) => a.kind === 'reply' && a.status === 'waiting' && a.messageId).forEach((a) => { state.open.add(a.messageId); loadBody(a.messageId); });
+        if (state.pill === 'drafts') openWaitingDrafts();
         render(); return;
       }
       if (t.dataset.mbxDraftnew || t.dataset.mbxRedraft) { await draft(Number(t.dataset.mbxDraftnew || t.dataset.mbxMsg), t.dataset.mbxRedraft || 'new'); return; }
@@ -613,13 +616,124 @@
     });
   }
 
+  /** Drafts pill: every waiting draft open and editable straight away. */
+  function openWaitingDrafts() {
+    state.actions.filter((a) => a.kind === 'reply' && a.status === 'waiting' && a.messageId).forEach((a) => { state.open.add(a.messageId); loadBody(a.messageId); });
+  }
+
+  // ── Review tab (docs/email-assistant-plan.md §5.3) ────────────────────────────────────────────
+  // Lists what waits for the owner's say-so — drafted replies and clean-up batches, across their
+  // mailboxes — and sends them to the Emails tab to act. Send, Save to drafts, clean-up ticks and
+  // Undo live in ONE place (the Emails tab), so there's one confirm and one code path for each.
+  // Only the owner sees anything: the server answers actions=1 for the mailbox's owner alone.
+  async function reviewItems() {
+    // No seen=1: looking at Review is not looking at the email, so "needs you now" stays.
+    const res = await fetch(API, { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not load your email.');
+    if (data.available === false) return { state: 'unavailable', items: [] };
+    if (data.access && data.access !== 'owner') return { state: 'not_owner', items: [] };
+    const boxes = data.mailboxes || [];
+    if (!boxes.length) return { state: 'no_mailbox', items: [] };
+    const items = [];
+    await Promise.all(boxes.map(async (box) => {
+      const r = await fetch(`${API}?mailboxId=${encodeURIComponent(box.id)}&actions=1`, { credentials: 'same-origin' });
+      const a = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      for (const d of (a.actions || []).filter((x) => x.kind === 'reply' && x.status === 'waiting')) items.push({ type: 'reply', box, d });
+      for (const b of a.cleanup || []) items.push({ type: 'cleanup', box, b });
+    }));
+    // Replies first (a person is waiting), then clean-ups; one mailbox's items together.
+    items.sort((x, y) => (x.type === y.type ? x.box.id - y.box.id : x.type === 'reply' ? -1 : 1));
+    return { state: 'ok', items, many: boxes.length > 1 };
+  }
+
+  /** Pure: the Review list's HTML. */
+  function reviewHtml(r) {
+    if (r.state === 'unavailable') return '<p class="text-sm text-gray-600 py-10 text-center">The Email Assistant is not switched on for this workspace yet.</p>';
+    if (r.state === 'not_owner') return '<p class="text-sm text-gray-600 py-10 text-center">Only the mailbox\'s owner sees its drafted replies and clean-ups.</p>';
+    if (r.state === 'no_mailbox') return '<p class="text-sm text-gray-600 py-10 text-center">Connect your mailbox on the Emails tab. Drafted replies and clean-ups wait here for your OK.</p>';
+    if (!r.items.length) return '<p class="text-sm text-gray-600 py-10 text-center">Nothing waiting for you. Open an email on the Emails tab and press "Draft a reply".</p>';
+    const where = (box) => (r.many ? `<span class="text-xs text-gray-500"> · ${esc(box.address)}</span>` : '');
+    const head = (t) => `<p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-4 mb-1">${t}</p>`;
+    const replies = r.items.filter((i) => i.type === 'reply');
+    const cleanups = r.items.filter((i) => i.type === 'cleanup');
+    const replyRow = ({ box, d }) => {
+      const gaps = (d.gaps || []).length;
+      const first = String(d.body || '').replace(/\s+/g, ' ').trim();
+      return `<li class="flex flex-wrap items-center gap-3 py-3">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-gray-900">Reply to ${esc(d.to || 'the sender')}${where(box)}</p>
+          <p class="text-sm text-gray-700 truncate">${esc(d.subject || '(no subject)')}</p>
+          ${first ? `<p class="text-xs text-gray-500 truncate">${esc(first.slice(0, 160))}</p>` : ''}
+          ${gaps ? `<p class="text-xs font-semibold text-amber-800 mt-0.5">${gaps} gap${gaps === 1 ? '' : 's'} to fill before it can be sent</p>` : ''}
+        </div>
+        <button type="button" class="btn-primary px-3 py-1.5 text-sm font-bold rounded-lg" data-mbx-review="drafts" data-mbx-box="${box.id}">Check and send</button>
+      </li>`;
+    };
+    const cleanupRow = ({ box, b }) => {
+      const n = (b.messageIds || []).length;
+      return `<li class="flex flex-wrap items-center gap-3 py-3">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-gray-900">${esc(b.label)}${where(box)}</p>
+          <p class="text-xs text-gray-600">${n} email${n === 1 ? '' : 's'} to ${b.op === 'trash' ? 'move to trash' : 'archive'} · you can untick any, and undo for 30 days</p>
+        </div>
+        <button type="button" class="btn-secondary border px-3 py-1.5 text-sm font-bold rounded-lg" data-mbx-review="cleanup" data-mbx-box="${box.id}">Check clean-up</button>
+      </li>`;
+    };
+    return (replies.length ? head('Replies waiting for you') + `<ul class="divide-y divide-gray-100">${replies.map(replyRow).join('')}</ul>` : '')
+      + (cleanups.length ? head('Ready to clear') + `<ul class="divide-y divide-gray-100">${cleanups.map(cleanupRow).join('')}</ul>` : '')
+      + '<p class="text-xs text-gray-500 mt-4">Nothing is sent or moved until you press the button for it on the Emails tab.</p>';
+  }
+
+  /** The Review tab's count: waiting replies + clean-up batches (0 when not the owner). */
+  async function reviewCount() {
+    try { return (await reviewItems()).items.length; } catch { return 0; }
+  }
+
+  /**
+   * Draw the Review list into the Review tab; returns the count it drew. `isCurrent` says whether this
+   * load is still the newest (the container is shared by every role's Review tab), or null if not drawn.
+   */
+  async function renderReview(container, { isCurrent } = {}) {
+    if (!container) return null;
+    const current = () => !isCurrent || isCurrent();
+    container.innerHTML = '<p class="text-sm text-gray-500 py-10 text-center">Loading…</p>';
+    let r;
+    try { r = await reviewItems(); }
+    catch (err) {
+      if (current()) container.innerHTML = `<p class="text-sm font-semibold text-red-700 py-10 text-center">${esc(err.message)}</p>`;
+      return null;
+    }
+    if (!current()) return null;
+    container.innerHTML = reviewHtml(r);
+    if (!container.dataset.mbxReviewBound) {
+      container.dataset.mbxReviewBound = '1';
+      container.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-mbx-review]');
+        if (!t) return;
+        // Only this container's own buttons: the same element is reused by every role's Review tab.
+        if (window._detailHubKind !== 'mailbox') return;
+        state.mailboxId = Number(t.dataset.mbxBox) || state.mailboxId;
+        state.pill = t.dataset.mbxReview;
+        state.openDraftsAfterLoad = state.pill === 'drafts';
+        window._activateMainTab?.('datahub'); // its activation refreshes this module, which then opens the drafts
+      });
+    }
+    return r.items.length;
+  }
+
   async function refresh() {
     if (!state.assistantId || !host()) return;
     // The page is a single-page app: after leaving the Email Assistant for another assistant, this
     // module must not paint over that assistant's Data Hub.
     const current = window._detailCurrentData;
     if (current && Number(current.id) !== Number(state.assistantId)) { state.assistantId = null; return; }
-    try { await load(); render(); }
+    try {
+      await load();
+      if (state.openDraftsAfterLoad) { state.openDraftsAfterLoad = false; openWaitingDrafts(); }
+      render();
+    }
     catch (err) { host().innerHTML = `<div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm font-semibold text-red-700">${esc(err.message)}</div>`; }
   }
 
@@ -634,5 +748,5 @@
     await refresh();
   }
 
-  window.AssistantMailbox = { init, refresh, _test: { pillDefs, filtered, esc, gapsIn } };
+  window.AssistantMailbox = { init, refresh, renderReview, reviewCount, _test: { pillDefs, filtered, esc, gapsIn, reviewHtml } };
 })();

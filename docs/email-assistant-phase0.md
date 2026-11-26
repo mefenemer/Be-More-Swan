@@ -276,31 +276,62 @@ The Google Cloud sub-processor notice (§3.3, decided) goes out separately under
 
 ## 7. CASA quote requests (drafts, not sent)
 
-Google's list of authorised CASA labs is on the App Defense Alliance site (appdefensealliance.dev →
-CASA → authorised labs). Recommended: TAC Security (Google's negotiated rate) plus one other lab from
-that list for comparison.
+Updated 2026-11-26 to match what is built (Gmail reading, sorting, drafts, send-on-approval, clean-up and
+labels are on staging; one scope, `gmail.modify`). Send the same email to two labs.
 
-> **Subject:** CASA Tier 2 assessment quote: Gmail restricted scopes, web app
+**Where to send it:** Google's list of authorised CASA labs is on the App Defense Alliance site
+(appdefensealliance.dev → CASA → "Authorized Labs"). Recommended: **TAC Security** (Google's negotiated
+rate for Tier 2) plus one other lab from that list for comparison. Use each lab's own contact form or
+sales address from that page, not one copied from anywhere else.
+
+> **Subject:** Quote request: CASA Tier 2 assessment for a Gmail restricted-scope web app
 >
 > Hello,
 >
-> We're Be More Swan Ltd (UK), a web app of AI assistants for small businesses. We're preparing a Google
-> OAuth restricted-scope verification for a new Google Cloud project that will request
-> `gmail.readonly` and `gmail.modify`, and we need a **CASA Tier 2** assessment.
+> We're Be More Swan Ltd, a UK company. Our web app gives small businesses a team of AI assistants. One
+> of them, the Email Assistant, connects to a user's own Gmail account. We're preparing Google OAuth
+> verification for restricted scopes, and Google will ask us for a **CASA Tier 2** assessment. We'd
+> like a quote.
 >
-> - App type: web application (vanilla JavaScript front end, serverless functions on Netlify, Postgres
->   on Neon). No mobile app.
-> - Data: Gmail message headers and content are read on demand and not stored; derived summaries and
->   categories are stored; tokens encrypted at application level (AES-256-GCM).
-> - Timing: we expect to submit to Google in [month]; assessment would follow Google's request.
-> - We'd like this to renew yearly.
+> **The app**
+> - Web application only, no mobile app. Vanilla JavaScript front end; serverless functions on Netlify
+>   (Node.js/TypeScript); Postgres on Neon. Production and staging sites are separate.
+> - Google Cloud project with one restricted scope, `https://www.googleapis.com/auth/gmail.modify`,
+>   plus `openid` and `userinfo.email`. No other Google APIs.
+> - Sign-in to our app is separate (our own accounts); Google OAuth is used only to connect a mailbox.
 >
-> Could you send: the price for the initial assessment and the yearly re-assessment, what's included
-> (number of re-scans after fixes), typical lead time, and what you need from us (self-assessment
-> questionnaire, scan access to staging, source access)?
+> **What it does with Gmail data**
+> - Reads new mail (headers, and the body on demand) to sort it into categories, mark what needs a reply
+>   and write a one-line summary. Message bodies and attachments are **not stored**; we store the
+>   sender, subject, category, priority and summary.
+> - Drafts replies, which the user must approve before anything is sent from their own mailbox.
+>   Moves mail to archive or trash only when the user approves; never deletes permanently.
+> - OAuth tokens are encrypted at application level (AES-256-GCM, one key per mailbox) and are deleted
+>   when the user disconnects.
+> - Email text is sent to one AI provider (Anthropic) for sorting and drafting, under a no-training
+>   contract. A user can mark senders as private; their email is never sent to AI.
+>
+> **Timing**
+> We'd like to submit to Google in [month 2027] and start the assessment when Google asks for it. We
+> expect to renew every year.
+>
+> **Could you tell us**
+> 1. The price of the first Tier 2 assessment, and of the yearly re-assessment.
+> 2. What's included: how many re-scans after we fix findings, and whether a letter of validation for
+>    Google is part of it.
+> 3. Typical time from starting to the letter of validation.
+> 4. What you need from us: self-assessment questionnaire, a test account and scan access to our
+>    staging site, source code access, or anything else.
+> 5. Any discount for a small business, or for booking the yearly renewal up front.
 >
 > Thank you,
-> [name], Be More Swan Ltd
+> [Your name]
+> [Role], Be More Swan Ltd
+> [Phone, optional]
+
+Before sending, fill in the three brackets: the month you plan to submit, your name and your role.
+Keep a note of both replies here (price, lead time, re-scans) so the plan's release checklist can be
+dated.
 
 ## 8. DPIA (draft)
 

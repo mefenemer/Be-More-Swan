@@ -672,7 +672,13 @@ page only — no real mailbox has been connected yet). As built:
     notification-actions.ts, the preferences and `db/notifications-categorization.sql` (⚠️ re-run that file on
     BOTH DBs; until then the call site passes the category, so nothing breaks).
 - **Still open:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per email, which
-  needs real email from people in a connected mailbox; a Review-tab listing (approvals live on the Emails tab).
+  needs real email from people in a connected mailbox.
+- **Review tab ✅ BUILT 2026-11-26:** the Review tab lists the owner's drafted replies (with any `[check: …]`
+  gaps counted) and clean-up batches across their mailboxes, with a count on the tab. Each item opens the Emails
+  tab on that mailbox's Drafts or Clean-up, where it is sent or applied — one confirm and one code path per
+  action. Registry `reviewQueue: { kind: 'mailbox', source: 'mailbox' }`; no lifecycle columns; never
+  assistant_records. Looking at Review does not clear "needs you now" (no `seen=1`). A teammate or an
+  impersonating admin sees "Only the mailbox's owner…" and the browser never asks for drafts.
 
 **Phase 3: Gmail** — split in two (2026-11-13):
 - **3a ✅ BUILT 2026-11-13** (branch `claude/email-assistant-phase1`): Gmail connect on the separate mail

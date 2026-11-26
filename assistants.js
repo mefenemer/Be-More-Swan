@@ -1742,6 +1742,8 @@ window._detailRqRefreshColumnCounts = async function() {
     if (rq.source === 'blog_posts') return;
     // Same as blog: the newsletter renderer sets its own review badge as it draws.
     if (rq.source === 'newsletter_issues') return;
+    // The Email Assistant's list (one view, no columns) sets its badge as it draws, too.
+    if (rq.source === 'mailbox') return;
     // Only count columns that are actually on screen (Approved is hidden for posts queues).
     const visible = Object.keys(_DETAIL_RQ_COLUMNS).filter(k => {
         const btn = document.querySelector(`.detail-rq-col[data-status="${k}"]`);
@@ -1759,6 +1761,7 @@ async function _detailRqRenderGroups(statusKey) {
     // and routes into Blog Studio (where blog review/editing lives) + schedules via schedule-blog.
     if ((window._detailReviewQueue || {}).source === 'blog_posts') return _detailRqRenderBlog(statusKey);
     if ((window._detailReviewQueue || {}).source === 'newsletter_issues') return _detailRqRenderNewsletter(statusKey);
+    if ((window._detailReviewQueue || {}).source === 'mailbox') return _detailRqRenderMailbox();
 
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
@@ -4971,6 +4974,22 @@ window._detailRqNewsletterOpen = function (issueId) {
     window.loadView?.('newsletter');
 };
 
+/**
+ * The Email Assistant's Review tab (registry reviewQueue source 'mailbox'): drafted replies and clean-up
+ * batches waiting for the mailbox OWNER, drawn by assistant-mailbox.js. One list, no lifecycle columns
+ * (the column strip is hidden for this role) — each item opens the Emails tab, where it is sent or applied.
+ */
+async function _detailRqRenderMailbox() {
+    const container = document.getElementById('detail-rq-groups');
+    if (!container || !window.AssistantMailbox?.renderReview) return;
+    const seq = ++_detailRqRenderSeq; // only the newest load may paint (see _detailRqRenderGroups)
+    const n = await window.AssistantMailbox.renderReview(container, { isCurrent: () => seq === _detailRqRenderSeq });
+    if (n == null) return;
+    _setDetailRqTabBadge(n);
+    window._setPendingReviewCount?.(n);
+    window._updateOpSignals?.({ pendingReview: n });
+}
+
 async function _detailRqRenderNewsletter(statusKey) {
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
@@ -7503,6 +7522,7 @@ function _applyDashboardRegistry(data) {
     }
     const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
     const rqIsNewsletter = window._detailReviewQueue.source === 'newsletter_issues';
+    const rqIsMailbox = window._detailReviewQueue.source === 'mailbox';
     // A role can override the subtitle from the registry (reviewQueue.subtitle) when the generic
     // copy would misdescribe what its Approve button actually does.
     setText('detail-rq-subtitle', window._detailReviewQueue.subtitle
@@ -7535,7 +7555,8 @@ function _applyDashboardRegistry(data) {
     // Records queues have no post-generation button; blog re-points it at Blog Studio. A records
     // queue may name its own (registry reviewQueue.newAction): the Meeting Note Taker's "New meeting".
     const rqNew = rqIsRecords ? window._detailReviewQueue.newAction : null;
-    toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);
+    // The Email Assistant's Review has nothing to create: a reply starts from an email on the Emails tab.
+    toggleBtn('detail-rq-primary-btn', !rqIsMailbox && (!rqIsRecords || !!rqNew));
     // ⚠️ A property handler beats the HTML's onclick="openGeneratePostSheet()", and a slow earlier
     // load can wire this page's button before this render runs: open the Meeting Note Taker, move on
     // to Felix before its context arrives, and Felix's "New post" opened "New meeting" (staging,
@@ -7914,6 +7935,17 @@ function _applyDashboardRegistry(data) {
         window.AssistantLeadThreads?.init({ assistantId: data.id });
     } else {
         window.AssistantLeadOutreach?.reset();
+    }
+    // The Email Assistant's Review is ONE list (assistant-mailbox.js renderReview), not lifecycle columns.
+    // After the reset() above, which shows the strip again for every other role. Its count is primed now,
+    // like a records queue's, so the tab says whether anything waits before it is opened.
+    if ((cfg.reviewQueue || {}).source === 'mailbox') {
+        const strip = document.getElementById('detail-rq-colstrip');
+        if (strip) { strip.classList.add('hidden'); strip.style.display = 'none'; }
+        const forId = data.id;
+        window.AssistantMailbox?.reviewCount?.().then((n) => {
+            if (Number(window._currentAssistantId) === Number(forId)) _setDetailRqTabBadge(n);
+        });
     }
 
     // Strategy tab — lead roles only (strategyTab: lead_qualifier) AND gated on the
