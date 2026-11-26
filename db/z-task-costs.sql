@@ -93,6 +93,7 @@ INSERT INTO task_cost_change_items (change_id, cost_key, new_units) VALUES
     (1, 'meeting_pickup', 1),        -- added 2026-11-19 (Note Taker meeting pick-up, D3); a re-run adds just this row
     (1, 'meeting_bot_call', 1),      -- added 2026-11-19 (Note Taker joins the call, B3); nobody is charged until the meeting_bot flag is on
     (1, 'ai_voiceover_long', 0),     -- added 2026-11-19 (long voiceovers, each further 2,500 characters); 0 = today's flat price until a change is announced
+    (1, 'product_from_photo', 1),    -- added 2026-11-26 (Shopkeeper: a product drafted from a photo, owner Q5); a re-run adds just this row
     (1, 'chat_messages', 1),
     (1, 'editing_helper', 1),
     (1, 'design_round', 1),

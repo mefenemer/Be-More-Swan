@@ -266,6 +266,7 @@ export const CARD_LABELS: Record<string, string> = {
     shop_settings: 'Fill in the shop\'s Delivery & returns details',
     product_stock: 'Set how many of a product are in stock, or when to warn it is low',
     product_options: 'Set a product\'s options (sizes, colours…), each with its own price and stock',
+    product_photo: 'Add a product from a photo: name and description written from the picture, the price typed by you',
     delivery_rates: 'Set the UK delivery choices buyers pick at checkout, with free-over thresholds and collection',
     order_update: 'Mark an order as posted (with tracking, emailed to the buyer from your own inbox), dealt with, or new again',
     site_import_request: 'Import their existing website',

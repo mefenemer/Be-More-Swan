@@ -24,7 +24,7 @@
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, photo: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -181,6 +181,32 @@
       ${state.stockError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.stockError)}</p>` : ''}`);
   }
 
+  // Product from a photo (Phase 2 slice 3): pick a photo → the Shopkeeper drafts its name and description (never a
+  // price) → the owner types the price → "Add product" saves it through Business Information's own save
+  // (org-products.ts POST), the same as "Add" on the Products tab. state.photo = { asset, busy, draft, error, done }.
+  const taskWord = (n) => (n > 0 ? `${n} task${n === 1 ? '' : 's'}` : 'free');
+  function photoProductCard(d) {
+    const p = state.photo;
+    const head = '<p class="text-sm font-black text-gray-900">Add a product from a photo</p>';
+    const intro = `<p class="text-xs text-gray-500 mt-1">Choose a photo of one product. ${esc(state.assistantName || 'Your Shopkeeper')} writes its name and description from the picture (${esc(taskWord(Number(d.photoTaskCost) || 0))}, nothing if no product can be seen); you type the price and check the words before it's added. It never sets a price.</p>`;
+    if (!p) return card(`${head}${intro}<div class="mt-3">${btn('data-photo-pick', 'Choose a photo', true)}</div>`);
+    const pic = p.asset && p.asset.url ? `<img src="${esc(p.asset.url)}" alt="" class="rounded-lg border border-gray-200 object-cover" style="width:96px;height:96px">` : '';
+    const msg = p.error ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(p.error)}</p>`
+      : p.done ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(p.done)}</p>` : '';
+    if (!p.draft) {
+      return card(`${head}${intro}<div class="flex flex-wrap items-center gap-3 mt-3">${pic}
+        ${btn('data-photo-draft', p.busy ? 'Reading the photo…' : `Write it from the photo (${esc(taskWord(Number(d.photoTaskCost) || 0))})`, true).replace('<button', p.busy ? '<button disabled' : '<button')}
+        ${btn('data-photo-pick', 'Choose another')}${btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
+    }
+    return card(`${head}<div class="flex flex-wrap gap-3 mt-3">${pic}<div class="flex-1" style="min-width:14rem">
+        <label class="block text-[11px] font-bold text-gray-600">Name<input type="text" maxlength="80" data-photo-name value="${esc(p.draft.name)}" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600 mt-2">Description<textarea rows="3" maxlength="500" data-photo-desc class="${inputCls} mt-1">${esc(p.draft.description)}</textarea></label>
+        <label class="block text-[11px] font-bold text-gray-600 mt-2">Price in pounds (you set this)<input type="text" inputmode="decimal" data-photo-price placeholder="e.g. 12.50" class="${inputCls} mt-1" style="max-width:9rem"></label>
+      </div></div>
+      <p class="text-xs text-gray-500 mt-2">Check the words: they come from the picture only. It's added to Business Information ▸ Products with this photo, and can then be bought online.</p>
+      <div class="flex flex-wrap gap-2 mt-3">${btn('data-photo-add', p.busy ? 'Adding…' : 'Add product', true).replace('<button', p.busy ? '<button disabled' : '<button')}${btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
+  }
+
   const poundsOf = (p) => (p == null ? '' : (p / 100).toFixed(2).replace(/\.00$/, ''));
   function deliveryRow(r) {
     const v = (x) => (x == null ? '' : esc(x));
@@ -292,7 +318,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${photoProductCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -328,6 +354,50 @@
     if (!t('#datahub-table-host')) return;
     if (t('[data-shop-details] > summary')) { state.shopOpen = !t('[data-shop-details]').open; return; }
     if (t('[data-shop-more]')) { state.shown += 20; render(); return; }
+    if (t('[data-photo-pick]')) {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { state.photo = { error: 'Photos can\'t be chosen on this page — refresh and try again.' }; render(); return; }
+      window.MediaPicker.open({
+        title: 'Choose a photo of the product', assistantName: state.assistantName,
+        onPick: (asset) => { state.photo = { asset }; render(); },
+      });
+      return;
+    }
+    if (t('[data-photo-cancel]')) { state.photo = null; render(); return; }
+    if (t('[data-photo-draft]') && state.photo && state.photo.asset) {
+      state.photo = { asset: state.photo.asset, busy: true };
+      render();
+      try {
+        const r = await post({ action: 'product_photo_draft', assetId: state.photo.asset.id });
+        state.photo = { asset: state.photo.asset, draft: r.draft };
+      } catch (err) { state.photo = { asset: state.photo.asset, error: err.message }; }
+      render();
+      return;
+    }
+    const photoAdd = t('[data-photo-add]');
+    if (photoAdd && state.photo && state.photo.draft) {
+      const root = photoAdd.closest('.rounded-2xl');
+      const name = root.querySelector('[data-photo-name]').value.trim();
+      const description = root.querySelector('[data-photo-desc]').value.trim();
+      const price = root.querySelector('[data-photo-price]').value.trim().replace(/^£/, '');
+      const keep = { asset: state.photo.asset, draft: { name, description } };
+      if (!name) { state.photo = { ...keep, error: 'Give it a name.' }; render(); return; }
+      if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0) { state.photo = { ...keep, error: 'Type the price in pounds, e.g. 12.50.' }; render(); return; }
+      state.photo = { ...keep, busy: true };
+      render();
+      try {
+        const r = await fetch('/.netlify/functions/org-products', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'product', name, description: description || null, priceType: 'fixed', priceAmount: Number(price), priceCurrency: 'GBP', imageAssetId: state.photo.asset.id }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'It couldn\'t be added. Please try again.');
+        state.photo = null;
+        await load();
+        state.stockSaved = `Added "${name}". Set how many you have in Stock above.`;
+      } catch (err) { state.photo = { ...keep, error: err.message }; }
+      render();
+      return;
+    }
     const save = t('[data-shop-save]');
     if (save) {
       const root = save.closest('.rounded-2xl') || document;

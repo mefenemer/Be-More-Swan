@@ -2965,6 +2965,81 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('product_stock', renderProductStockCard);
 
+  // { type: 'product_photo', assetId, pictureName } — a product from a photo the owner attached (online shop Phase 2,
+  // shop-product-photo.ts). "Write it from the photo" spends the task (shop.ts product_photo_draft, the Shop tab's
+  // same call); the owner checks the words and TYPES the price; "Add product" saves through Business Information's
+  // own save (org-products.ts POST). The AI never sets the price. Nothing is charged or saved until they click.
+  function renderProductPhotoCard(data) {
+    const d = data || {};
+    const assetId = Number(d.assetId);
+    const ok = Number.isInteger(assetId) && assetId > 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Product from a photo</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${escapeHtml(d.pictureName || 'Your photo')}</p>
+      <p class="text-xs text-gray-600 mt-1">I write the name and description from the picture; you check them and type the price.</p>
+      <div data-pp-form class="hidden mt-3 space-y-2">
+        <label class="block text-[11px] font-bold text-gray-600">Name<input type="text" maxlength="80" data-pp-name class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600">Description<textarea rows="3" maxlength="500" data-pp-desc class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"></textarea></label>
+        <label class="block text-[11px] font-bold text-gray-600">Price in pounds (you set this)<input type="text" inputmode="decimal" data-pp-price placeholder="e.g. 12.50" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" style="max-width:9rem"></label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pp-draft class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${ok ? '' : 'disabled'}>Write it from the photo</button>
+        <button type="button" data-pp-add class="hidden btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Add product</button>
+        <button type="button" data-pp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pp-status role="status"></p>`;
+    const status = el.querySelector('[data-pp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pp-cancel]')) { setBusy(true); say('Nothing saved or charged.'); return; }
+      if (e.target.closest('[data-pp-draft]')) {
+        setBusy(true);
+        say('Reading the photo…');
+        el.dispatchEvent(new CustomEvent('shop:productPhotoDraft', {
+          bubbles: true,
+          detail: {
+            assetId,
+            respond({ ok: done, error, draft, charged }) {
+              setBusy(false);
+              if (!done) { say(error || 'The photo couldn\'t be read — nothing was charged.', 'error'); return; }
+              el.querySelector('[data-pp-form]').classList.remove('hidden');
+              el.querySelector('[data-pp-name]').value = draft.name || '';
+              el.querySelector('[data-pp-desc]').value = draft.description || '';
+              el.querySelector('[data-pp-draft]').classList.add('hidden');
+              el.querySelector('[data-pp-add]').classList.remove('hidden');
+              say(`Check the words${charged ? ` (${charged} task${charged === 1 ? '' : 's'} used)` : ''}, type the price, then press Add product.`);
+              el.querySelector('[data-pp-price]').focus();
+            },
+          },
+        }));
+        return;
+      }
+      if (!e.target.closest('[data-pp-add]')) return;
+      const name = el.querySelector('[data-pp-name]').value.trim();
+      const description = el.querySelector('[data-pp-desc]').value.trim();
+      const price = el.querySelector('[data-pp-price]').value.trim().replace(/^£/, '');
+      if (!name) { say('Give it a name.', 'error'); return; }
+      if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0) { say('Type the price in pounds, e.g. 12.50.', 'error'); return; }
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('shop:productPhotoAdd', {
+        bubbles: true,
+        detail: {
+          product: { kind: 'product', name, description: description || null, priceType: 'fixed', priceAmount: Number(price), priceCurrency: 'GBP', imageAssetId: assetId },
+          respond({ ok: done, error }) {
+            if (!done) { setBusy(false); say(error || 'It couldn\'t be added — nothing was saved.', 'error'); return; }
+            say(`Added "${name}" to Business Information ▸ Products. Tell me how many you have and I'll set the stock.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('product_photo', renderProductPhotoCard);
+
   // { type: 'product_options', productId, productName, group, options: [{ id?, label, price?, stock? }] } —
   // a product's options (online shop Phase 1, shop-options.ts): shop.ts product_options, the Shop tab
   // Options editor's same save. It REPLACES the list (an empty list removes the options). Nothing is
