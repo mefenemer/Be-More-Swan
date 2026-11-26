@@ -349,3 +349,7 @@ jobs:
       # before/after/level (an option's = its product's), so alerts fire once into low and once at sold out.
       - name: Shop stock alerts
         run: npx tsx tests/shop-stock-alerts-db.test.ts
+      # Website enquirers who tick "Send me news" or whom the owner adds (src/utils/enquiry-audience.ts): consent always
+      # recorded when they end up subscribed (pending → single opt-in / manual entry), refusals never lifted — on Postgres.
+      - name: Website enquirers to Audience
+        run: npx tsx tests/enquiry-audience-db.test.ts
