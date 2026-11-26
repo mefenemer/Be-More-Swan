@@ -8,7 +8,7 @@
 // GET   /feature-requests?action=roadmap                   → read-only roadmap grouped Year → Quarter (US03)
 // GET   /feature-requests?action=metrics                   → avg request→release wait time (US03)
 // GET   /feature-requests?action=catalogue                 → assistant catalogue for the dependent dropdown (US01)
-// POST  /feature-requests  { title, description, category, assistantRef? }
+// POST  /feature-requests  { title, description, category, assistantRef?, chatSessionId? }
 //                                                          → submit a request (defaults to pending_review) (US01)
 // POST  /feature-requests?action=vote { featureId }        → toggle an upvote (US02)
 //
@@ -22,6 +22,7 @@ import { getDb } from '../../db/client';
 import { featureRequests, featureRequestVotes, masterAssistants } from '../../db/schema';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { linkUserReportToNotes } from '../../src/utils/assistant-notes';
 import {
     FR_CATEGORY_LABEL,
     FR_STATUS_LABEL,
@@ -271,6 +272,9 @@ export default withLambda(async (event) => {
         status: 'pending_review',
         source: 'user',
     }).returning({ id: featureRequests.id });
+
+    // Sent from an assistant's chat card: that chat's own assistant notes are duplicates of this (assistant-notes.ts). Never throws.
+    if (body.chatSessionId != null) await linkUserReportToNotes(db, { chatSessionId: body.chatSessionId, organisationId: org?.organisationId ?? null, userId, report: { table: 'feature_requests', id: created.id } });
 
     // New ideas used to wait silently in Admin → Feature Requests at pending_review; the business
     // inbox now hears about each one. Best-effort — the submission has already succeeded.

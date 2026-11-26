@@ -2073,7 +2073,8 @@
     // Help: a support ticket (support-tickets.ts) or, for something broken, Report an Issue (issue-reports.ts).
     async function onMentorSupport(e) {
       if (mentorAlreadyHandled(e)) return;
-      mentorRun(e, (A, d) => A.support(d));
+      // The chat's id lets the server close this chat's own assistant notes as duplicates of the report (assistant-notes.ts).
+      mentorRun(e, (A, d) => A.support({ ...d, chatSessionId }));
     }
 
     // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
