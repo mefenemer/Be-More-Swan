@@ -300,10 +300,10 @@ legal pieces land in their final home and nothing is moved twice.
 
 ## 11. Still open for the owner
 
-Phases 0–1: nothing (decisions taken 2026-11-15; Phase 1 live on prod 2026-11-25 via #885). **Phase 2: the eight
-questions in §12.3**, answered before its first slice is built.
+Nothing. Phases 0–1 decided 2026-11-15 (Phase 1 live on prod 2026-11-25 via #885); **Phase 2's eight questions
+(§12.3) decided 2026-11-26 — every recommendation taken.** Next: Phase 2 slice 1.
 
-## 12. Phase 2 plan — the assistants run the shop (drafted 2026-11-26, nothing built)
+## 12. Phase 2 plan — the assistants run the shop (owner approved 2026-11-26)
 
 Checked against the code on staging after Phase 1. Each slice is one PR into staging, built in this order; each one
 is useful on its own. Rules carried from §10: every action in the Shop tab AND chat (same server path), nothing goes
@@ -344,9 +344,9 @@ customer email. Shop orders get them today once "ask after orders" is on.
 After slice 9: public copy (the §4 "disruptive line"), What's New, help articles, `/connections` only for what is
 live — each by the owner's word, as always.
 
-### 12.3 Questions for the owner
+### 12.3 Owner decisions (2026-11-26: every recommendation taken)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 | --- | --- | --- |
 | Q1 | Review requests go from `noreply@bemoreswan.com`, against the own-inbox rule. Change them? | **Yes, for shop orders now** (slice 7): own domain or Gmail/Outlook, else not sent and the Shop tab says why. Bookings' review requests have the same problem — a separate fix. |
 | Q2 | Where does the buyer tick "Send me news"? | **On our basket page**, before Stripe — the wording is ours, and the reminder (Q3) needs the tick before the buyer reaches Stripe. Single-product Buy buttons (Website-only customers) get no box. |
