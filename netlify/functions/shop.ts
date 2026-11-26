@@ -49,6 +49,7 @@ import { cleanSiteSlugInput, siteCacheTag, siteOrigin, siteVisibleText } from '.
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { purgeCache } from '@netlify/functions';
 import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
+import { loadShopSales, monthSummary, salesMonthWords } from '../../src/utils/shop-sales';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -118,6 +119,9 @@ export default withLambda(async (event) => {
             postingOn: await ordersPostingOn(db),
             // The shop page for a business with no Be More Swan website (shop-page.ts).
             shopPage: await shopPageState(db, orgId, assistant.id).catch((err) => { console.error('[shop] shop page read failed', err instanceof Error ? err.message : err); return null; }),
+            // "This month" on the Orders card (shop-sales.ts, Phase 2 slice 1): UK months, after refunds, per currency.
+            sales: orders.length ? await loadShopSales(db, orgId).then((s) => { const m = monthSummary(s); return { thisMonth: salesMonthWords(m.thisMonth), lastMonth: salesMonthWords(m.lastMonth) }; })
+                .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
             canEdit, warnings,
         };
     }
