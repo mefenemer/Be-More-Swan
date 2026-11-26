@@ -2762,9 +2762,9 @@
         return;
       }
       const emails = Array.isArray(d.newsletters) ? d.newsletters : [];
-      // Everyone-who-subscribes ('subscribed') and form-started email flows ('form') are both
-      // automatic series; anything else becomes draft emails.
-      const trigger = d.trigger && (d.trigger.event === 'subscribed' || d.trigger.event === 'form') ? d.trigger.event : null;
+      // Everyone-who-subscribes ('subscribed'), form-started ('form') and shop first-order ('first_order')
+      // email flows are automatic series; anything else becomes draft emails.
+      const trigger = d.trigger && (d.trigger.event === 'subscribed' || d.trigger.event === 'form' || d.trigger.event === 'first_order') ? d.trigger.event : null;
       const toSequence = !!trigger;
       const request = toSequence
         ? { url: '/.netlify/functions/newsletter-sequences', body: {

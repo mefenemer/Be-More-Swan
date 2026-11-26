@@ -57,7 +57,9 @@ check('switching on a second everyone campaign asks, and takeOver swaps both in 
 
 check('who receives it can change, but never to a second ON everyone campaign', () => {
     const st = slice(FN, "if (action === 'setTrigger')", "if (action === 'enable')");
-    assert.match(st, /if \(to === 'subscribed' && sequence\.isEnabled\)/);
+    // ONE_ON = 'subscribed' or 'first_order' (online shop slice 4b): one ON flow of each.
+    assert.match(st, /if \(ONE_ON\(to\) && sequence\.isEnabled\)/);
+    assert.match(FN, /const ONE_ON = \(t: string\) => t === 'subscribed' \|\| t === FIRST_ORDER_TRIGGER;/);
     assert.match(st, /code: 'ANOTHER_EVERYONE_ON'/);
     assert.match(st, /\.set\(\{ triggerEvent: to,/);
 });
@@ -67,7 +69,7 @@ check('the Studio lists every campaign by id and offers the swap', () => {
     assert.match(STUDIO, /seqState\.selectedId = Number\(b\.getAttribute\('data-auto-seq'\)\) \|\| null;/);
     assert.match(STUDIO, /<select id="nl-seq-trigger"/);
     assert.match(STUDIO, /action: 'setTrigger', trigger: to/);
-    assert.match(STUDIO, /r\.status === 409 && res\.code === 'ANOTHER_EVERYONE_ON'/);
+    assert.match(STUDIO, /r\.status === 409 && \(res\.code === 'ANOTHER_EVERYONE_ON' \|\| res\.code === 'ANOTHER_FIRST_ORDER_ON'\)/);
     assert.match(STUDIO, /takeOver: true/);
 });
 

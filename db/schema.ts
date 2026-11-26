@@ -5309,7 +5309,9 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   // Any number of "everyone who subscribes" campaigns; at most ONE switched on per org
   // (db/newsletter-sequences-everyone-campaigns.sql — replaced the one-welcome-per-org indexes).
   uniqueIndex("newsletter_sequences_org_everyone_on_uidx").on(t.organisationId).where(sql`trigger_event = 'subscribed' AND is_enabled`),
-  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form')`),
+  // At most ONE "first order" flow on per org (db/z-shop-first-order-flow.sql, online shop slice 4b).
+  uniqueIndex("newsletter_sequences_org_first_order_on_uidx").on(t.organisationId).where(sql`trigger_event = 'first_order' AND is_enabled`),
+  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form', 'first_order')`),
 ]);
 
 export const newsletterSequenceSteps = pgTable("newsletter_sequence_steps", {

@@ -34,6 +34,7 @@ import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, us
 import { createNotification } from './notify';
 import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
 import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
+import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
 // Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
@@ -535,6 +536,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         audience = await addShopBuyerToAudience(db, { organisationId: site.organisationId, email: order.customerEmail, name: order.customerName, orderId: order.id, words: session.metadata?.[NEWS_WORDS_METADATA_KEY] ?? null, sourceUrl: order.pagePath })
             .catch((err) => { console.error('[site-shop] buyer → Audience failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) }); return null; });
     }
+    // Slice 4b: their first order starts the "first order" email flow (or, newly subscribed, the welcome flow).
+    if (audience) await enrolShopBuyer(db, { organisationId: site.organisationId, email: order.customerEmail, orderId: order.id, audience });
     const audienceLine = buyerAudienceLine(audience);
     if (owner?.email) {
         const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;

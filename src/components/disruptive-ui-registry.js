@@ -8001,9 +8001,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     // "beta testers" campaign as the welcome sequence — Save then tried to overwrite the LIVE
     // waitlist welcome sequence, and the user had no way to say "no, this is for a form". The card
     // now asks (data-ncd-who), and everything below reads the current answer.
-    let event = trigger.event === 'subscribed' || trigger.event === 'form' ? trigger.event : 'custom';
+    // 'first_order' (online shop slice 4b): a shop buyer who ticked "Send me news" paying for their first order.
+    let event = trigger.event === 'subscribed' || trigger.event === 'form' || trigger.event === 'first_order' ? trigger.event : 'custom';
     const automatic = event !== 'custom';
     let isForm = event === 'form';
+    let isFirstOrder = event === 'first_order';
     const whoName = `ncd-who-${Math.random().toString(36).slice(2, 9)}`;
     const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Email sequence';
     const goal = typeof ui.goal === 'string' ? ui.goal.trim() : '';
@@ -8011,10 +8013,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabelFor = () => isForm ? 'Save as form email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
-    const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
+    const saveLabelFor = () => isForm ? 'Save as form email flow' : isFirstOrder ? 'Save as first-order email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : isFirstOrder ? 'Starts after a shop buyer’s first order' : 'Starts when someone subscribes';
     const statusFor = () => isForm
       ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+      : isFirstOrder
+        ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Once on, it goes to shop buyers who tick “Send me news” at checkout, after their first order — nobody is emailed by saving.'
       : automatic
         ? 'Saving makes this a new email flow for everyone who subscribes, under Email Flows in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
         : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
@@ -8046,9 +8050,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <input type="radio" name="${whoName}" value="form" class="mt-1" ${isForm ? 'checked' : ''}>
           <span>Only people who fill in a particular sign-up form <span class="text-gray-500">— e.g. beta testers. You link the form afterwards.</span></span>
         </label>
-        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
-          <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer mb-1.5">
+          <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm || isFirstOrder ? '' : 'checked'}>
           <span>Everyone who joins your list <span class="text-gray-500">— saved as a new email flow; your current one is not touched.</span></span>
+        </label>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+          <input type="radio" name="${whoName}" value="first_order" class="mt-1" ${isFirstOrder ? 'checked' : ''}>
+          <span>Shop buyers, after their first order <span class="text-gray-500">— only those who tick “Send me news” at checkout.</span></span>
         </label>
       </fieldset>` : ''}
 
@@ -8124,6 +8132,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
                 say(deduped
                   ? 'Already saved — it is under Email Flows in the Email Studio.'
                   : `Saved as an email flow — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.`);
+              } else if (isFirstOrder) {
+                say(deduped
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as a first-order email flow — ${stepCount || n} emails, switched off. Turn it on under Email Flows in the Email Studio when you are ready.`);
               } else if (automatic) {
                 say(deduped
                   ? 'Already saved — it is under Email Flows in the Email Studio.'
@@ -8147,8 +8159,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.addEventListener('change', (e) => {
       const pick = e.target.closest && e.target.closest(`input[name="${whoName}"]`);
       if (!pick) return;
-      event = pick.value === 'form' ? 'form' : 'subscribed';
+      event = pick.value === 'form' ? 'form' : pick.value === 'first_order' ? 'first_order' : 'subscribed';
       isForm = event === 'form';
+      isFirstOrder = event === 'first_order';
       const btn = el.querySelector('[data-ncd-save]');
       if (btn) btn.textContent = saveLabelFor();
       const starts = el.querySelector('[data-ncd-starts]');

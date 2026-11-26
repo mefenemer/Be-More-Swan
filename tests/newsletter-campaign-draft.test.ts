@@ -43,7 +43,8 @@ const ISSUES = read('netlify/functions/newsletter-issues.ts');
 const SEQUENCES = read('netlify/functions/newsletter-sequences.ts');
 const SCHEMA = read('db/schema.ts');
 // The LATEST migration to define the trigger check (db/newsletter-sequences.sql's is superseded).
-const SEQ_SQL = read('db/form-builder.sql');
+// The newest migration that sets the trigger check (it was db/form-builder.sql before 'first_order').
+const SEQ_SQL = read('db/z-shop-first-order-flow.sql');
 
 const email = (over: Record<string, unknown> = {}) => ({
     subject: 'Welcome', preheader: 'Glad you are here', role: 'welcome',
@@ -156,7 +157,7 @@ await check('AUTOMATIC_TRIGGERS matches the database check, in the schema and th
         return m![1].split(',').map((t) => t.trim().replace(/'/g, '')).sort();
     };
     assert.deepEqual(fromCheck(SCHEMA, /newsletter_sequences_trigger_check", sql`\$\{t\.triggerEvent\} IN \(([^)]*)\)/), [...AUTOMATIC_TRIGGERS].sort(), 'db/schema.ts disagrees');
-    assert.deepEqual(fromCheck(SEQ_SQL, /CHECK \(trigger_event IN \(([^)]*)\)\)/), [...AUTOMATIC_TRIGGERS].sort(), 'db/newsletter-sequences.sql disagrees');
+    assert.deepEqual(fromCheck(SEQ_SQL, /CHECK \(trigger_event IN \(([^)]*)\)\)/), [...AUTOMATIC_TRIGGERS].sort(), 'db/z-shop-first-order-flow.sql disagrees');
 });
 
 await check('the prompt names exactly those triggers as the ones that start by themselves', () => {

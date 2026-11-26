@@ -64,9 +64,12 @@ async function prepareDefinition(db: Db, orgId: number, raw: unknown, opts: { fo
         if (!seg) { def.audience.segmentId = null; warnings.push('The chosen segment no longer exists, so it was cleared.'); }
     }
     if (def.campaign.sequenceId) {
-        const [seq] = await db.select({ id: newsletterSequences.id }).from(newsletterSequences)
+        const [seq] = await db.select({ id: newsletterSequences.id, triggerEvent: newsletterSequences.triggerEvent }).from(newsletterSequences)
             .where(and(eq(newsletterSequences.id, def.campaign.sequenceId), eq(newsletterSequences.organisationId, orgId))).limit(1);
         if (!seq) { def.campaign = { sequenceId: null, skipWelcome: false }; warnings.push('The chosen email flow no longer exists, so the form was unlinked.'); }
+        // review #903: never a first-order flow — it refuses form sign-ups, and with the
+        // welcome flow skipped they'd get no series at all.
+        else if (seq.triggerEvent === 'first_order') { def.campaign = { sequenceId: null, skipWelcome: false }; warnings.push('That email flow is for shop buyers’ first orders, not sign-up forms, so the form was unlinked. New sign-ups get your welcome flow.'); }
     }
     if (def.style.logo) {
         // ⚠️ The logo is drawn through a SIGNED, permanent, public URL. Signing an asset id that
