@@ -15,6 +15,14 @@ export interface ImportedProduct {
     price: string | null;
     href: string | null;
     image: string | null;
+    /** The shop's own description, as plain text (Shopify feed; online shop slice 9). */
+    description?: string | null;
+    /**
+     * The product's variants as OUR options (Shopify feed; online shop slice 9): one choice group, each option with
+     * its own price in MAJOR units (null = the product's price) and soldOut when the shop marks it unavailable. The
+     * feed has no stock counts, so stock is left for the owner to type.
+     */
+    options?: { group: string; options: Array<{ label: string; price: number | null; soldOut: boolean }> } | null;
 }
 
 export interface BuilderAdapter {

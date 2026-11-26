@@ -1040,7 +1040,14 @@ async function withShopFeed(fromPages: NonNullable<ImportReport['products']>, pl
         }
         if (!feed.length) return fromPages;
         const seen = new Set(fromPages.map((p) => p.name.trim().toLowerCase()));
-        const out = [...fromPages];
+        // A product read off a page AND in the feed keeps the page's reading, plus what only the feed knows (online shop
+        // slice 9): its description, and its variants as options — then the feed's price too (the page's says "From").
+        const byName = new Map(feed.map((p) => [p.name.trim().toLowerCase(), p]));
+        const out = fromPages.map((p) => {
+            const f = byName.get(p.name.trim().toLowerCase());
+            if (!f) return p;
+            return { ...p, description: p.description ?? f.description ?? null, ...(f.options ? { options: f.options, price: f.price ?? p.price } : {}) };
+        });
         for (const p of feed) {
             const k = p.name.trim().toLowerCase();
             if (seen.has(k) || out.length >= SHOP_FEED_MAX) continue;

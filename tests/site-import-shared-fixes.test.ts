@@ -161,8 +161,9 @@ async function main() {
     await check('Shopify /products.json and WooCommerce\'s Store API give every product: name, cheapest price, picture, page', () => {
         const sp = readShopifyFeed(JSON.stringify({ products: [{ title: 'Puff', handle: 'puff-olive', variants: [{ price: '120.00' }, { price: '140.00' }], images: [{ src: 'https://cdn.shopify.com/puff.jpg' }] }, { title: 'Tote', handle: 'tote', variants: [{ price: '55.00' }], images: [] }] }), 'https://s.example', 'GBP');
         assert.deepStrictEqual(sp, [
-            { name: 'Puff', price: 'From £120.00', href: 'https://s.example/products/puff-olive', image: 'https://cdn.shopify.com/puff.jpg' },
-            { name: 'Tote', price: '£55.00', href: 'https://s.example/products/tote', image: null },
+            // Online shop slice 9 adds description and options (none here: variants with no titles, one variant).
+            { name: 'Puff', price: 'From £120.00', href: 'https://s.example/products/puff-olive', image: 'https://cdn.shopify.com/puff.jpg', description: null, options: null },
+            { name: 'Tote', price: '£55.00', href: 'https://s.example/products/tote', image: null, description: null, options: null },
         ]);
         const wc = readWooFeed(JSON.stringify([{ name: 'Fig candle', permalink: 'https://w.example/product/fig/', prices: { price: '1800', currency_code: 'GBP', currency_minor_unit: 2 }, images: [{ src: 'https://w.example/fig.jpg' }] }]));
         assert.deepStrictEqual(wc, [{ name: 'Fig candle', price: '£18.00', href: 'https://w.example/product/fig/', image: 'https://w.example/fig.jpg' }]);

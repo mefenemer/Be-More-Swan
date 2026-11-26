@@ -371,3 +371,7 @@ jobs:
       # address; without one the order stays unclaimed and goes later, never using up the batch — on Postgres.
       - name: Shop review requests from the owner's address
         run: npx tsx tests/shop-review-requests-db.test.ts
+      # Bring your Shopify shop across (src/utils/site-import-store.ts, online shop Phase 2): descriptions and variants as
+      # options (own prices, unavailable sold out) land in Business Information; existing products untouched — on Postgres.
+      - name: Shop Shopify import with options
+        run: npx tsx tests/shop-shopify-options-db.test.ts

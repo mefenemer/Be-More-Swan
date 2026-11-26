@@ -330,6 +330,8 @@ export default withLambda(async (event) => {
         if (!r.ok) return json(r.status, { error: r.error });
         const said = [`${r.added} product${r.added === 1 ? '' : 's'} added to Business Information ▸ Products & Services, with ${r.added === 1 ? 'its price' : 'their prices'} — change them there from now on.`];
         if (r.skipped) said.push(`${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already there by name, so left as ${r.skipped === 1 ? 'it was' : 'they were'}.`);
+        // Shopify variants → options (online shop slice 9): each with its own price; unavailable ones sold out.
+        if (r.withOptions) said.push(`${r.withOptions} came with ${r.withOptions === 1 ? 'its' : 'their'} options (sizes, colours…) and prices; ones your old shop had sold out are marked sold out. Set how many you have of each on the Shopkeeper's Shop tab.`);
         return json(200, await view(site, said));
     }
 
