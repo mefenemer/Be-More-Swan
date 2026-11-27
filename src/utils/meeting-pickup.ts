@@ -175,6 +175,60 @@ export function transcriptRetryAt(endedAt: Date | null, now: Date): Date | null 
     return new Date(now.getTime() + wait);
 }
 
+// ── The Note Taker's own bot in the same call ─────────────────────────────────────────────────────
+//
+// A workspace can have Google Meet connected AND send the Note Taker's bot to a call (docs/note-taker-bot-plan.md).
+// Without a rule the call would be written up twice and charged twice (1 task for the pick-up, plus the bot's minutes
+// in the call). The bot wins: someone chose to send it, and it is charged by its time in the call. A picked-up
+// meeting whose call the bot got into is skipped ('bot_joined'), free.
+
+/** A meeting_bots row, only the fields the rule reads. */
+export interface BotOnCall { meetingUrl: string; status: string; joinAt: Date; joinedAt: Date | null; leftAt: Date | null }
+
+/** Bot statuses that can still turn into "it got in" (meeting-bot.ts OPEN_BOT_STATUSES). */
+const BOT_STILL_OPEN = new Set(['scheduled', 'joining', 'waiting_room', 'in_call', 'ended']);
+/** Clock slack either side of the call when matching a bot's time in it. */
+export const BOT_MATCH_SLACK_MS = 10 * 60 * 1000;
+/** How early before the call a bot may have been booked and still be for this call. */
+export const BOT_BOOKED_EARLY_MS = 60 * 60 * 1000;
+/** How long after the call an open bot is waited for (its webhook or the 15-minute poll settles it well before). */
+export const BOT_WAIT_MS = 2 * 60 * 60 * 1000;
+/** How often a meeting waiting on an open bot is looked at again. */
+export const BOT_WAIT_RETRY_MS = 15 * 60 * 1000;
+
+/** One call's link in a form both sides share: host + path, lower case, no query or trailing slash. Pure. */
+export function sameCallKey(link: string | null | undefined): string | null {
+    let u: URL;
+    try { u = new URL(String(link ?? '').trim()); } catch { return null; }
+    const path = u.pathname.replace(/\/+$/, '');
+    if (!path) return null;
+    return `${u.hostname.toLowerCase()}${path.toLowerCase()}`;
+}
+
+/**
+ * Was the Note Taker's bot in this call? 'covered' (it got in while the call ran: skip the pick-up), 'wait' (a bot for
+ * this call has not settled yet: look again shortly) or 'clear' (write it up). Matched on the join link and on time,
+ * so the same Meet code used for a call next week is a different call. Pure.
+ */
+export function botCover(row: { link: string | null; startedAt: Date | null; endedAt: Date | null }, bots: readonly BotOnCall[], now: Date): 'covered' | 'wait' | 'clear' {
+    const key = sameCallKey(row.link);
+    if (!key || !row.endedAt) return 'clear';
+    const from = (row.startedAt ?? row.endedAt).getTime() - BOT_MATCH_SLACK_MS;
+    const to = row.endedAt.getTime() + BOT_MATCH_SLACK_MS;
+    let wait = false;
+    for (const b of bots) {
+        if (sameCallKey(b.meetingUrl) !== key) continue;
+        if (b.joinedAt) {
+            const left = (b.leftAt ?? now).getTime();
+            if (b.joinedAt.getTime() <= to && left >= from) return 'covered';
+            continue;
+        }
+        const booked = b.joinAt.getTime();
+        if (BOT_STILL_OPEN.has(b.status) && booked >= from - BOT_BOOKED_EARLY_MS && booked <= to) wait = true;
+    }
+    return wait && now.getTime() - row.endedAt.getTime() < BOT_WAIT_MS ? 'wait' : 'clear';
+}
+
 // ── The store (meeting-pickup-db.ts in production, a Map in tests) ─────────────────────────────────
 
 export interface ImportRow {
@@ -194,7 +248,7 @@ export interface ImportRow {
 
 export type ImportRelease =
     | { status: 'found'; retryAt?: Date | null; lastError?: string | null; refundAttempt?: boolean }
-    | { status: 'skipped'; skipReason: 'no_transcript' | 'nobody_spoke' | 'no_meeting' | 'task_limit' | 'assistant_gone' | 'disconnected' | 'blocked' }
+    | { status: 'skipped'; skipReason: 'no_transcript' | 'nobody_spoke' | 'no_meeting' | 'task_limit' | 'assistant_gone' | 'disconnected' | 'blocked' | 'bot_joined' }
     | { status: 'failed'; lastError: string };
 
 export interface PickupStore {
@@ -269,6 +323,11 @@ export interface WriterDeps {
      * this import's id (a writer that died between filing and the latch), returns that one instead of filing a second.
      */
     file(organisationId: number, assistantId: number, card: Record<string, unknown>, importId: number): Promise<number | null>;
+    /**
+     * The workspace's Note Taker bots around this call's time (any status), for botCover. Asked only for a picked-up
+     * meeting, never a bot's own. Absent = no bots to check.
+     */
+    botsOnCall?(organisationId: number, row: ImportRow): Promise<BotOnCall[]>;
     /** Spends the task(s). Called once, after the latch. A bot's meeting is charged by its minutes in the call. */
     charge(organisationId: number, assistantId: number, importId: number, row: ImportRow): Promise<void>;
 }
@@ -276,7 +335,7 @@ export interface WriterDeps {
 export type WriteOutcome =
     | 'not_claimed' | 'written' | 'lost_latch' | 'waiting_for_transcript' | 'waiting_for_tasks'
     | 'skipped_no_transcript' | 'skipped_nobody_spoke' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
-    | 'skipped_disconnected' | 'skipped_blocked' | 'retry' | 'failed';
+    | 'skipped_disconnected' | 'skipped_blocked' | 'skipped_bot_joined' | 'waiting_for_bot' | 'retry' | 'failed';
 
 export async function writeImport(importId: number, d: WriterDeps): Promise<WriteOutcome> {
     const now = d.now();
@@ -303,6 +362,20 @@ export async function writeImport(importId: number, d: WriterDeps): Promise<Writ
         if (!source || !account) {
             await d.store.release(row.id, { status: 'skipped', skipReason: 'disconnected' }, d.now());
             return 'skipped_disconnected';
+        }
+
+        // The Note Taker's bot was in this call: its minutes are the ones kept (see botCover). Before the transcript is
+        // read, so a covered call costs no platform look-ups.
+        if ((row.via ?? 'transcript') === 'transcript' && d.botsOnCall) {
+            const cover = botCover(row, await d.botsOnCall(row.organisationId, row), d.now());
+            if (cover === 'covered') {
+                await d.store.release(row.id, { status: 'skipped', skipReason: 'bot_joined' }, d.now());
+                return 'skipped_bot_joined';
+            }
+            if (cover === 'wait') {
+                await d.store.release(row.id, { status: 'found', retryAt: new Date(d.now().getTime() + BOT_WAIT_RETRY_MS), refundAttempt: true, lastError: null }, d.now());
+                return 'waiting_for_bot';
+            }
         }
 
         const transcript = await source.fetchTranscript(account, row.externalId, row.endedAt);
