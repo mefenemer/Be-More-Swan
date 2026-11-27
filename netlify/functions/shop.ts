@@ -39,7 +39,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, siteOrders, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { buyerConfirmationsBlocked, connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { buyerConfirmationsBlocked, confirmationNotSent, connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
@@ -100,7 +100,7 @@ export default withLambda(async (event) => {
             db.select({
                 id: siteOrders.id, itemName: siteOrders.itemName, quantity: siteOrders.quantity, amountTotal: siteOrders.amountTotal, currency: siteOrders.currency,
                 customerName: siteOrders.customerName, customerEmail: siteOrders.customerEmail, shippingAddress: siteOrders.shippingAddress,
-                status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt,
+                status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt, buyerEmailedAt: siteOrders.buyerEmailedAt,
             }).from(siteOrders).where(eq(siteOrders.organisationId, orgId)).orderBy(desc(siteOrders.createdAt)).limit(SHOP_ORDER_LIMIT),
             db.select({
                 newOrders: sql<number>`count(*) filter (where ${siteOrders.status} = 'paid')::int`,
@@ -113,7 +113,9 @@ export default withLambda(async (event) => {
         return {
             payments: { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: canEdit },
             shop, shopMissing: missingFields(shop), exceptions: RETURN_EXCEPTIONS,
-            orders, stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
+            // The buyer got no confirmation from the owner's address (site-shop.ts confirmationNotSent): marked on the row.
+            orders: orders.map(({ buyerEmailedAt, ...o }) => ({ ...o, confirmationNotSent: confirmationNotSent({ ...o, buyerEmailedAt }) })),
+            stats: counts ?? { newOrders: 0, orders30: 0, takenPence30: 0, refunds30: 0 },
             stock, options: stock.items.length ? await loadProductOptions(db, orgId, stock.items.map((i) => i.id)) : {},
             // A basket order's items (shop-basket.ts), by order id.
             orderLines: orders.length ? await loadOrderLines(db, orgId, orders.map((o) => o.id)) : {},

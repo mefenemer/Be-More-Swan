@@ -653,6 +653,20 @@ ${o.delivery ? `<p><strong>Delivery chosen:</strong> ${esc(deliveryLine(o.delive
     };
 }
 
+/** Orders from here on are marked when their buyer has no confirmation recorded: from this day it goes only from the
+ *  owner's own address (#914). Older orders were confirmed the old way, so they are never marked. */
+export const CONFIRMATION_MARKER_FROM = '2026-11-27T00:00:00Z';
+
+/** The order list's marker: a buyer with an email address but no confirmation recorded (no own address, refused or
+ *  slow). Pure — the Shop tab and the website's Orders tab use it. */
+export function confirmationNotSent(o: { customerEmail: string | null; buyerEmailedAt: Date | string | null; createdAt: Date | string; status?: string }): boolean {
+    if (!o.customerEmail || o.buyerEmailedAt || o.status === 'refunded') return false;
+    return new Date(o.createdAt).getTime() >= Date.parse(CONFIRMATION_MARKER_FROM);
+}
+
+/** What the marker says. */
+export const CONFIRMATION_NOT_SENT_LINE = 'No order confirmation reached the buyer from your address (or we couldn\'t confirm it went). Please email them one yourself: what they bought, the price, your business details and their 14 days to cancel.';
+
 /** What happened to the buyer's "Order confirmed" email. */
 export type BuyerConfirmation = 'sent' | 'no_email' | 'not_ready' | 'no_route' | 'failed' | 'slow';
 
