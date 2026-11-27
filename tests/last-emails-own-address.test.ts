@@ -44,7 +44,7 @@ async function main() {
     });
 
     await check('the owner\'s warning on Sign-up forms', async () => {
-        assert.ok(/Nobody can sign up on a form that asks people to confirm by email/.test(String(await signupConfirmBlocked(db, 7, none))));
+        assert.ok(/Nobody can sign up on a form that asks people to confirm by email or gives a free download/.test(String(await signupConfirmBlocked(db, 7, none))));
         assert.strictEqual(await signupConfirmBlocked(db, 7, gmail), null);
     });
 
@@ -52,11 +52,12 @@ async function main() {
         assert.ok(!/noreply@|\(via Be More Swan\)/.test(read('src/utils/form-reward.ts')) && read('src/utils/form-reward.ts').includes('sendBusinessEmail(db, form.organisationId'));
         assert.ok(!/from: `|noreply@bemoreswan/.test(read('src/utils/audience-email.ts')));
         const pub = read('netlify/functions/audience-public.ts');
-        assert.ok(pub.indexOf('if (form.doubleOptIn && await signupConfirmBlocked(db, orgId))') > -1);
-        assert.ok(pub.indexOf('if (form.doubleOptIn && await signupConfirmBlocked(db, orgId))') < pub.indexOf('.from(audienceContacts)\n            .where(and(eq(audienceContacts.organisationId, orgId), eq(audienceContacts.email, email)))'), 'refused before the contact is read or written');
+        assert.ok(pub.indexOf('if ((form.doubleOptIn || !!resolveDefinition(form).reward) && await signupConfirmBlocked(db, orgId))') > -1);
+        assert.ok(pub.indexOf('if ((form.doubleOptIn || !!resolveDefinition(form).reward) && await signupConfirmBlocked(db, orgId))') < pub.indexOf('.from(audienceContacts)\n            .where(and(eq(audienceContacts.organisationId, orgId), eq(audienceContacts.email, email)))'), 'refused before the contact is read or written');
         assert.ok(pub.includes('await sendConfirmationEmail(db, orgId, {'));
         const out = read('netlify/functions/send-outbound-email.ts');
         assert.ok(!/assistant@|outbound\.bemoreswan|new Resend\(/.test(out) && out.includes("code: 'NO_SENDING_ADDRESS'"));
+        assert.ok(out.includes("const html = finalHtml ?? '';"), 'review #919: plain text stays plain');
         assert.ok(out.includes('injectAiFooter(bodyText, assistant.name, customDisclosureText, false, workspaceText)'), 'the AI notice is still added');
         assert.ok(read('netlify/functions/audience-forms.ts').includes('confirmBlocked,') && read('src/components/signup-forms.js').includes('data-sf-confirm-blocked'));
     });

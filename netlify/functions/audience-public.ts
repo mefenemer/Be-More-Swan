@@ -552,9 +552,10 @@ export default withLambda(async (event: HandlerEvent) => {
     // the most tracking parameters. 2000 is the practical URL ceiling browsers agree on.
     const pageUrl = String(body.url || '').slice(0, 2000) || null;
 
-    // A form that asks people to confirm by email needs the business's own address to send it from (owner 2026-11-27):
-    // without one, refuse BEFORE writing anything, so no unconfirmable "pending" contact is left behind.
-    if (form.doubleOptIn && await signupConfirmBlocked(db, orgId)) {
+    // A form that emails the visitor — to confirm, or with its free download — needs the business's own address to send
+    // from (owner 2026-11-27): without one, refuse BEFORE writing anything, so no unconfirmable "pending" contact is
+    // left behind and no success message promises an email that can't come (review #919).
+    if ((form.doubleOptIn || !!resolveDefinition(form).reward) && await signupConfirmBlocked(db, orgId)) {
         return json(503, { error: 'This sign-up form can\'t send its confirmation email right now. Please try again later.' }, origin);
     }
 

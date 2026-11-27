@@ -31,7 +31,6 @@ import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { sendBusinessEmail } from '../../src/utils/business-email';
 
 const jwtSecret = process.env.JWT_SECRET;
-const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export default withLambda(async (event) => {
     // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
@@ -112,7 +111,9 @@ export default withLambda(async (event) => {
 
     // From the workspace's OWN address only — its verified sending domain, else its connected Gmail/Outlook
     // (business-email.ts; owner 2026-11-27) — never "via Be More Swan". With neither, nothing is sent.
-    const html = finalHtml ?? `<p>${escapeHtml(finalText).replace(/\r?\n/g, '<br>')}</p>`;
+    // Plain text stays plain (review #919): an HTML part only when the assistant wrote one. An empty html makes the
+    // Gmail/Outlook send plain text and Resend send the text part.
+    const html = finalHtml ?? '';
     let emailId: string | null = null;
     const sent = await sendBusinessEmail(db, orgId, { business: orgRow?.name || assistant.name, to: String(to), subject: String(subject), html, text: finalText }, {
         // One Resend email (the workspace's own domain), caused by this workspace: logged against it (docs/cost-logging-audit.md).

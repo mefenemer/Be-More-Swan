@@ -83,7 +83,7 @@ export async function orgsWithRoute(db: Db, orgIds: number[], route: typeof reso
 export async function signupConfirmBlocked(db: Db, orgId: number, route: typeof resolveSendRoute = resolveSendRoute): Promise<string | null> {
     try {
         const r = await route(db, orgId, { recipientCount: 1, senderName: 'Your business' });
-        return 'error' in r ? 'Nobody can sign up on a form that asks people to confirm by email: the confirmation goes only from your own address, and none is set up. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending, or turn off "confirm by email" on the form. Free downloads also go only from your own address.' : null;
+        return 'error' in r ? 'Nobody can sign up on a form that asks people to confirm by email or gives a free download: those emails go only from your own address, and none is set up. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending.' : null;
     } catch (err) {
         console.error('[business-email] route check failed', err instanceof Error ? err.message : err);
         return null;
