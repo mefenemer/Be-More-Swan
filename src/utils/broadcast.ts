@@ -61,6 +61,13 @@ export const BROADCASTS: readonly BroadcastDef[] = [
         purpose: 'Courtesy notice for the Note Taker meeting bot (docs/note-taker-launch-notices-draft.md §2). DPA 1.2 names Recall.ai and AssemblyAI as specifically authorised, so no 14-day wait applies (legal review 2026-11-25); the Trust and privacy pages promise owners this email anyway. Send to owners before 27 November 2026.',
         audience: 'owners',
     },
+    {
+        key: 'subprocessor_google_cloud_notice',
+        label: 'New sub-processor: Google Cloud (Gmail new-mail notices for the Email Assistant)',
+        purpose: 'The 14 days\' notice in DPA clause 5 for adding Google Cloud Pub/Sub to the sub-processor list (docs/google-cloud-sub-processor-notice.md). Gmail push stays off on production until 14 days after this is sent. Owners may object to privacy@bemoreswan.com within 14 days of the email.',
+        // DPA clause 5 notice goes to the workspace owner, as for ElevenLabs (owner, 2026-11-20).
+        audience: 'owners',
+    },
 ];
 
 export function broadcastDef(key: unknown): BroadcastDef | null {
