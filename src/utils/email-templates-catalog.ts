@@ -721,6 +721,45 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('Any questions, just reply to this email.') + signoff,
     },
     {
+        // The DPA clause 5 notice for adding Google Cloud Pub/Sub as a sub-processor (docs/google-cloud-sub-processor-notice.md):
+        // Gmail's "new mail" notices for the Email Assistant (Phase 3b push). Every claim matches the code and the topic set-up:
+        // a push carries only { emailAddress, historyId } (mail-push-gmail.ts), undelivered messages are kept 7 days (the
+        // subscription's retention), and the reader fetches mail from Gmail itself. No fixed objection date: the 14 days run
+        // from the send, and production push stays off until they have passed. No training claim: none is needed or made.
+        triggerKey: 'subprocessor_google_cloud_notice',
+        name: 'Notice: new sub-processor Google Cloud (Gmail new-mail notices)',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'We are adding Google Cloud to our list of sub-processors',
+        preheader: 'Only for Gmail mailboxes connected to your Email Assistant. You can object within 14 days.',
+        bodyHtml: greet +
+            p('We are adding <strong>Google Cloud</strong> (Google LLC, United States) to the list of providers that process data for us, on our <a href="https://bemoreswan.com/trust.html#sub-processors">Trust page</a>.') +
+            p('<strong>What it does.</strong> When you connect a Gmail mailbox to your Email Assistant, Gmail tells us the moment new mail arrives, instead of us checking every few minutes. Those "new mail" notices pass through Google Cloud Pub/Sub, a messaging service in our own Google Cloud account. Each notice carries only the mailbox\'s email address and a reference number &mdash; no email content, subjects or senders. If you use the Email Assistant with Gmail, it then reads the new mail from Gmail directly. If you disconnect a Gmail mailbox, its notices can keep passing through for at most 7 days afterwards; we ignore them.') +
+            p('<strong>How your data is protected.</strong> Google Cloud acts as our processor under the Google Cloud Data Processing Addendum, and transfers outside the UK and EU are covered by Standard Contractual Clauses with the UK Addendum. A notice that cannot be delivered is kept for up to 7 days, then deleted.') +
+            p('<strong>When.</strong> We will not use it for any customer mailbox until at least 14 days after this email.') +
+            p('<strong>If you object.</strong> If you have a data protection reason to object, email <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a> within 14 days of this email. We will work with you on an alternative, such as checking your mailbox every few minutes instead, and if we cannot find one you can end the affected service with no early-termination charge (clause 5 of our <a href="https://bemoreswan.com/dpa.html">Data Processing Agreement</a>). If you do not connect Gmail to an Email Assistant, nothing reaches Google Cloud.') +
+            p('Nothing else changes, and there is nothing you need to do.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
+        // One-off (owner, 2026-11-27): booking emails to customers go only from the business's own address since
+        // release #918 (src/utils/business-email.ts). Sent only to owners of workspaces with bookings and no address
+        // (broadcast audience 'bookings_no_address'). Every claim matches the code: nothing is sent without an address;
+        // the Bookings tab and the owner's own emails say so; stay arrival details and first pay links wait.
+        triggerKey: 'booking_emails_need_address_notice',
+        name: 'Notice: booking emails need your own email address',
+        category: 'Account',
+        transactional: true,
+        subject: 'Action needed: your booking emails need your own email address',
+        preheader: 'Connect Gmail or Outlook, or verify your domain, so customers get their booking emails.',
+        bodyHtml: greet +
+            p('Your customers now get their booking emails from <strong>your own email address</strong>, not from Be More Swan. That covers confirmations, reminders, cancellations, holiday let emails, deposit receipts and class waitlist offers. Replies come straight back to you.') +
+            p('<strong>Your workspace takes bookings but has no email address set up yet, so these emails are not being sent.</strong> Your bookings themselves are safe, and you are told each time on your Bookings tab and in your new-booking emails.') +
+            p('<strong>What to do.</strong> In Email Studio &rsaquo; Sending, connect your Gmail or Outlook, or verify your own domain. It takes a couple of minutes. From then on, booking emails go out by themselves; holiday let arrival details and balance links that were waiting go out on the next run.') +
+            p('Until then, please email any customer who has booked recently to confirm their booking yourself.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
         // A change to task costs (Admin → Money → Task costs, src/utils/task-cost-changes.ts). The figures
         // come from the change; the in-app twin shares the key. Transactional: a notice, not marketing.
         triggerKey: 'task_cost_change',

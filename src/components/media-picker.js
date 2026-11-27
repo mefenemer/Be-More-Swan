@@ -16,6 +16,8 @@
  *     (chat-session.js), where a document is read rather than shown. The window closes and hands the files back.
  *   topic: what the picture is for — the stock search and the AI prompt start from it.
  *   findNow: open on stock with `topic` already searched (the chat's "Choose a picture", design-studio.js).
+ *   filesOnly: only "Upload or library" — no stock, no AI, and the library lists only the owner's own uploads (no provider) and photos imported from their own website (site_import). For a photo that must show the real thing (the Shopkeeper's
+ *     product from a photo, owner 2026-11-27: a stock or AI picture would list something the buyer doesn't get).
  *
  * Used by the Website Assistant's editor (assistant-site-editor.js). Uploads go through the
  * workspace's own uploader (window.gpUploadContentAsset), which handles moderation — a flagged
@@ -73,6 +75,7 @@
     const onPick = opts.onPick || function () {};
     const multiple = !!opts.multiple;
     const allowVideo = !!opts.video;
+    const filesOnly = !!opts.filesOnly;
     const who = opts.assistantName || 'your assistant';
     const noun = allowVideo ? 'picture or video' : 'picture';
     const chosen = [];   // multiple: the assets ticked or uploaded, in order
@@ -93,7 +96,7 @@
           <p class="text-sm font-black text-gray-900">${esc(opts.title || `Choose a ${noun}`)}</p>
           <button type="button" data-mp-close class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Close</button>
         </div>
-        <div class="flex flex-wrap gap-2 px-5 pt-4">${tabBtn('files', 'Upload or library')}${tabBtn('stock', `Ask ${who} to find stock`)}${tabBtn('ai', `Ask ${who} to create one`)}</div>
+        <div class="flex flex-wrap gap-2 px-5 pt-4">${tabBtn('files', 'Upload or library')}${filesOnly ? '' : `${tabBtn('stock', `Ask ${who} to find stock`)}${tabBtn('ai', `Ask ${who} to create one`)}`}</div>
         <p data-mp-msg class="text-xs font-semibold px-5 mt-2" role="status"></p>
         <div class="px-5 pb-5 pt-2 overflow-y-auto" style="min-height:0">
           <div data-mp-pane="files">
@@ -213,8 +216,12 @@
       .then((d) => {
         const groups = d.assets || {};
         const usable = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || [])
-          .filter((a) => (a.assetType === 'image' || (allowVideo && a.assetType === 'video')) && a.status !== 'rejected' && (a.storageUrl || a.externalUrl));
-        if (!usable.length) { grid.innerHTML = `<p class="text-xs text-gray-500">Nothing in your library yet — upload one above, or ask ${esc(who)} to find or create one.</p>`; return; }
+          .filter((a) => (a.assetType === 'image' || (allowVideo && a.assetType === 'video')) && a.status !== 'rejected' && (a.storageUrl || a.externalUrl))
+          // filesOnly (review #926): only the owner's OWN photos — uploads (no provider) and photos imported from their own
+          // website (site_import, owner 2026-11-27) — never a saved stock photo (pexels), an AI picture (fal, stability…), a
+          // brand card, flyer or video render.
+          .filter((a) => !filesOnly || !a.provider || a.provider === 'site_import');
+        if (!usable.length) { grid.innerHTML = `<p class="text-xs text-gray-500">${filesOnly ? 'None of your own photos in your library yet — upload one above.' : `Nothing in your library yet — upload one above, or ask ${esc(who)} to find or create one.`}</p>`; return; }
         grid.innerHTML = usable.map((a) => `
           <button type="button" data-mp-asset="${esc(a.id)}" class="text-left border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
             ${tileMedia(a.storageUrl || a.externalUrl, a.assetType === 'video')}
@@ -260,7 +267,7 @@
     $('[data-mp-stock-go]').addEventListener('click', () => searchStock(false));
     $('[data-mp-stock-q]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchStock(false); } });
     more.addEventListener('click', () => searchStock(true));
-    if (opts.findNow && opts.topic) { showTab('stock'); searchStock(false); }
+    if (opts.findNow && opts.topic && !filesOnly) { showTab('stock'); searchStock(false); }
     stockGrid.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-mp-stock-pick]');
       if (!b) return;

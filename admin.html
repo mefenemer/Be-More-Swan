@@ -4627,7 +4627,7 @@ async function loadBroadcasts() {
       card.querySelector('.bc-waiting').textContent = n;
       input.placeholder = `Type ${n}`;
       input.disabled = n === 0 || !!b.switchedOff;
-      send.textContent = `Send to ${n} ${pick.value === 'owners' ? (n === 1 ? 'owner' : 'owners') : (n === 1 ? 'person' : 'people')}`;
+      send.textContent = `Send to ${n} ${pick.value !== 'everyone' ? (n === 1 ? 'owner' : 'owners') : (n === 1 ? 'person' : 'people')}`;
       send.disabled = input.value.trim() !== String(n) || n === 0 || !!b.switchedOff;
     };
     pick.addEventListener('change', () => { input.value = ''; sync(); });
@@ -4646,8 +4646,8 @@ async function runBroadcast(btn, resource, payload) {
     if (!res.ok) { showBcStatus('error', d.error || `That didn't work (HTTP ${res.status}).`); if (res.status === 409) loadBroadcasts(); return; }
     if (resource === 'test') showBcStatus('success', `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`);
     else showBcStatus('success', d.emailsGoToCustomers
-      ? `Sending to ${d.waiting} ${d.audience === 'owners' ? 'workspace owners' : 'people'}. It runs in the background; refresh this page to watch the count fall.`
-      : `Writing in-app notices for ${d.waiting} ${d.audience === 'owners' ? 'workspace owners' : 'people'} on this database. No customer emails are sent from here.`);
+      ? `Sending to ${d.waiting} ${d.audience !== 'everyone' ? 'workspace owners' : 'people'}. It runs in the background; refresh this page to watch the count fall.`
+      : `Writing in-app notices for ${d.waiting} ${d.audience !== 'everyone' ? 'workspace owners' : 'people'} on this database. No customer emails are sent from here.`);
     setTimeout(loadBroadcasts, 4000);
   } catch (err) {
     showBcStatus('error', err.message || 'That didn\'t work.');

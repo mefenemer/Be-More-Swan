@@ -13,7 +13,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BROADCASTS, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES, readAudience, BROADCAST_AUDIENCES } from '../src/utils/broadcast';
+import { BROADCASTS, audiencesFor, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES, readAudience, BROADCAST_AUDIENCES } from '../src/utils/broadcast';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 import { TEMPLATE_DEFAULTS } from '../src/utils/email-templates-catalog';
 
@@ -136,23 +136,52 @@ check('Recall.ai notice (Note Taker launch 27 Nov 2026): owners, both lists, eve
     assert.doesNotMatch(email.bodyHtml + tpl.message, /saved the transcript|30 days|Zoom|within 3 days at most|\btrain/i, 'no promise the code or Recall has not confirmed');
 });
 
+check('Google Cloud notice (Gmail push): owners, both lists, every claim matches the push code and the topic set-up', () => {
+    const tpl = NOTIFICATION_DEFAULTS.find((t) => t.templateKey === 'subprocessor_google_cloud_notice')!;
+    const email = TEMPLATE_DEFAULTS.find((t) => t.triggerKey === 'subprocessor_google_cloud_notice')!;
+    assert.ok(tpl && email, 'both templates exist');
+    assert.strictEqual(broadcastDef('subprocessor_google_cloud_notice')?.audience, 'owners', 'DPA clause 5 notice goes to owners');
+    for (const s of ['Google Cloud', 'Pub/Sub', 'privacy@bemoreswan.com', '14 days', 'Email Assistant', 'reference number']) {
+        assert.ok(tpl.message.includes(s), `in-app: ${s}`);
+        assert.ok(email.bodyHtml.includes(s), `email: ${s}`);
+    }
+    assert.ok(email.bodyHtml.includes('no email content') && tpl.message.includes('never email content'), 'a push carries only the address and historyId (mail-push-gmail.ts)');
+    assert.ok(email.bodyHtml.includes('up to 7 days'), 'the subscription keeps undelivered messages 7 days');
+    assert.doesNotMatch(email.bodyHtml + tpl.message, /as it does today/, 'Gmail is not live for customers yet (review of #921)');
+    assert.ok(email.bodyHtml.includes('at most 7 days afterwards') && tpl.message.includes('at most 7 days after you disconnect'), 'the notice matches the pages on the disconnect gap (review of #921)');
+    assert.ok(email.bodyHtml.includes('until at least 14 days after this email'), 'production push waits for the notice');
+    assert.doesNotMatch(email.bodyHtml, /within 14 days of (?:\d|[A-Z][a-z]+ \d)/, 'no fixed objection date: the 14 days run from the send');
+    assert.doesNotMatch(email.bodyHtml + tpl.message, /\btrain|sorry|apolog|EU only|UK only/i, 'no promise the set-up does not keep (topic has no region policy)');
+    for (const f of ['trust.html', 'privacy.html']) {
+        const html = read(f);
+        assert.match(html, /<td[^>]*>Google Cloud \(Pub\/Sub\)<\/td>/, `${f} lists it`);
+        assert.ok(html.includes('US (Google LLC; global infrastructure)'), `${f}: location is not a storage promise (topic has no region policy)`);
+        assert.ok(html.includes('and for up to 7 days after one is disconnected'), `${f}: a Gmail watch can outlive a disconnect (no users.stop) — review of #921`);
+        assert.match(html, /Google Cloud, (?:on|in) the list above, is different: it is our own\s+account/, `${f} says why it is not a connected platform`);
+    }
+});
+
 check('audience (owner, 2026-11-20): owners or everyone, picked per send, never widened by a missing field', () => {
-    assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone']);
+    assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone', 'bookings_no_address']);
+    // 2026-11-27: the targeted audience is offered only by the notice written for it.
+    assert.deepStrictEqual([...audiencesFor(broadcastDef('ai_video_per_second_notice')!)], ['owners', 'everyone']);
+    assert.deepStrictEqual([...audiencesFor(broadcastDef('booking_emails_need_address_notice')!)], ['bookings_no_address']);
     assert.strictEqual(readAudience('owners'), 'owners');
     assert.strictEqual(readAudience('everyone'), 'everyone');
     for (const bad of [undefined, null, '', 'admins', 'Owners']) assert.strictEqual(readAudience(bad), null);
     assert.strictEqual(broadcastDef('subprocessor_elevenlabs_notice')?.audience, 'owners', 'the DPA notice goes to owners');
     assert.strictEqual(broadcastDef('ai_video_per_second_notice')?.audience, 'everyone');
     const util = read('src/utils/broadcast.ts');
-    assert.match(util, /\$\{audience === 'owners' \? sql`AND uo\.role = 'owner'` : sql``\}/);
+    assert.match(util, /const owners = audience === 'owners' \|\| audience === 'bookings_no_address';/);
+    assert.match(util, /\$\{owners \? sql`AND uo\.role = 'owner'` : sql``\}/);
     const fn = read('netlify/functions/admin-broadcast.ts');
     assert.ok(fn.indexOf("const audience = readAudience(body.audience);") < fn.indexOf('const waiting = (await pendingRecipients(db, def.key, audience)).length;'), 'the count is checked for the audience picked');
-    assert.match(fn, /if \(!audience\) return json\(400,/);
+    assert.match(fn, /if \(!audience \|\| !audiencesFor\(def\)\.includes\(audience\)\) return json\(400,/);
     assert.match(fn, /body: JSON\.stringify\(\{ key: def\.key, adminId, audience \}\)/);
     const worker = read('netlify/functions/admin-broadcast-background.ts');
-    assert.match(worker, /if \(!audience\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
+    assert.match(worker, /if \(!audience \|\| !audiencesFor\(def\)\.includes\(audience\)\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
     assert.match(worker, /recipients = await pendingRecipients\(db, def\.key, audience\);/);
-    assert.match(util, /export async function pendingRecipients\(db: Db, key: string, audience: BroadcastAudience\): Promise/, 'no default: every caller says who');
+    assert.match(util, /export async function pendingRecipients\(db: Db, key: string, audience: BroadcastAudience, deps/, 'no default: every caller says who');
     // Review of #788: two sends of one notice at once must not reach anyone twice.
     assert.ok(worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') > 0
         && worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') < worker.indexOf('const ok = await createNotification('), 'checked again just before each send');

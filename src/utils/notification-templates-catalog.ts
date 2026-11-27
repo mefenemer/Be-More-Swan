@@ -1311,6 +1311,26 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // DPA clause 5 notice: Google Cloud Pub/Sub added as a sub-processor (docs/google-cloud-sub-processor-notice.md).
+        templateKey: 'subprocessor_google_cloud_notice',
+        name: 'New sub-processor: Google Cloud',
+        category: 'Compliance',
+        type: 'subprocessor_google_cloud_notice',
+        title: 'We are adding Google Cloud to our list of sub-processors',
+        message: 'When you connect Gmail to your Email Assistant, Gmail\'s "new mail" notices pass through Google Cloud Pub/Sub (US). They carry only the mailbox address and a reference number, never email content, and can continue for at most 7 days after you disconnect. Google Cloud acts as our processor under its Data Processing Addendum, with Standard Contractual Clauses and the UK Addendum. Not used for customer mailboxes until 14 days after this notice. If you have a data protection reason to object, email privacy@bemoreswan.com within 14 days. The full list is on our Trust page.',
+        variables: [],
+    },
+    {
+        // One-off (owner, 2026-11-27): booking emails need the business's own address (broadcast 'bookings_no_address').
+        templateKey: 'booking_emails_need_address_notice',
+        name: 'Booking emails need your own email address',
+        category: 'Connections',
+        type: 'booking_emails_need_address_notice',
+        title: 'Your booking emails need your own email address',
+        message: 'Customers now get booking confirmations, reminders and cancellations from your own email address, not Be More Swan. Your workspace has none set up, so they are not being sent. Connect Gmail or Outlook, or verify your domain, in Email Studio ▸ Sending. Until then, please confirm recent bookings with your customers yourself.',
+        variables: [],
+    },
+    {
         // A change to task costs (Admin → Money → Task costs). Each change has its own `type`
         // (task_cost_change_<id>), the once-each mark, so this one template serves all of them.
         templateKey: 'task_cost_change',

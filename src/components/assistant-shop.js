@@ -290,6 +290,8 @@
       ${notes}`);
   }
 
+  // Kept the same as site-shop.ts CONFIRMATION_NOT_SENT_LINE (a test checks).
+  const CONFIRM_NOT_SENT = 'No order confirmation reached the buyer from your address (or we couldn\'t confirm it went). Please email them one yourself: what they bought, the price, your business details and their 14 days to cancel.';
   function ordersCard(d) {
     const list = d.orders || [];
     if (!list.length) return card(`<p class="text-sm font-black text-gray-900">Orders</p><p class="text-xs text-gray-500 mt-1">No orders yet. When someone buys, the order appears here and in your email, and ${esc(state.assistantName || 'your Shopkeeper')} can tell you about it in the chat.</p>`);
@@ -314,6 +316,7 @@
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
+          ${o.confirmationNotSent ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-order-not-confirmed>⚠️ ${esc(CONFIRM_NOT_SENT)}</p>` : ''}
           ${((d.orderLines || {})[o.id] || []).length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5" data-order-lines>${d.orderLines[o.id].map((l) => `<li>${esc(l.qty)} × ${esc(l.name)} · ${esc(money(l.unit * l.qty, o.currency))}</li>`).join('')}</ul>` : ''}
           ${((d.orderDelivery || {})[o.id]) ? `<p class="text-xs text-gray-600 mt-1" data-order-delivery>Delivery: ${esc(d.orderDelivery[o.id].name || 'chosen at checkout')}${d.orderDelivery[o.id].amount != null ? ` · ${esc(d.orderDelivery[o.id].amount === 0 ? 'free' : money(d.orderDelivery[o.id].amount, o.currency))}` : ''}</p>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
@@ -372,6 +375,8 @@
       if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { state.photo = { error: 'Photos can\'t be chosen on this page — refresh and try again.' }; render(); return; }
       window.MediaPicker.open({
         title: 'Choose a photo of the product', assistantName: state.assistantName,
+        // Your own photo only (owner 2026-11-27): a stock or AI picture would list something the buyer doesn't get.
+        filesOnly: true,
         onPick: (asset) => { state.photo = { asset }; render(); },
       });
       return;

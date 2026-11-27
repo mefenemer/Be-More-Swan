@@ -70,13 +70,18 @@ export function bookingEmailLine(r: BusinessEmailResult, what = 'confirmation'):
 /** The workspaces among these that have their own address to send from (review #917: due work is looked for only
  *  there, so workspaces still waiting for one never fill a batch). A failed check counts as no route. */
 export async function orgsWithRoute(db: Db, orgIds: number[], route: typeof resolveSendRoute = resolveSendRoute): Promise<number[]> {
+    const ids = [...new Set(orgIds)];
     const out: number[] = [];
-    for (const id of [...new Set(orgIds)]) {
-        const r = await route(db, id, { recipientCount: 1, senderName: 'Your booking' }).catch(() => ({ error: 'check failed' }));
-        if ('route' in r) out.push(id);
+    // A few at a time (review #924): hundreds of workspaces must not mean hundreds of round trips in a row.
+    for (let i = 0; i < ids.length; i += ROUTE_CHECK_PARALLEL) {
+        const part = ids.slice(i, i + ROUTE_CHECK_PARALLEL);
+        const results = await Promise.all(part.map((id) => route(db, id, { recipientCount: 1, senderName: 'Your booking' }).catch(() => ({ error: 'check failed' }))));
+        results.forEach((r, j) => { if ('route' in r) out.push(part[j]); });
     }
     return out;
 }
+/** How many route checks run at once. */
+export const ROUTE_CHECK_PARALLEL = 8;
 
 /** Audience ▸ Sign-up forms: a form asks people to confirm by email, but there is no own address to send it from,
  *  so nobody can sign up on it until there is (owner 2026-11-27). null = fine or unknown. Never throws. */

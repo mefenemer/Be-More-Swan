@@ -53,6 +53,8 @@
       pictures: true,
       docTypes: /(?!)/,
       documents: false,   // no PDFs or text either (the server refuses them too: route flag pictureAttachments)
+      // The owner's own photo only (owner 2026-11-27): no stock or AI picture becomes a product listing.
+      filesOnly: true,
       accept: 'image/*',
       title: 'Add a photo of a product — upload or choose from your library',
       srLabel: 'Attach a photo of a product',
@@ -335,6 +337,7 @@
           inputEl.focus();
         },
         ...(attachCfg.documents === false ? {} : { documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } } }),
+        ...(attachCfg.filesOnly ? { filesOnly: true } : {}),
       });
     }
     function onChipsClick(e) {
