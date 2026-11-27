@@ -375,6 +375,8 @@
       if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { state.photo = { error: 'Photos can\'t be chosen on this page — refresh and try again.' }; render(); return; }
       window.MediaPicker.open({
         title: 'Choose a photo of the product', assistantName: state.assistantName,
+        // Your own photo only (owner 2026-11-27): a stock or AI picture would list something the buyer doesn't get.
+        filesOnly: true,
         onPick: (asset) => { state.photo = { asset }; render(); },
       });
       return;
