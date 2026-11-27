@@ -155,6 +155,7 @@ check('Google Cloud notice (Gmail push): owners, both lists, every claim matches
         const html = read(f);
         assert.match(html, /<td[^>]*>Google Cloud \(Pub\/Sub\)<\/td>/, `${f} lists it`);
         assert.ok(html.includes('US (Google LLC; global infrastructure)'), `${f}: location is not a storage promise (topic has no region policy)`);
+        assert.ok(html.includes('and for up to 7 days after one is disconnected'), `${f}: a Gmail watch can outlive a disconnect (no users.stop) — review of #921`);
         assert.match(html, /Google Cloud, (?:on|in) the list above, is different: it is our own\s+account/, `${f} says why it is not a connected platform`);
     }
 });
