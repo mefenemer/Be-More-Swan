@@ -10,10 +10,12 @@
 // Admin routes (aura_session cookie, `manage_comms_templates`):
 //   GET   ?resource=list                → every email, newest first
 //   GET   ?resource=digest&id=N         → one email + its screenshots + a rendered preview + who would
-//                                         receive it right now
+//                                         receive it right now (+ per plan group, and the saved choice)
+//   GET   ?resource=recipients&id=N&audience=paying,trial → how many the ticked groups reach
 //   PATCH ?resource=digest&id=N         → { subject?, preheader?, intro?, items? } — only while 'ready'
 //   POST  ?resource=test-send&id=N      → send it to the signed-in admin only
-//   POST  ?resource=approve&id=N        → ready → sending, then the background worker delivers it
+//   POST  ?resource=approve&id=N        → { audience: ['paying','trial','beta','no_plan'] } — the groups to send
+//                                         to (required); ready → sending, then the worker delivers it
 //   POST  ?resource=resume&id=N         → re-trigger a worker for an email stuck in 'sending'
 //   POST  ?resource=discard&id=N        → ready → discarded
 //
@@ -34,7 +36,10 @@ import {
     normaliseDraft, normaliseEdit, renderProductUpdateEmail, renderReminderEmail,
     productUpdateImageUrl, whatsNewUnsubscribeUrl, DraftError, type StoredItem,
 } from '../../src/utils/product-update-email';
-import { countRecipients } from '../../src/utils/product-update-recipients';
+import {
+    countRecipients, countByGroup, readAudience, writeAudience, normaliseAudience, AudienceError,
+    AUDIENCE_GROUPS, AUDIENCE_LABELS,
+} from '../../src/utils/product-update-recipients';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -204,6 +209,8 @@ export default withLambda(async (event) => {
             .from(productUpdateImages).where(eq(productUpdateImages.digestId, id));
         const preview = renderProductUpdateEmail(digest, { baseUrl, firstName: admin.firstName });
         const recipients = digest.status === 'ready' ? await countRecipients(db) : digest.recipientCount;
+        const groups = digest.status === 'ready' ? await countByGroup(db) : null;
+        const audience = await readAudience(db, id);
         const [progress] = await db.select({
             sent: sql<number>`count(*) filter (where ${productUpdateSends.status} = 'sent')::int`,
             failed: sql<number>`count(*) filter (where ${productUpdateSends.status} = 'failed')::int`,
@@ -213,8 +220,18 @@ export default withLambda(async (event) => {
             images: images.map(i => ({ ...i, url: productUpdateImageUrl(baseUrl, i.id) })),
             previewHtml: preview.html,
             recipients,
+            groups,
+            audience: audience ?? [...AUDIENCE_GROUPS],
+            audienceLabels: AUDIENCE_LABELS,
             progress,
         });
+    }
+
+    if (resource === 'recipients' && method === 'GET') {
+        let audience;
+        try { audience = normaliseAudience(String(q.audience || '').split(',').filter(Boolean)); }
+        catch (err) { if (err instanceof AudienceError) return json(400, { error: err.message }); throw err; }
+        return json(200, { audience, recipients: await countRecipients(db, audience) });
     }
 
     if (resource === 'digest' && method === 'PATCH') {
@@ -252,8 +269,18 @@ export default withLambda(async (event) => {
 
     if (resource === 'approve' && method === 'POST') {
         if (digest.status !== 'ready') return json(409, { error: `This email is already ${digest.status}.` });
-        const recipients = await countRecipients(db);
-        if (recipients === 0) return json(409, { error: 'There is nobody to send this to.' });
+        // Who to send to is required — never a silent default — so the count the admin confirmed
+        // is the list the worker walks. It is saved BEFORE the claim; the worker reads it back.
+        let audience;
+        try {
+            audience = normaliseAudience(JSON.parse(event.body || '{}').audience);
+            await writeAudience(db, id, audience);
+        } catch (err) {
+            if (err instanceof AudienceError || err instanceof SyntaxError) return json(400, { error: err.message });
+            throw err;
+        }
+        const recipients = await countRecipients(db, audience);
+        if (recipients === 0) return json(409, { error: 'There is nobody in the groups you ticked to send this to.' });
         // The status change IS the lock: only one approve can move 'ready' → 'sending'.
         const [claimed] = await db.update(productUpdateDigests).set({
             status: 'sending', approvedBy: admin.id, approvedAt: new Date(), recipientCount: recipients, updatedAt: new Date(),
@@ -261,7 +288,7 @@ export default withLambda(async (event) => {
         if (!claimed) return json(409, { error: 'Someone else has just approved or discarded this email.' });
         await insertAdminAuditLog({
             adminId: admin.id, action: 'product_update_approve', targetType: 'product_update_digest', targetId: id,
-            newState: { subject: digest.subject, preheader: digest.preheader, intro: digest.intro, items: digest.items, recipients },
+            newState: { subject: digest.subject, preheader: digest.preheader, intro: digest.intro, items: digest.items, recipients, audience },
             ipAddress: ip, userAgent: ua,
         });
         const dispatched = await triggerWorker(baseUrl, id);

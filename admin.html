@@ -2493,6 +2493,11 @@
                 <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Features</p>
                 <div id="pu-items" class="space-y-3"></div>
               </div>
+              <fieldset id="pu-audience" class="hidden border border-gray-200 rounded-xl p-3">
+                <legend class="px-1 text-xs font-bold text-gray-500 uppercase tracking-wide">Send to</legend>
+                <p class="text-xs text-gray-500 mb-2">Owners and teammates, by their workspace's plan. Anyone who has unsubscribed is always left out.</p>
+                <div id="pu-audience-boxes" class="flex flex-wrap gap-x-4 gap-y-2"></div>
+              </fieldset>
               <div id="pu-actions" class="flex flex-wrap items-center gap-2 pt-1">
                 <button type="button" id="pu-save" onclick="puSave()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save changes</button>
                 <button type="button" id="pu-test" onclick="puTestSend()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">Send me a test</button>
@@ -13722,6 +13727,7 @@ const PU_STATUS = {
 let _puCurrent = null;   // { digest, images, recipients, progress }
 let _puItems = [];       // working copy of the features while editing
 let _puDirty = false;
+let _puAudience = [];    // the plan groups ticked under "Send to"
 
 async function _puFetch(params, opts = {}) {
   const r = await fetch(`${PU_API}?${params}`, { credentials: 'same-origin', ...opts,
@@ -13779,6 +13785,7 @@ async function puOpen(id) {
   const u = new URL(location.href); u.searchParams.set('id', id); history.replaceState(history.state, '', u.toString());
   const d = _puCurrent.digest;
   _puItems = (d.items || []).map((it) => ({ ...it }));
+  _puAudience = [...(_puCurrent.audience || [])];
   document.getElementById('pu-subject').value = d.subject || '';
   document.getElementById('pu-preheader').value = d.preheader || '';
   document.getElementById('pu-intro').value = d.intro || '';
@@ -13795,7 +13802,7 @@ function _puRender() {
   const banner = document.getElementById('pu-banner');
   if (d.status === 'ready') {
     banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-amber-50 border border-amber-200 text-amber-900';
-    banner.innerHTML = `<strong>Waiting for your review.</strong> Approving sends it to <strong>${recipients}</strong> customer${recipients === 1 ? '' : 's'} (active accounts that have not unsubscribed).`;
+    banner.innerHTML = `<strong>Waiting for your review.</strong> Approving sends it to <strong>${recipients}</strong> customer${recipients === 1 ? '' : 's'} in the groups ticked under Send to (active accounts that have not unsubscribed).`;
   } else if (d.status === 'sending') {
     banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-blue-50 border border-blue-200 text-blue-800';
     banner.innerHTML = `<strong>Sending.</strong> ${progress.sent} of ${d.recipientCount} sent${progress.failed ? `, ${progress.failed} failed` : ''}. Refresh to update.`;
@@ -13813,6 +13820,7 @@ function _puRender() {
   document.getElementById('pu-resume').classList.toggle('hidden', d.status !== 'sending');
   const approve = document.getElementById('pu-approve');
   approve.textContent = `Approve & send to ${recipients} customer${recipients === 1 ? '' : 's'}`;
+  _puRenderAudience(editable);
 
   document.getElementById('pu-items').innerHTML = _puItems.map((it, i) => `
     <div class="border border-gray-200 rounded-xl p-3 bg-white">
@@ -13840,10 +13848,40 @@ function _puRender() {
   _puSyncButtons();
 }
 
+function _puRenderAudience(editable) {
+  const box = document.getElementById('pu-audience');
+  const labels = _puCurrent.audienceLabels || {};
+  const groups = _puCurrent.groups || {};
+  box.classList.toggle('hidden', !editable && !(_puCurrent.audience || []).length);
+  document.getElementById('pu-audience-boxes').innerHTML = Object.keys(labels).map((g) => `
+    <label class="inline-flex items-center gap-2 text-sm">
+      <input type="checkbox" value="${_puEsc(g)}" ${_puAudience.includes(g) ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="puAudience(this.value, this.checked)">
+      ${_puEsc(labels[g])}${editable && groups[g] != null ? ` <span class="text-gray-400">(${groups[g]})</span>` : ''}
+    </label>`).join('');
+}
+
+let _puAudienceSeq = 0;
+async function puAudience(group, on) {
+  const order = Object.keys(_puCurrent.audienceLabels || {});
+  _puAudience = order.filter((g) => (g === group ? on : _puAudience.includes(g)));
+  const seq = ++_puAudienceSeq;
+  const approve = document.getElementById('pu-approve');
+  if (!_puAudience.length) { _puCurrent.recipients = 0; _puRender(); return; }
+  approve.disabled = true;
+  try {
+    const r = await _puFetch(`resource=recipients&id=${_puCurrent.digest.id}&audience=${encodeURIComponent(_puAudience.join(','))}`);
+    if (seq !== _puAudienceSeq) return; // a later tick has already asked
+    _puCurrent.recipients = r.recipients;
+  } catch (e) { if (seq === _puAudienceSeq) _puFlash(e.message, 'err'); }
+  if (seq === _puAudienceSeq) _puRender();
+}
+
 function _puSyncButtons() {
   const approve = document.getElementById('pu-approve');
-  approve.disabled = _puDirty;
-  approve.title = _puDirty ? 'Save your changes first, so you approve what the preview shows' : '';
+  const nobody = !_puAudience.length || !_puCurrent.recipients;
+  approve.disabled = _puDirty || nobody;
+  approve.title = _puDirty ? 'Save your changes first, so you approve what the preview shows'
+    : !_puAudience.length ? 'Tick at least one group under Send to' : nobody ? 'Nobody in the ticked groups' : '';
   document.getElementById('pu-save').disabled = !_puDirty;
 }
 
@@ -13907,15 +13945,18 @@ async function puTestSend() {
 
 async function puApprove() {
   if (_puDirty) return;
+  if (!_puAudience.length) return;
   const n = _puCurrent.recipients;
+  const labels = _puCurrent.audienceLabels || {};
+  const who = _puAudience.map((g) => _puEsc(labels[g] || g)).join(', ');
   const ok = await window.confirmModal(
-    `This emails <strong>${n} customer${n === 1 ? '' : 's'}</strong> now. It cannot be recalled once it starts.<br><br>Subject: <strong>${_puEsc(_puCurrent.digest.subject)}</strong>`,
+    `This emails <strong>${n} customer${n === 1 ? '' : 's'}</strong> now (${who}). It cannot be recalled once it starts.<br><br>Subject: <strong>${_puEsc(_puCurrent.digest.subject)}</strong>`,
     { title: 'Send this email to customers?', confirmLabel: `Send to ${n}`, cancelLabel: 'Not yet' });
   if (!ok) return;
   const btn = document.getElementById('pu-approve');
   btn.disabled = true;
   try {
-    const r = await _puFetch(`resource=approve&id=${_puCurrent.digest.id}`, { method: 'POST' });
+    const r = await _puFetch(`resource=approve&id=${_puCurrent.digest.id}`, { method: 'POST', body: JSON.stringify({ audience: _puAudience }) });
     _puFlash(r.dispatched
       ? `Approved. Sending to ${r.recipients} customers now — this page shows progress when you refresh.`
       : `Approved, but the sender did not start. Press "Resume sending" to start it.`, r.dispatched ? 'ok' : 'err');

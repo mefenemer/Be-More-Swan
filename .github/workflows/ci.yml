@@ -367,6 +367,10 @@ jobs:
       # the Team Chat question once, sends claimed with refusals skipped, batches and the sweep — on Postgres.
       - name: Shop back-in-stock waiting lists
         run: npx tsx tests/shop-waitlist-db.test.ts
+      # What's New "Send to": plan groups pick owners and teammates by current plan, all four = everyone, the choice is
+      # saved before approve and read by the worker — on Postgres.
+      - name: What's New send-to groups
+        run: npx tsx tests/product-update-audience-db.test.ts
       # Review requests after shop orders (src/utils/review-requests.ts, online shop Phase 2): only from the owner's own
       # address; without one the order stays unclaimed and goes later, never using up the batch — on Postgres.
       - name: Shop review requests from the owner's address
