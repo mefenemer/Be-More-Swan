@@ -253,6 +253,54 @@ test.describe('Admin → Money → Task costs', () => {
         await expect.poll(async () => page.locator('#tc-date').inputValue(), { timeout: 6000 }).toBe('2026-12-06');
     });
 
+    test('a typed cost survives a repaint (e.g. Send a test) and keeps the "Not saved yet" hold', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', STATE([DRAFT]));
+        await openAdmin(page, api);
+        await page.locator('[data-tc-key="ai_music"]').fill('40');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('40');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+    });
+
+    test('after a successful announce, typing cannot turn Announce back on before the repaint; after a refusal it follows the hold', async ({ page, signedIn, api }) => {
+        let calls = 0;
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() !== 'POST') return STATE([DRAFT]);
+            calls++;
+            if (calls === 1) { route.fulfill({ status: 502, json: { error: 'The notice could not start.' } }); return undefined; }
+            return { started: true, waiting: 12, emailsGoToCustomers: false };
+        });
+        await openAdmin(page, api);
+        await page.locator('#tc-confirm').fill('12');
+        await page.locator('#tc-announce').click();
+        await expect(page.locator('#tc-status')).toContainText('could not start');
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+        await page.locator('#tc-announce').click();
+        await expect(page.locator('#tc-status')).toContainText('Announced');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+        await page.locator('#tc-confirm').fill('');
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+    });
+
+    test('cancelling an announced change keeps the date and reason typed for the draft', async ({ page, signedIn, api }) => {
+        const second = { ...ANNOUNCED, id: 9, effectiveDate: '2027-01-01', items: [{ key: 'ai_image', oldUnits: 1, newUnits: 2 }], acceptance: { workspaces: 8, accepted: 0, waiting: [] } };
+        let cancelled = false;
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (cancelled = true, { cancelled: true }) : (cancelled ? STATE([DRAFT]) : STATE([second, DRAFT]))));
+        await openAdmin(page, api);
+        await page.locator('#tc-date').fill('2027-02-01');
+        await page.locator('#tc-reason').fill('Kept while cancelling.');
+        await page.locator('[data-tc-card="9"] [data-tc-cancel]').click();
+        await page.getByRole('button', { name: 'Cancel the change' }).click();
+        await expect(page.locator('#tc-status')).toContainText('Cancelled');
+        await expect.poll(async () => page.locator('[data-tc-card]').count(), { timeout: 6000 }).toBe(1);
+        await expect(page.locator('#tc-date')).toHaveValue('2027-02-01');
+        await expect(page.locator('#tc-reason')).toHaveValue('Kept while cancelling.');
+    });
+
     test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Choose the date the change starts.' } }); return undefined; }
