@@ -128,6 +128,8 @@ export async function checkFixDeployed(opts: {
     fetchImpl?: FetchLike;
     /** Only count the PR if it was merged into this branch (a release PR must go into main). */
     base?: string;
+    /** Only count the PR if it merged at or after this PR did (a release must come after the fix it ships). */
+    notBeforePr?: number;
 }): Promise<FixDeployState> {
     const repo = opts.repo || DEFAULT_REPO;
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
@@ -144,6 +146,14 @@ export async function checkFixDeployed(opts: {
         const mergeSha = prBody?.merged ? prBody?.merge_commit_sha : null;
         if (!isFullSha(mergeSha)) return 'not_merged';
         if (opts.base && prBody?.base?.ref !== opts.base) return 'not_merged';
+        if (opts.notBeforePr) {
+            const earlier = await f(`https://api.github.com/repos/${repo}/pulls/${opts.notBeforePr}`, { headers });
+            if (!earlier.ok) return 'error';
+            const earlierAt = Date.parse((await earlier.json())?.merged_at ?? '');
+            const thisAt = Date.parse(prBody?.merged_at ?? '');
+            if (!Number.isFinite(earlierAt) || !Number.isFinite(thisAt)) return 'error';
+            if (thisAt < earlierAt) return 'not_merged';
+        }
 
         const cmp = await f(`https://api.github.com/repos/${repo}/compare/${mergeSha}...${opts.deployedSha}`, { headers });
         // 404 here is normal for a deploy commit GitHub hasn't indexed yet, or a merge commit from
@@ -243,11 +253,13 @@ async function confirmLiveFixes(
         // Shipped inside a release PR that COPIED the fix into main (ticket #95: fixes-only release #896),
         // so the staging merge commit never reaches main. The prod PR recorded on the ticket
         // (fix-tickets.ts prod-pr; db/z-pr-approval.sql) counts once it is merged into main and deployed.
-        // to_jsonb above reads it as NULL on a database without that column.
+        // to_jsonb above reads it as NULL on a database without that column. It must have merged AFTER the
+        // current fix PR: a reopened ticket can still carry the release that shipped its OLD fix (the
+        // `pr` step clears prod_pr_url now, but older rows may not have been).
         if (state !== 'live' && row.prod_pr_url) {
             const prodPr = parsePrNumber(row.prod_pr_url, o.repo);
             if (prodPr && prodPr !== prNumber) {
-                const prodState = await checkFixDeployed({ prNumber: prodPr, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl, base: 'main' });
+                const prodState = await checkFixDeployed({ prNumber: prodPr, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl, base: 'main', notBeforePr: prNumber });
                 if (prodState === 'live' || prodState === 'error') state = prodState;
             }
         }
