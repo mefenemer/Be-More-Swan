@@ -196,6 +196,8 @@ async function main() {
         const ft = read('scripts/fix-tickets.ts');
         const pr = ft.slice(ft.indexOf("} else if (cmd === 'pr') {"), ft.indexOf("} else if (cmd === 'staging-sql') {"));
         assert.ok(pr.includes('prod_pr_url = NULL, dev_prod_status = NULL, dev_prod_result = NULL'));
+        // An Approve still showing for the old fix's prod PR would write it back into prod_pr_url (pr-approval.ts).
+        assert.ok(pr.includes('approval_pr_url = NULL, approval_note = NULL, approval_requested_at = NULL'));
     });
 
     await check('no prod PR recorded: still not live (nothing guessed)', async () => {
