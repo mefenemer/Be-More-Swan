@@ -280,10 +280,11 @@ test.describe('Admin → Money → Task costs', () => {
         await expect(page.locator('#tc-announce')).toBeEnabled();
         await page.locator('#tc-announce').click();
         await expect(page.locator('#tc-status')).toContainText('Announced');
-        await expect(page.locator('#tc-announce')).toBeDisabled();
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
         await page.locator('#tc-confirm').fill('');
         await page.locator('#tc-confirm').fill('12');
-        await expect(page.locator('#tc-announce')).toBeDisabled();
+        // Read once, now: a retrying expect would pass anyway once the scheduled reload repaints 3 s later.
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
     });
 
     test('cancelling an announced change keeps the date and reason typed for the draft', async ({ page, signedIn, api }) => {
@@ -341,6 +342,44 @@ test.describe('Admin → Money → Task costs', () => {
         await page.waitForTimeout(2000);
         await expect(page.locator('#tc-save')).toHaveText('Save as a draft');
         await expect(page.locator('#tc-open')).not.toContainText('Draft: starts');
+    });
+
+    test('a load that started before the announce cannot undo the hold (review of #927 round 2)', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() !== 'POST') return STATE([DRAFT]);
+            return route.request().url().includes('resource=test') ? { inApp: true, emailed: false, to: 'admin@example.test' } : { started: true, waiting: 12, emailsGoToCustomers: false };
+        });
+        await openAdmin(page, api);
+        // Delay the NEXT state read inside the page (the reload the Test press starts), so the announce can finish while
+        // that stale read is still on its way — the stubbed network answers one request at a time.
+        await page.evaluate(() => {
+            const real = window.fetch.bind(window);
+            (window as any).__holdState = false;
+            window.fetch = (async (input: any, init?: any) => {
+                const url = String(input);
+                if ((window as any).__holdState && url.includes('resource=state')) {
+                    (window as any).__holdState = false;
+                    const res = await real(input, init);
+                    const body = await res.text();
+                    // Held until the test says so (after the announce), so the order is certain.
+                    await new Promise((r) => { (window as any).__release = r; });
+                    return new Response(body, { status: res.status, headers: res.headers });
+                }
+                return real(input, init);
+            }) as typeof window.fetch;
+        });
+        await page.evaluate(() => { (window as any).__holdState = true; });
+        await page.locator('#tc-test').click();            // starts a reload at once (held in the page)
+        await page.locator('#tc-confirm').fill('12');
+        await page.locator('#tc-announce').click();        // announce while that reload is in flight
+        await expect(page.locator('#tc-status')).toContainText('Announced');
+        await page.waitForFunction(() => typeof (window as any).__release === 'function');
+        await page.evaluate(() => (window as any).__release()); // now the stale reload (read before the announce) arrives
+        await page.waitForTimeout(300);
+        await page.locator('#tc-confirm').fill('');
+        await page.locator('#tc-confirm').fill('12');
+        // Read once, now: a retrying expect would pass anyway when the scheduled reload repaints 3 s later.
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
     });
 
     test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
