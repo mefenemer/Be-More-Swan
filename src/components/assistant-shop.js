@@ -298,6 +298,7 @@
       ${d.canEdit ? btn('data-shop-csv', 'Download CSV') : ''}</div>
       ${d.sales ? `<p class="text-xs text-gray-600 mt-1" data-shop-sales>This month: <span class="font-bold text-gray-900">${esc(d.sales.thisMonth)}</span> · Last month: ${esc(d.sales.lastMonth)}</p>` : ''}
       ${d.reminders ? `<p class="text-xs text-gray-600 mt-1" data-shop-reminders>${esc(d.reminders)}</p>` : ''}
+      ${d.confirmBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-shop-confirm-blocked>${esc(d.confirmBlocked)}</p>` : ''}
       ${d.reviewBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-shop-review-blocked>${esc(d.reviewBlocked)}</p>` : ''}
       ${state.ordersSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.ordersSaved)}</p>` : ''}
       ${state.ordersError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.ordersError)}</p>` : ''}

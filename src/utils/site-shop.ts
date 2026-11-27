@@ -38,6 +38,9 @@ import { joinWaitlist, WAITLIST_ACTION, WAITLIST_LIMIT } from './shop-waitlist';
 import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
 import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
+import { htmlToPlainText } from './email-template';
+import { resolveSendRoute } from './newsletter-send';
+import { deliverStep } from './newsletter-sequence';
 import { checkRateLimit } from './rate-limit';
 // Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
 // connectAccountFor, and chat-orchestrator imports site-store. See src/lib/render-libs.ts.
@@ -570,6 +573,10 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     // Slice 4b: their first order starts the "first order" email flow (or, newly subscribed, the welcome flow).
     if (audience) await enrolShopBuyer(db, { organisationId: site.organisationId, email: order.customerEmail, orderId: order.id, audience });
     const audienceLine = buyerAudienceLine(audience);
+    // The buyer's confirmation goes first, so the owner's email can say when it couldn't (own address only).
+    const buyerSent = await sendBuyerConfirmation(db, order, site, total, orderLines, delivery)
+        .catch((err: unknown): BuyerConfirmation => { console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err); return 'failed'; });
+    const buyerLine = buyerConfirmationLine(buyerSent);
     if (owner?.email) {
         const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
         const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
@@ -585,10 +592,10 @@ ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => 
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
 ${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : ''}
 ${audienceLine ? `<p>${esc(audienceLine)}</p>` : ''}
+${buyerLine ? `<p><strong>⚠️ ${esc(buyerLine)}</strong></p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
-    await sendBuyerConfirmation(db, order, site, total, orderLines, delivery).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
     return true;
 }
 
@@ -646,19 +653,68 @@ ${o.delivery ? `<p><strong>Delivery chosen:</strong> ${esc(deliveryLine(o.delive
     };
 }
 
-async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null, delivery: { name: string | null; amount: number | null } | null = null): Promise<void> {
-    if (!order.customerEmail) return;
+/** What happened to the buyer's "Order confirmed" email. */
+export type BuyerConfirmation = 'sent' | 'no_email' | 'not_ready' | 'no_route' | 'failed' | 'slow';
+
+/** The buyer's send may take this long before the owner's email goes anyway (review #914: the webhook must not be cut off
+ *  before the owner hears about the order). */
+export const BUYER_SEND_BUDGET_MS = 4000;
+
+/** The owner's new-order email line when the buyer wasn't sent their confirmation; null when it went (or there was
+ *  no address to send to). The confirmation goes only from the owner's own address (owner 2026-11-27). Pure. */
+export function buyerConfirmationLine(r: BuyerConfirmation): string | null {
+    switch (r) {
+        case 'no_route': return 'The buyer was NOT sent an order confirmation: confirmations go only from your own address, and none is set up. Please email them a confirmation yourself now (what they bought, the price, your business details and their 14 days to cancel). Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending so future buyers get it by themselves.';
+        case 'failed': return 'The buyer\'s order confirmation couldn\'t be sent from your email account. Please email them a confirmation yourself.';
+        case 'slow': return 'We couldn\'t confirm the buyer\'s order confirmation went: your email account was slow to answer. Check your sent mail, and if it isn\'t there, email them a confirmation yourself.';
+        default: return null;
+    }
+}
+
+/** The Shop tab's and the chat snapshot's warning: Buy buttons can show (Delivery & returns complete) but there is no
+ *  own address to send buyers' confirmations from. null = fine, not selling yet, or the check failed. */
+export async function buyerConfirmationsBlocked(db: Db, orgId: number, route: typeof resolveSendRoute = resolveSendRoute): Promise<string | null> {
+    try {
+        const shop = await loadShopSettings(db, orgId);
+        if (!shop || !shopReady(shop)) return null;
+        const r = await route(db, orgId, { recipientCount: 1, senderName: shop.traderName || 'Your shop' });
+        return 'error' in r ? 'Buyers won\'t get an order confirmation email: it goes only from your own address, and none is set up. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending.' : null;
+    } catch (err) {
+        console.error('[site-shop] confirmation route check failed', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/** "Order confirmed" to the buyer, ONLY from the owner's own verified sending domain or connected Gmail/Outlook
+ *  (resolveSendRoute) — never from a Be More Swan address. No route = not sent; the owner's email says so. */
+export async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null, delivery: { name: string | null; amount: number | null } | null = null,
+    deps: { resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep; budgetMs?: number } = {}): Promise<BuyerConfirmation> {
+    if (!order.customerEmail) return 'no_email';
     const shop = await loadShopSettings(db, site.organisationId);
-    if (!shop || !shopReady(shop)) return;   // never sell without these; an old open checkout is the only way here
+    if (!shop || !shopReady(shop)) return 'not_ready';   // never sell without these; an old open checkout is the only way here
+    const routed = await (deps.resolveRoute ?? resolveSendRoute)(db, site.organisationId, { recipientCount: 1, senderName: (shop.traderName || 'Your order').slice(0, 60) });
+    if ('error' in routed) return 'no_route';
     const termsUrl = site.slug ? `${(await import('./site-hosting')).siteOrigin(site.slug)}${SHOP_TERMS_PATH}` : null;
     const mail = buyerEmail({ order, shop, total, termsUrl, lines, delivery });
-    await sendEmail({
-        to: order.customerEmail,
-        from: `${(shop.traderName || 'Your order').replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
-        ...(shop.contactEmail ? { replyTo: shop.contactEmail } : {}),
-        subject: mail.subject, html: mail.html,
-    });
+    // "To cancel, reply to this email": replies go to the contact email shown on Delivery & returns (review #914).
+    const route = { ...routed.route, replyTo: shop.contactEmail || routed.route.replyTo || null };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        const send = (deps.deliver ?? deliverStep)(db, route, site.organisationId, { to: order.customerEmail.replace(/[\r\n,;]/g, ''), subject: mail.subject, html: mail.html, text: htmlToPlainText(mail.html), listUnsubscribe: null });
+        const slow = new Promise<'slow'>((res) => { timer = setTimeout(() => res('slow'), deps.budgetMs ?? BUYER_SEND_BUDGET_MS); });
+        if (await Promise.race([send.then(() => 'sent' as const), slow]) === 'slow') {
+            send.catch(() => undefined);
+            console.error('[site-shop] buyer confirmation slow — owner told to check', { orderId: order.id });
+            return 'slow';
+        }
+    } catch (err) {
+        console.error('[site-shop] buyer confirmation refused', err instanceof Error ? err.message : err);
+        return 'failed';
+    } finally {
+        clearTimeout(timer);
+    }
     await db.update(siteOrders).set({ buyerEmailedAt: new Date() }).where(eq(siteOrders.id, order.id));
+    return 'sent';
 }
 
 /**

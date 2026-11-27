@@ -9,7 +9,7 @@
 import { desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { siteOrders } from '../../db/schema';
-import { connectAccountFor } from './site-shop';
+import { buyerConfirmationsBlocked, connectAccountFor } from './site-shop';
 import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText } from './shop-settings';
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
@@ -50,6 +50,8 @@ export interface ShopSnapshotInput {
     waiting?: Record<number, number>;
     /** Review requests after orders are on but have no route to send from (review-requests.ts, slice 7); null = fine/off. */
     reviewBlocked?: string | null;
+    /** Selling, but no own address for buyers' order confirmations (site-shop.ts); null = fine/not selling. */
+    confirmBlocked?: string | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -131,6 +133,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     const waitingRows = Object.entries(input.waiting || {}).filter(([, n]) => n > 0)
         .map(([id, n]) => ({ name: input.stock?.items.find((i) => i.id === Number(id))?.name || `product #${id}`, n }));
     lines.push('', `WAITING LISTS ("Tell me when it's back" on a sold-out product's page; one service email each, never added to the Audience): ${waitingRows.length ? waitingRows.map((w) => `${w.name} — ${w.n} waiting`).join('; ') : 'nobody waiting'}. When a stock save makes a waiting product buyable again, you (the Shopkeeper) ask in Team Chat whether to email them; the owner sends with "Email them" there or on the Shop tab's Stock card. You can't send them from this chat — say where the button is.`);
+    lines.push('', `ORDER CONFIRMATIONS: each buyer is emailed "Order confirmed" (their legal receipt) only from the business's verified sending domain or connected Gmail/Outlook, never a Be More Swan address; with neither, it isn't sent and the owner's new-order email asks them to send one themselves.${input.confirmBlocked ? ` RIGHT NOW: ${input.confirmBlocked}` : ''}`);
     lines.push('', `REVIEW REQUESTS AFTER ORDERS (Audience ▸ Reviews switches them on): sent only from the business's verified sending domain or connected Gmail/Outlook, never a Be More Swan address.${input.reviewBlocked ? ` RIGHT NOW: ${input.reviewBlocked}` : ''}`);
     lines.push('', `ABANDONED-CHECKOUT REMINDERS: automatic, no setting. A basket buyer who ticks "Send me news" types their email on the basket page; if their checkout lapses unpaid (after 1 hour) they get ONE reminder with a link back to their basket, sent from the business's verified sending domain or connected Gmail/Outlook only (no route = not sent). Never to anyone who didn't tick. Fixed wording, no tasks spent. This week: ${input.reminders || 'none sent'}`);
     if (!input.orders.length) {
@@ -166,5 +169,6 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const reminders = reminderStatsWords(await loadReminderStats(db, orgId));
     const waiting = await waitingCounts(db, orgId);
     const reviewBlocked = await orderReviewRequestsBlocked(db, orgId);
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting, reviewBlocked });
+    const confirmBlocked = await buyerConfirmationsBlocked(db, orgId);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting, reviewBlocked, confirmBlocked });
 }
