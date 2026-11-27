@@ -17,7 +17,7 @@ import { productUpdateDigests, productUpdateSends } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { renderProductUpdateEmail, whatsNewUnsubscribeUrl } from '../../src/utils/product-update-email';
-import { recipientPage } from '../../src/utils/product-update-recipients';
+import { recipientPage, readAudience } from '../../src/utils/product-update-recipients';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PAGE = 200;
@@ -43,10 +43,13 @@ export default withLambda(async (event) => {
     const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
     if (!baseUrl) { console.error('[send-product-update] no BASE_URL — cannot build links'); return { statusCode: 500, body: 'no base url' }; }
 
+    // The plan groups ticked at approve (NULL = everyone). Read once, so every page walks one list.
+    const audience = await readAudience(db, digestId);
+
     let afterId = 0;
     let timedOut = false;
     outer: while (true) {
-        const page = await recipientPage(db, afterId, PAGE);
+        const page = await recipientPage(db, afterId, PAGE, audience);
         if (page.length === 0) break;
         for (const r of page) {
             afterId = r.id;
