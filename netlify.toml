@@ -1181,6 +1181,10 @@ node_bundler = "esbuild"
 # Slack, Notion, Jira, Asana and a mail provider in turn, so it gets the full synchronous budget.
 [functions.run-scenario-jobs]
   timeout = 26
+# Staging's HTTP twin of poll-mailboxes (staging-crons.yml): dispatches reads, then starts and renews
+# Email Assistant push watches within a budget counted from the run's start (mailbox-push.ts).
+[functions.run-poll-mailboxes]
+  timeout = 26
 [functions.suppression-sync]
   schedule = "0 4 * * *"
 # US-GOV-2.1.1: Daily digest for stale pending HITL actions — 09:00 UTC every day
