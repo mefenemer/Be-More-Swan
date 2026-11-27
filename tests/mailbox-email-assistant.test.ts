@@ -858,4 +858,59 @@ check('Review tab wiring: registry kind/source mailbox, rendered by the componen
     assert.ok(!/reviewCount/.test(a));
 });
 
+// ── Emails tab: several mailboxes (owner, 2026-11-27: no way to add Outlook once Gmail was connected) ──
+function loadEmailsTab(responses: Record<string, { status?: number; body: unknown }>) {
+    const calls: string[] = [];
+    const el = () => ({ innerHTML: '', dataset: {} as Record<string, string>, listeners: {} as Record<string, any[]>,
+        addEventListener(type: string, fn: any) { (this.listeners[type] ||= []).push(fn); } });
+    const els: Record<string, ReturnType<typeof el>> = { 'datahub-table-host': el(), 'datahub-toolbar': el() };
+    const win: Record<string, any> = {};
+    const fetch = async (url: string) => {
+        calls.push(url);
+        const r = responses[url] ?? { status: 404, body: { error: 'nope' } };
+        return { ok: (r.status ?? 200) < 400, status: r.status ?? 200, json: async () => r.body };
+    };
+    runInNewContext(read('src/components/assistant-mailbox.js'), {
+        window: win, document: { getElementById: (id: string) => els[id] ?? null }, fetch, console, URLSearchParams, setTimeout,
+        location: { search: '', pathname: '/workspace.html', hash: '' }, history: { replaceState() {} },
+    });
+    return { api: win.AssistantMailbox, host: els['datahub-table-host'], bar: els['datahub-toolbar'], calls };
+}
+const OWNER_BASE = { available: true, access: 'owner', providers: { outlook: true, gmail: true }, messages: [] };
+
+check('Emails tab: one mailbox has no picker; "Add another mailbox" opens Connect Outlook and Connect Gmail', async () => {
+    const t = loadEmailsTab({
+        [`${API_URL}?seen=1`]: { body: { ...OWNER_BASE, mailboxes: [{ id: 1, address: 'me@gmail.com', provider: 'gmail', status: 'active' }] } },
+        [`${API_URL}?mailboxId=1&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [] } },
+    });
+    await t.api.init({ assistantId: 64 });
+    assert.ok(!t.host.innerHTML.includes('data-mbx-switch'), 'no picker for a single mailbox');
+    assert.ok(!t.host.innerHTML.includes('data-mailbox-connect'), 'connect panel starts closed');
+    const addBtn = { hasAttribute: (a: string) => a === 'data-mbx-add', dataset: {} };
+    for (const fn of t.host.listeners.click) await fn({ target: { closest: () => addBtn } });
+    assert.ok(t.host.innerHTML.includes('Add another mailbox'));
+    assert.ok(t.host.innerHTML.includes('href="/api/mailbox-oauth/outlook/connect?assistantId=64"'), 'Outlook connect for this assistant');
+    assert.ok(t.host.innerHTML.includes('href="/api/mailbox-oauth/gmail/connect?assistantId=64"'), 'Gmail connect for this assistant');
+});
+
+check('Emails tab: two mailboxes get a picker; switching loads the other mailbox\'s drafts and clean-up', async () => {
+    const t = loadEmailsTab({
+        [`${API_URL}?seen=1`]: { body: { ...OWNER_BASE, mailboxes: [
+            { id: 1, address: 'me@gmail.com', provider: 'gmail', status: 'active' },
+            { id: 2, address: 'me@shop.co', provider: 'outlook', status: 'needs_reconnect' },
+        ] } },
+        [`${API_URL}?mailboxId=1&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [] } },
+        [`${API_URL}?mailboxId=2&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [] } },
+    });
+    await t.api.init({ assistantId: 64 });
+    assert.ok(t.host.innerHTML.includes('data-mbx-switch'));
+    assert.ok(/<option value="1" selected>me@gmail\.com \(Gmail\)<\/option>/.test(t.host.innerHTML));
+    assert.ok(t.host.innerHTML.includes('me@shop.co (Outlook) — needs reconnecting'));
+    const sw = { value: '2' };
+    for (const fn of t.host.listeners.change) await fn({ target: { closest: (sel: string) => (sel === '[data-mbx-switch]' ? sw : null) } });
+    assert.ok(t.calls.includes(`${API_URL}?mailboxId=2&actions=1`), 'actions for the newly picked mailbox');
+    assert.ok(/<option value="2" selected>/.test(t.host.innerHTML), 'the picker shows the new choice');
+    assert.ok(t.host.innerHTML.includes('Reconnect'), 'the picked mailbox\'s own reconnect banner shows');
+});
+
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
