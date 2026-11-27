@@ -742,6 +742,24 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('Any questions, just reply to this email.') + signoff,
     },
     {
+        // One-off (owner, 2026-11-27): booking emails to customers go only from the business's own address since
+        // release #918 (src/utils/business-email.ts). Sent only to owners of workspaces with bookings and no address
+        // (broadcast audience 'bookings_no_address'). Every claim matches the code: nothing is sent without an address;
+        // the Bookings tab and the owner's own emails say so; stay arrival details and first pay links wait.
+        triggerKey: 'booking_emails_need_address_notice',
+        name: 'Notice: booking emails need your own email address',
+        category: 'Account',
+        transactional: true,
+        subject: 'Action needed: your booking emails need your own email address',
+        preheader: 'Connect Gmail or Outlook, or verify your domain, so customers get their booking emails.',
+        bodyHtml: greet +
+            p('Your customers now get their booking emails from <strong>your own email address</strong>, not from Be More Swan. That covers confirmations, reminders, cancellations, holiday let emails, deposit receipts and class waitlist offers. Replies come straight back to you.') +
+            p('<strong>Your workspace takes bookings but has no email address set up yet, so these emails are not being sent.</strong> Your bookings themselves are safe, and you are told each time on your Bookings tab and in your new-booking emails.') +
+            p('<strong>What to do.</strong> In Email Studio &rsaquo; Sending, connect your Gmail or Outlook, or verify your own domain. It takes a couple of minutes. From then on, booking emails go out by themselves; holiday let arrival details and balance links that were waiting go out on the next run.') +
+            p('Until then, please email any customer who has booked recently to confirm their booking yourself.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
         // A change to task costs (Admin → Money → Task costs, src/utils/task-cost-changes.ts). The figures
         // come from the change; the in-app twin shares the key. Transactional: a notice, not marketing.
         triggerKey: 'task_cost_change',

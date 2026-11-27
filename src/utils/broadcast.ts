@@ -21,10 +21,19 @@ import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
 
-/** Who a broadcast reaches: every member of a live workspace, or only its owners. */
-export const BROADCAST_AUDIENCES = ['owners', 'everyone'] as const;
+/** Who a broadcast reaches: every member of a live workspace, only its owners, or — for one targeted notice — only the
+ *  owners of workspaces that took bookings in the last 180 days and have no own address to send booking emails from. */
+export const BROADCAST_AUDIENCES = ['owners', 'everyone', 'bookings_no_address'] as const;
 export type BroadcastAudience = typeof BROADCAST_AUDIENCES[number];
-export const AUDIENCE_LABELS: Record<BroadcastAudience, string> = { owners: 'Workspace owners', everyone: 'Everyone in each workspace' };
+export const AUDIENCE_LABELS: Record<BroadcastAudience, string> = {
+    owners: 'Workspace owners', everyone: 'Everyone in each workspace',
+    bookings_no_address: 'Owners of workspaces taking bookings with no email address set up',
+};
+/** The audiences a notice offers when it names none: the two general ones. A targeted audience is offered only by the
+ *  notice written for it. */
+export const GENERAL_AUDIENCES: readonly BroadcastAudience[] = ['owners', 'everyone'];
+/** How far back a booking makes a workspace "taking bookings". */
+export const BOOKINGS_LOOKBACK_DAYS = 180;
 
 /** An audience from a request; anything else is null (refused, never guessed). Pure. */
 export function readAudience(v: unknown): BroadcastAudience | null {
@@ -37,8 +46,15 @@ export interface BroadcastDef {
     label: string;
     /** Why it exists — shown on the admin page so nobody sends it by accident. */
     purpose: string;
-    /** Who the admin page offers first. They can still pick the other. */
+    /** Who the admin page offers first. They can still pick another this notice offers. */
     audience: BroadcastAudience;
+    /** The audiences this notice may go to (default GENERAL_AUDIENCES). */
+    audiences?: readonly BroadcastAudience[];
+}
+
+/** The audiences one notice may go to. */
+export function audiencesFor(def: BroadcastDef): readonly BroadcastAudience[] {
+    return def.audiences ?? GENERAL_AUDIENCES;
 }
 
 export const BROADCASTS: readonly BroadcastDef[] = [
@@ -67,6 +83,13 @@ export const BROADCASTS: readonly BroadcastDef[] = [
         purpose: 'The 14 days\' notice in DPA clause 5 for adding Google Cloud Pub/Sub to the sub-processor list (docs/google-cloud-sub-processor-notice.md). Gmail push stays off on production until 14 days after this is sent. Owners may object to privacy@bemoreswan.com within 14 days of the email.',
         // DPA clause 5 notice goes to the workspace owner, as for ElevenLabs (owner, 2026-11-20).
         audience: 'owners',
+    },
+    {
+        key: 'booking_emails_need_address_notice',
+        label: 'Booking emails now need your own email address (owners with bookings and no address)',
+        purpose: 'One-off notice (owner, 2026-11-27): since release #918, booking confirmations, reminders and other customer booking emails go only from the business\'s own address. This reaches only owners of workspaces that took bookings in the last 180 days and have no verified sending domain or connected Gmail/Outlook. Send once the release is live on production.',
+        audience: 'bookings_no_address',
+        audiences: ['bookings_no_address'],
     },
 ];
 
@@ -97,19 +120,30 @@ export function emailsGoToCustomers(headers: Record<string, string | undefined> 
 
 export interface Recipient { id: number; email: string; firstName: string | null }
 
-/** Everyone who should get this notice and hasn't yet — or, for 'owners', only workspace owners. */
-export async function pendingRecipients(db: Db, key: string, audience: BroadcastAudience): Promise<Recipient[]> {
-    const rows = await db.execute<{ id: number; email: string; first_name: string | null }>(sql`
-        SELECT DISTINCT u.id, u.email, u.first_name
+/** Everyone who should get this notice and hasn't yet — or, for 'owners', only workspace owners; for
+ *  'bookings_no_address', only owners of workspaces with a booking in the last BOOKINGS_LOOKBACK_DAYS days and no own
+ *  address to send from (business-email.ts orgsWithRoute; a failed route check counts as no address). */
+export async function pendingRecipients(db: Db, key: string, audience: BroadcastAudience, deps: { routed?: (db: Db, orgIds: number[]) => Promise<number[]> } = {}): Promise<Recipient[]> {
+    const owners = audience === 'owners' || audience === 'bookings_no_address';
+    const rows = await db.execute<{ id: number; email: string; first_name: string | null; org_id: number }>(sql`
+        SELECT DISTINCT u.id, u.email, u.first_name, uo.organisation_id AS org_id
           FROM users u
           JOIN user_organisations uo ON uo.user_id = u.id
           JOIN plans p ON p.organisation_id = uo.organisation_id
          WHERE u.status = 'active'
            AND p.status IN (${sql.join(LIVE_PLAN_STATUSES.map((s) => sql`${s}`), sql`, `)})
-           ${audience === 'owners' ? sql`AND uo.role = 'owner'` : sql``}
+           ${owners ? sql`AND uo.role = 'owner'` : sql``}
+           ${audience === 'bookings_no_address' ? sql`AND EXISTS (SELECT 1 FROM bookings b WHERE b.organisation_id = uo.organisation_id AND b.created_at > now() - make_interval(days => ${BOOKINGS_LOOKBACK_DAYS}))` : sql``}
            AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = u.id AND n.type = ${key})
          ORDER BY u.id`);
-    return (rows as unknown as Array<{ id: number; email: string; first_name: string | null }>)
+    let list = rows as unknown as Array<{ id: number; email: string; first_name: string | null; org_id: number }>;
+    if (audience === 'bookings_no_address' && list.length) {
+        const routed = new Set(await (deps.routed ?? (async (d: Db, ids: number[]) => (await import('./business-email')).orgsWithRoute(d, ids)))(db, [...new Set(list.map((r) => Number(r.org_id)))]));
+        list = list.filter((r) => !routed.has(Number(r.org_id)));
+    }
+    // One row per person (an owner of two workspaces appears once).
+    const seen = new Set<number>();
+    return list.filter((r) => !seen.has(Number(r.id)) && seen.add(Number(r.id)))
         .map((r) => ({ id: Number(r.id), email: r.email, firstName: r.first_name }));
 }
 

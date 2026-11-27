@@ -14,7 +14,7 @@ import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
-import { alreadyHas, broadcastDef, pendingRecipients, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
+import { alreadyHas, audiencesFor, broadcastDef, pendingRecipients, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
 import { cancelledNoticeKey, cancelledRecipients, noticeContext, noticeKey, readChange } from '../../src/utils/task-cost-changes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -61,7 +61,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if (!def) return { statusCode: 400, body: 'key required.' };
         // The audience the admin confirmed the count for; never widened to everyone by a missing field.
         const audience = readAudience(body.audience);
-        if (!audience) return { statusCode: 400, body: 'audience required.' };
+        if (!audience || !audiencesFor(def).includes(audience)) return { statusCode: 400, body: 'audience required.' };
         templateKey = def.key;
         sentMark = def.key;
         recipients = await pendingRecipients(db, def.key, audience);
