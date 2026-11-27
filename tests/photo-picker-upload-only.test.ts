@@ -26,7 +26,10 @@ check('the picker: filesOnly drops the stock and AI tabs and never opens on stoc
     assert.ok(mp.includes("${tabBtn('files', 'Upload or library')}${filesOnly ? '' : `${tabBtn('stock', `Ask ${who} to find stock`)}${tabBtn('ai', `Ask ${who} to create one`)}`}"));
     assert.ok(mp.includes('if (opts.findNow && opts.topic && !filesOnly)'));
     // review #926: a stock or AI picture already saved in the library can't be chosen either.
-    assert.ok(mp.includes('.filter((a) => !filesOnly || !a.provider);'));
+    // owner 2026-11-27: photos imported from the owner's own website (site_import) are theirs too.
+    assert.ok(mp.includes(".filter((a) => !filesOnly || !a.provider || a.provider === 'site_import');"));
+    const keep = (a: { provider?: string | null }) => !a.provider || a.provider === 'site_import';
+    assert.deepStrictEqual([{ provider: null }, { provider: 'site_import' }, { provider: 'pexels' }, { provider: 'fal' }, { provider: 'brand_card' }].filter(keep).map((a) => a.provider), [null, 'site_import']);
     assert.ok(mp.includes("None of your own photos in your library yet — upload one above."));
 });
 
