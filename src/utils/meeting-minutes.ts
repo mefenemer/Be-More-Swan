@@ -121,8 +121,19 @@ export interface MinutesCard {
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** A sentence that puts the action items off ("…will be shared separately once confirmed"). */
-const DEFERRED_ACTIONS = /[^.!?\n]*\baction items?\b[^.!?\n]*\b(?:shared|sent|circulated|follow|confirmed)\b[^.!?\n]*\b(?:separately|later|once confirmed|in due course|to follow|shortly)\b[^.!?\n]*[.!?]?/i;
+/**
+ * Whether one sentence of the email puts the action items off ("…will be shared separately once confirmed", "We will share
+ * the action items later"): it names action items, says they WILL BE shared/sent/circulated (or we will share/send them),
+ * and says when ("separately", "later", "once confirmed"…). A line that lists items ("Action items: Sam to send the deck
+ * later") or introduces a list (ends with ":") is never one. Review of #938. Pure.
+ */
+function defersActionItems(sentence: string): boolean {
+    const s = sentence.trim();
+    if (!/\baction items?\b/i.test(s) || /\baction items?\s*:/i.test(s) || s.endsWith(':')) return false;
+    const willShare = /\b(?:will|shall|would|to|are to|is to)\s+be\s+(?:shared|sent|circulated|confirmed)\b|\b(?:will|we'll|i'll|shall|we will|i will)\s+(?:share|send|circulate)\b/i;
+    const when = /\b(?:separately|later|once (?:they are |they're |they have been )?confirmed|in due course|shortly|to follow|in a separate)\b/i;
+    return willShare.test(s) && when.test(s);
+}
 
 /** The tasks as the email's list: "• description (owner, due …)". Pure. */
 export function actionItemLines(tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
@@ -138,8 +149,18 @@ export function actionItemLines(tasks: readonly { description: string; assignee:
  * card has tasks, that sentence becomes the list. Anything else is left as written. Pure.
  */
 export function withActionItems(body: string, tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
-    if (!tasks.length || !DEFERRED_ACTIONS.test(body)) return body;
-    return body.replace(DEFERRED_ACTIONS, `Action items:\n${actionItemLines(tasks)}`);
+    if (!tasks.length) return body;
+    let replaced = false;
+    // Sentence by sentence (a sentence never crosses a line break): the first deferring sentence becomes the list, any
+    // later one is dropped (the list is already there).
+    const out = body.replace(/[^.!?\n]+[.!?]?/g, (sentence) => {
+        if (!defersActionItems(sentence)) return sentence;
+        if (replaced) return '';
+        replaced = true;
+        const lead = sentence.match(/^\s*/)?.[0] ?? '';
+        return `${lead}Action items:\n${actionItemLines(tasks)}`;
+    });
+    return out;
 }
 
 /**

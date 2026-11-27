@@ -126,6 +126,16 @@ assert.ok(form.includes('nothing is sent until you approve'));
     const listed = 'Hello,\n\nActions: Sam to send the deck by Friday.\n\nThanks';
     assert.equal(withActionItems(listed, tasks), listed, 'an email that already lists them is untouched');
     assert.equal(actionItemLines([{ description: 'Send the deck', assignee: 'Sam', dueDate: 'Friday' }]), '• Send the deck (Sam, due Friday)');
+    // Review of #938: verb-first wording is caught; a list heading or a line that lists items is never rewritten.
+    assert.ok(withActionItems('Hi,\n\nWe will share the action items separately once confirmed.\n\nThanks', tasks).includes('Action items:\n• Review the note-taker'));
+    const heading = 'Hi,\n\nAction items (a fuller note will be sent later):\n• Sam to send the deck\n\nThanks';
+    assert.equal(withActionItems(heading, tasks), heading, 'a heading that introduces a list keeps its own list (no duplicates)');
+    const listsOne = 'Hi,\n\nAction items: Sam to follow up with the client later.\n\nThanks';
+    assert.equal(withActionItems(listsOne, tasks), listsOne, 'a line that lists an item is not replaced');
+    const twice = 'Action items will be shared later. Action items will be sent separately.';
+    const twiceFixed = withActionItems(twice, tasks);
+    assert.equal((twiceFixed.match(/Action items:/g) || []).length, 1, 'the first deferring sentence becomes the list');
+    assert.ok(!/separately|shared later/.test(twiceFixed), 'a later deferring sentence is dropped');
     const card = normaliseMinutesCard({ type: 'action_item_assignment', meetingSummary: 'x', tasks, followupEmail: { subject: 'S', body } });
     assert.ok(card!.followupEmail!.body.includes('• Review the note-taker introduction wording'), 'applied when the card is cleaned (chat and bot both)');
 }
