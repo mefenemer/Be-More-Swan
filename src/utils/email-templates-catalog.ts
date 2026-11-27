@@ -721,6 +721,27 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('Any questions, just reply to this email.') + signoff,
     },
     {
+        // The DPA clause 5 notice for adding Google Cloud Pub/Sub as a sub-processor (docs/google-cloud-sub-processor-notice.md):
+        // Gmail's "new mail" notices for the Email Assistant (Phase 3b push). Every claim matches the code and the topic set-up:
+        // a push carries only { emailAddress, historyId } (mail-push-gmail.ts), undelivered messages are kept 7 days (the
+        // subscription's retention), and the reader fetches mail from Gmail itself. No fixed objection date: the 14 days run
+        // from the send, and production push stays off until they have passed. No training claim: none is needed or made.
+        triggerKey: 'subprocessor_google_cloud_notice',
+        name: 'Notice: new sub-processor Google Cloud (Gmail new-mail notices)',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'We are adding Google Cloud to our list of sub-processors',
+        preheader: 'Only for Gmail mailboxes connected to your Email Assistant. You can object within 14 days.',
+        bodyHtml: greet +
+            p('We are adding <strong>Google Cloud</strong> (Google LLC, United States) to the list of providers that process data for us, on our <a href="https://bemoreswan.com/trust.html#sub-processors">Trust page</a>.') +
+            p('<strong>What it does.</strong> When you connect a Gmail mailbox to your Email Assistant, Gmail tells us the moment new mail arrives, instead of us checking every few minutes. Those "new mail" notices pass through Google Cloud Pub/Sub, a messaging service in our own Google Cloud account. Each notice carries only the mailbox\'s email address and a reference number &mdash; no email content, subjects or senders. If you use the Email Assistant with Gmail, it then reads the new mail from Gmail directly.') +
+            p('<strong>How your data is protected.</strong> Google Cloud acts as our processor under the Google Cloud Data Processing Addendum, and transfers outside the UK and EU are covered by Standard Contractual Clauses with the UK Addendum. A notice that cannot be delivered is kept for up to 7 days, then deleted.') +
+            p('<strong>When.</strong> We will not use it for any customer mailbox until at least 14 days after this email.') +
+            p('<strong>If you object.</strong> If you have a data protection reason to object, email <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a> within 14 days of this email. We will work with you on an alternative, such as checking your mailbox every few minutes instead, and if we cannot find one you can end the affected service with no early-termination charge (clause 5 of our <a href="https://bemoreswan.com/dpa.html">Data Processing Agreement</a>). If you do not connect Gmail to an Email Assistant, nothing reaches Google Cloud.') +
+            p('Nothing else changes, and there is nothing you need to do.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
         // A change to task costs (Admin → Money → Task costs, src/utils/task-cost-changes.ts). The figures
         // come from the change; the in-app twin shares the key. Transactional: a notice, not marketing.
         triggerKey: 'task_cost_change',
