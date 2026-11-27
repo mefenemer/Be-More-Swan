@@ -20,12 +20,12 @@ import { formatMoney } from './product-price';
 import { connectAccountFor } from './site-shop';
 import { releaseHold } from './booking-deposits';
 import { balanceCharge, chargeNow, refundStayParts, startBalanceCheckout, startStayCheckout, stayRefundFor } from './stay-charges';
-import { announceCustomerChange, announceNewBooking, customerCancel, describeBooking, emailKey, fromLine, loadBooking, type BookingRow } from './bookings';
+import { announceCustomerChange, announceNewBooking, customerCancel, describeBooking, emailKey, loadBooking, type BookingRow } from './bookings';
+import { bookingEmailLine, sendBusinessEmail } from './business-email';
 import { stayPagePath } from './site-stays';
 import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
-import { sendEmail } from './email';
 import { verifyBookingToken } from './booking-links';
 
 export interface StayChoice { stay: number | null; in: string | null; out: string | null; guests: number; rooms: number; extras: number[]; }
@@ -243,12 +243,12 @@ export async function stayCancelSubmit(b: BookCtx, row0: BookingRow, token: stri
     const money = result === 'refunded' ? `<p>${esc(formatMoney(back.total, cur))} is on its way back to your card — it usually arrives within 5–10 days.</p>`
         : result === 'refund_failed' ? `<p>${esc(ctx.business)} will refund ${esc(formatMoney(back.total, cur))} to you.</p>`
         : done.paymentStatus === 'paid' ? '<p>Under the cancellation terms, nothing is refunded.</p>' : '';
-    await sendEmail({
-        to: done.customerEmail, from: fromLine(ctx.business),
+    const told = await sendBusinessEmail(b.db, done.organisationId, {
+        business: ctx.business, to: done.customerEmail,
         subject: `You've cancelled your stay — ${ctx.business}`,
         html: `<p>${esc(done.customerName)}, your stay at <strong>${esc(what)}</strong>, <strong>${esc(when)}</strong>, is cancelled. Thanks for letting ${esc(ctx.business)} know.</p>${money}`,
-    }).catch((err: unknown) => console.error('[site-stay-booking] cancel email failed', err instanceof Error ? err.message : err));
-    await announceCustomerChange(b.db, 'cancelled', done, ctx).catch((err) => console.error('[site-stay-booking] cancel notice failed', err));
+    });
+    await announceCustomerChange(b.db, 'cancelled', done, ctx, undefined, bookingEmailLine(told, 'cancellation')).catch((err) => console.error('[site-stay-booking] cancel notice failed', err));
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=cancelled&b=%2F` };
 }
 

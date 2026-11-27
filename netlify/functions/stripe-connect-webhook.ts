@@ -29,10 +29,10 @@ import { balanceCharge, stayBalancePaid, stayModeFor, stayPaymentSettled } from 
 import { formatMoney } from '../../src/utils/product-price';
 import { describeCancellation } from '../../src/utils/stay-quote';
 import { loadStays, pricingOf } from '../../src/utils/stays';
-import { announceNewBooking, describeBooking, fromLine, loadBookingSetup } from '../../src/utils/bookings';
+import { announceNewBooking, describeBooking, loadBookingSetup } from '../../src/utils/bookings';
+import { sendBusinessEmail } from '../../src/utils/business-email';
 import { organisations, sites } from '../../db/schema';
 import { siteOrigin } from '../../src/utils/site-hosting';
-import { sendEmail } from '../../src/utils/email';
 import { esc } from '../../src/utils/site-render';
 import { eq } from 'drizzle-orm';
 
@@ -58,10 +58,11 @@ async function depositSettled(db: ReturnType<typeof getDb>, accountId: string, s
     const business = org?.name || 'Your booking';
     if (r.lateRefund) {
         const { when, what } = describeBooking(b, setup.settings.timezone);
-        await sendEmail({
-            to: b.customerEmail, from: fromLine(business), subject: `Your deposit has been refunded — ${business}`,
+        // Own address only (business-email.ts); with none, Stripe's own refund receipt is what they get.
+        await sendBusinessEmail(db, b.organisationId, {
+            business, to: b.customerEmail, subject: `Your deposit has been refunded — ${business}`,
             html: `<p>Sorry, ${esc(b.customerName)} — your payment for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong> arrived after the time was released, so nothing was booked. Your deposit has been refunded in full; it usually reaches your card within 5–10 days.</p><p>Please book again on our website.</p>`,
-        }).catch((err: unknown) => console.error('[stripe-connect-webhook] late-refund email failed', err instanceof Error ? err.message : err));
+        });
         return;
     }
     await announceNewBooking(db, b, {
@@ -79,10 +80,10 @@ async function balanceSettled(db: ReturnType<typeof getDb>, accountId: string, s
     const { what, when } = describeBooking(b, 'UTC');
     const paid = balanceCharge({ ...b, damageDepositStatus: session.metadata?.bms_damage === '1' ? 'due' : 'none' });
     const m = (n: number) => formatMoney(n, b.currency || 'GBP');
-    await sendEmail({
-        to: b.customerEmail, from: fromLine(business), subject: `Balance paid — ${business}`,
+    await sendBusinessEmail(db, b.organisationId, {
+        business, to: b.customerEmail, subject: `Balance paid — ${business}`,
         html: `<p>Hi ${esc(b.customerName)},</p><p>Thank you — we've received your balance of <strong>${esc(m(paid.balance))}</strong> for <strong>${esc(what)}</strong>, ${esc(when)}${paid.damage ? `, with the refundable damage deposit of ${esc(m(paid.damage))}` : ''}. You're all paid up.</p>`,
-    }).catch((err: unknown) => console.error('[stripe-connect-webhook] balance receipt failed', err instanceof Error ? err.message : err));
+    });
 }
 
 export default withLambda(async (event) => {

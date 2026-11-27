@@ -25,26 +25,26 @@ export interface GmailSendResult { id: string; threadId?: string }
 
 /** Fixed boundary for the multipart/alternative form. Never appears in base64 payloads. */
 const BOUNDARY = 'bms-alt-boundary-8f2c1a';
+/** The outer multipart/mixed boundary when there are attachments. */
+const MIXED = 'bms-mixed-boundary-3d7e9b';
+/** A MIME parameter value made safe: no quotes, CR/LF or semicolons. Pure. */
+const mimeParam = (v: string) => v.replace(/["\r\n;\\]/g, '').slice(0, 120) || 'attachment';
 
-/**
- * Send an email via the org's connected Gmail account.
- * @throws IntegrationError when Gmail isn't connected (from getFreshAccessToken)
- * @throws Error when the Gmail API rejects the send
- */
-export async function sendGmailMessage(
-    db: Db,
-    organisationId: number,
-    msg: {
-        to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string;
-        /**
-         * Optional HTML alternative. When present the message goes out as multipart/alternative,
-         * with `body` as the text part. Added for newsletter sends over the mailbox route — cold
-         * outreach deliberately stays plain text, because a 1:1 email that arrives as a styled
-         * template stops looking like a person wrote it.
-         */
-        html?: string;
-    },
-): Promise<GmailSendResult> {
+export type GmailMessage = {
+    to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string;
+    /**
+     * Optional HTML alternative. When present the message goes out as multipart/alternative,
+     * with `body` as the text part. Added for newsletter sends over the mailbox route — cold
+     * outreach deliberately stays plain text, because a 1:1 email that arrives as a styled
+     * template stops looking like a person wrote it.
+     */
+    html?: string;
+    /** Files to attach (a booking's calendar invite): content as base64. */
+    attachments?: Array<{ filename: string; content: string; contentType?: string }>;
+};
+
+/** The raw RFC 822 message (headers, alternative text/HTML, attachments). Pure — tests/booking-emails-own-address.test.ts. */
+export function gmailMime(msg: GmailMessage): string {
     // Strip CR/LF so field values can never smuggle extra MIME headers.
     const to = msg.to.replace(/[\r\n]+/g, ' ').trim();
     const subject = (msg.subject || '(no subject)').replace(/[\r\n]+/g, ' ').trim();
@@ -59,9 +59,53 @@ export async function sendGmailMessage(
     const listUnsubscribe = msg.listUnsubscribe ? msg.listUnsubscribe.replace(/[\r\n]+/g, ' ').trim() : '';
     if (!to) throw new Error('A recipient address is required to send.');
 
-    const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
+    const content = msg.html
+        // multipart/alternative: the text part first, HTML second — clients render the LAST
+        // part they understand, so the order is what decides which one a person sees.
+        ? [
+            `Content-Type: multipart/alternative; boundary="${BOUNDARY}"`,
+            '',
+            `--${BOUNDARY}`,
+            'Content-Type: text/plain; charset="UTF-8"',
+            'Content-Transfer-Encoding: base64',
+            '',
+            Buffer.from(body, 'utf8').toString('base64'),
+            '',
+            `--${BOUNDARY}`,
+            'Content-Type: text/html; charset="UTF-8"',
+            'Content-Transfer-Encoding: base64',
+            '',
+            Buffer.from(msg.html, 'utf8').toString('base64'),
+            '',
+            `--${BOUNDARY}--`,
+        ]
+        : [
+            'Content-Type: text/plain; charset="UTF-8"',
+            'Content-Transfer-Encoding: base64',
+            '',
+            Buffer.from(body, 'utf8').toString('base64'),
+        ];
+    // Attachments: the message becomes multipart/mixed — the content above first, then each file (base64, wrapped).
+    const files = msg.attachments?.filter((a) => a.content) ?? [];
+    const parts = files.length ? [
+        `Content-Type: multipart/mixed; boundary="${MIXED}"`,
+        '',
+        `--${MIXED}`,
+        ...content,
+        '',
+        ...files.flatMap((a) => [
+            `--${MIXED}`,
+            `Content-Type: ${mimeParam(a.contentType || 'application/octet-stream')}; name="${mimeParam(a.filename)}"`,
+            `Content-Disposition: attachment; filename="${mimeParam(a.filename)}"`,
+            'Content-Transfer-Encoding: base64',
+            '',
+            (a.content.replace(/\s+/g, '').match(/.{1,76}/g) || []).join('\r\n'),
+            '',
+        ]),
+        `--${MIXED}--`,
+    ] : content;
 
-    const mime = [
+    return [
         `To: ${to}`,
         ...(replyTo ? [`Reply-To: ${replyTo}`] : []),
         // List-Unsubscribe-Post is only meaningful alongside List-Unsubscribe, and its value is
@@ -74,33 +118,22 @@ export async function sendGmailMessage(
         ] : []),
         `Subject: ${encodeMimeHeader(subject)}`,
         'MIME-Version: 1.0',
-        ...(msg.html
-            // multipart/alternative: the text part first, HTML second — clients render the LAST
-            // part they understand, so the order is what decides which one a person sees.
-            ? [
-                `Content-Type: multipart/alternative; boundary="${BOUNDARY}"`,
-                '',
-                `--${BOUNDARY}`,
-                'Content-Type: text/plain; charset="UTF-8"',
-                'Content-Transfer-Encoding: base64',
-                '',
-                Buffer.from(body, 'utf8').toString('base64'),
-                '',
-                `--${BOUNDARY}`,
-                'Content-Type: text/html; charset="UTF-8"',
-                'Content-Transfer-Encoding: base64',
-                '',
-                Buffer.from(msg.html, 'utf8').toString('base64'),
-                '',
-                `--${BOUNDARY}--`,
-            ]
-            : [
-                'Content-Type: text/plain; charset="UTF-8"',
-                'Content-Transfer-Encoding: base64',
-                '',
-                Buffer.from(body, 'utf8').toString('base64'),
-            ]),
+        ...parts,
     ].join('\r\n');
+}
+
+/**
+ * Send an email via the org's connected Gmail account.
+ * @throws IntegrationError when Gmail isn't connected (from getFreshAccessToken)
+ * @throws Error when the Gmail API rejects the send
+ */
+export async function sendGmailMessage(
+    db: Db,
+    organisationId: number,
+    msg: GmailMessage,
+): Promise<GmailSendResult> {
+    const mime = gmailMime(msg);
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',

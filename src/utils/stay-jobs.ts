@@ -19,11 +19,12 @@
 // Every step claims its row first (a timestamp set only where it is still empty), so two overlapping
 // runs can't email or charge twice. Not AI work: no tasks.
 
-import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { bookings, organisations, sites, stayTypes } from '../../db/schema';
 import { addDays, formatDate, formatTime } from './booking-time';
-import { describeBooking, fromLine, ownerOf, type BookingRow } from './bookings';
+import { describeBooking, ownerOf, type BookingRow } from './bookings';
+import { orgsWithRoute, sendBusinessEmail, type BusinessEmailResult } from './business-email';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { esc, BOOK_PATH } from './site-render';
@@ -61,8 +62,9 @@ async function tellOwner(db: Db, b: BookingRow, who: Who, change: string, next: 
     }
 }
 
-const guestEmail = (b: BookingRow, who: Who, subject: string, html: string) => sendEmail({ to: b.customerEmail, from: fromLine(who.business), subject, html })
-    .catch((err: unknown) => console.error('[stay-jobs] guest email failed', err instanceof Error ? err.message : err));
+/** A guest email, ONLY from the owner's own address (business-email.ts; owner 2026-11-27). Never throws. */
+const guestEmail = (db: Db, b: BookingRow, who: Who, subject: string, html: string): Promise<BusinessEmailResult> =>
+    sendBusinessEmail(db, b.organisationId, { business: who.business, to: b.customerEmail, subject, html });
 
 /** The email with the pay link (first ask, reminder, or after a card failed). */
 export function payLinkEmail(b: BookingRow, who: Who, kind: 'first' | 'reminder' | 'card_failed'): { subject: string; html: string } {
@@ -83,12 +85,25 @@ export function payLinkEmail(b: BookingRow, who: Who, kind: 'first' | 'reminder'
     };
 }
 
+/** The workspaces with due rows that can email their guests (review #917): due work that needs an email is looked
+ *  for only there, so workspaces still waiting for an own address never fill a batch. */
+async function routedOrgsFor(db: Db, where: SQL | undefined, withStay = false): Promise<number[]> {
+    const q = db.selectDistinct({ id: bookings.organisationId }).from(bookings);
+    const rows = await (withStay ? q.innerJoin(stayTypes, eq(stayTypes.id, bookings.stayTypeId)) : q).where(where).limit(1000);
+    return orgsWithRoute(db, rows.map((r) => r.id));
+}
+
 /** 1. Balances due today or earlier on confirmed stays that haven't been asked for yet. */
 export async function collectDueBalances(db: Db, now: Date): Promise<number> {
     const today = now.toISOString().slice(0, 10);
-    const due = await db.select().from(bookings).where(and(
+    const base = and(
         eq(bookings.kind, 'stay'), eq(bookings.status, 'confirmed'), eq(bookings.balanceStatus, 'due'),
         lte(bookings.balanceDueOn, today), isNull(bookings.balanceRequestedAt),
+    );
+    // A card on file is charged whatever the email route; a pay link needs the owner's own address.
+    const routed = await routedOrgsFor(db, and(base, sql`${bookings.balanceCollection} IS DISTINCT FROM 'auto'`));
+    const due = await db.select().from(bookings).where(and(base,
+        routed.length ? or(eq(bookings.balanceCollection, 'auto'), inArray(bookings.organisationId, routed)) : eq(bookings.balanceCollection, 'auto'),
     )).limit(BATCH);
     let done = 0;
     for (const b0 of due) {
@@ -102,23 +117,28 @@ export async function collectDueBalances(db: Db, now: Date): Promise<number> {
             const r = await chargeBalanceOffSession(db, b);
             if (r.ok) {
                 const c = balanceCharge(b);
-                await guestEmail(r.booking, who, `Balance paid — ${who.business}`,
+                await guestEmail(db, r.booking, who, `Balance paid — ${who.business}`,
                     `<p>Hi ${esc(b.customerName)},</p><p>We've taken your remaining balance of <strong>${esc(m(c.balance))}</strong> for <strong>${esc(what)}</strong>, ${esc(when)}, from your card${c.damage ? `, with the refundable damage deposit of ${esc(m(c.damage))}` : ''}. You're all paid up — thank you.</p>`);
                 done++;
                 continue;
             }
             await db.update(bookings).set({ balanceStatus: 'failed' }).where(eq(bookings.id, b.id));
             const mail = payLinkEmail(b, who, 'card_failed');
-            await guestEmail(b, who, mail.subject, mail.html);
+            // Say what really happened to the pay link (review #917): it goes only from the owner's own address.
+            const linked = await guestEmail(db, b, who, mail.subject, mail.html);
+            const linkWords = linked === 'sent' ? 'We emailed them a link to pay.' : linked === 'slow' ? 'We tried to email them a link to pay — check your sent mail.' : 'We could NOT email them a link to pay (booking emails go only from your own address) — please send them one yourself.';
             await tellOwner(db, b, who, `couldn't be charged the ${m(b.balancePence ?? 0)} balance for ${when}`,
-                'We emailed them a link to pay. Get in touch with them if it stays unpaid.',
-                `<p>We couldn't take the <strong>${esc(m(b.balancePence ?? 0))}</strong> balance for <strong>${esc(what)}</strong>, ${esc(when)}, from <strong>${esc(b.customerName)}</strong>'s card (${esc(r.reason)}).</p><p>We've emailed them a link to pay. Reply to this email to write to them.</p>`,
+                `${linkWords} Get in touch with them if it stays unpaid.`,
+                `<p>We couldn't take the <strong>${esc(m(b.balancePence ?? 0))}</strong> balance for <strong>${esc(what)}</strong>, ${esc(when)}, from <strong>${esc(b.customerName)}</strong>'s card (${esc(r.reason)}).</p><p>${esc(linkWords)} Reply to this email to write to them.</p>`,
                 `Balance not paid: ${b.customerName}, ${when}`);
             done++;
             continue;
         }
         const mail = payLinkEmail(b, who, 'first');
-        await guestEmail(b, who, mail.subject, mail.html);
+        // Not sent (no own address yet): released, so the pay link goes on a later run — and the 3-day reminder
+        // counts from when it really went.
+        const r = await guestEmail(db, b, who, mail.subject, mail.html);
+        if (r === 'no_route' || r === 'failed') { await db.update(bookings).set({ balanceRequestedAt: null }).where(eq(bookings.id, b.id)); continue; }
         done++;
     }
     return done;
@@ -128,12 +148,15 @@ export async function collectDueBalances(db: Db, now: Date): Promise<number> {
 export async function chaseUnpaidBalances(db: Db, now: Date): Promise<number> {
     const threeDays = new Date(now.getTime() - 3 * DAY);
     const sixDays = new Date(now.getTime() - 6 * DAY);
-    const rows = await db.select().from(bookings).where(and(
+    const base = and(
         eq(bookings.kind, 'stay'), eq(bookings.status, 'confirmed'), inArray(bookings.balanceStatus, ['due', 'failed']),
         lte(bookings.balanceRequestedAt, threeDays),
         // An ISO string, never a Date: postgres-js can't bind a Date inside raw sql (raw-sql-date-params test).
         sql`(${bookings.balanceRemindedAt} IS NULL OR (${bookings.balanceOwnerToldAt} IS NULL AND ${bookings.balanceRequestedAt} <= ${sixDays.toISOString()}::timestamptz))`,
-    )).limit(BATCH);
+    );
+    const routed = await routedOrgsFor(db, base);
+    if (!routed.length) return 0;
+    const rows = await db.select().from(bookings).where(and(base, inArray(bookings.organisationId, routed))).limit(BATCH);
     let done = 0;
     for (const b0 of rows) {
         const who = await whoFor(db, b0);
@@ -141,7 +164,9 @@ export async function chaseUnpaidBalances(db: Db, now: Date): Promise<number> {
             const [b] = await db.update(bookings).set({ balanceRemindedAt: now }).where(and(eq(bookings.id, b0.id), isNull(bookings.balanceRemindedAt))).returning();
             if (!b) continue;
             const mail = payLinkEmail(b, who, 'reminder');
-            await guestEmail(b, who, mail.subject, mail.html);
+            // Not sent: released, so it goes on a later run — the owner's "emailed twice" stays true (review #917).
+            const r = await guestEmail(db, b, who, mail.subject, mail.html);
+            if (r === 'no_route' || r === 'failed') { await db.update(bookings).set({ balanceRemindedAt: null }).where(eq(bookings.id, b.id)); continue; }
             done++;
         } else if (b0.balanceRequestedAt && b0.balanceRequestedAt <= sixDays) {
             const [b] = await db.update(bookings).set({ balanceOwnerToldAt: now }).where(and(eq(bookings.id, b0.id), isNull(bookings.balanceOwnerToldAt))).returning();
@@ -177,13 +202,18 @@ ${stay.houseRules ? `<p><strong>House rules:</strong><br>${lines(stay.houseRules
 /** 3. Arrival details, N days before check-in, once anything owed is paid. */
 export async function sendArrivalDetails(db: Db, now: Date): Promise<number> {
     const today = now.toISOString().slice(0, 10);
-    const rows = await db.select({ b: bookings, stay: stayTypes }).from(bookings).innerJoin(stayTypes, eq(stayTypes.id, bookings.stayTypeId)).where(and(
+    const base = and(
         eq(bookings.kind, 'stay'), eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt),
         // Not after they've arrived; and only from N days before (a date minus whole days — no timezone involved).
         sql`${bookings.checkIn} >= ${today}::date`, sql`${bookings.checkIn} - ${stayTypes.arrivalDetailsDays} <= ${today}::date`,
         // Never a door code to a guest who still owes the balance.
         sql`coalesce(${bookings.balanceStatus}, 'none') NOT IN ('due', 'failed')`,
-    )).limit(BATCH);
+    );
+    // Only where the owner has their own address (review #917); the Bookings tab tells the others why nothing goes.
+    const routed = await routedOrgsFor(db, base, true);
+    if (!routed.length) return 0;
+    const rows = await db.select({ b: bookings, stay: stayTypes }).from(bookings).innerJoin(stayTypes, eq(stayTypes.id, bookings.stayTypeId))
+        .where(and(base, inArray(bookings.organisationId, routed))).limit(BATCH);
     let sent = 0;
     for (const { b: b0, stay } of rows) {
         const [b] = await db.update(bookings).set({ reminderSentAt: now }).where(and(eq(bookings.id, b0.id), isNull(bookings.reminderSentAt))).returning();
@@ -191,9 +221,11 @@ export async function sendArrivalDetails(db: Db, now: Date): Promise<number> {
         const who = await whoFor(db, b);
         const owner = await ownerOf(db, who.assistantId);
         const mail = arrivalEmail(b, stay, who.business);
-        await sendEmail({ to: b.customerEmail, from: fromLine(who.business), ...(owner?.email ? { replyTo: owner.email } : {}), subject: mail.subject, html: mail.html })
-            .catch((err: unknown) => console.error('[stay-jobs] arrival email failed', err instanceof Error ? err.message : err));
-        sent++;
+        // Own address only (never "via Be More Swan"). Not sent → the claim is released, so it goes on a later run once
+        // the owner has an address (until they arrive); the Bookings tab says why.
+        const r = await sendBusinessEmail(db, b.organisationId, { business: who.business, to: b.customerEmail, replyTo: owner?.email ?? null, subject: mail.subject, html: mail.html });
+        if (r === 'sent' || r === 'slow') sent++;   // slow may still go: keep the claim, never a second door code
+        else await db.update(bookings).set({ reminderSentAt: null }).where(eq(bookings.id, b.id));
     }
     return sent;
 }
@@ -231,14 +263,14 @@ export async function returnDueDamageDeposits(db: Db, now: Date): Promise<number
         const r = await settleDamageDeposit(db, b, 0, null);
         if (r === 'none') continue;
         const who = await whoFor(db, b);
-        await damageEmail(b, who, r === 'returned' ? 0 : null, null);
+        await damageEmail(db, b, who, r === 'returned' ? 0 : null, null);
         done++;
     }
     return done;
 }
 
 /** The guest hears what happened to their damage deposit. `keep` null = the refund failed (the business will sort it). */
-export async function damageEmail(b: BookingRow, who: Who, keep: number | null, reason: string | null): Promise<void> {
+export async function damageEmail(db: Db, b: BookingRow, who: Who, keep: number | null, reason: string | null): Promise<void> {
     const { what } = describeBooking(b, 'UTC');
     const held = b.damageDepositPence ?? 0;
     const m = (n: number) => formatMoney(n, b.currency || 'GBP');
@@ -247,7 +279,7 @@ export async function damageEmail(b: BookingRow, who: Who, keep: number | null, 
         : keep === 0
             ? `<p>Hi ${esc(b.customerName)},</p><p>Thanks for staying at ${esc(what)}. Your <strong>${esc(m(held))}</strong> damage deposit is on its way back to your card — it usually arrives within 5–10 days.</p>`
             : `<p>Hi ${esc(b.customerName)},</p><p>Thanks for staying at ${esc(what)}. We've returned <strong>${esc(m(held - keep))}</strong> of your ${esc(m(held))} damage deposit to your card, and kept <strong>${esc(m(keep))}</strong>.</p><p><strong>Why:</strong> ${esc(reason || '')}</p><p>If you'd like to talk about it, reply to this email.</p>`;
-    await guestEmail(b, who, keep && keep > 0 ? `About your damage deposit — ${who.business}` : `Your damage deposit is on its way back — ${who.business}`, html);
+    await guestEmail(db, b, who, keep && keep > 0 ? `About your damage deposit — ${who.business}` : `Your damage deposit is on its way back — ${who.business}`, html);
 }
 
 /** Everything above, for the hourly run. Each part's failure is logged and never stops the others. */

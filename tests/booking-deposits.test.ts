@@ -104,7 +104,7 @@ console.log('\nRefunds');
 check('refunded in full: the customer cancelling online, the business declining or cancelling, a cancelled class date', () => {
     const sb = read('src/utils/site-booking.ts');
     const refund = sb.indexOf("if (done && done.paymentStatus === 'paid') done.paymentStatus = await refundDeposit(b.db, done)");
-    const told = sb.indexOf("await emailCustomer(done, 'cancelled_by_you'", refund);
+    const told = sb.indexOf("await emailCustomer(b.db, done, 'cancelled_by_you'", refund);
     assert.ok(refund > 0 && told > refund, 'refund, then tell them');
     assert.ok(read('src/utils/bookings.ts').includes("if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row)"));
     assert.ok(read('netlify/functions/sites.ts').includes("if (b.status === 'cancelled' && b.paymentStatus === 'paid') b.paymentStatus = await refundDeposit(db, b)"));

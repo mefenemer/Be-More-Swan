@@ -1584,7 +1584,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
       <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours & location')}</p>
-      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`) + bookingLinkCard();
+      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>
+      ${state.bookingEmailBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-booking-email-blocked>${esc(state.bookingEmailBlocked)}</p>` : ''}`) + bookingLinkCard();
     const list = state.bookings;
     const tt = timetableCard();
     if (!list) return head + tt + card('<p class="text-sm text-gray-500 text-center">Loading bookings…</p>');
@@ -1629,6 +1630,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     try {
       const [bk, tt] = await Promise.all([post({ action: 'bookings', assistantId: state.assistantId }), post({ action: 'timetable', assistantId: state.assistantId })]);
       state.bookings = bk.bookings || [];
+      state.bookingEmailBlocked = bk.emailBlocked || null;
       state.timetable = tt.sessions || [];
     } catch (err) { state.bookings = state.bookings || []; state.timetable = state.timetable || []; state.note = { text: err.message, tone: 'error' }; }
     rerender();
@@ -3028,7 +3030,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       try {
         const r = await post({ action: 'session_cancel', assistantId: state.assistantId, id: Number(sCancel.dataset.sessionCancel), wholeSeries: series });
         state.timetable = r.sessions || state.timetable;
-        state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.`, tone: 'ok' };
+        state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.${r.notTold ? ` ${r.notTold} customer${r.notTold === 1 ? '' : 's'} couldn't be emailed: booking emails go only from your own address. Please tell them yourself.` : ''}`, tone: r.notTold ? 'error' : 'ok' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadBookings();
       return;
@@ -3062,8 +3064,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         if (!ok) return;
       }
       try {
-        await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
+        const r = await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
         state.data = await post({ action: 'get', assistantId: state.assistantId });
+        // The customer couldn't be emailed from the owner's own address: say so (business-email.ts).
+        if (r && r.emailLine) state.note = { text: r.emailLine, tone: 'error' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadBookings();
       return;

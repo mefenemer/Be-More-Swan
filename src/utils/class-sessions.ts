@@ -4,13 +4,13 @@
 // (kind 'class', party_size = places), made under the same per-workspace lock as every booking, so
 // two people can never take the last place. db/z-classes.sql. tests/classes.test.ts.
 
+import { sendBusinessEmail } from './business-email';
 import { randomUUID } from 'crypto';
 import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { bookableResources, bookings, classSessions, classWaitlist, orgProducts } from '../../db/schema';
 import { addDays, DATE_RE, formatDate, formatTime, TIME_RE, toMinutes, utcToZoned, zonedToUtc } from './booking-time';
 import { loadBookingSetup, type BookingRow } from './bookings';
-import { sendEmail } from './email';
 import { holdsTime, holdUntil } from './booking-deposits';
 import { esc } from './site-render';
 import { cleanMeetingUrl } from './booking-meeting';
@@ -225,11 +225,14 @@ export async function offerFreedPlaces(db: Db, orgId: number, sessionId: number 
             const [claimed] = await db.update(classWaitlist).set({ offeredAt: new Date() }).where(and(eq(classWaitlist.id, w.id), isNull(classWaitlist.offeredAt))).returning({ id: classWaitlist.id });
             if (!claimed) continue;
             const link = `${p.siteOrigin.replace(/\/+$/, '')}${p.bookPath(s.id)}`;
-            await sendEmail({
-                to: w.email, from: `${p.business.replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
+            // Own address only (business-email.ts; review #917). Not sent → the offer is released, so it is made again
+            // when a place next frees up once the owner has an address; nobody is skipped over.
+            const r = await sendBusinessEmail(db, orgId, {
+                business: p.business, to: w.email,
                 subject: `A place has opened up — ${s.title}, ${v.dateText}`,
                 html: `<p>Hi ${esc(w.name.split(/\s+/)[0])},</p><p>A place has opened up on <strong>${esc(s.title)}</strong>, ${esc(v.dateText)}, ${esc(v.timeText)}. You were on the waitlist.</p><p><a href="${esc(link)}">Book your place</a> — it isn't held, so the first to book gets it.</p>`,
-            }).catch((err: unknown) => console.error('[class-sessions] waitlist email failed', err instanceof Error ? err.message : err));
+            });
+            if (r === 'no_route' || r === 'failed') { await db.update(classWaitlist).set({ offeredAt: null }).where(eq(classWaitlist.id, w.id)); continue; }
             left -= w.places;
             sent++;
         }

@@ -196,7 +196,7 @@ export async function deliverStep(
     db: Db,
     route: SendRoute,
     organisationId: number,
-    msg: { to: string; subject: string; html: string; text: string; listUnsubscribe: string | null },
+    msg: { to: string; subject: string; html: string; text: string; listUnsubscribe: string | null; attachments?: Array<{ filename: string; content: string; contentType?: string }> },
 ): Promise<string | null> {
     // Returns the provider's message id where there is one (Resend) — the key the webhook matches
     // opens, clicks, bounces and complaints on. A mailbox send has none, so it is tracked as sent only.
@@ -211,12 +211,14 @@ export async function deliverStep(
             headers: msg.listUnsubscribe
                 ? { 'List-Unsubscribe': msg.listUnsubscribe, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
                 : undefined,
+            ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
         });
         return (data as { id?: string } | null)?.id ?? null;
     }
     const common = {
         to: msg.to, subject: msg.subject, body: msg.text, html: msg.html,
         listUnsubscribe: msg.listUnsubscribe || undefined,
+        ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
     };
     if (route.provider === 'outlook') { await sendOutlookMessage(db, organisationId, common); return null; }
     await sendGmailMessage(db, organisationId, common);
