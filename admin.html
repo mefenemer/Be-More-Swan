@@ -4936,6 +4936,9 @@ async function tcRun(btn, resource, payload, say) {
     const d = await tcCall(resource, payload);
     announced = resource === 'announce';
     if (announced) tcAnnounced = true;
+    // Any load already on its way read the state from before this change: drop its reply, so the scheduled load below is
+    // the one that paints (review of #927 round 2).
+    if (resource === 'announce' || resource === 'discard' || resource === 'cancel') tcLoadSeq++;
     // The draft these typed values belonged to is gone (announced or discarded): start the next one clean.
     // Cancelling an announced change leaves the draft alone, so its typed values stay (review of #879 round 2).
     if (resource === 'discard' || resource === 'announce') tcForm = tcEmptyForm();
