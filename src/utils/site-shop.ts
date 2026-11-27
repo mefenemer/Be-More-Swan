@@ -32,7 +32,15 @@ import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
 import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, users } from '../../db/schema';
 import { createNotification } from './notify';
+import { sendStockAlerts, stockCrossing, type StockAlert } from './shop-stock-alerts';
+import { checkoutNewsChoice, EMAIL_FIELD, reminderCheckoutParams, saveReminderEmail } from './shop-checkout-reminder';
+import { joinWaitlist, WAITLIST_ACTION, WAITLIST_LIMIT } from './shop-waitlist';
+import { addShopBuyerToAudience, buyerAudienceLine, newsBoxLabel, newsTicked, NEWS_METADATA_KEY, NEWS_WORDS_METADATA_KEY, type BuyerAudienceResult } from './shop-buyer-audience';
+import { enrolShopBuyer } from './shop-first-order-flow';
 import { sendEmail } from './email';
+import { htmlToPlainText } from './email-template';
+import { resolveSendRoute } from './newsletter-send';
+import { deliverStep } from './newsletter-sequence';
 import { checkRateLimit } from './rate-limit';
 // Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
 // connectAccountFor, and chat-orchestrator imports site-store. See src/lib/render-libs.ts.
@@ -138,7 +146,9 @@ export async function refreshConnectAccount(db: Db, orgId: number): Promise<Conn
 
 export type BuyOutcome =
     | { kind: 'redirect'; location: string }
-    | { kind: 'error'; status: 400 | 404 | 409 | 429 | 503; title: string; message: string; backPath: string };
+    | { kind: 'error'; status: 400 | 404 | 409 | 429 | 503; title: string; message: string; backPath: string }
+    // A page that says something went right (the waiting list, shop-waitlist.ts) — drawn like an error notice, status 200.
+    | { kind: 'notice'; status: 200; title: string; message: string; backPath: string };
 
 /** A product as a site shows it — read from Business Information (org_products), never from the site. */
 export interface SiteProduct {
@@ -286,7 +296,7 @@ export const NEW_BASKET_LIMIT = { maxAttempts: 30, windowSecs: 3600 };
 async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip', limit = BUY_LIMIT): Promise<BuyOutcome | null> {
     try {
         const limited = await checkRateLimit(db, key, ip, limit);
-        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: key === 'site_basket_ip' ? 'Too many baskets were started from here just now.' : 'Too many checkouts were started from here just now.', backPath: back };
+        if (!limited.allowed) return { kind: 'error', status: 429, title: 'Please try again shortly', message: key === 'site_basket_ip' ? 'Too many baskets were started from here just now.' : key === 'site_waitlist_ip' ? 'Too many waiting-list requests were sent from here just now.' : 'Too many checkouts were started from here just now.', backPath: back };
     } catch (err) {
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
     }
@@ -296,6 +306,8 @@ async function rateLimited(db: Db, ip: string, back: string, key = 'site_buy_ip'
 export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome> {
     // A basket action (shop-basket.ts): add / set / remove / checkout, all posted to /_buy.
     const act = String(req.body.get('_a') || '');
+    // "Tell me when it's back" on a sold-out product's page (shop-waitlist.ts, Phase 2 slice 6).
+    if (act === WAITLIST_ACTION) return waitlistAction(db, req);
     if (act) return basketAction(db, req, act);
     const back = req.backPath;
     const r = await resolveBuy(db, req);
@@ -322,12 +334,30 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
     }
 }
 
+/** A sold-out product's "Tell me when it's back" box: the address joins that product's waiting list. */
+async function waitlistAction(db: Db, req: BuyRequest): Promise<BuyOutcome> {
+    const back = req.backPath;
+    const orgId = req.site.organisationId;
+    const productId = Number(req.body.get('_pid'));
+    const sectionId = String(req.body.get('_s') || '');
+    const notHere: BuyOutcome = { kind: 'error', status: 404, title: 'That item isn\'t here any more', message: 'The page may have changed since you opened it. Go back and have another look.', backPath: back };
+    // Shopkeeper workspaces only (the Shopkeeper asks the owner), and the section must be on the PUBLISHED site and offer it.
+    if (!(await basketOn(db, orgId))) return notHere;
+    const section = req.definition.pages.flatMap((p) => p.sections).find((x) => x.id === sectionId);
+    if (!section || section.type !== 'products' || !Number.isInteger(productId) || !section.props.productIds.includes(productId)) return notHere;
+    const limited = await rateLimited(db, req.ip, back, 'site_waitlist_ip', WAITLIST_LIMIT);
+    if (limited) return limited;
+    const r = await joinWaitlist(db, { orgId, siteId: req.site.id, productId, email: req.body.get(EMAIL_FIELD) });
+    if (!r.ok) return { kind: 'error', status: r.status, title: r.status === 409 ? 'Please have another look' : 'That didn\'t work', message: r.error, backPath: back };
+    return { kind: 'notice', status: 200, title: 'We\'ll tell you when it\'s back', message: 'We\'ll send you one email when it\'s back in stock. That\'s all: it doesn\'t sign you up to anything else.', backPath: back };
+}
+
 // ── The basket (Shopkeeper workspaces, shop-basket.ts) ─────────────────────────────────────────
 
 export const basketPagePath = (id: string) => `${BASKET_PATH}?b=${encodeURIComponent(id)}`;
 
 /** The Checkout Session for a whole basket — pure. Quantities were chosen on the basket page. */
-export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null }): Stripe.Checkout.SessionCreateParams {
+export function basketCheckoutParams(req: { origin: string; site: SiteRow; basketId: string; lines: PricedLine[]; collectAddress: boolean; shop?: ShopSettings | null; imageUrl?: (assetId: number) => string | null; delivery?: DeliverySetup | null; news?: boolean; businessName?: string; reminderEmail?: string | null; now?: Date }): Stripe.Checkout.SessionCreateParams {
     const back = basketPagePath(req.basketId);
     // UK delivery rates (shop-delivery.ts): the buyer picks one on Stripe's page; a rate is free over its threshold.
     // In pounds only: a basket priced in another currency is checked out without them (Stripe needs one currency).
@@ -350,9 +380,14 @@ export function basketCheckoutParams(req: { origin: string; site: SiteRow; baske
         ...(req.shop ? { custom_text: { submit: { message: checkoutNote(req.shop, `${req.origin}${SHOP_TERMS_PATH}`) } } } : {}),
         success_url: `${req.origin}${FORM_SENT_PATH}?k=order&b=${encodeURIComponent('/')}`,
         cancel_url: `${req.origin}${back}`,
+        // Ticked with an email (shop-checkout-reminder.ts): the email is filled in on Stripe's page, and the checkout
+        // lapses after an hour so its one reminder follows soon after. Unticked: Stripe's defaults.
+        ...(req.news ? reminderCheckoutParams(req.reminderEmail ?? null, req.now ?? new Date()) : {}),
         metadata: {
             bms_site_id: String(req.site.id), bms_org_id: String(req.site.organisationId), bms_basket: req.basketId,
             bms_item_name: orderSummaryName(req.lines), bms_page: BASKET_PATH,
+            // The basket page's "Send me news" box, ticked (shop-buyer-audience.ts). Absent = not ticked.
+            ...(req.news ? { [NEWS_METADATA_KEY]: '1', [NEWS_WORDS_METADATA_KEY]: newsBoxLabel(req.businessName ?? '').slice(0, 450) } : {}),
         },
     };
 }
@@ -397,15 +432,19 @@ async function basketAction(db: Db, req: BuyRequest, act: string): Promise<BuyOu
     if ('kind' in ready) return ready;
     const limited = await rateLimited(db, req.ip, basketPagePath(basket.id));
     if (limited) return limited;
+    // "Send me news" ticked needs the email typed beside it (shop-checkout-reminder.ts); unticked keeps none.
+    const newsChoice = checkoutNewsChoice(req.body.get('_news') === '1', req.body.get(EMAIL_FIELD));
+    if (!newsChoice.ok) return { kind: 'error', status: 400, title: 'Please check your email address', message: newsChoice.error, backPath: basketPagePath(basket.id) };
     const sections = req.definition.pages.flatMap((p) => p.sections);
     const collectAddress = priced.lines.some((l) => { const s = sections.find((x) => x.id === l.sectionId); return s?.type === 'products' && s.props.collectAddress; });
     try {
         const session = await (await stripeClient()).checkout.sessions.create(
-            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId) }),
+            basketCheckoutParams({ origin: req.origin, site: req.site, basketId: basket.id, lines: priced.lines, collectAddress, shop: ready.shop, imageUrl: req.assetUrl, delivery: await loadDelivery(db, orgId), news: req.body.get('_news') === '1', businessName: req.definition.settings.siteName, reminderEmail: newsChoice.email }),
             { stripeAccount: ready.account.stripeAccountId },
         );
         if (!session.url) throw new Error('Stripe returned no checkout address');
         await markBasketCheckout(db, basket.id, req.site.id, priced.lines.map((l) => ({ productId: l.productId, optionId: l.optionId, name: l.name, unit: l.unit, qty: l.qty })), session.id);
+        await saveReminderEmail(db, { basketId: basket.id, siteId: req.site.id, sessionId: session.id, email: newsChoice.email, expiresAt: newsChoice.email && session.expires_at ? new Date(session.expires_at * 1000) : null });
         return { kind: 'redirect', location: session.url };
     } catch (err) {
         console.error('[site-shop] basket checkout failed', { siteId: req.site.id, message: err instanceof Error ? err.message : String(err) });
@@ -475,6 +514,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         return { taken: null, failed: true };
     };
     let stockLine: string | null;
+    // Phase 2 "stock that talks": what this order took down to its low level or to 0 (once per crossing).
+    const stockAlerts: StockAlert[] = [];
     let orderLines: OrderLine[] | null = null;
     let linesFailed = false;
     // The delivery the buyer chose on Stripe (shop-delivery.ts): its name from the shipping rate, its cost.
@@ -493,6 +534,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         for (const l of lines) {
             const r = await takeOne(l.productId, l.optionId, l.qty);
             failed ||= r.failed;
+            const crossed = stockCrossing(r.taken, l.name);
+            if (crossed) stockAlerts.push(crossed);
             const note = stockAfterOrderLine(r.taken, l.qty);
             if (note) notes.push(`${l.name}: ${note}`);
         }
@@ -504,6 +547,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
         const optionId = Number(session.metadata?.bms_option);
         const r = await takeOne(Number(session.metadata?.bms_product), Number.isInteger(optionId) && optionId > 0 ? optionId : null, order.quantity);
         stockLine = r.failed ? STOCK_NOT_UPDATED_LINE : stockAfterOrderLine(r.taken, order.quantity);
+        const crossed = stockCrossing(r.taken, order.itemName);
+        if (crossed) stockAlerts.push(crossed);
     }
 
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
@@ -518,6 +563,20 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
             metadata: { assistantId: site.aiAssistantId, siteId: site.id, orderId: order.id },
         }).catch((err) => console.error('[site-shop] notification failed', err));
     }
+    await sendStockAlerts(db, { orgId: site.organisationId, ownerUserId: owner?.userId ?? null, orderId: order.id, alerts: stockAlerts });
+    // Phase 2: a buyer who ticked "Send me news" on the basket page joins the Audience, now that they've paid.
+    let audience: BuyerAudienceResult | null = null;
+    if (newsTicked(session.metadata as Record<string, string> | null)) {
+        audience = await addShopBuyerToAudience(db, { organisationId: site.organisationId, email: order.customerEmail, name: order.customerName, orderId: order.id, words: session.metadata?.[NEWS_WORDS_METADATA_KEY] ?? null, sourceUrl: order.pagePath })
+            .catch((err) => { console.error('[site-shop] buyer → Audience failed', { orderId: order.id, message: err instanceof Error ? err.message : String(err) }); return null; });
+    }
+    // Slice 4b: their first order starts the "first order" email flow (or, newly subscribed, the welcome flow).
+    if (audience) await enrolShopBuyer(db, { organisationId: site.organisationId, email: order.customerEmail, orderId: order.id, audience });
+    const audienceLine = buyerAudienceLine(audience);
+    // The buyer's confirmation goes first, so the owner's email can say when it couldn't (own address only).
+    const buyerSent = await sendBuyerConfirmation(db, order, site, total, orderLines, delivery)
+        .catch((err: unknown): BuyerConfirmation => { console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err); return 'failed'; });
+    const buyerLine = buyerConfirmationLine(buyerSent);
     if (owner?.email) {
         const addr = order.shippingAddress as { name?: string; address?: Record<string, string | null> } | null;
         const addrLines = addr?.address ? [addr.name, addr.address.line1, addr.address.line2, addr.address.city, addr.address.postal_code].filter(Boolean) : [];
@@ -532,10 +591,11 @@ ${order.customerEmail ? `<p><strong>Email:</strong> ${esc(order.customerEmail)}<
 ${addrLines.length ? `<p><strong>Deliver to:</strong><br>${addrLines.map((l) => esc(String(l))).join('<br>')}</p>` : ''}
 ${stockLine ? `<p><strong>Stock:</strong> ${esc(stockLine)}</p>` : ''}
 ${linesFailed ? `<p><strong>⚠️ ${esc(ORDER_LINES_NOT_SAVED_LINE)}</strong></p>` : ''}
+${audienceLine ? `<p>${esc(audienceLine)}</p>` : ''}
+${buyerLine ? `<p><strong>⚠️ ${esc(buyerLine)}</strong></p>` : ''}
 <p>The money goes to your Stripe account; refunds are made from your Stripe dashboard. It is also on your Orders page.</p>`,
         }).catch((err: unknown) => console.error('[site-shop] owner email failed', err instanceof Error ? err.message : err));
     }
-    await sendBuyerConfirmation(db, order, site, total, orderLines, delivery).catch((err: unknown) => console.error('[site-shop] buyer email failed', err instanceof Error ? err.message : err));
     return true;
 }
 
@@ -593,19 +653,68 @@ ${o.delivery ? `<p><strong>Delivery chosen:</strong> ${esc(deliveryLine(o.delive
     };
 }
 
-async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null, delivery: { name: string | null; amount: number | null } | null = null): Promise<void> {
-    if (!order.customerEmail) return;
+/** What happened to the buyer's "Order confirmed" email. */
+export type BuyerConfirmation = 'sent' | 'no_email' | 'not_ready' | 'no_route' | 'failed' | 'slow';
+
+/** The buyer's send may take this long before the owner's email goes anyway (review #914: the webhook must not be cut off
+ *  before the owner hears about the order). */
+export const BUYER_SEND_BUDGET_MS = 4000;
+
+/** The owner's new-order email line when the buyer wasn't sent their confirmation; null when it went (or there was
+ *  no address to send to). The confirmation goes only from the owner's own address (owner 2026-11-27). Pure. */
+export function buyerConfirmationLine(r: BuyerConfirmation): string | null {
+    switch (r) {
+        case 'no_route': return 'The buyer was NOT sent an order confirmation: confirmations go only from your own address, and none is set up. Please email them a confirmation yourself now (what they bought, the price, your business details and their 14 days to cancel). Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending so future buyers get it by themselves.';
+        case 'failed': return 'The buyer\'s order confirmation couldn\'t be sent from your email account. Please email them a confirmation yourself.';
+        case 'slow': return 'We couldn\'t confirm the buyer\'s order confirmation went: your email account was slow to answer. Check your sent mail, and if it isn\'t there, email them a confirmation yourself.';
+        default: return null;
+    }
+}
+
+/** The Shop tab's and the chat snapshot's warning: Buy buttons can show (Delivery & returns complete) but there is no
+ *  own address to send buyers' confirmations from. null = fine, not selling yet, or the check failed. */
+export async function buyerConfirmationsBlocked(db: Db, orgId: number, route: typeof resolveSendRoute = resolveSendRoute): Promise<string | null> {
+    try {
+        const shop = await loadShopSettings(db, orgId);
+        if (!shop || !shopReady(shop)) return null;
+        const r = await route(db, orgId, { recipientCount: 1, senderName: shop.traderName || 'Your shop' });
+        return 'error' in r ? 'Buyers won\'t get an order confirmation email: it goes only from your own address, and none is set up. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending.' : null;
+    } catch (err) {
+        console.error('[site-shop] confirmation route check failed', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/** "Order confirmed" to the buyer, ONLY from the owner's own verified sending domain or connected Gmail/Outlook
+ *  (resolveSendRoute) — never from a Be More Swan address. No route = not sent; the owner's email says so. */
+export async function sendBuyerConfirmation(db: Db, order: OrderRow, site: SiteRow, total: string, lines: OrderLine[] | null = null, delivery: { name: string | null; amount: number | null } | null = null,
+    deps: { resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep; budgetMs?: number } = {}): Promise<BuyerConfirmation> {
+    if (!order.customerEmail) return 'no_email';
     const shop = await loadShopSettings(db, site.organisationId);
-    if (!shop || !shopReady(shop)) return;   // never sell without these; an old open checkout is the only way here
+    if (!shop || !shopReady(shop)) return 'not_ready';   // never sell without these; an old open checkout is the only way here
+    const routed = await (deps.resolveRoute ?? resolveSendRoute)(db, site.organisationId, { recipientCount: 1, senderName: (shop.traderName || 'Your order').slice(0, 60) });
+    if ('error' in routed) return 'no_route';
     const termsUrl = site.slug ? `${(await import('./site-hosting')).siteOrigin(site.slug)}${SHOP_TERMS_PATH}` : null;
     const mail = buyerEmail({ order, shop, total, termsUrl, lines, delivery });
-    await sendEmail({
-        to: order.customerEmail,
-        from: `${(shop.traderName || 'Your order').replace(/[<>"\\\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
-        ...(shop.contactEmail ? { replyTo: shop.contactEmail } : {}),
-        subject: mail.subject, html: mail.html,
-    });
+    // "To cancel, reply to this email": replies go to the contact email shown on Delivery & returns (review #914).
+    const route = { ...routed.route, replyTo: shop.contactEmail || routed.route.replyTo || null };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        const send = (deps.deliver ?? deliverStep)(db, route, site.organisationId, { to: order.customerEmail.replace(/[\r\n,;]/g, ''), subject: mail.subject, html: mail.html, text: htmlToPlainText(mail.html), listUnsubscribe: null });
+        const slow = new Promise<'slow'>((res) => { timer = setTimeout(() => res('slow'), deps.budgetMs ?? BUYER_SEND_BUDGET_MS); });
+        if (await Promise.race([send.then(() => 'sent' as const), slow]) === 'slow') {
+            send.catch(() => undefined);
+            console.error('[site-shop] buyer confirmation slow — owner told to check', { orderId: order.id });
+            return 'slow';
+        }
+    } catch (err) {
+        console.error('[site-shop] buyer confirmation refused', err instanceof Error ? err.message : err);
+        return 'failed';
+    } finally {
+        clearTimeout(timer);
+    }
     await db.update(siteOrders).set({ buyerEmailedAt: new Date() }).where(eq(siteOrders.id, order.id));
+    return 'sent';
 }
 
 /**

@@ -156,7 +156,7 @@ check('arrival details go N days before, to confirmed stays, never to a guest wh
     assert.ok(fn.includes("eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt)"));
     assert.ok(fn.includes('${bookings.checkIn} - ${stayTypes.arrivalDetailsDays} <= ${today}::date') && fn.includes('${bookings.checkIn} >= ${today}::date'));
     assert.ok(fn.includes("NOT IN ('due', 'failed')"), 'held back while the balance is unpaid');
-    assert.ok(fn.indexOf('set({ reminderSentAt: now })') < fn.indexOf('sendEmail('), 'claimed before it is sent');
+    assert.ok(fn.indexOf('set({ reminderSentAt: now })') < fn.indexOf('sendBusinessEmail('), 'claimed before it is sent');
     assert.ok(!fn.includes('new Date(') || !/\$\{[a-z]+Date\}/.test(fn), 'dates bound as strings');
     // It runs last, so a balance charged in the same run releases the details in that run.
     assert.ok(src.indexOf("['arrivalSent', sendArrivalDetails]") > src.indexOf("['balancesAsked', collectDueBalances]"));

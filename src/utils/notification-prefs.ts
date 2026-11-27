@@ -340,6 +340,17 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         types: ['mentor_morning_summary'],
     },
     {
+        // The Email Assistant (src/utils/mailbox-notify.ts): "emails need you now" and the morning note.
+        // To the mailbox's owner only, counts only. Email OFF: no emails about your emails.
+        key: 'email_assistant',
+        label: 'Email Assistant',
+        description: 'When an email needs you now, and a short note each morning: what needs you, what was sorted and what is ready to clear.',
+        scope: 'account',
+        push: PUSH_OFF,
+        inApp: ON, email: OFF,
+        types: ['email_needs_you', 'email_morning_digest'],
+    },
+    {
         key: 'onboarding_reminders',
         label: 'Onboarding',
         description: 'Setup reminders and your welcome / setup-complete milestones.',

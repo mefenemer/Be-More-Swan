@@ -2965,6 +2965,81 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('product_stock', renderProductStockCard);
 
+  // { type: 'product_photo', assetId, pictureName } — a product from a photo the owner attached (online shop Phase 2,
+  // shop-product-photo.ts). "Write it from the photo" spends the task (shop.ts product_photo_draft, the Shop tab's
+  // same call); the owner checks the words and TYPES the price; "Add product" saves through Business Information's
+  // own save (org-products.ts POST). The AI never sets the price. Nothing is charged or saved until they click.
+  function renderProductPhotoCard(data) {
+    const d = data || {};
+    const assetId = Number(d.assetId);
+    const ok = Number.isInteger(assetId) && assetId > 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Product from a photo</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${escapeHtml(d.pictureName || 'Your photo')}</p>
+      <p class="text-xs text-gray-600 mt-1">I write the name and description from the picture; you check them and type the price.</p>
+      <div data-pp-form class="hidden mt-3 space-y-2">
+        <label class="block text-[11px] font-bold text-gray-600">Name<input type="text" maxlength="80" data-pp-name class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600">Description<textarea rows="3" maxlength="500" data-pp-desc class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"></textarea></label>
+        <label class="block text-[11px] font-bold text-gray-600">Price in pounds (you set this)<input type="text" inputmode="decimal" data-pp-price placeholder="e.g. 12.50" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" style="max-width:9rem"></label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pp-draft class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${ok ? '' : 'disabled'}>Write it from the photo</button>
+        <button type="button" data-pp-add class="hidden btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Add product</button>
+        <button type="button" data-pp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pp-status role="status"></p>`;
+    const status = el.querySelector('[data-pp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pp-cancel]')) { setBusy(true); say('Nothing saved or charged.'); return; }
+      if (e.target.closest('[data-pp-draft]')) {
+        setBusy(true);
+        say('Reading the photo…');
+        el.dispatchEvent(new CustomEvent('shop:productPhotoDraft', {
+          bubbles: true,
+          detail: {
+            assetId,
+            respond({ ok: done, error, draft, charged }) {
+              setBusy(false);
+              if (!done) { say(error || 'The photo couldn\'t be read — nothing was charged.', 'error'); return; }
+              el.querySelector('[data-pp-form]').classList.remove('hidden');
+              el.querySelector('[data-pp-name]').value = draft.name || '';
+              el.querySelector('[data-pp-desc]').value = draft.description || '';
+              el.querySelector('[data-pp-draft]').classList.add('hidden');
+              el.querySelector('[data-pp-add]').classList.remove('hidden');
+              say(`Check the words${charged ? ` (${charged} task${charged === 1 ? '' : 's'} used)` : ''}, type the price, then press Add product.`);
+              el.querySelector('[data-pp-price]').focus();
+            },
+          },
+        }));
+        return;
+      }
+      if (!e.target.closest('[data-pp-add]')) return;
+      const name = el.querySelector('[data-pp-name]').value.trim();
+      const description = el.querySelector('[data-pp-desc]').value.trim();
+      const price = el.querySelector('[data-pp-price]').value.trim().replace(/^£/, '');
+      if (!name) { say('Give it a name.', 'error'); return; }
+      if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0) { say('Type the price in pounds, e.g. 12.50.', 'error'); return; }
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('shop:productPhotoAdd', {
+        bubbles: true,
+        detail: {
+          product: { kind: 'product', name, description: description || null, priceType: 'fixed', priceAmount: Number(price), priceCurrency: 'GBP', imageAssetId: assetId },
+          respond({ ok: done, error }) {
+            if (!done) { setBusy(false); say(error || 'It couldn\'t be added — nothing was saved.', 'error'); return; }
+            say(`Added "${name}" to Business Information ▸ Products. Tell me how many you have and I'll set the stock.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('product_photo', renderProductPhotoCard);
+
   // { type: 'product_options', productId, productName, group, options: [{ id?, label, price?, stock? }] } —
   // a product's options (online shop Phase 1, shop-options.ts): shop.ts product_options, the Shop tab
   // Options editor's same save. It REPLACES the list (an empty list removes the options). Nothing is
@@ -7926,9 +8001,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     // "beta testers" campaign as the welcome sequence — Save then tried to overwrite the LIVE
     // waitlist welcome sequence, and the user had no way to say "no, this is for a form". The card
     // now asks (data-ncd-who), and everything below reads the current answer.
-    let event = trigger.event === 'subscribed' || trigger.event === 'form' ? trigger.event : 'custom';
+    // 'first_order' (online shop slice 4b): a shop buyer who ticked "Send me news" paying for their first order.
+    let event = trigger.event === 'subscribed' || trigger.event === 'form' || trigger.event === 'first_order' ? trigger.event : 'custom';
     const automatic = event !== 'custom';
     let isForm = event === 'form';
+    let isFirstOrder = event === 'first_order';
     const whoName = `ncd-who-${Math.random().toString(36).slice(2, 9)}`;
     const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Email sequence';
     const goal = typeof ui.goal === 'string' ? ui.goal.trim() : '';
@@ -7936,10 +8013,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabelFor = () => isForm ? 'Save as form email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
-    const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
+    const saveLabelFor = () => isForm ? 'Save as form email flow' : isFirstOrder ? 'Save as first-order email flow' : automatic ? 'Save as email flow' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : isFirstOrder ? 'Starts after a shop buyer’s first order' : 'Starts when someone subscribes';
     const statusFor = () => isForm
       ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+      : isFirstOrder
+        ? 'Saving creates this email flow under Email Flows in the Email Studio, switched off. Once on, it goes to shop buyers who tick “Send me news” at checkout, after their first order — nobody is emailed by saving.'
       : automatic
         ? 'Saving makes this a new email flow for everyone who subscribes, under Email Flows in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
         : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
@@ -7971,9 +8050,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <input type="radio" name="${whoName}" value="form" class="mt-1" ${isForm ? 'checked' : ''}>
           <span>Only people who fill in a particular sign-up form <span class="text-gray-500">— e.g. beta testers. You link the form afterwards.</span></span>
         </label>
-        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
-          <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer mb-1.5">
+          <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm || isFirstOrder ? '' : 'checked'}>
           <span>Everyone who joins your list <span class="text-gray-500">— saved as a new email flow; your current one is not touched.</span></span>
+        </label>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+          <input type="radio" name="${whoName}" value="first_order" class="mt-1" ${isFirstOrder ? 'checked' : ''}>
+          <span>Shop buyers, after their first order <span class="text-gray-500">— only those who tick “Send me news” at checkout.</span></span>
         </label>
       </fieldset>` : ''}
 
@@ -8049,6 +8132,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
                 say(deduped
                   ? 'Already saved — it is under Email Flows in the Email Studio.'
                   : `Saved as an email flow — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.`);
+              } else if (isFirstOrder) {
+                say(deduped
+                  ? 'Already saved — it is under Email Flows in the Email Studio.'
+                  : `Saved as a first-order email flow — ${stepCount || n} emails, switched off. Turn it on under Email Flows in the Email Studio when you are ready.`);
               } else if (automatic) {
                 say(deduped
                   ? 'Already saved — it is under Email Flows in the Email Studio.'
@@ -8072,8 +8159,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     el.addEventListener('change', (e) => {
       const pick = e.target.closest && e.target.closest(`input[name="${whoName}"]`);
       if (!pick) return;
-      event = pick.value === 'form' ? 'form' : 'subscribed';
+      event = pick.value === 'form' ? 'form' : pick.value === 'first_order' ? 'first_order' : 'subscribed';
       isForm = event === 'form';
+      isFirstOrder = event === 'first_order';
       const btn = el.querySelector('[data-ncd-save]');
       if (btn) btn.textContent = saveLabelFor();
       const starts = el.querySelector('[data-ncd-starts]');

@@ -16,6 +16,8 @@
   const ISSUES_API = '/.netlify/functions/newsletter-issues';
 
   const esc = (s) => window.escapeHtml ? window.escapeHtml(s) : String(s ?? '');
+  /** Who a flow goes to, lower case, for lists and pickers ('first_order': online shop slice 4b). */
+  const flowWho = (t) => t === 'subscribed' ? 'everyone who subscribes' : t === 'first_order' ? 'shop buyers after their first order' : 'people who fill in a linked form';
   const $ = (id) => document.getElementById(id);
 
   // `hidden` loses to any utility that sets display, so every toggle touches both.
@@ -278,7 +280,7 @@
               <p class="text-sm font-bold text-gray-900 truncate">${esc(x.name)}</p>
               <span class="shrink-0 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${x.isEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${x.isEnabled ? 'On' : 'Off'}</span>
             </div>
-            <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${x.triggerEvent === 'subscribed' ? 'everyone who subscribes' : 'people who fill in a linked form'}</p>
+            <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${flowWho(x.triggerEvent)}</p>
           </button></li>`).join('')
         : '<li class="px-4 py-4 text-xs text-gray-500">None yet. Use <span class="font-bold">New email flow</span> to create one.</li>';
     } catch { host.innerHTML = ''; }
@@ -2049,7 +2051,7 @@
     if (!host) return;
     if (seqState.sequences.length < 2) { host.innerHTML = ''; return; }
     const current = String(seqState.selectedId || (seqState.sequence && seqState.sequence.id) || '');
-    const opt = (x) => `<option value="${esc(x.id)}" ${current === String(x.id) ? 'selected' : ''}>${esc(`${x.name} — ${x.triggerEvent === 'subscribed' ? 'everyone who subscribes' : 'a linked sign-up form'} · ${x.isEnabled ? 'On' : 'Off'}`)}</option>`;
+    const opt = (x) => `<option value="${esc(x.id)}" ${current === String(x.id) ? 'selected' : ''}>${esc(`${x.name} — ${flowWho(x.triggerEvent)} · ${x.isEnabled ? 'On' : 'Off'}`)}</option>`;
     host.innerHTML = `
       <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-pick">Showing</label>
       <select id="nl-seq-pick" class="w-full sm:w-auto px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">
@@ -2177,7 +2179,9 @@
           <span class="block text-[11px] text-gray-500">${f.segmentName ? `Adds people to the segment <strong>${esc(f.segmentName)}</strong>` : 'Does not add people to a segment'}</span></span>
         <button type="button" data-seq-open-forms class="link text-xs font-semibold shrink-0">Edit form</button>
       </li>`;
-    const who = seq.triggerEvent === 'form'
+    const who = seq.triggerEvent === 'first_order'
+      ? '<p class="text-sm text-gray-700">Starts when someone pays for their <strong>first order</strong> in your online shop, having ticked “Send me news” at checkout. Buyers who don’t tick the box never receive it. It replaces the “everyone who subscribes” flow for them, so nobody gets two series at once.</p>'
+      : seq.triggerEvent === 'form'
       ? (forms.length
         ? `<p class="text-sm text-gray-700">Starts when someone fills in ${forms.length === 1 ? 'this sign-up form' : 'any of these sign-up forms'}:</p><ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>`
         : `<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">No sign-up form starts this flow yet, so nobody will receive it. Link one in <button type="button" data-seq-open-forms class="link font-semibold">Audience ▸ Sign-up forms</button> (the form's "Email flow" setting).</p>`)
@@ -2189,6 +2193,7 @@
           <select id="nl-seq-trigger" class="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-900 bg-white cursor-pointer">
             <option value="subscribed" ${seq.triggerEvent === 'subscribed' ? 'selected' : ''}>Everyone who subscribes</option>
             <option value="form" ${seq.triggerEvent === 'form' ? 'selected' : ''}>People who fill in a linked form</option>
+            <option value="first_order" ${seq.triggerEvent === 'first_order' ? 'selected' : ''}>Shop buyers, after their first order</option>
           </select></dd></div>
         <div><dt class="text-[11px] text-gray-500">Status</dt><dd class="font-semibold text-gray-900">${seq.isEnabled ? `On${since ? ` since ${esc(since)}` : ''}` : 'Off'}</dd></div>
         <div><dt class="text-[11px] text-gray-500">Emails</dt><dd class="font-semibold text-gray-900">${seqState.steps.length} · over ${seqState.steps.reduce((a, s) => a + Number(s.delayDays || 0), 0)} days</dd></div>
@@ -2287,7 +2292,7 @@
         </div>
         <p class="text-[11px] text-gray-400 mt-1">Only you see this.${isFormSeq ? ' Who receives these emails is set by the sign-up form you link it to.' : ''}</p>
       </div>
-      ${isFormSeq ? '' : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
+      ${isFormSeq || seq.triggerEvent === 'first_order' ? '' : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
         <p class="font-bold">This flow goes to everyone who subscribes.</p>
         <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a flow of its own. For one group only — such as beta testers — create a separate flow with <strong>New email flow → People who fill in a form</strong>, and link it to that group’s form. Only one flow for everyone can be on at a time — switching another on offers to swap them.</p>
       </div>`}
@@ -2537,6 +2542,8 @@
         turningOn
           ? (seq.triggerEvent === 'form'
             ? 'From now on, everyone who fills in a sign-up form linked to this flow (and confirms) will receive these emails automatically, without anyone reading them again first.'
+            : seq.triggerEvent === 'first_order'
+            ? 'From now on, every shop buyer who ticks “Send me news” at checkout will receive these emails automatically after their first order, without anyone reading them again first.'
             : 'From now on, everyone who confirms their subscription will receive these emails automatically, without anyone reading them again first.')
           : `Switch off "${seq.name}"? ${active.toLocaleString()} ${active === 1 ? 'person is' : 'people are'} part way through and will not receive the rest.`,
         {
@@ -2553,9 +2560,9 @@
         let r = await send(false);
         let res = await r.json().catch(() => ({}));
         // Only one "everyone who subscribes" campaign can be on — offer the swap (2026-10-06).
-        if (r.status === 409 && res.code === 'ANOTHER_EVERYONE_ON') {
+        if (r.status === 409 && (res.code === 'ANOTHER_EVERYONE_ON' || res.code === 'ANOTHER_FIRST_ORDER_ON')) {
           const swap = await window.confirmModal(
-            `"${res.otherName}" is on and already goes to everyone who subscribes. Only one such flow can be on at a time. Switch "${res.otherName}" off and this one on? People part way through "${res.otherName}" will not receive the rest of it.`,
+            `"${res.otherName}" is on and already goes to ${res.code === 'ANOTHER_FIRST_ORDER_ON' ? 'shop buyers after their first order' : 'everyone who subscribes'}. Only one such flow can be on at a time. Switch "${res.otherName}" off and this one on? People part way through "${res.otherName}" will not receive the rest of it.`,
             { title: 'Swap flows?', confirmLabel: 'Swap', cancelLabel: 'Keep as it is' });
           if (!swap) return;
           r = await send(true);
@@ -2572,7 +2579,7 @@
       const to = e.target.value;
       try {
         await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'setTrigger', trigger: to }) });
-        window.showToast(to === 'subscribed' ? 'This flow now goes to everyone who subscribes.' : 'This flow now goes to people who fill in a linked sign-up form.');
+        window.showToast(to === 'subscribed' ? 'This flow now goes to everyone who subscribes.' : to === 'first_order' ? 'This flow now goes to shop buyers who ask for news, after their first order.' : 'This flow now goes to people who fill in a linked sign-up form.');
         await openWelcomeModal();
       } catch (err) { window.showToast(err.message); e.target.value = seq.triggerEvent; }
     });
@@ -2859,6 +2866,8 @@
         'Starts by itself the moment someone joins your list. Saved as a new flow, switched off until you turn it on.', 'data-cmp-who="subscribed"')
       + tile(cmp.who === 'form', 'People who fill in a form',
         'Starts by itself when someone fills in a sign-up form you link it to — a guide download, a waitlist, a purchase registration. Switched off until you turn it on.', 'data-cmp-who="form"')
+      + tile(cmp.who === 'first_order', 'Shop buyers, after their first order',
+        'Starts by itself when someone pays for their first order in your online shop and ticks “Send me news” at checkout — a thank-you and welcome. Switched off until you turn it on.', 'data-cmp-who="first_order"')
       + tile(cmp.who === 'custom', 'A group I choose',
         'Does not start by itself — each email is saved as a draft, and you send it to the right people on its day.', 'data-cmp-who="custom"');
     const aud = $('nl-cmp-audience');
@@ -2910,7 +2919,7 @@
           name: $('nl-cmp-name').value,
           campaignType: cmp.type,
           goal: $('nl-cmp-goal').value,
-          audience: cmp.who === 'subscribed' ? 'Everyone who subscribes' : cmp.who === 'form' ? 'People who fill in a sign-up form' : $('nl-cmp-audience').value,
+          audience: cmp.who === 'subscribed' ? 'Everyone who subscribes' : cmp.who === 'form' ? 'People who fill in a sign-up form' : cmp.who === 'first_order' ? 'Shop buyers who asked for news, after their first order' : $('nl-cmp-audience').value,
           triggerEvent: cmp.who,
           facts: $('nl-cmp-facts').value,
           avoid: $('nl-cmp-avoid').value,
@@ -2933,7 +2942,9 @@
     const automatic = d.trigger && d.trigger.startsAutomatically;
     const isForm = d.trigger && d.trigger.event === 'form';
     const n = d.newsletters.length;
-    $('nl-cmp-review-note').textContent = isForm
+    $('nl-cmp-review-note').textContent = d.trigger && d.trigger.event === 'first_order'
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes a first-order email flow under Email Flows, switched off until you turn it on. Nobody is emailed by saving.`
+      : isForm
       ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email flow under Email Flows, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
       : automatic
       ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes a flow for everyone who subscribes, switched off until you turn it on under Email Flows. Nobody is emailed by saving.`
@@ -2984,7 +2995,9 @@
       hide($('nl-campaign-modal'));
       state.campaign = null;
       loadAutoList();
-      if (d.trigger.event === 'form') {
+      if (d.trigger.event === 'first_order') {
+        window.showToast(data.deduped ? 'Already saved — it is under Email Flows.' : 'Saved as a first-order email flow, switched off. Turn it on under Email Flows when you are ready.');
+      } else if (d.trigger.event === 'form') {
         window.showToast(data.deduped ? 'Already saved — it is under Email Flows.' : 'Saved as an email flow, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Flows.');
       } else if (automatic) {
         window.showToast(data.deduped ? 'Already saved — it is under Email Flows.' : 'Saved as an email flow for everyone who subscribes, switched off. Turn it on under Email Flows when you are ready.');

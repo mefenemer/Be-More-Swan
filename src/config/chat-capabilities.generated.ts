@@ -191,7 +191,9 @@ export const GENERATED_CHAT_MANIFEST = {
         },
         "shopkeeper": {
             "flags": [
-                "usesShopSnapshot"
+                "usesShopSnapshot",
+                "acceptsAttachments",
+                "pictureAttachments"
             ],
             "contentSnapshot": null,
             "offersOwnCards": true,
@@ -200,6 +202,7 @@ export const GENERATED_CHAT_MANIFEST = {
                 "delivery_rates",
                 "order_update",
                 "product_options",
+                "product_photo",
                 "product_stock",
                 "shop_settings"
             ],
@@ -318,6 +321,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "usesSiteSnapshot",
         "acceptsAttachments",
         "transcriptAttachments",
+        "pictureAttachments",
         "contentSnapshot",
         "usesAudienceSnapshot",
         "usesMeetingsSnapshot",
@@ -454,6 +458,7 @@ export const GENERATED_CHAT_MANIFEST = {
         "post_picture",
         "post_text_edit",
         "product_options",
+        "product_photo",
         "product_stock",
         "qr_code",
         "redraft_upcoming_proposal",

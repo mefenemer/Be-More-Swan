@@ -42,7 +42,7 @@ export interface CampaignPlanInput {
     goal: string;
     audience: string;
     /** 'subscribed' → the welcome sequence; anything else → draft emails the user sends. */
-    triggerEvent: 'subscribed' | 'form' | 'custom';
+    triggerEvent: 'subscribed' | 'form' | 'first_order' | 'custom';
     /** Links and facts the person supplied. The ONLY source a URL may come from. */
     facts: string;
     avoid: string;
@@ -76,7 +76,7 @@ export async function draftCampaignEmails(db: Db, input: CampaignPlanInput): Pro
         `THE CAMPAIGN — "${input.name}" (${kind.label}).
 Goal — what the reader has done when it worked: ${input.goal || '(not stated — infer it from the plan)'}
 Who is in it: ${input.audience || org?.targetAudience || 'their subscribers'}
-${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' : input.triggerEvent === 'form' ? 'They enter the moment they fill in a sign-up form (and confirm their email).' : 'The business sends each email to this group by hand on its day.'}
+${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' : input.triggerEvent === 'form' ? 'They enter the moment they fill in a sign-up form (and confirm their email).' : input.triggerEvent === 'first_order' ? 'They enter the moment they pay for their FIRST order in this business\'s online shop, having ticked "Send me news" at checkout. They have just bought: thank them, never ask them to buy that same thing again, and never mention the price they paid or promise delivery dates.' : 'The business sends each email to this group by hand on its day.'}
 The whole plan (you write ONE of these; the others are written separately, in the same voice):
 ${plan}`,
         input.facts

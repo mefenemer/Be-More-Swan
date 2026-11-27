@@ -9,7 +9,7 @@
 import { desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { siteOrders } from '../../db/schema';
-import { connectAccountFor } from './site-shop';
+import { buyerConfirmationsBlocked, connectAccountFor } from './site-shop';
 import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText } from './shop-settings';
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
@@ -17,6 +17,10 @@ import { loadProductOptions, optionsWords, type ProductOptions } from './shop-op
 import { deliveryWords, hasDelivery, loadDelivery, type DeliverySetup } from './shop-delivery';
 import { shopPageSnapshotLines, shopPageState, type ShopPageState } from './shop-page';
 import { loadOrderPosting, ordersPostingOn, orderStateWords, type OrderPosting } from './shop-orders';
+import { loadShopSales, salesSnapshotLines, type ShopSales } from './shop-sales';
+import { loadReminderStats, reminderStatsWords } from './shop-checkout-reminder';
+import { waitingCounts } from './shop-waitlist';
+import { orderReviewRequestsBlocked } from './review-requests';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,6 +42,16 @@ export interface ShopSnapshotInput {
     postingOn?: boolean;
     /** The shop page for a business with no website (shop-page.ts). */
     shopPage?: ShopPageState | null;
+    /** Totals over every order, best sellers and every order waiting to be posted (shop-sales.ts, Phase 2). */
+    sales?: ShopSales | null;
+    /** This week's abandoned-checkout reminders, in words (shop-checkout-reminder.ts, Phase 2 slice 5); null = none. */
+    reminders?: string | null;
+    /** People waiting to hear a product is back, by product id (shop-waitlist.ts, Phase 2 slice 6). */
+    waiting?: Record<number, number>;
+    /** Review requests after orders are on but have no route to send from (review-requests.ts, slice 7); null = fine/off. */
+    reviewBlocked?: string | null;
+    /** Selling, but no own address for buyers' order confirmations (site-shop.ts); null = fine/not selling. */
+    confirmBlocked?: string | null;
 }
 
 /** Pure: the DELIVERY line (what buyers choose from at checkout). */
@@ -61,7 +75,7 @@ export function stockSnapshotLines(stock: ShopSnapshotInput['stock'], options: S
     for (const it of shown) {
         const po = options?.[it.id];
         out.push(po?.options.length
-            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option; product_stock does not apply): ${optionsWords(po, it.pence ?? null, it.currency)}`
+            ? `- productId ${it.id}: ${it.name} (${it.price}) — OPTIONS (stock is per option, set with product_options; product_stock only sets lowStockAt here, which warns for EACH option${it.lowStockAt != null ? `, now ${it.lowStockAt}` : ', none set'}): ${optionsWords(po, it.pence ?? null, it.currency)}`
             : `- productId ${it.id}: ${it.name} (${it.price}) — ${stockWords(it)}; no options`);
     }
     return out;
@@ -116,6 +130,12 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
     lines.push(...stockSnapshotLines(input.stock, input.options));
     lines.push(...deliverySnapshotLines(input.delivery));
     lines.push(...shopPageSnapshotLines(input.shopPage));
+    const waitingRows = Object.entries(input.waiting || {}).filter(([, n]) => n > 0)
+        .map(([id, n]) => ({ name: input.stock?.items.find((i) => i.id === Number(id))?.name || `product #${id}`, n }));
+    lines.push('', `WAITING LISTS ("Tell me when it's back" on a sold-out product's page; one service email each, never added to the Audience): ${waitingRows.length ? waitingRows.map((w) => `${w.name} — ${w.n} waiting`).join('; ') : 'nobody waiting'}. When a stock save makes a waiting product buyable again, you (the Shopkeeper) ask in Team Chat whether to email them; the owner sends with "Email them" there or on the Shop tab's Stock card. You can't send them from this chat — say where the button is.`);
+    lines.push('', `ORDER CONFIRMATIONS: each buyer is emailed "Order confirmed" (their legal receipt) only from the business's verified sending domain or connected Gmail/Outlook, never a Be More Swan address; with neither, it isn't sent and the owner's new-order email asks them to send one themselves.${input.confirmBlocked ? ` RIGHT NOW: ${input.confirmBlocked}` : ''}`);
+    lines.push('', `REVIEW REQUESTS AFTER ORDERS (Audience ▸ Reviews switches them on): sent only from the business's verified sending domain or connected Gmail/Outlook, never a Be More Swan address.${input.reviewBlocked ? ` RIGHT NOW: ${input.reviewBlocked}` : ''}`);
+    lines.push('', `ABANDONED-CHECKOUT REMINDERS: automatic, no setting. A basket buyer who ticks "Send me news" types their email on the basket page; if their checkout lapses unpaid (after 1 hour) they get ONE reminder with a link back to their basket, sent from the business's verified sending domain or connected Gmail/Outlook only (no route = not sent). Never to anyone who didn't tick. Fixed wording, no tasks spent. This week: ${input.reminders || 'none sent'}`);
     if (!input.orders.length) {
         lines.push('', 'ORDERS: none yet.');
     } else {
@@ -126,6 +146,7 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
             lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}`);
         }
         if (input.postingOn === false) lines.push('- Marking orders as posted isn\'t switched on yet: don\'t offer the order_update card with status "posted".');
+        lines.push(...salesSnapshotLines(input.sales));
     }
     return lines.join('\n');
 }
@@ -144,5 +165,10 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
     const delivery = await loadDelivery(db, orgId);
     const [posting, postingOn] = await Promise.all([loadOrderPosting(db, orgId, orders.map((o) => o.id)), ordersPostingOn(db)]);
     const shopPage = assistantId ? await shopPageState(db, orgId, assistantId).catch(() => null) : null;
-    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage });
+    const sales = orders.length ? await loadShopSales(db, orgId).catch((err) => { console.error('[shop-snapshot] sales read failed', err instanceof Error ? err.message : err); return null; }) : null;
+    const reminders = reminderStatsWords(await loadReminderStats(db, orgId));
+    const waiting = await waitingCounts(db, orgId);
+    const reviewBlocked = await orderReviewRequestsBlocked(db, orgId);
+    const confirmBlocked = await buyerConfirmationsBlocked(db, orgId);
+    return shopSnapshotText({ connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, shop, orders, stock, options, delivery, posting, postingOn, shopPage, sales, reminders, waiting, reviewBlocked, confirmBlocked });
 }

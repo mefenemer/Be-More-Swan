@@ -54,6 +54,8 @@
  *                //   'posts'   → scheduled_posts lifecycle (social/blog), rendered by _detailRq*.
  *                //   'records' → assistant_records awaiting approval (approval_status), recordType
  *                //               matches hubTab.recordType.
+ *                //   'mailbox' (with source: 'mailbox') → the Email Assistant's owner-only list of
+ *                //               drafted replies + clean-ups (assistant-mailbox.js renderReview); no columns.
  *   cfg.hubTab   // → the Data Hub tab config (ALWAYS present — every assistant has a workspace).
  *                //   kind: 'records' (default) → assistant_records table (Leads/Ledger/Tickets/…);
  *                //   kind: 'content_library'   → the social/blog post library, with source:
@@ -1399,11 +1401,13 @@
       },
       primaryAction: { label: 'What needs me today?', kind: 'chat' },
       tabChat: { tabs: ['datahub'], placeholder: 'Ask about your email — "what needs me today?", "anything from Jo?"' },
-      // Phase 2 fills this with drafted replies and clean-up batches waiting for approval.
+      // Drafted replies and clean-up batches waiting for the mailbox OWNER (mailbox_actions, read via
+      // mailboxes.ts — never assistant_records). One list, no lifecycle columns: assistant-mailbox.js
+      // renderReview draws it, and each item opens the Emails tab, where it is sent or applied.
       reviewQueue: {
-        kind: 'records',
-        recordType: 'email_action',
-        subtitle: 'Your drafted replies and clean-ups are on the Emails tab, under Drafts and Clean-up — open an email and press "Draft a reply". Nothing is sent or moved until you press the button for it.',
+        kind: 'mailbox',
+        source: 'mailbox',
+        subtitle: 'Replies the assistant drafted and emails it suggests clearing, waiting for your OK. Only you see them. Nothing is sent or moved until you press the button for it on the Emails tab.',
       },
       hubTab: {
         id: 'datahub',

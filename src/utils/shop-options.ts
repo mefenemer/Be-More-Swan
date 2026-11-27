@@ -186,8 +186,24 @@ export async function saveProductOptions(db: Db, orgId: number, productId: numbe
     return { ok: true, value: saved ?? { group, options: [] } };
 }
 
-/** A paid order for an option: take `qty` from ITS stock, stopping at 0. Null when not tracked. */
-export async function takeOptionStock(db: Db, orgId: number, optionId: number, qty: number): Promise<{ before: number; after: number; lowStockAt: null; oversold: boolean } | null> {
+/** The low-stock level of the option's product; null when unset or unreadable. */
+async function productLowStockAt(db: Db, orgId: number, optionId: number): Promise<number | null> {
+    try {
+        const [r] = asRows<{ low: unknown }>(await db.execute(sql`
+            SELECT p.low_stock_at AS low FROM product_options o JOIN org_products p ON p.id = o.product_id AND p.organisation_id = ${orgId}
+             WHERE o.id = ${optionId} AND o.organisation_id = ${orgId}`));
+        return numOrNull(r?.low);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * A paid order for an option: take `qty` from ITS stock, stopping at 0. Null when not tracked. Its low-stock level
+ * is the product's ("warn me at 3" means each option — Phase 2, shop-stock-alerts.ts), read after the update so a
+ * database without that column still takes the stock.
+ */
+export async function takeOptionStock(db: Db, orgId: number, optionId: number, qty: number): Promise<{ before: number; after: number; lowStockAt: number | null; oversold: boolean } | null> {
     if (!Number.isInteger(optionId) || optionId <= 0 || !(qty > 0)) return null;
     try {
         const [r] = asRows<{ before: unknown; after: unknown }>(await db.execute(sql`
@@ -197,7 +213,8 @@ export async function takeOptionStock(db: Db, orgId: number, optionId: number, q
          RETURNING old.stock AS before, o.stock AS after`));
         if (!r) return null;
         const before = Number(r.before);
-        return { before, after: Number(r.after), lowStockAt: null, oversold: before < qty };
+        const lowStockAt = await productLowStockAt(db, orgId, optionId);
+        return { before, after: Number(r.after), lowStockAt, oversold: before < qty };
     } catch (err) {
         if (isMissingOptionsTable(err)) return null;
         throw err;

@@ -296,15 +296,13 @@
     </div>
     <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-56 overflow-y-auto text-sm text-gray-700 leading-relaxed">
       <div id="dpa-whats-new" class="hidden mb-3 pb-3 border-b border-gray-200">
-        <p class="font-bold mb-2">What changed in version 1.1 (12 October 2026)</p>
+        <p class="font-bold mb-2">What changed in version 1.2 (27 November 2026)</p>
         <ul class="list-disc list-inside space-y-1">
-          <li>Written for UK GDPR and the Data Protection Act 2018.</li>
-          <li>Our sub-processors are listed in one place, the Trust page, and we email you 14 days before adding one — you can object.</li>
-          <li>New annexes set out what data we process for you and how we keep it secure.</li>
-          <li>A clause on transfers outside the UK and the safeguards we use.</li>
-          <li>We tell you about a personal data breach without undue delay and within 48 hours.</li>
-          <li>You can export your workspace data yourself from My Account.</li>
+          <li><strong>Note Taker meetings (optional):</strong> accepting authorises two new sub-processors, <strong>Recall.ai</strong> (meeting bot) and <strong>AssemblyAI</strong> (turns the audio into text), for the Note Taker only. Recordings for UK and EU workspaces stay in the EU and are deleted once the minutes are written. They receive nothing unless someone in your workspace sends the Note Taker to a meeting.</li>
+          <li><strong>Email Assistant (optional):</strong> we may read and sort emails in mailboxes you connect, which can contain sensitive information you didn't choose to send. Clause 13 sets out how we limit that.</li>
+          <li>Annex 1 and Annex 2 describe both features.</li>
         </ul>
+        <p class="mt-2">If you don't accept yet, nothing else changes: your assistants keep working under the version you accepted before, and only the Note Taker's meeting feature stays off.</p>
       </div>
       <p class="font-bold mb-2">In short</p>
       <p class="mb-2">Your organisation (the controller) authorises Be More Swan (the processor) to process personal data on your behalf, only to provide the platform and only on your instructions.</p>
@@ -313,7 +311,7 @@
     <div id="dpa-accept-area">
       <label class="flex items-start gap-3 mb-6 cursor-pointer">
         <input type="checkbox" id="dpa-agree-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
-        <span class="text-sm text-gray-700">I have read and agree to the <a href="/dpa.html" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> (v1.1) on behalf of my organisation.</span>
+        <span class="text-sm text-gray-700">I have read and agree to the <a href="/dpa.html" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> (v1.2) on behalf of my organisation, including the sub-processors named in clause 5.</span>
       </label>
       <button id="btn-dpa-accept" onclick="submitDpaAcceptance(this)"
         class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -527,17 +525,17 @@ async function submitDpaAcceptance(btn) {
       </div>
     </div>
     <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-48 overflow-y-auto text-sm text-gray-700 leading-relaxed">
-      <p class="font-bold mb-2">What changed in Terms v2.4 (from 19 December 2026)</p>
+      <p class="font-bold mb-2">What changed in Terms v2.5 (27 November 2026)</p>
       <ul class="list-disc list-inside space-y-1">
-        <li>An AI presenter, a made-up person who speaks your video's script to camera, counts as 2 tasks for each second they are on screen (clause 5.2). A 15-second appearance is 30 tasks. Until 19 December it uses no tasks.</li>
-        <li>It's optional. Videos without a presenter cost the same as before, and your assistants always show what a video will use before you make it.</li>
-        <li>Nothing else changes. Version 2.3's change still applies: an AI video clip counts as 4 tasks for each second of video from 3 December 2026.</li>
+        <li>The Note Taker can join your Google Meet and Microsoft Teams calls and take the notes itself. From 1 January 2027 it counts as 1 task for each started 5 minutes it is in the call with you (clause 5.2): a 1-hour meeting is 12 tasks. Until then it uses no tasks.</li>
+        <li>New clause 9.3: when you send it to a meeting, you must tell the people in it that it is recording, and get any consent the law requires. In some places, including several US states, everyone must agree.</li>
+        <li>Nothing else changes. The AI presenter (2 tasks a second from 19 December 2026) and AI video (4 tasks a second from 3 December 2026) changes still apply.</li>
       </ul>
       <p class="mt-3">Full terms available at <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/terms</a>.</p>
     </div>
     <label class="flex items-start gap-3 mb-6 cursor-pointer">
       <input type="checkbox" id="tos-agree-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
-      <span class="text-sm text-gray-700">I have read and agree to the updated <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline font-medium">Terms of Service</a> (v2.4).</span>
+      <span class="text-sm text-gray-700">I have read and agree to the updated <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline font-medium">Terms of Service</a> (v2.5).</span>
     </label>
     <button id="btn-tos-accept" onclick="submitTosAcceptance(this)"
       class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"

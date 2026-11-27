@@ -10,8 +10,9 @@
 //
 // Posting emails the buyer "on its way" FROM THE OWNER'S OWN Gmail or Outlook (owner, 2026-11-17: Be More
 // Swan never sends a customer's email from its own domain). With neither connected the order is still marked
-// posted and the owner is told the buyer wasn't emailed. The order confirmation is different: it is the legal
-// receipt (CCR 2013) and stays as it is (site-shop.ts sendBuyerConfirmation).
+// posted and the owner is told the buyer wasn't emailed. The order confirmation (the CCR 2013 receipt) also goes only
+// from the owner's own address since 2026-11-27 (site-shop.ts sendBuyerConfirmation; owner's new-order email warns
+// when it couldn't).
 //
 // Set from the Shopkeeper's Shop tab and its chat card `order_update` (shop.ts order_update / order_done).
 //

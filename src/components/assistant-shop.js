@@ -24,7 +24,7 @@
 (function () {
   'use strict';
   const API = '/.netlify/functions/shop';
-  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
+  const state = { assistantId: null, assistantName: '', data: null, shopOpen: false, shopSaved: null, shopError: null, paymentsError: null, paymentsNotice: null, stockSaved: null, stockError: null, optOpen: null, photo: null, deliverySaved: null, deliveryError: null, shown: 20, refreshed: false, bound: false };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('datahub-table-host');
@@ -150,6 +150,16 @@
   }
 
   /** Stock: one row per product that can be bought online (a fixed price in Business Information). */
+  // "Tell me when it's back" (Phase 2 slice 6): how many are waiting, and — once it can be bought again — the button
+  // that emails them from the owner's own domain or mailbox (shop.ts waitlist_send; Team Chat asks the same).
+  function waitingLine(it, po, n, canEdit) {
+    if (!n) return '';
+    const soldOut = po && po.options && po.options.length ? po.options.every((o) => o.stock != null && o.stock <= 0) : it.state === 'sold_out';
+    const who = `${n} ${n === 1 ? 'person is' : 'people are'} waiting to hear it's back`;
+    if (soldOut) return `<p class="text-xs text-gray-600 mt-2" data-waiting="${esc(it.id)}">${esc(who)}. When you add stock, ${esc(state.assistantName || 'your Shopkeeper')} asks you in Team Chat whether to email them.</p>`;
+    return `<div class="flex flex-wrap items-center gap-3 mt-2" data-waiting="${esc(it.id)}"><p class="text-xs font-semibold text-emerald-800">${esc(who)}.</p>${canEdit ? btn(`data-waitlist-send="${esc(it.id)}"`, `Email them (${esc(n)})`, true) : ''}</div>`;
+  }
+
   function stockCard(d) {
     const st = d.stock || { ready: false, items: [] };
     const head = '<p class="text-sm font-black text-gray-900">Stock</p>';
@@ -157,7 +167,7 @@
     if (!st.items.length) return card(`${head}<p class="text-xs text-gray-500 mt-1">No products can be bought online yet. Give a product a fixed price in <strong>Business Information ▸ Products &amp; Services</strong> and it appears here.</p>`);
     const num = (attr, value, label) => `<label class="block text-[11px] font-bold text-gray-600">${esc(label)}<input type="number" min="0" max="100000" step="1" inputmode="numeric" ${attr} value="${value == null ? '' : esc(value)}" class="${inputCls} mt-1" style="max-width:7rem"></label>`;
     return card(`${head}
-      <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid.</p>
+      <p class="text-xs text-gray-500 mt-1">How many of each you have. Leave it empty to not track it (always buyable). At 0 your website shows <strong>Sold out</strong>, and buyers can never pick more than you have. Stock goes down by itself when an order is paid. When an order takes something down to your warning level, or sells the last one, you get a notification and ${esc(state.assistantName || 'your Shopkeeper')} tells you in Team Chat.</p>
       <ul class="space-y-2 mt-3">${st.items.map((it) => {
         const [label, cls] = STOCK_PILL[it.state] || STOCK_PILL.untracked;
         const po = (d.options || {})[it.id];
@@ -166,16 +176,46 @@
             <p class="text-xs font-bold text-gray-900">${esc(it.name)} <span class="font-normal text-gray-500">· ${esc(it.price)}</span></p>
             ${po ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">Stock per option</span>' : `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}" data-stock-state="${esc(it.state)}">${esc(it.state === 'low' ? `Low: ${it.stock} left` : label)}</span>`}
           </div>
-          ${po ? '' : `<div class="flex flex-wrap items-end gap-3 mt-2">
+          ${po ? `<div class="flex flex-wrap items-end gap-3 mt-2" data-stock-low-options>
+            ${num('data-stock-low', it.lowStockAt, 'Warn me when any option gets to')}
+            ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
+          </div>` : `<div class="flex flex-wrap items-end gap-3 mt-2">
             ${num('data-stock-count', it.stock, 'In stock')}
             ${num('data-stock-low', it.lowStockAt, 'Warn me at')}
             ${btn(`data-stock-save="${esc(it.id)}"`, 'Save')}
           </div>`}
+          ${waitingLine(it, po, (d.waiting || {})[it.id] || 0, d.canEdit)}
           ${optionsEditor(it, po)}
         </li>`;
       }).join('')}</ul>
       ${state.stockSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.stockSaved)}</p>` : ''}
       ${state.stockError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.stockError)}</p>` : ''}`);
+  }
+
+  // Product from a photo (Phase 2 slice 3): pick a photo → the Shopkeeper drafts its name and description (never a
+  // price) → the owner types the price → "Add product" saves it through Business Information's own save
+  // (org-products.ts POST), the same as "Add" on the Products tab. state.photo = { asset, busy, draft, error, done }.
+  const taskWord = (n) => (n > 0 ? `${n} task${n === 1 ? '' : 's'}` : 'free');
+  function photoProductCard(d) {
+    const p = state.photo;
+    const head = '<p class="text-sm font-black text-gray-900">Add a product from a photo</p>';
+    const intro = `<p class="text-xs text-gray-500 mt-1">Choose a photo of one product. ${esc(state.assistantName || 'Your Shopkeeper')} writes its name and description from the picture (${esc(taskWord(Number(d.photoTaskCost) || 0))}, nothing if no product can be seen); you type the price and check the words before it's added. It never sets a price.</p>`;
+    if (!p) return card(`${head}${intro}<div class="mt-3">${btn('data-photo-pick', 'Choose a photo', true)}</div>`);
+    const pic = p.asset && p.asset.url ? `<img src="${esc(p.asset.url)}" alt="" class="rounded-lg border border-gray-200 object-cover" style="width:96px;height:96px">` : '';
+    const msg = p.error ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(p.error)}</p>`
+      : p.done ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(p.done)}</p>` : '';
+    if (!p.draft) {
+      return card(`${head}${intro}<div class="flex flex-wrap items-center gap-3 mt-3">${pic}
+        ${btn('data-photo-draft', p.busy ? 'Reading the photo…' : `Write it from the photo (${esc(taskWord(Number(d.photoTaskCost) || 0))})`, true).replace('<button', p.busy ? '<button disabled' : '<button')}
+        ${p.busy ? '' : `${btn('data-photo-pick', 'Choose another')}${btn('data-photo-cancel', 'Cancel')}`}</div>${msg}`);
+    }
+    return card(`${head}<div class="flex flex-wrap gap-3 mt-3">${pic}<div class="flex-1" style="min-width:14rem">
+        <label class="block text-[11px] font-bold text-gray-600">Name<input type="text" maxlength="80" data-photo-name value="${esc(p.draft.name)}" class="${inputCls} mt-1"></label>
+        <label class="block text-[11px] font-bold text-gray-600 mt-2">Description<textarea rows="3" maxlength="500" data-photo-desc class="${inputCls} mt-1">${esc(p.draft.description)}</textarea></label>
+        <label class="block text-[11px] font-bold text-gray-600 mt-2">Price in pounds (you set this)<input type="text" inputmode="decimal" data-photo-price placeholder="e.g. 12.50" class="${inputCls} mt-1" style="max-width:9rem"></label>
+      </div></div>
+      <p class="text-xs text-gray-500 mt-2">Check the words: they come from the picture only. It's added to Business Information ▸ Products with this photo, and can then be bought online.</p>
+      <div class="flex flex-wrap gap-2 mt-3">${btn('data-photo-add', p.busy ? 'Adding…' : 'Add product', true).replace('<button', p.busy ? '<button disabled' : '<button')}${p.busy ? '' : btn('data-photo-cancel', 'Cancel')}</div>${msg}`);
   }
 
   const poundsOf = (p) => (p == null ? '' : (p / 100).toFixed(2).replace(/\.00$/, ''));
@@ -256,6 +296,10 @@
     const shown = list.slice(0, state.shown);
     return card(`<div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-black text-gray-900">Orders${d.stats && d.stats.newOrders ? ` <span class="text-xs font-bold text-emerald-800">· ${esc(d.stats.newOrders)} new</span>` : ''}</p>
       ${d.canEdit ? btn('data-shop-csv', 'Download CSV') : ''}</div>
+      ${d.sales ? `<p class="text-xs text-gray-600 mt-1" data-shop-sales>This month: <span class="font-bold text-gray-900">${esc(d.sales.thisMonth)}</span> · Last month: ${esc(d.sales.lastMonth)}</p>` : ''}
+      ${d.reminders ? `<p class="text-xs text-gray-600 mt-1" data-shop-reminders>${esc(d.reminders)}</p>` : ''}
+      ${d.confirmBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-shop-confirm-blocked>${esc(d.confirmBlocked)}</p>` : ''}
+      ${d.reviewBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-shop-review-blocked>${esc(d.reviewBlocked)}</p>` : ''}
       ${state.ordersSaved ? `<p class="text-xs font-semibold text-green-700 mt-2" role="status">${esc(state.ordersSaved)}</p>` : ''}
       ${state.ordersError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.ordersError)}</p>` : ''}
       <ul class="space-y-2 mt-3">${shown.map((o) => {
@@ -288,7 +332,7 @@
     const h = host();
     if (!h || !state.data) return;
     if (bar()) bar().innerHTML = '';
-    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
+    h.innerHTML = `<div class="max-w-3xl">${checklist(state.data)}${paymentsCard(state.data)}${shopSettingsCard(state.data)}${deliveryCard(state.data)}${stockCard(state.data)}${photoProductCard(state.data)}${shopPageCard(state.data)}${ordersCard(state.data)}</div>`;
   }
 
   async function load() {
@@ -324,6 +368,60 @@
     if (!t('#datahub-table-host')) return;
     if (t('[data-shop-details] > summary')) { state.shopOpen = !t('[data-shop-details]').open; return; }
     if (t('[data-shop-more]')) { state.shown += 20; render(); return; }
+    if (t('[data-photo-pick]')) {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { state.photo = { error: 'Photos can\'t be chosen on this page — refresh and try again.' }; render(); return; }
+      window.MediaPicker.open({
+        title: 'Choose a photo of the product', assistantName: state.assistantName,
+        onPick: (asset) => { state.photo = { asset }; render(); },
+      });
+      return;
+    }
+    if (t('[data-photo-cancel]')) { state.photo = null; render(); return; }
+    if (t('[data-photo-draft]') && state.photo && state.photo.asset && !state.photo.busy) {
+      // review #899: the photo is kept here, and a reply for a photo no longer on the card is thrown away.
+      const asset = state.photo.asset;
+      const pending = { asset, busy: true };
+      state.photo = pending;
+      render();
+      let next;
+      try {
+        const r = await post({ action: 'product_photo_draft', assetId: asset.id });
+        next = { asset, draft: r.draft };
+      } catch (err) { next = { asset, error: err.message }; }
+      if (state.photo !== pending) return;
+      state.photo = next;
+      render();
+      return;
+    }
+    const photoAdd = t('[data-photo-add]');
+    if (photoAdd && state.photo && state.photo.draft) {
+      const root = photoAdd.closest('.rounded-2xl');
+      const name = root.querySelector('[data-photo-name]').value.trim();
+      const description = root.querySelector('[data-photo-desc]').value.trim();
+      const price = root.querySelector('[data-photo-price]').value.trim().replace(/^£/, '');
+      const keep = { asset: state.photo.asset, draft: { name, description } };
+      if (!name) { state.photo = { ...keep, error: 'Give it a name.' }; render(); return; }
+      if (!/^\d+(\.\d{1,2})?$/.test(price) || Number(price) <= 0) { state.photo = { ...keep, error: 'Type the price in pounds, e.g. 12.50.' }; render(); return; }
+      if (state.photo.busy) return;
+      state.photo = { ...keep, busy: true };
+      render();
+      let added = false;
+      try {
+        const r = await fetch('/.netlify/functions/org-products', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'product', name, description: description || null, priceType: 'fixed', priceAmount: Number(price), priceCurrency: 'GBP', imageAssetId: state.photo.asset.id }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'It couldn\'t be added. Please try again.');
+        // review #899: added — the form never comes back, even if refreshing the tab fails, so it can't be added twice.
+        added = true;
+        state.photo = null;
+        state.stockSaved = `Added "${name}". Set how many you have in Stock above.`;
+        await load().catch(() => { state.stockSaved = `Added "${name}". Refresh the page to see it in Stock.`; });
+      } catch (err) { if (!added) state.photo = { ...keep, error: err.message }; }
+      render();
+      return;
+    }
     const save = t('[data-shop-save]');
     if (save) {
       const root = save.closest('.rounded-2xl') || document;
@@ -379,6 +477,16 @@
       render();
       return;
     }
+    const waitSend = t('[data-waitlist-send]');
+    if (waitSend) {
+      state.stockSaved = null; state.stockError = null; waitSend.disabled = true;
+      try {
+        state.data = await post({ action: 'waitlist_send', productId: Number(waitSend.dataset.waitlistSend) });
+        state.stockSaved = (state.data.warnings || [])[0] || 'Sent.';
+      } catch (err) { state.stockError = err.message; }
+      render();
+      return;
+    }
     const stockSave = t('[data-stock-save]');
     if (stockSave) {
       const row = stockSave.closest('[data-stock-row]');
@@ -386,7 +494,9 @@
       try {
         state.data = await post({
           action: 'product_stock', productId: Number(stockSave.dataset.stockSave),
-          stock: row.querySelector('[data-stock-count]').value, lowStockAt: row.querySelector('[data-stock-low]').value,
+          // A product with options has only the warning box (it applies to each option); its stock is per option.
+          ...(row.querySelector('[data-stock-count]') ? { stock: row.querySelector('[data-stock-count]').value } : {}),
+          lowStockAt: row.querySelector('[data-stock-low]').value,
         });
         state.stockSaved = (state.data.warnings || [])[0] || 'Saved.';
       } catch (err) { state.stockError = err.message; }
@@ -483,5 +593,5 @@
     await refresh();
   }
 
-  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, ordersCard, shopPageCard } };
+  window.AssistantShop = { init, refresh, _test: { steps, esc, money, stockCard, waitingLine, ordersCard, shopPageCard } };
 })();

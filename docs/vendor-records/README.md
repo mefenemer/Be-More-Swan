@@ -8,5 +8,6 @@ Dated copies of our sub-processors' data protection documents, kept as evidence 
 |---|---|---|---|
 | `recall-dpa-2026-11-20.pdf` | Recall.ai (Hyperdoc Inc.) EU and UK Data Processing Addendum, with the UK Addendum. Self-executing: it applies through Recall's terms accepted at sign-up; nothing to sign | recall.ai/data-processing-agreement (Word copy, exported to PDF) | 2026-11-20 |
 | `recall-subprocessors-2026-11-20.pdf` / `.txt` | Recall.ai sub-processor list (18) | recall.ai/privacy/subprocessors → security.recall.ai/subprocessors | 2026-11-20 |
+| `recall-support-reply-2026-11-26.md` | Recall support's written answers: no model training, breach notice "without undue delay" (no fixed hours), speaker labels from platform names (no voice ID) | Email from Recall support | 2026-11-26 |
 
 Recall: change notices come from its trust-centre subscription (subscribed 2026-11-20; without it the DPA waives notice). Notice period 10 days; objections within 10 days.

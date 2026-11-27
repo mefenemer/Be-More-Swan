@@ -268,6 +268,26 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
             v('morning.headline', 'One line: the summary’s main points', '2 sales (£85) · 3 bookings today · 1 new enquiry'),
         ],
     },
+    // The Email Assistant (src/utils/mailbox-notify.ts). To the MAILBOX OWNER only, counts and their own
+    // address only — never a sender, subject or summary.
+    {
+        templateKey: 'email_needs_you',
+        name: 'Email Assistant: emails need you now',
+        category: 'Assistants',
+        type: 'email_needs_you',
+        title: '{{emails.now}}',
+        message: 'In {{mailbox.address}}. Open your Emails tab to see them.',
+        variables: [v('emails.now', 'How many need you now', '2 emails need you now'), v('mailbox.address', 'Mailbox address', 'hello@example.com')],
+    },
+    {
+        templateKey: 'email_morning_digest',
+        name: 'Email Assistant: your email this morning',
+        category: 'Assistants',
+        type: 'email_morning_digest',
+        title: 'Your email this morning',
+        message: '{{digest.line}}',
+        variables: [v('digest.line', 'The morning line', '3 emails need you (1 now) · 12 sorted yesterday · 5 ready to clear'), v('mailbox.address', 'Mailbox address', 'hello@example.com')],
+    },
     {
         // The Business Mentor drafted a strategy document (src/utils/mentor-jobs.ts). Nothing is saved
         // until the user chooses "Use this draft".
@@ -427,6 +447,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
             ASSISTANT_NAME,
             v('order.item', 'What they bought', 'House Blend, 1kg'),
             v('order.total', 'Amount paid', '£24'),
+        ],
+    },
+    {
+        // A paid order took a product (or option) down to its low-stock level or to 0 (shop-stock-alerts.ts,
+        // online shop Phase 2). Title and message are written from the counts; the Shopkeeper also says it in Team Chat.
+        templateKey: 'shop_stock_alert',
+        name: 'Low stock or sold out',
+        category: 'Assistants',
+        type: 'shop_stock_alert',
+        title: '{{stock.title}}',
+        message: '{{stock.message}}',
+        variables: [
+            v('stock.title', 'What ran low', 'Low stock: 3 left of Lavender candle'),
+            v('stock.message', 'What to do', "3 left of Lavender candle — that's the low-stock level you set. Set a new count on the Shop tab when more arrive."),
         ],
     },
     {

@@ -18,6 +18,7 @@ import { settingsFromRow, BOOKING_DEFAULTS, cleanWeeklyHours } from './booking-s
 import { addDays, formatDate, formatTime, utcToZoned } from './booking-time';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
+import { bookingEmailLine, sendBusinessEmail, type BusinessEmailResult } from './business-email';
 import { esc, type SiteRenderBooking, type SiteRenderBusiness } from './site-render';
 import { manageBookingUrl } from './booking-links';
 import { depositNote, holdsTime, holdUntil, refundDeposit } from './booking-deposits';
@@ -205,7 +206,7 @@ export async function customerCancel(db: Db, orgId: number, id: number): Promise
 }
 
 /** The owner hears about a customer's cancel or move: a card, and an email with the details. */
-export async function announceCustomerChange(db: Db, change: 'cancelled' | 'moved', b: BookingRow, ctx: BookingNoticeContext, before?: BookingRow): Promise<void> {
+export async function announceCustomerChange(db: Db, change: 'cancelled' | 'moved', b: BookingRow, ctx: BookingNoticeContext, before?: BookingRow, customerLine: string | null = null): Promise<void> {
     await calendarSoon(db, b.organisationId);
     const { when, what } = describeBooking(b, ctx.timezone);
     const was = before ? describeBooking(before, ctx.timezone).when : null;
@@ -223,7 +224,7 @@ export async function announceCustomerChange(db: Db, change: 'cancelled' | 'move
         await sendEmail({
             to: owner.email, replyTo: b.customerEmail,
             subject: change === 'cancelled' ? `Booking cancelled: ${what}, ${when}` : `Booking moved: ${what}, now ${when}`,
-            html: `<p><strong>${esc(b.customerName)}</strong> ${change === 'cancelled' ? `cancelled their booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>` : `moved their booking for <strong>${esc(what)}</strong>${was ? ` from ${esc(was)}` : ''} to <strong>${esc(when)}</strong>`}.</p><p>${esc(next)}</p>`,
+            html: `<p><strong>${esc(b.customerName)}</strong> ${change === 'cancelled' ? `cancelled their booking for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>` : `moved their booking for <strong>${esc(what)}</strong>${was ? ` from ${esc(was)}` : ''} to <strong>${esc(when)}</strong>`}.</p><p>${esc(next)}</p>${customerLine ? `<p><strong>⚠️ ${esc(customerLine)}</strong></p>` : ''}`,
         }).catch((err: unknown) => console.error('[bookings] change email failed', err instanceof Error ? err.message : err));
     }
 }
@@ -273,8 +274,6 @@ export function bookingIcs(b: BookingRow, business: string, uidDomain = 'bemores
     ].join('\r\n');
 }
 
-/** "Willowbrook Coffee (via Be More Swan)" — the business named, the address ours (email.ts). */
-export const fromLine = (business: string) => `${business.replace(/[<>"\\\r\n]/g, '').slice(0, 60) || 'Your booking'} (via Be More Swan) <noreply@bemoreswan.com>`;
 
 export async function ownerOf(db: Db, assistantId: number | null): Promise<{ userId: number; name: string; email: string | null } | null> {
     if (!assistantId) return null;
@@ -304,12 +303,17 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
     const { when, what } = describeBooking(b, ctx.timezone);
     const owner = await ownerOf(db, ctx.assistantId);
     const pending = b.status === 'pending';
+    // The owner's card first: it must never wait on (or be lost to) a slow mailbox send (review #917).
     if (owner) {
         await createNotification(db, 'site_booking_received', {
             userId: owner.userId, assistantId: ctx.assistantId ?? undefined, category: pending ? 'suggested_action' : 'state_change',
             context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, next: pending ? 'Confirm or decline it on the Bookings tab.' : 'It is confirmed — it is on the Bookings tab.' } },
             metadata: { assistantId: ctx.assistantId, bookingId: b.id },
         }).catch((err) => console.error('[bookings] notification failed', err));
+    }
+    // Then the customer's email (own address only, capped at 4 s), so the owner's email can say when it couldn't go.
+    const customerLine = bookingEmailLine(await emailCustomer(db, b, pending ? 'received' : 'confirmed', ctx, owner?.email ?? null), pending ? 'request receipt' : 'confirmation');
+    if (owner) {
         if (owner.email) {
             await sendEmail({
                 to: owner.email, replyTo: b.customerEmail,
@@ -318,16 +322,18 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
 <p>Email: ${esc(b.customerEmail)}${b.customerPhone ? `<br>Phone: ${esc(b.customerPhone)}` : ''}</p>
 ${ownerMeetingLine(b) ? `<p>${esc(ownerMeetingLine(b))}</p>` : ''}
 ${b.notes ? `<p style="white-space:pre-wrap">${esc(b.notes)}</p>` : ''}
+${customerLine ? `<p><strong>⚠️ ${esc(customerLine)}</strong></p>` : ''}
 <p>${pending ? 'Confirm or decline it on your Website Assistant\'s Bookings tab — the time is held until you do.' : 'It is confirmed and on your Bookings tab.'} Reply to this email to write to them.</p>`,
             }).catch((err: unknown) => console.error('[bookings] owner email failed', err instanceof Error ? err.message : err));
         }
     }
-    await emailCustomer(b, pending ? 'received' : 'confirmed', ctx, owner?.email ?? null);
 }
 
 export type CustomerNotice = 'received' | 'confirmed' | 'declined' | 'cancelled' | 'cancelled_by_you' | 'reminder';
 
-export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: BookingNoticeContext, ownerEmail: string | null): Promise<void> {
+/** The customer's email about their booking, ONLY from the owner's own address (business-email.ts; owner 2026-11-27).
+ *  Returns whether it went, so the caller can tell the owner. Never throws. */
+export async function emailCustomer(db: Db, b: BookingRow, notice: CustomerNotice, ctx: BookingNoticeContext, ownerEmail: string | null): Promise<BusinessEmailResult> {
     const { when, what } = describeBooking(b, ctx.timezone);
     const lines: Record<CustomerNotice, { subject: string; body: string }> = {
         received: { subject: `We've got your booking request — ${ctx.business}`, body: `<p>Thanks, ${esc(b.customerName)}. ${esc(ctx.business)} has your request for <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>.</p><p>It isn't confirmed yet — you'll get another email when it is.</p>` },
@@ -350,15 +356,17 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
         : b.paymentStatus === 'refunded' ? `<p>Your ${esc(money.replace(' refunded', ''))} has been refunded — it usually reaches your card within 5–10 days.</p>`
         : b.paymentStatus === 'paid' && (notice === 'received' || notice === 'confirmed' || notice === 'reminder') ? `<p>${esc(money)} — thank you.</p>`
         : b.paymentStatus === 'refund_failed' ? `<p>${esc(ctx.business)} will refund your deposit.</p>` : '';
-    await sendEmail({
-        to: b.customerEmail, from: fromLine(ctx.business), ...(ownerEmail ? { replyTo: ownerEmail } : {}),
+    const r = await sendBusinessEmail(db, b.organisationId, {
+        business: ctx.business, to: b.customerEmail, replyTo: ownerEmail,
         subject, html: `${body}${meeting}${depositLine}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
         ...(notice === 'confirmed' ? { attachments: [{ filename: 'booking.ics', content: Buffer.from(bookingIcs(b, ctx.business)).toString('base64'), contentType: 'text/calendar' }] } : {}),
-    }).catch((err: unknown) => console.error('[bookings] customer email failed', err instanceof Error ? err.message : err));
+    });
+    if (r !== 'sent') console.error('[bookings] customer email not sent', { bookingId: b.id, notice, result: r });
+    return r;
 }
 
 /** The owner confirms, declines or cancels. Only from a state where that makes sense. */
-export async function decideBooking(db: Db, orgId: number, id: number, action: 'confirm' | 'decline' | 'cancel', ctx: BookingNoticeContext): Promise<{ ok: true; booking: BookingRow } | { ok: false; error: string }> {
+export async function decideBooking(db: Db, orgId: number, id: number, action: 'confirm' | 'decline' | 'cancel', ctx: BookingNoticeContext): Promise<{ ok: true; booking: BookingRow; emailLine: string | null } | { ok: false; error: string }> {
     const from: Record<typeof action, string[]> = { confirm: ['pending'], decline: ['pending'], cancel: ['pending', 'confirmed'] };
     const to = { confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' }[action];
     let [row] = await db.update(bookings).set({ status: to, decidedAt: new Date(), ...(action === 'cancel' ? { cancelledBy: 'owner' } : {}) })
@@ -371,9 +379,10 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
     // A stay may also have taken its balance and a damage deposit: all of it goes back, and nothing more is asked for.
     if (action !== 'confirm' && row.kind === 'stay') await (await import('./stay-charges')).refundStayRest(db, row);
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];
-    await emailCustomer(row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
+    const emailed = await emailCustomer(db, row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
+    const emailLine = bookingEmailLine(emailed, ({ confirm: 'confirmation', decline: 'decline email', cancel: 'cancellation' } as const)[action]);
     await calendarSoon(db, orgId);
-    return { ok: true, booking: row };
+    return { ok: true, booking: row, emailLine };
 }
 
 /** Upcoming and recent bookings for the owner (newest decisions needed first, then by time). */

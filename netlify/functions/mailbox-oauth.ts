@@ -221,6 +221,9 @@ export default withLambda(async (event) => {
             await storeMailboxToken(db, existing.vaultRefKey, token);
             await db.update(mailboxes).set({
                 status: 'active', lastError: null, scopes: got.scope, displayName: got.displayName, updatedAt: new Date(),
+                // A lapsed grant may have ended the push: the next poll run starts it again (mailbox-push.ts).
+                // watch_id stays, so an Outlook subscription that still exists is renewed, not duplicated.
+                watchExpiresAt: null,
             }).where(eq(mailboxes.id, existing.id));
             mailboxId = existing.id;
         } else {

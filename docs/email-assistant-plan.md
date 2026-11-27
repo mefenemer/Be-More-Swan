@@ -658,9 +658,27 @@ page only — no real mailbox has been connected yet). As built:
   - Checked on the fixture page: all five cards render via the registry; reply card drafts and blocks Send
     on a gap; clean-up card reads the live batch; rule card saves; tab shows Labels/Rules/Unsubscribe.
     **Not checked against a real mailbox.**
-- **Still open after 2b:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per
-  email, which needs real email from people in a connected mailbox; a Review-tab listing (approvals live on
-  the Emails tab); notifications ("3 emails need you") in the bell/Inbox and the morning summary section.
+- **Notifications ✅ BUILT 2026-11-26** (`src/utils/mailbox-notify.ts`), to the mailbox's OWNER only, counts and
+  their own address only:
+  - `email_needs_you` (Needs you): newly sorted mail includes something Now. One open per mailbox; cleared when
+    the owner opens the Emails tab.
+  - `email_morning_digest` (an update): once a day, 07:00–11:59 in the workspace's time zone, from the
+    10-minute poll — "3 emails need you (1 now) · 12 sorted yesterday · 5 ready to clear"; nothing sent when
+    all are 0; latched in `mailboxes.settings.lastDigestDay` before sending.
+  - **Changed from §2.3:** not a section in the Business Mentor's morning summary. That summary is per
+    workspace and goes to every owner and admin; email is one person's, and the Mentor never reads
+    mailboxes. The Email Assistant sends its own note in the same window instead.
+  - New preference category "Email Assistant" (in-app on, email off, push off). Both types added to
+    notification-actions.ts, the preferences and `db/notifications-categorization.sql` (⚠️ re-run that file on
+    BOTH DBs; until then the call site passes the category, so nothing breaks).
+- **Still open:** task charging (`email_reply_draft`, sorting rate) — needs the real AI cost per email, which
+  needs real email from people in a connected mailbox.
+- **Review tab ✅ BUILT 2026-11-26:** the Review tab lists the owner's drafted replies (with any `[check: …]`
+  gaps counted) and clean-up batches across their mailboxes, with a count on the tab. Each item opens the Emails
+  tab on that mailbox's Drafts or Clean-up, where it is sent or applied — one confirm and one code path per
+  action. Registry `reviewQueue: { kind: 'mailbox', source: 'mailbox' }`; no lifecycle columns; never
+  assistant_records. Looking at Review does not clear "needs you now" (no `seen=1`). A teammate or an
+  impersonating admin sees "Only the mailbox's owner…" and the browser never asks for drafts.
 
 **Phase 3: Gmail** — split in two (2026-11-13):
 - **3a ✅ BUILT 2026-11-13** (branch `claude/email-assistant-phase1`): Gmail connect on the separate mail
@@ -671,9 +689,32 @@ page only — no real mailbox has been connected yet). As built:
   rotation), Google revoke on disconnect, "Connect Gmail" shown only where the mail client is set.
   Polling every 10 min, same as Outlook. Tests: tests/mailbox-email-assistant.test.ts (40 checks).
   Checked against the fixture page only — no real Gmail connected yet (needs the Google project, §6.2).
-- **3b, next:** Gmail push (`users.watch` + Pub/Sub; Google Cloud sub-processor notice 14 days before
-  it reaches customers), Graph change notifications for Outlook, daily renewals; polling stays as the
-  safety net.
+- **3b ✅ BUILT 2026-11-26** (branch `claude/email-assistant-push`): push for both providers, off on a
+  site until its settings are there.
+  - Gmail: `users.watch` on INBOX → Pub/Sub topic → push subscription (OIDC) → `mail-push-gmail.ts`.
+    The token must be Google-signed, audience `GMAIL_PUSH_AUDIENCE`, email `GMAIL_PUSH_SERVICE_ACCOUNT`
+    (⚠️ the email check matters: any Google Cloud account can mint a token for any audience). Always
+    200 with a body.
+  - Outlook: Graph subscription on the Inbox, `changeType: created` (new mail only; moves and reads are
+    caught by the poll), 6 days, `mail-push-graph.ts` as notification + lifecycle URL, clientState =
+    HMAC(`GRAPH_NOTIFY_SECRET`, mailbox id). Validation handshake echoed as text/plain.
+  - `mailbox-push.ts` `ensureWatches()` runs in every poll: starts a missing watch, renews one ending
+    within a day. Disconnect stops the watch first. `db/z-mailbox-push.sql` adds `watch_expires_at`,
+    `watch_id`, `last_push_at` (⚠️ both DBs before deploy).
+  - A push wakes the reader unless that mailbox is mid-run; a push that lands mid-run causes one more
+    run afterwards. A mailbox is polled every 30 minutes instead of 10 only once push is proven (a push
+    in the last day); a set-up that never delivers keeps the 10-minute poll. A watch that fails to start,
+    or a workspace without the flag, is tried again after 6 hours. Disconnect never calls Gmail's
+    `users.stop` (it would end push for every connection of that Google account).
+  - Tidied 2026-11-26 (second review of #906): the poll run dispatches reads in parallel, then watches
+    until 16 s after the run began (leftovers logged as `deferred`, first next run), then prune and
+    digests; no new batch of reads starts after 10 s (the rest stay due for the next run); a failed
+    watch also clears `last_push_at` (back on the 10-minute poll at once); a push for a workspace without
+    the flag wakes no function.
+  - Known, left: Gmail's watch also fires on our own label writes, so a labelling run is followed by one
+    cheap extra run.
+  - Tests: tests/mailbox-push.test.ts (25 checks). Not yet tried against real Google / Microsoft.
+  - Before Gmail push reaches customers: Google Cloud sub-processor notice, 14 days.
 - Then: record the demo video for both uses (Email Assistant + Part B), submit the restricted-scope
   review, do CASA.
 
@@ -737,8 +778,11 @@ The owner chose the name, then said "go with your recommendations on D2–D12".
       (`CURRENT_DPA_VERSION`) + subprocessor list updated (Google Cloud, 14 days' notice before Gmail push reaches customers);
       in-app terms prompt; DPIA signed off. Drafts in `docs/email-assistant-phase0.md`.
 - [ ] Env vars on both sites: `GMAIL_MAIL_CLIENT_ID`, `GMAIL_MAIL_CLIENT_SECRET`,
-      `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUSH_AUDIENCE`, `GRAPH_NOTIFY_SECRET` (per-mailbox `clientState`
-      derived from it). Outlook client ids already set.
+      `GMAIL_PUBSUB_TOPIC` (`projects/<mail project>/topics/<topic>`), `GMAIL_PUSH_AUDIENCE` (the push
+      URL, `<site>/.netlify/functions/mail-push-gmail`), `GMAIL_PUSH_SERVICE_ACCOUNT` (the account the push
+      subscription signs as), `GRAPH_NOTIFY_SECRET` (per-mailbox `clientState` derived from it).
+      Outlook client ids already set.
+- [ ] `db/z-mailbox-push.sql` applied to BOTH DBs before the push code deploys.
 - [ ] `db/z-mailboxes.sql` (and the task-cost rows) applied to **both** DBs before deploy; help
       article SQL on both DBs at release.
 - [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.

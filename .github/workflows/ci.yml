@@ -341,3 +341,41 @@ jobs:
       # raw SQL on db/z-platform-incidents.sql's columns and its partial unique index.
       - name: CI test failure ticket
         run: npx tsx tests/ci-test-incident-db.test.ts
+      # "Ask your shop" (src/utils/shop-sales.ts, online shop Phase 2): UK-month totals of UTC timestamps,
+      # after refunds and per currency, and best sellers from basket lines + Buy orders — only Postgres proves them.
+      - name: Shop sales totals
+        run: npx tsx tests/shop-sales-db.test.ts
+      # "Stock that talks" (src/utils/shop-stock-alerts.ts, online shop Phase 2): stock taken per order returns
+      # before/after/level (an option's = its product's), so alerts fire once into low and once at sold out.
+      - name: Shop stock alerts
+        run: npx tsx tests/shop-stock-alerts-db.test.ts
+      # Shop buyers who tick "Send me news" (src/utils/shop-buyer-audience.ts, online shop Phase 2): consent always
+      # recorded when they end up subscribed (pending → single opt-in), refusals never lifted — proven on Postgres.
+      - name: Shop buyers to Audience
+        run: npx tsx tests/shop-buyer-audience-db.test.ts
+      # Website enquirers who tick "Send me news" or whom the owner adds (src/utils/enquiry-audience.ts): consent always
+      # recorded when they end up subscribed (pending → single opt-in / manual entry), refusals never lifted — on Postgres.
+      - name: Website enquirers to Audience
+        run: npx tsx tests/enquiry-audience-db.test.ts
+      - name: Shop first-order email flows
+        run: npx tsx tests/shop-first-order-flow-db.test.ts
+      # The abandoned-checkout reminder (src/utils/shop-checkout-reminder.ts, online shop Phase 2): ticked checkouts only,
+      # the basket's latest checkout, never twice, never to a refused address, no route = not sent — on Postgres.
+      - name: Shop abandoned-checkout reminder
+        run: npx tsx tests/shop-checkout-reminder-db.test.ts
+      # "Tell me when it's back" (src/utils/shop-waitlist.ts, online shop Phase 2): one waiting row per person per product,
+      # the Team Chat question once, sends claimed with refusals skipped, batches and the sweep — on Postgres.
+      - name: Shop back-in-stock waiting lists
+        run: npx tsx tests/shop-waitlist-db.test.ts
+      # Review requests after shop orders (src/utils/review-requests.ts, online shop Phase 2): only from the owner's own
+      # address; without one the order stays unclaimed and goes later, never using up the batch — on Postgres.
+      - name: Shop review requests from the owner's address
+        run: npx tsx tests/shop-review-requests-db.test.ts
+      # The Business Mentor watches the shop (src/utils/shop-mentor.ts, online shop Phase 2): best seller, stock and
+      # "not sold in 60 days" (old enough, buyable, the shop selling, never another workspace's orders) — on Postgres.
+      - name: Shop facts for the Business Mentor
+        run: npx tsx tests/shop-mentor-db.test.ts
+      # Bring your Shopify shop across (src/utils/site-import-store.ts, online shop Phase 2): descriptions and variants as
+      # options (own prices, unavailable sold out) land in Business Information; existing products untouched — on Postgres.
+      - name: Shop Shopify import with options
+        run: npx tsx tests/shop-shopify-options-db.test.ts

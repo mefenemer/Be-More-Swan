@@ -105,7 +105,7 @@ const role = reg.slice(reg.indexOf('    meeting_note_taker: {'), reg.indexOf('  
 assert.ok(role.includes("primaryAction: { label: 'New meeting', kind: 'meetingForm' }"));
 assert.ok(role.includes("newAction: { label: 'New meeting', kind: 'meetingForm' }"));
 const app = read('assistants.js');
-assert.ok(app.includes("toggleBtn('detail-rq-primary-btn', !rqIsRecords || !!rqNew);"));
+assert.ok(app.includes("toggleBtn('detail-rq-primary-btn', !rqIsMailbox && (!rqIsRecords || !!rqNew));"));
 assert.ok(app.includes("if (pa.kind === 'meetingForm') {") && app.includes('window.MeetingMinutesForm.open({'));
 assert.ok(read('workspace.html').includes('<script src="/src/components/meeting-minutes-form.js"></script>'));
 const form = read('src/components/meeting-minutes-form.js');

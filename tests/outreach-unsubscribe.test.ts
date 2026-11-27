@@ -216,7 +216,8 @@ check('both transports strip CR/LF from the header value', () => {
     // caller forge arbitrary MIME headers on the tenant's own mailbox.
     for (const p of ['src/utils/gmail.ts', 'src/utils/outlook.ts']) {
         const src = read(p);
-        const from = landmark(src, 'listUnsubscribe');
+        // gmail.ts builds the message in gmailMime, after its GmailMessage type: start at the value itself.
+        const from = landmark(src, p.endsWith('gmail.ts') ? 'const listUnsubscribe' : 'listUnsubscribe');
         assert.match(src.slice(from, from + 600), /replace\(\/\[\\r\\n\]\+\/g/, `${p} must strip CR/LF`);
     }
 });

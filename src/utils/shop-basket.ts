@@ -37,6 +37,8 @@ export const BASKET_LINE_MAX_QTY = 10;
 export const BASKET_FRESH_HOURS = 24;
 export const BASKET_KEEP_DAYS = 7;
 export const BASKET_PATH = '/basket';
+/** A sold-out product page's "Tell me when it's back" form posts this as _a (shop-waitlist.ts). */
+export const WAITLIST_ACTION = 'notify';
 
 export interface BasketItem { productId: number; optionId: number | null; sectionId: string; qty: number }
 
@@ -296,14 +298,24 @@ export async function loadOrderLines(db: Db, orgId: number, orderIds: number[]):
     }
 }
 
-/** The daily sweep: baskets untouched for a week go. */
+/** A reminded basket (shop-checkout-reminder.ts) is kept this long, so the reminder's unsubscribe link keeps working. */
+export const REMINDED_BASKET_KEEP_DAYS = 60;
+
+/** The daily sweep: baskets untouched for a week go; a reminded one stays 60 days from its reminder. */
 export async function sweepBaskets(db: Db): Promise<number> {
     try {
         const rows = asRows<{ id: string }>(await db.execute(sql`
-            DELETE FROM site_baskets WHERE updated_at < now() - make_interval(days => ${BASKET_KEEP_DAYS}) RETURNING id`));
+            DELETE FROM site_baskets WHERE updated_at < now() - make_interval(days => ${BASKET_KEEP_DAYS})
+               AND (reminded_at IS NULL OR reminded_at < now() - make_interval(days => ${REMINDED_BASKET_KEEP_DAYS})) RETURNING id`));
         return rows.length;
     } catch (err) {
         if (isMissingBasketTable(err)) return 0;
+        // Before db/z-shop-checkout-reminder.sql there is no reminded_at: the week-old rule alone.
+        if ((err as { code?: string; cause?: { code?: string } })?.code === '42703' || (err as { cause?: { code?: string } })?.cause?.code === '42703') {
+            const rows = asRows<{ id: string }>(await db.execute(sql`
+                DELETE FROM site_baskets WHERE updated_at < now() - make_interval(days => ${BASKET_KEEP_DAYS}) RETURNING id`));
+            return rows.length;
+        }
         throw err;
     }
 }

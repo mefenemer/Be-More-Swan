@@ -37,6 +37,7 @@ import { listingIcs, listingRoute, listingSlugs, loadListingBySlug, loadSiteList
 import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing-post';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
+import { waitlistReady } from '../../src/utils/shop-waitlist';
 import { canSell, loadSiteProducts, startCheckout, type SiteProduct } from '../../src/utils/site-shop';
 import type { SiteDefinition } from '../../src/utils/site-definition';
 import type { RenderContext } from '../../src/utils/site-render';
@@ -125,6 +126,8 @@ const BOOKING_ONLY_PATHS = new Set(['/', BOOKING_PAGE_PATH, BOOK_PATH, FORM_SENT
 export async function productPageResponse(req: {
     path: string; query: string; method: string; definition: SiteDefinition; ctx: RenderContext;
     loadProducts: () => Promise<Record<number, SiteProduct>>; canSell: () => Promise<boolean>;
+    /** Whether "Tell me when it's back" can be offered (the waiting-list table exists; shop-waitlist.ts). */
+    waitlistOn?: () => Promise<boolean>;
     /** A page carrying a buyer's basket is theirs: never shared-cached. */
     cache?: string;
 }): Promise<{ statusCode: number; headers: Record<string, string>; body: string } | null> {
@@ -134,7 +137,7 @@ export async function productPageResponse(req: {
     if (!product) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(req.definition, '/__none', req.ctx).html };
     const canonical = productPagePath(product);
     if (canonical !== req.path.replace(/\/$/, '')) return { statusCode: 301, headers: { Location: `${canonical}${req.query ? `?${req.query}` : ''}`, 'Cache-Control': 'public, max-age=300' }, body: '' };
-    const html = renderSiteProduct(req.definition, { ...req.ctx, canSell: await req.canSell(), products: { [product.id]: product } }, product);
+    const html = renderSiteProduct(req.definition, { ...req.ctx, canSell: await req.canSell(), products: { [product.id]: product }, waitlist: req.ctx.basket?.on ? await (req.waitlistOn?.() ?? false) : false }, product);
     if (!html) return null;
     return { statusCode: 200, headers: headers('text/html; charset=utf-8', req.cache ?? 'public, max-age=60'), body: req.method === 'HEAD' ? '' : html };
 }
@@ -379,7 +382,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     const productPage = await productPageResponse({
         path, query: String(event.queryStringParameters?.q || ''), method: event.httpMethod, definition, ctx: pageCtx,
         loadProducts: () => loadSiteProducts(db, site.organisationId, definition),
-        canSell: () => canSell(db, site.organisationId), cache: pageCache,
+        canSell: () => canSell(db, site.organisationId), waitlistOn: () => waitlistReady(db), cache: pageCache,
     });
     if (productPage) return productPage;
 

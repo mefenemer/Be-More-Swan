@@ -1,7 +1,7 @@
 // src/utils/mailbox-sync.ts — read a mailbox's new email and sort it (docs/email-assistant-plan.md §4).
 //
-// Woken by mailbox-sync-background.ts: right after a mailbox connects, and every 10 minutes by
-// poll-mailboxes.ts. One run:
+// Woken by mailbox-sync-background.ts: right after a mailbox connects, by a push when new mail arrives
+// (mailbox-push.ts), and by poll-mailboxes.ts (every 10 minutes, or 30 when push is on). One run:
 //   1. takes the mailbox's lease (sync_lock_until) — ONE reader at a time per mailbox, across instances;
 //   2. reads the inbox's changes from the saved cursor (Graph delta / Gmail history), stores headers, marks removals;
 //   3. sorts what is still pending: private senders, the user's sender rules, headers, then AI;
@@ -16,6 +16,7 @@ import { resolveBaseUrl } from './base-url';
 import { isFeatureEnabled } from './feature-flags';
 import { EMAIL_ASSISTANT_FLAG, MailboxError, getMailboxAccessToken, labelsOn, parseMailboxSettings, type MailboxRow } from './mailboxes';
 import { writerFor } from './mail-writer';
+import { notifyNowEmails } from './mailbox-notify';
 import { senderMatches, categoryLabel } from './email-sort';
 import { mailboxActions } from '../../db/schema';
 import { cursorExpired, providerHttpError, readerFor } from './mail-reader';
@@ -81,6 +82,9 @@ async function takeLease(db: Db, mailboxId: number): Promise<MailboxRow | null> 
     return rows[0] ?? null;
 }
 
+/** A "now" email older than this when it is sorted doesn't raise the "needs you now" notification. */
+export const NOW_NOTIFY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 export interface SyncOutcome { ran: boolean; read: number; sorted: number; aiSorted: number; labelled: number; ruleArchived: number; error?: string }
 
 /** One read-and-sort run for a mailbox. Never throws. */
@@ -134,12 +138,18 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
 
         // Newly sorted emails whose category is then written into the mailbox (labels, when on).
         const toLabel: { providerMessageId: string; category: string }[] = [];
+        let newNow = 0;
         const providerIdOf = new Map(pending.map((m) => [m.id, m.providerMessageId]));
+        const receivedAtOf = new Map(pending.map((m) => [m.id, m.receivedAt]));
         const save = async (id: number, r: SortResult) => {
             await db.update(mailboxMessages).set({
                 category: r.category, priority: r.priority, summary: r.summary, reason: r.reason, sortedBy: r.sortedBy, updatedAt: new Date(),
             }).where(eq(mailboxMessages.id, id));
             out.sorted++;
+            // Only mail that ARRIVED recently counts as "needs you now": a first read (14 days), a re-read after
+            // the cursor expired, or mail held back by the daily AI limit is sorted late and is not news.
+            const at = receivedAtOf.get(id);
+            if (r.priority === 'now' && at && Date.now() - at.getTime() <= NOW_NOTIFY_MAX_AGE_MS) newNow++;
             const pid = providerIdOf.get(id);
             // Private stays unlabelled: a "Private" label would point at exactly what the owner wants left alone.
             if (pid && r.category !== 'private') toLabel.push({ providerMessageId: pid, category: categoryLabel(r.category) });
@@ -192,7 +202,10 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
             }
         }
 
-        // ── 4. The owner's archive rules (D5: a rule may archive, never trash) ──
+        // ── 4. Tell the owner when something new is time-critical (once; counts only) ──
+        if (newNow) await notifyNowEmails(db, box, newNow);
+
+        // ── 5. The owner's archive rules (D5: a rule may archive, never trash) ──
         if (writer && settings.archiveRules.length) out.ruleArchived = await runArchiveRules(db, box, writer, token, settings.archiveRules);
     } catch (err) {
         if (err instanceof MailboxError) lastError = err.message;
@@ -270,13 +283,21 @@ async function aiSortedToday(db: Db, mailboxId: number): Promise<number> {
     return row?.n ?? 0;
 }
 
-/** Active mailboxes due a run: not read for 9+ minutes and not mid-run. */
+/**
+ * Active mailboxes due a run, not mid-run: not read for 9+ minutes, or 29+ minutes when push is PROVEN
+ * for the mailbox (a watch that hasn't expired AND a push in the last day) — then push brings new mail,
+ * and this poll only catches a lost push (plan §4.2) or a change push doesn't report (Outlook's
+ * subscription covers new mail only). A watch that never delivers (a wrong Pub/Sub or Graph set-up)
+ * keeps the 10-minute poll.
+ */
 export async function mailboxesDueForSync(db: Db, limit = 50): Promise<number[]> {
     const rows = await db.select({ id: mailboxes.id }).from(mailboxes)
         .where(and(
             eq(mailboxes.status, 'active'),
             sql`(${mailboxes.syncLockUntil} IS NULL OR ${mailboxes.syncLockUntil} < now())`,
-            sql`(${mailboxes.lastSyncAt} IS NULL OR ${mailboxes.lastSyncAt} < now() - interval '9 minutes')`,
+            sql`(${mailboxes.lastSyncAt} IS NULL OR ${mailboxes.lastSyncAt} < now() - CASE
+                WHEN ${mailboxes.watchExpiresAt} > now() AND ${mailboxes.lastPushAt} > now() - interval '1 day'
+                THEN interval '29 minutes' ELSE interval '9 minutes' END)`,
         ))
         .orderBy(sql`${mailboxes.lastSyncAt} ASC NULLS FIRST`).limit(limit);
     return rows.map((r) => r.id);

@@ -37,6 +37,8 @@ export async function sendOutlookMessage(
         to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string;
         /** Optional HTML body. See the note in gmail.ts — outreach stays plain text on purpose. */
         html?: string;
+        /** Files to attach (a booking's calendar invite): content as base64. */
+        attachments?: Array<{ filename: string; content: string; contentType?: string }>;
     },
 ): Promise<OutlookSendResult> {
     // Strip CR/LF for parity with the Gmail path — Graph is JSON so header smuggling isn't
@@ -58,6 +60,8 @@ export async function sendOutlookMessage(
                 // A comma-separated list becomes one recipient each (a meeting follow-up goes to every
                 // attendee at once); a single address is unchanged.
                 toRecipients: outlookRecipients(to),
+                // Files (a booking's calendar invite): Graph's fileAttachment, base64 content.
+                ...(msg.attachments?.length ? { attachments: msg.attachments.map((a) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType || 'application/octet-stream', contentBytes: a.content })) } : {}),
                 // Per-thread inbound alias, so a reply routes back to THIS conversation rather
                 // than to the sender's own mailbox where nothing would observe it.
                 ...(msg.replyTo ? { replyTo: [{ emailAddress: { address: msg.replyTo.replace(/[\r\n]+/g, ' ').trim() } }] } : {}),

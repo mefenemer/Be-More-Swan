@@ -300,4 +300,62 @@ legal pieces land in their final home and nothing is moved twice.
 
 ## 11. Still open for the owner
 
-Nothing — all decisions taken 2026-11-15. Next step: build Phase 0 (legal pieces + Shopkeeper shell).
+Nothing. Phases 0–1 decided 2026-11-15 (Phase 1 live on prod 2026-11-25 via #885); **Phase 2's eight questions
+(§12.3) decided 2026-11-26 — every recommendation taken.** Next: Phase 2 slice 1.
+
+## 12. Phase 2 plan — the assistants run the shop (owner approved 2026-11-26)
+
+Checked against the code on staging after Phase 1. Each slice is one PR into staging, built in this order; each one
+is useful on its own. Rules carried from §10: every action in the Shop tab AND chat (same server path), nothing goes
+out without the owner's approval, AI never sets a price, AI work spends tasks (`getTaskCosts()`), customer email
+only from the owner's own sending domain or Gmail/Outlook (owner rule 2026-11-17 — never a Be More Swan sender).
+
+### 12.1 What already exists to build on
+
+| §4 item | Already in code | Missing |
+| --- | --- | --- |
+| 1 Photo → product | Pictures attach in the Website and Note Taker chats (`chat-attachments.ts`, media library `content_assets`); Products save path `org-products.ts` (POST/PATCH, `pictureIsOurs`); vision calls exist (`footage-review.ts`) | Shopkeeper chat takes no attachments; the model only sees `Picture "x" — assetId N`, never the pixels; no product-draft card |
+| 2 Ask your shop | Shop snapshot: Stripe, settings, stock (40), options, delivery, shop page, newest **15** orders; 5 cards incl. `order_update` | No totals by period, no best sellers, nothing beyond the 15 newest orders |
+| 3 Low stock | `stockAfterOrderLine` wording in the owner's new-order email; bell helper `createNotification`; Team Chat `postTeamMessage` | No bell notice, no Team Chat message; options have no low-stock level |
+| 4 Back in stock | Site sign-ups → Audience (`subscribeInProcess` → `audience-public.ts`); Mentor's `mentor_draft_request` asks Social for a post (Requested-by pill); email drafts in `newsletter_issues` | No "Tell me when it's back" box, no waiting list, no Shopkeeper → Social/Email request |
+| 5 Buyers → Audience | `audience-store.ts` (`upsertContact`, consent events); patterns `enquiry-audience.ts`, `won-customer-audience.ts`; review requests already cover shop orders (`review-requests.ts`, 7 days after) | No consent box at checkout; flows can only start on `subscribed`/`form`, not a first order |
+| 6 Abandoned checkout | `stripe-connect-webhook.ts` handles `checkout.session.expired` for booking holds only; Email Marketing sends from the owner's domain or mailbox (`resolveSendRoute`) | Shop sessions ignored on expiry; no consent; no reminder |
+| 7 Mentor | Morning summary counts yesterday's orders (`mentor-morning.ts`); suggestions via `mentor_proposals` (3 a week, gated) | No shop data in the Mentor snapshot; no shop suggestion kind |
+| 8 Shopify import | `site-shop-feeds.ts` reads Shopify `/products.json` and Woo Store API; `addImportedProducts` | Only name/price/link/picture: variants collapse to "From £x" (not buyable), no options, no stock, no description |
+
+**Found while checking (needs a decision, Q1):** review requests are sent from "Business (via Be More Swan)
+&lt;noreply@bemoreswan.com&gt;" (`review-requests.ts` → `fromLine`), which the 2026-11-17 own-inbox rule forbids for
+customer email. Shop orders get them today once "ask after orders" is on.
+
+### 12.2 Slices
+
+| # | Slice | What the owner gets | SQL | Tasks |
+| --- | --- | --- | --- | --- |
+| 1 | **Ask your shop** | Chat answers "how much did I sell in October?", "best sellers this month?", "who's still waiting for their order?" from totals over ALL orders (by month, by product from `site_order_lines`, unposted list), not just the newest 15. A "This month" line on the Shop tab's Orders card. | none | free (chat) |
+| 2 | **Stock that talks** | When an order takes a product (or option) to its low level or to 0: a bell notice and a Shopkeeper Team Chat message ("3 left of Lavender candle" / "Lavender candle sold out — it shows Sold out now"), once per crossing. Options warn at their product's level ("warn me at 3" = each size). **Built: no SQL** — a crossing is read from the order's before/after counts, and options share the product's level. | none | free |
+| 3 | **Product from a photo** | Attach a photo in the Shopkeeper chat → a product card with name, description and kind filled in from the picture, **price empty** (the owner types it), picture already attached → Save adds it through `org-products.ts`. Same card from a "Add from a photo" button on the Shop tab. | none | new key `product_from_photo` (Q5) |
+| 4 | **Buyers who say yes join your Audience** | An unticked box on the basket page, "Send me news from Kudzu Candles". Ticked → the buyer is added to Audience (single opt-in, tag "Shop buyer", consent recorded) when they pay, and a **"First order" email flow** can start for them (new flow trigger). Unticked → never added. | `site_baskets.news_consent`, `site_orders.news_consent` (additive); `newsletter_sequences.trigger_event` CHECK + `'first_order'` (manual) | flow emails as today |
+| 5 | **Abandoned checkout reminder** | A buyer who ticked the box, reached Stripe and didn't pay gets **one** reminder about an hour later with a link back to their basket — sent from the owner's own domain or mailbox, never otherwise. Shown on the Shop tab ("2 reminders sent this week, 1 came back and paid"). | `site_baskets.reminded_at`, `checkout_expires_at` (additive) | new key `checkout_reminder` (Q6) |
+| 6 | **Back in stock** | Sold-out product pages show "Tell me when it's back" (email box). When stock goes above 0, the Shopkeeper asks in Team Chat: **"Lavender candle is back — email the 6 people waiting?"** [Send] [Not now]; Send emails them from the owner's route. It also offers "Ask Social for a post" (a Requested-by draft, approval as today). | new table `shop_waitlist` (additive) | email free; post = normal post task |
+| 7 | **Review requests from your own inbox** | Per Q1. | none | — |
+| 8 | **The Mentor watches the shop** | Morning summary adds best seller of the week and low stock; weekly review can suggest "Fig candle hasn't sold in 60 days — post about it or lower the price?" (owner decides; AI never sets the price). | none | free |
+| 9 | **Bring your Shopify shop across** | Import keeps options (Shopify variants → our options with their own prices) and descriptions, and marks unavailable variants sold out. Shopify's public feed has no stock counts, so stock is left for the owner to type. | none | — |
+
+After slice 9: public copy (the §4 "disruptive line"), What's New, help articles, `/connections` only for what is
+live — each by the owner's word, as always.
+
+### 12.3 Owner decisions (2026-11-26: every recommendation taken)
+
+| # | Question | Decision |
+| --- | --- | --- |
+| Q1 | Review requests go from `noreply@bemoreswan.com`, against the own-inbox rule. Change them? | **Yes, for shop orders now** (slice 7): own domain or Gmail/Outlook, else not sent and the Shop tab says why. Bookings' review requests have the same problem — a separate fix. |
+| Q2 | Where does the buyer tick "Send me news"? | **On our basket page**, before Stripe — the wording is ours, and the reminder (Q3) needs the tick before the buyer reaches Stripe. Single-product Buy buttons (Website-only customers) get no box. |
+| Q3 | One abandoned-checkout reminder or more? | **One**, about an hour after the checkout lapses (we set Stripe's checkout to expire after 1 hour instead of 24). PECR: only buyers who ticked the box. |
+| Q4 | Back-in-stock email: automatic or ask first? | **Ask first** (Team Chat button) — matches "nothing goes out without approval". The waiting-list email is a service they asked for, so it needs no marketing consent; it never adds them to Audience unless they also tick "send me news". |
+| Q5 | Task cost of a product from a photo? | **1 task** (one vision call), settable in Admin like every cost. |
+| Q6 | Task cost of an abandoned-checkout reminder? | **0** — fixed wording, no AI. Decision 5 listed it as task-spending; recommend free as no AI runs. |
+| Q7 | Mentor "delivery price above your sector's average"? | **Drop it** — we have no reliable sector delivery prices, and it would be a claim we can't back. Keep best seller / not sold in 60 days / low stock. |
+| Q8 | Order of slices | As listed: cheapest and most-used first (1–3), then the Audience pieces (4–6) which need Q1–Q4, then 7–9. |
+
+**Owner actions Phase 2 will need:** add `checkout.session.expired` to the "Website Assistant - Connected Shops"
+Stripe webhook (slice 5); prod SQL per slice on your word.

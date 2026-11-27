@@ -5,6 +5,7 @@
 //
 //   POST { action, assistantId, ... }
 //   get              → { payments, shop, shopMissing, exceptions, orders, stats, canEdit }
+//   waitlist_send    { productId } → email the people waiting for a product that is back (shop-waitlist.ts)
 //   shop_settings    { settings }  → save the Delivery & returns details (owner/admin); the Shop tab's form
 //                                    and the chat's shop_settings card send exactly this
 //   payments_connect → Stripe's onboarding link for the workspace's Standard account (owner/admin)
@@ -29,13 +30,16 @@
 // one chat card (disruptive-ui-registry.js `shop_settings`) saves through one path for both roles.
 // Nothing here moves money: refunds and payouts stay in the business's own Stripe dashboard.
 
+import { loadReminderStats, reminderStatsWords } from '../../src/utils/shop-checkout-reminder';
+import { orderReviewRequestsBlocked } from '../../src/utils/review-requests';
+import { askBackInStock, productBuyable, sendBackInStock, sendResultWords, waitingCounts } from '../../src/utils/shop-waitlist';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, siteOrders, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { buyerConfirmationsBlocked, connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
@@ -49,6 +53,9 @@ import { cleanSiteSlugInput, siteCacheTag, siteOrigin, siteVisibleText } from '.
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { purgeCache } from '@netlify/functions';
 import { deliveryWords, hasDelivery, loadDelivery, loadOrderDelivery, saveDelivery } from '../../src/utils/shop-delivery';
+import { loadShopSales, monthSummary, salesMonthWords } from '../../src/utils/shop-sales';
+import { draftProductFromPhoto } from '../../src/utils/shop-product-photo';
+import { getTaskCosts } from '../../src/utils/task-costs';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -118,8 +125,30 @@ export default withLambda(async (event) => {
             postingOn: await ordersPostingOn(db),
             // The shop page for a business with no Be More Swan website (shop-page.ts).
             shopPage: await shopPageState(db, orgId, assistant.id).catch((err) => { console.error('[shop] shop page read failed', err instanceof Error ? err.message : err); return null; }),
+            // "This month" on the Orders card (shop-sales.ts, Phase 2 slice 1): UK months, after refunds, per currency.
+            sales: orders.length ? await loadShopSales(db, orgId).then((s) => { const m = monthSummary(s); return { thisMonth: salesMonthWords(m.thisMonth), lastMonth: salesMonthWords(m.lastMonth) }; })
+                .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
+            // Review requests after orders are on but can't be sent from the owner's own address (review-requests.ts, slice 7).
+            reviewBlocked: await orderReviewRequestsBlocked(db, orgId),
+            // Selling, but no own address for buyers' order confirmations (site-shop.ts; owner 2026-11-27).
+            confirmBlocked: await buyerConfirmationsBlocked(db, orgId),
+            // People waiting to hear a product is back (shop-waitlist.ts, Phase 2 slice 6), by product id.
+            waiting: await waitingCounts(db, orgId),
+            // Abandoned-checkout reminders this week (shop-checkout-reminder.ts, Phase 2 slice 5), in words; null = none.
+            reminders: reminderStatsWords(await loadReminderStats(db, orgId)),
+            // Product from a photo (shop-product-photo.ts): its task cost, for the button's label.
+            photoTaskCost: (await getTaskCosts()).weights.product_from_photo,
             canEdit, warnings,
         };
+    }
+
+    /** A stock save made a sold-out product buyable again and people are waiting: the Shopkeeper asks in Team Chat. */
+    async function backInStockNote(productId: number, before: { buyable: boolean } | null): Promise<string> {
+        if (!before || before.buyable) return '';
+        const after = await productBuyable(db, orgId, productId).catch(() => null);
+        if (!after?.buyable) return '';
+        const waiting = await askBackInStock(db, { orgId, productId, name: after.name, shopkeeperId: assistant.id });
+        return waiting ? ` ${waiting} ${waiting === 1 ? 'person is' : 'people are'} waiting to hear it's back: email them from Team Chat or with "Email them" below.` : '';
     }
 
     if (action === 'get') return json(200, await view());
@@ -212,12 +241,22 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'product_stock') {
+        const before = await productBuyable(db, orgId, Number(body.productId)).catch(() => null);
         const r = await saveProductStock(db, orgId, Number(body.productId), {
             ...(Object.prototype.hasOwnProperty.call(body, 'stock') ? { stock: body.stock } : {}),
             ...(Object.prototype.hasOwnProperty.call(body, 'lowStockAt') ? { lowStockAt: body.lowStockAt } : {}),
         });
         if (!r.ok) return json(r.status, { error: r.error });
-        return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.`]));
+        return json(200, await view([`Saved. ${r.item.name}: ${stockWords(r.item)}.${await backInStockNote(Number(body.productId), before)}`]));
+    }
+
+    // Product from a photo (Phase 2 slice 3, shop-product-photo.ts): a name and description drafted from one of the
+    // workspace's pictures, never a price. Saves nothing — the Shop tab form and the chat card then add the product
+    // through Business Information's own save (org-products.ts POST). Anyone who can add products can draft one.
+    if (action === 'product_photo_draft') {
+        const r = await draftProductFromPhoto(db, { orgId, assistantId: assistant.id, assetId: Number(body.assetId) });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, { draft: r.draft, charged: r.charged });
     }
 
     if (action === 'delivery_rates') {
@@ -228,10 +267,23 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'product_options') {
+        const before = await productBuyable(db, orgId, Number(body.productId)).catch(() => null);
         const r = await saveProductOptions(db, orgId, Number(body.productId), { group: body.group, options: body.options });
         if (!r.ok) return json(r.status, { error: r.error });
         const n = r.value.options.length;
-        return json(200, await view([n ? `Saved ${n} option${n === 1 ? '' : 's'} (${r.value.options.map((o) => o.label).join(', ')}).` : 'Options removed: the product is bought as one item again.']));
+        const note = await backInStockNote(Number(body.productId), before);
+        return json(200, await view([(n ? `Saved ${n} option${n === 1 ? '' : 's'} (${r.value.options.map((o) => o.label).join(', ')}).` : 'Options removed: the product is bought as one item again.') + note]));
+    }
+
+    // "Tell me when it's back" (Phase 2 slice 6, shop-waitlist.ts): email the people waiting for a product that is
+    // buyable again, from the owner's own domain or mailbox. The same send as Team Chat's "Email them".
+    if (action === 'waitlist_send') {
+        if (!canEdit) return json(403, { error: 'Only the workspace owner or an admin can email the people waiting.' });
+        const productId = Number(body.productId);
+        const p = await productBuyable(db, orgId, productId);
+        const r = await sendBackInStock(db, { orgId, productId });
+        if (!r.ok) return json(409, { error: r.error });
+        return json(200, await view([sendResultWords(p?.name || 'That product', r)]));
     }
 
     return json(400, { error: `Unknown action: ${action}` });

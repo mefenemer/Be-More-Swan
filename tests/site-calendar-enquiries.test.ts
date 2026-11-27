@@ -54,7 +54,9 @@ check('the contact form offers an unticked box; ticked, they join with that tick
     const forms = read('src/utils/site-forms.ts');
     assert.ok(forms.includes("if (section.props.offerUpdates && req.body.get('_updates') === 'yes') {") && forms.includes("by: 'form'"));
     const w = read('src/utils/enquiry-audience.ts');
-    assert.ok(w.includes("consentBasis: fromForm ? 'single_opt_in' : 'manual_entry'") && w.includes('await recordConsentEvent(db, {'));
+    assert.ok(w.includes("const consentBasis = fromForm ? 'single_opt_in' : 'manual_entry';") && w.includes('await recordConsentEvent(t, {'));
+    // The consent record comes before the tag, inside one transaction (tests/enquiry-audience-db.test.ts proves it on Postgres).
+    assert.ok(w.includes('return db.transaction(') && w.indexOf('await recordConsentEvent(t, {') < w.indexOf('await applyTagsByName(t,'));
 });
 check('the owner adds someone only by saying they agreed; a refusal is never lifted', () => {
     const api = read('netlify/functions/sites.ts');

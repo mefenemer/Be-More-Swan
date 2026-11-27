@@ -18,6 +18,8 @@ import { CRAWLERS } from '../lib/robots';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { safeFetchBinary } from './safe-fetch';
+import { PRODUCT_LIMITS } from './org-products';
+import { saveProductOptions } from './shop-options';
 import { BLOG_PATH, normaliseSiteDefinition, type SiteDefinition, type SiteRedirect } from './site-definition';
 import { blogSummary, type ImportedBlog, type ImportedBlogPost, type ImportedBlogSummary } from './site-import-blog';
 import { fetchSiteCss, fetchSiteHtml, fetchSiteJson } from './site-fetch';
@@ -352,7 +354,7 @@ export function describeImportForChat(imp: ImportView | null, drafting: boolean)
     if (imp.status === 'reading' && drafting) return `Import of their current site: reading ${imp.sourceUrl} right now — the imported draft appears on the Website tab in a minute or two.`;
     if (imp.status === 'ready') {
         const r = imp.report;
-        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; products found on their old shop: ${r?.products?.length ?? 0}${r?.products?.length ? ` (${r.products.slice(0, 5).map((p) => `"${p.name.slice(0, 60)}"${p.price ? ` ${p.price.slice(0, 20)}` : ''}`).join('; ')}) — a site_import_products card adds them to Business Information, before they use or discard the import` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; ${blogForChat(r?.blog ?? null)}their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
+        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; products found on their old shop: ${r?.products?.length ?? 0}${r?.products?.length ? ` (${r.products.slice(0, 5).map((p) => `"${p.name.slice(0, 60)}"${p.price ? ` ${p.price.slice(0, 20)}` : ''}${p.options?.options.length ? ` (${p.options.options.length} ${p.options.group.toLowerCase()} options)` : ''}`).join('; ')})${r.products.some((p) => p.options?.options.length) ? `, ${r.products.filter((p) => p.options?.options.length).length} with options (sizes, colours…) that come across with their own prices, unavailable ones sold out — stock counts don't come across (the shop's feed hasn't got them), so they set those on the Shopkeeper's Shop tab` : ''} — a site_import_products card adds them to Business Information, before they use or discard the import` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; ${blogForChat(r?.blog ?? null)}their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
     }
     return `Import of their current site: the last attempt (${imp.sourceUrl}) did not make a draft — ${imp.message ?? 'it failed'}`;
 }
@@ -368,9 +370,11 @@ const PRODUCT_PICTURES_PER_REQUEST = 12;
  * site_import_products card; both send sites.ts import_products. `names` = the ones they ticked (all
  * when omitted). A product already in Business Information by that name is skipped, never overwritten.
  * Its picture comes too when they chose to copy pictures: the library copy the import made, else
- * fetched now through the SSRF fence (a few per request). Prices go only into Business Information.
+ * fetched now through the SSRF fence (a few per request). Prices go only into Business Information. From a Shopify
+ * feed (online shop slice 9) its description comes too, and its variants become options with their own prices,
+ * unavailable ones sold out (stock left empty otherwise: the feed has no counts).
  */
-export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?: unknown; userId: number | null }): Promise<{ ok: true; added: number; skipped: number; withoutPicture: number } | { ok: false; status: number; error: string }> {
+export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?: unknown; userId: number | null }): Promise<{ ok: true; added: number; skipped: number; withoutPicture: number; withOptions: number; optionsFailed: string[] } | { ok: false; status: number; error: string }> {
     const row = await loadImport(db, site.id);
     const all = (row?.report as ImportReport | null)?.products ?? [];
     if (!row || !all.length) return { ok: false, status: 404, error: 'There are no products from your old shop to add.' };
@@ -399,17 +403,40 @@ export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?:
         pictures.push(null);
     }
     const start = have.reduce((m, h) => Math.max(m, h.sortOrder ?? -1), -1) + 1;
+    let withOptions = 0;
+    const optionsFailed: string[] = [];
     if (adding.length) {
-        await db.insert(orgProducts).values(adding.map((p, i) => {
+        const inserted = await db.insert(orgProducts).values(adding.map((p, i) => {
             const f = productFieldsFromImport(p);
             return {
                 organisationId: orgId, createdBy: opts.userId ?? null, kind: 'product', status: 'active', sortOrder: start + i,
                 name: f.name, url: f.url, priceType: f.priceType, priceAmount: f.priceAmount, priceCurrency: f.priceCurrency, price: f.price,
                 imageAssetId: pictures[i],
+                // The shop's own description (Shopify feed, online shop slice 9), within Business Information's limit.
+                description: p.description ? p.description.slice(0, PRODUCT_LIMITS.description) : null,
             };
-        }));
+        })).returning({ id: orgProducts.id, name: orgProducts.name, priceType: orgProducts.priceType, price: orgProducts.price });
+        // Paired by name, not by position (review #911: a multi-row INSERT's RETURNING order isn't promised).
+        const rowByName = new Map(inserted.map((r) => [r.name.trim().toLowerCase(), r]));
+        // Its variants as options (slice 9), through the Shop tab's own save — only for a product with a fixed price
+        // (an option is bought at its own price, or the product's).
+        for (const p of adding) {
+            const row = rowByName.get(productFieldsFromImport(p).name.trim().toLowerCase());
+            if (!p.options?.options.length || !row || row.priceType !== 'fixed') continue;
+            const r = await saveProductOptions(db, orgId, row.id, {
+                group: p.options.group,
+                options: p.options.options.map((o) => ({ label: o.label, price: o.price == null ? '' : o.price.toFixed(2), stock: o.soldOut ? 0 : '' })),
+            }).catch((err: unknown) => ({ ok: false as const, status: 500, error: err instanceof Error ? err.message : String(err) }));
+            if (r.ok) { withOptions++; continue; }
+            // review #911: without its options it must not be on sale at the cheapest variant's price (an XL at the S
+            // price). Back to the "From £x" text it had before options existed — not buyable until the owner sets it.
+            console.error('[site-import-store] options not added; price set back to text', { productId: row.id, error: r.error });
+            await db.update(orgProducts).set({ priceType: 'text', priceAmount: null, price: `From ${row.price ?? ''}`.trim().slice(0, 60) })
+                .where(and(eq(orgProducts.id, row.id), eq(orgProducts.organisationId, orgId)));
+            optionsFailed.push(row.name);
+        }
     }
-    return { ok: true, added: adding.length, skipped: wanted.length - adding.length, withoutPicture: pictures.filter((x) => x === null).length };
+    return { ok: true, added: adding.length, skipped: wanted.length - adding.length, withoutPicture: pictures.filter((x) => x === null).length, withOptions, optionsFailed };
 }
 
 /** The old blog's posts, for the chat's line about a ready import. */

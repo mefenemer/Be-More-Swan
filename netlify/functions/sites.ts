@@ -85,6 +85,7 @@ import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, t
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
+import { bookingEmailsBlocked } from '../../src/utils/business-email';
 import { cleanKeep, settleDamageDeposit, stayMoneyView } from '../../src/utils/stay-charges';
 import { damageEmail, whoFor } from '../../src/utils/stay-jobs';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
@@ -330,6 +331,9 @@ export default withLambda(async (event) => {
         if (!r.ok) return json(r.status, { error: r.error });
         const said = [`${r.added} product${r.added === 1 ? '' : 's'} added to Business Information ▸ Products & Services, with ${r.added === 1 ? 'its price' : 'their prices'} — change them there from now on.`];
         if (r.skipped) said.push(`${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already there by name, so left as ${r.skipped === 1 ? 'it was' : 'they were'}.`);
+        // Shopify variants → options (online shop slice 9): each with its own price; unavailable ones sold out.
+        if (r.optionsFailed.length) said.push(`${r.optionsFailed.slice(0, 5).map((n) => `"${n}"`).join(', ')}${r.optionsFailed.length > 5 ? ` and ${r.optionsFailed.length - 5} more` : ''}: ${r.optionsFailed.length === 1 ? 'its' : 'their'} options couldn't be added, so ${r.optionsFailed.length === 1 ? 'it shows' : 'they show'} "From" prices and can't be bought yet. Add the options on the Shopkeeper's Shop tab.`);
+        if (r.withOptions) said.push(`${r.withOptions} came with ${r.withOptions === 1 ? 'its' : 'their'} options (sizes, colours…) and prices; ones your old shop had sold out are marked sold out. Set how many you have of each on the Shopkeeper's Shop tab.`);
         return json(200, await view(site, said));
     }
 
@@ -556,7 +560,9 @@ export default withLambda(async (event) => {
             // Holiday lets / B&B rooms: the balance and the damage deposit (stay-jobs.ts), in words, and what the owner may do.
             ...(b.kind === 'stay' ? { stay: stayMoneyView(b, new Date()) } : {}) }))
             // An unpaid deposit hold that lapsed was never a booking: left out.
-            .filter((b, i) => !(rows[i].paymentStatus === 'expired')) });
+            .filter((b, i) => !(rows[i].paymentStatus === 'expired')),
+            // No own address to send booking emails from (business-email.ts; owner 2026-11-27).
+            emailBlocked: await bookingEmailsBlocked(db, orgId) });
     }
 
     // ── Classes and events (class-sessions.ts): the timetable ──
@@ -580,14 +586,15 @@ export default withLambda(async (event) => {
         if (!r.sessions.length) return json(409, { error: 'That session has already been cancelled.' });
         const [owner] = await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, assistant.id)).limit(1);
         const ctx = { business: definition.settings.siteName, timezone: setup.settings.timezone, assistantId: assistant.id, cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: site.slug ? siteOrigin(site.slug) : null };
+        let notTold = 0;
         for (const b of r.bookings) {
             if (b.status === 'cancelled' && b.paymentStatus === 'paid') b.paymentStatus = await refundDeposit(db, b) === 'refunded' ? 'refunded' : 'refund_failed';
             // An unpaid hold had told nobody yet, so there is nobody to tell.
             if (b.paymentStatus === 'unpaid') continue;
-            await emailCustomer(b, 'cancelled', ctx, owner?.email ?? null);
+            if (await emailCustomer(db, b, 'cancelled', ctx, owner?.email ?? null) !== 'sent') notTold++;
         }
         await reconcileSoon(db, orgId);
-        return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
+        return json(200, { cancelled: r.sessions.length, told: r.bookings.length - notTold, notTold, sessions: await ownerTimetable(db, orgId, new Date()) });
     }
 
     // ── A stay's damage deposit (stay-charges.ts): give it all back now, or keep part with a reason ──
@@ -606,7 +613,7 @@ export default withLambda(async (event) => {
         const r = await settleDamageDeposit(db, b, keep, keep ? reason : null);
         if (r === 'none') return json(409, { error: 'That damage deposit has already been dealt with.' });
         const who = await whoFor(db, b);
-        await damageEmail(b, who, r === 'refund_failed' ? null : keep, keep ? reason : null);
+        await damageEmail(db, b, who, r === 'refund_failed' ? null : keep, keep ? reason : null);
         if (r === 'refund_failed') return json(502, { error: 'Stripe couldn\'t make the refund. Please refund it in your Stripe dashboard — the guest has been told you will.' });
         return json(200, { ok: true, status: r });
     }
@@ -627,7 +634,7 @@ export default withLambda(async (event) => {
             const cls = sectionForKind(definition, 'class');
             if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls, sid) });
         }
-        return json(200, { ok: true, status: r.booking.status });
+        return json(200, { ok: true, status: r.booking.status, emailLine: r.emailLine });
     }
 
     if (action === 'booking_setup') {

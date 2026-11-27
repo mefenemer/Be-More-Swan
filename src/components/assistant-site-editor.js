@@ -1584,7 +1584,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
       <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours & location')}</p>
-      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`) + bookingLinkCard();
+      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>
+      ${state.bookingEmailBlocked ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-booking-email-blocked>${esc(state.bookingEmailBlocked)}</p>` : ''}`) + bookingLinkCard();
     const list = state.bookings;
     const tt = timetableCard();
     if (!list) return head + tt + card('<p class="text-sm text-gray-500 text-center">Loading bookings…</p>');
@@ -1629,6 +1630,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     try {
       const [bk, tt] = await Promise.all([post({ action: 'bookings', assistantId: state.assistantId }), post({ action: 'timetable', assistantId: state.assistantId })]);
       state.bookings = bk.bookings || [];
+      state.bookingEmailBlocked = bk.emailBlocked || null;
       state.timetable = tt.sessions || [];
     } catch (err) { state.bookings = state.bookings || []; state.timetable = state.timetable || []; state.note = { text: err.message, tone: 'error' }; }
     rerender();
@@ -2204,7 +2206,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (!products || !products.length) return '';
     return `<details class="mt-2" open data-site-import-products-box><summary class="text-xs font-bold text-gray-800 cursor-pointer">Products we found on your shop (${esc(products.length)}) — add them to Business Information</summary>
       <p class="text-xs text-gray-500 mt-1">Each ticked one becomes a product in Business Information ▸ Products & Services, with its price and a link to its page on your old shop${state.data.import && state.data.import.pictures === 'copy' ? ', and its picture' : ''}. Prices never go on your website. Add them before you use or discard this import.</p>
-      <ul class="mt-1 space-y-1">${products.slice(0, 60).map((p, i) => `<li class="text-xs text-gray-700"><label class="inline-flex items-start gap-2"><input type="checkbox" checked data-site-import-product="${esc(i)}" class="mt-0.5"> <span>${esc(p.name)}${p.price ? ` <span class="text-gray-500">— ${esc(p.price)}</span>` : ''}</span></label></li>`).join('')}</ul>
+      <ul class="mt-1 space-y-1">${products.slice(0, 60).map((p, i) => `<li class="text-xs text-gray-700"><label class="inline-flex items-start gap-2"><input type="checkbox" checked data-site-import-product="${esc(i)}" class="mt-0.5"> <span>${esc(p.name)}${p.price ? ` <span class="text-gray-500">— ${esc(p.price)}</span>` : ''}${p.options && p.options.options && p.options.options.length ? ` <span class="text-gray-500" data-site-import-product-options>· ${esc(p.options.options.length)} ${esc(String(p.options.group || 'option').toLowerCase())} options</span>` : ''}</span></label></li>`).join('')}</ul>
+      ${products.some((p) => p.options && p.options.options && p.options.options.length) ? '<p class="text-xs text-gray-500 mt-1" data-site-import-options-note>Options (sizes, colours…) come with their own prices, and ones your old shop had sold out are marked sold out. Stock counts don\'t come across: set them on the Shopkeeper\'s Shop tab.</p>' : ''}
       <div class="mt-2">${btn('data-site-import-products', 'Add ticked products to Business Information')}</div>
     </details>`;
   }
@@ -3027,7 +3030,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       try {
         const r = await post({ action: 'session_cancel', assistantId: state.assistantId, id: Number(sCancel.dataset.sessionCancel), wholeSeries: series });
         state.timetable = r.sessions || state.timetable;
-        state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.`, tone: 'ok' };
+        state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.${r.notTold ? ` ${r.notTold} customer${r.notTold === 1 ? '' : 's'} couldn't be emailed: booking emails go only from your own address. Please tell them yourself.` : ''}`, tone: r.notTold ? 'error' : 'ok' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadBookings();
       return;
@@ -3061,8 +3064,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         if (!ok) return;
       }
       try {
-        await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
+        const r = await post({ action: 'booking_decide', assistantId: state.assistantId, id: Number(dec.dataset.siteBooking), decision });
         state.data = await post({ action: 'get', assistantId: state.assistantId });
+        // The customer couldn't be emailed from the owner's own address: say so (business-email.ts).
+        if (r && r.emailLine) state.note = { text: r.emailLine, tone: 'error' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadBookings();
       return;

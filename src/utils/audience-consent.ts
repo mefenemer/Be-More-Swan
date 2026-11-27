@@ -127,6 +127,13 @@ export async function checkAudienceConsentBulk(
     db: Db,
     organisationId: number,
     emails: readonly (string | null | undefined)[],
+    /**
+     * consentGivenHere: the person has JUST given consent on the caller's own page (the shop basket's ticked "Send
+     * me news" box, shop-checkout-reminder.ts), before they are an Audience contact. A missing or 'pending' contact
+     * then goes on through EVERY refusal below — outreach opt-out, suppressed domain, pause — instead of stopping
+     * at not_in_audience / unconfirmed. A refused status (unsubscribed, bounced, complained, suppressed) still wins.
+     */
+    opts: { consentGivenHere?: boolean } = {},
 ): Promise<Map<string, AudienceVerdict>> {
     const verdicts = new Map<string, AudienceVerdict>();
 
@@ -240,12 +247,12 @@ export async function checkAudienceConsentBulk(
         }
 
         const contact = contacts.get(email);
-        if (!contact) {
+        if (!contact && !opts.consentGivenHere) {
             verdicts.set(email, { sendable: false, reason: 'not_in_audience' });
             continue;
         }
 
-        const byStatus = statusVerdict(contact.status);
+        const byStatus = contact && !(opts.consentGivenHere && contact.status === 'pending') ? statusVerdict(contact.status) : null;
         if (byStatus) {
             verdicts.set(email, byStatus);
             continue;
@@ -282,7 +289,7 @@ export async function checkAudienceConsentBulk(
         // Somebody who asks for quiet and then gets a welcome-sequence email two days later has
         // been told no. Checked against the clock on each call, so the pause lifts itself — nothing
         // has to run for it to end.
-        if (contact.pausedUntil && contact.pausedUntil.getTime() > Date.now()) {
+        if (contact?.pausedUntil && contact.pausedUntil.getTime() > Date.now()) {
             verdicts.set(email, {
                 sendable: false,
                 reason: 'paused',

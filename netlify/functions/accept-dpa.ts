@@ -18,7 +18,10 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 // The text of each version lives in get-dpa-content.ts. Bumping this asks every workspace owner to
 // accept again at their next login (workspace.html) — see the note above DPA_1_1_HTML.
-export const CURRENT_DPA_VERSION = '1.1';
+// 1.2 (27 November 2026): names Recall.ai + AssemblyAI (Note Taker meetings, specifically authorised) and adds the
+// Email Assistant / Note Taker paragraphs to clause 13. Organisations on 1.0/1.1 keep working; only the meeting bot
+// (BOT_DPA_MIN_VERSION) needs 1.2 or later.
+export const CURRENT_DPA_VERSION = '1.2';
 
 /**
  * Versions that still satisfy the "has this organisation accepted the DPA?" gates (hire, onboarding,
@@ -27,7 +30,7 @@ export const CURRENT_DPA_VERSION = '1.1';
  * the version must never lock every existing customer out of their assistants. A future change that
  * must be accepted before work continues drops the old version from this list.
  */
-export const DPA_VERSIONS_STILL_VALID = ['1.0', '1.1'];
+export const DPA_VERSIONS_STILL_VALID = ['1.0', '1.1', '1.2'];
 export const dpaAcceptedVersionClause = () => inArray(dpaAcceptances.version, DPA_VERSIONS_STILL_VALID);
 
 /** An agreement made on behalf of the organisation — only someone who can bind it may accept. */

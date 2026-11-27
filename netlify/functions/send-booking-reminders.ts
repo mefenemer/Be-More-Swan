@@ -45,13 +45,13 @@ export async function sendDueReminders(db: ReturnType<typeof getDb>, now: Date):
         const site = siteRows.find((s) => s.id === b.siteId);
         // A Teams / Meet link that couldn't be made at confirmation gets one more try (booking-meeting.ts).
         const withLink = await ensureMeetingLink(db, b as BookingRow);
-        await emailCustomer(withLink, 'reminder', {
+        const r = await emailCustomer(db, withLink, 'reminder', {
             business: orgRows.find((o) => o.id === b.organisationId)?.name || 'Your booking',
             timezone: settings.timezone, assistantId: site?.aiAssistantId ?? null, cancellationPolicy: settings.cancellationPolicy,
             // A booking-only address (not published) still serves the manage page (site-booking-page.ts).
             siteOrigin: site?.slug && site.status !== 'suspended' ? siteOrigin(site.slug) : null,
         }, null);
-        sent++;
+        if (r === 'sent') sent++;
     }
     return sent;
 }

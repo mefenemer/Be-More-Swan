@@ -98,7 +98,7 @@ check('full screen: one button in, the same button (or Esc) out', () => {
 });
 
 check('the paperclip opens the picture window (with documents), and a blank "create" lets the assistant decide', () => {
-    assert.ok(session.includes('function onAttachClick(e)') && session.includes("documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },"));
+    assert.ok(session.includes('function onAttachClick(e)') && session.includes("documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } }"));
     assert.ok(session.includes("attachLabel?.addEventListener('click', onAttachClick);") && session.includes("attachLabel?.removeEventListener('click', onAttachClick);"));
     assert.ok(session.includes("if (p.asset) { out.push({ kind: 'image', assetId: p.asset.id"), 'a library picture is sent by id, not uploaded again');
     const mp = read('src/components/media-picker.js');

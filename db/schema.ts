@@ -749,6 +749,10 @@ export const mailboxes = pgTable("mailboxes", {
   lastSyncAt: timestamp("last_sync_at"),
   lastError: text("last_error"),
   syncLockUntil: timestamp("sync_lock_until"),
+  // Push (db/z-mailbox-push.sql): NULL watch_expires_at = no push, polled every 10 minutes.
+  watchExpiresAt: timestamp("watch_expires_at"),
+  watchId: text("watch_id"),                                  // Graph subscription id
+  lastPushAt: timestamp("last_push_at"),
   settings: jsonb("settings").notNull().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -5309,7 +5313,9 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   // Any number of "everyone who subscribes" campaigns; at most ONE switched on per org
   // (db/newsletter-sequences-everyone-campaigns.sql — replaced the one-welcome-per-org indexes).
   uniqueIndex("newsletter_sequences_org_everyone_on_uidx").on(t.organisationId).where(sql`trigger_event = 'subscribed' AND is_enabled`),
-  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form')`),
+  // At most ONE "first order" flow on per org (db/z-shop-first-order-flow.sql, online shop slice 4b).
+  uniqueIndex("newsletter_sequences_org_first_order_on_uidx").on(t.organisationId).where(sql`trigger_event = 'first_order' AND is_enabled`),
+  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form', 'first_order')`),
 ]);
 
 export const newsletterSequenceSteps = pgTable("newsletter_sequence_steps", {
@@ -6621,9 +6627,17 @@ export const siteBaskets = pgTable("site_baskets", {
   items: jsonb().notNull().default([]),
   checkoutLines: jsonb("checkout_lines"),
   checkoutSessionId: text("checkout_session_id"),
+  // The abandoned-checkout reminder (db/z-shop-checkout-reminder.sql, src/utils/shop-checkout-reminder.ts).
+  reminderEmail: text("reminder_email"),
+  checkoutExpiresAt: timestamp("checkout_expires_at"),
+  remindedAt: timestamp("reminded_at"),
+  reminderResult: text("reminder_result"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  check("site_baskets_reminder_result_check", sql`${t.reminderResult} IS NULL OR ${t.reminderResult} IN ('sent', 'no_route', 'refused', 'failed')`),
+  index("site_baskets_org_reminded_idx").on(t.organisationId, t.remindedAt).where(sql`${t.remindedAt} IS NOT NULL`),
+]);
 
 // A paid basket order's lines (online shop Phase 1, db/z-shop-basket.sql). Mirrored here ONLY for the workspace
 // data export; the app reads and writes it with raw SQL in src/utils/shop-basket.ts (missing table = no lines).
@@ -6638,6 +6652,22 @@ export const siteOrderLines = pgTable("site_order_lines", {
   quantity: integer().notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// "Tell me when it's back" (db/z-shop-waitlist.sql, src/utils/shop-waitlist.ts): one row per person waiting for a product.
+export const shopWaitlist = pgTable("shop_waitlist", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+  productId: integer("product_id").notNull().references(() => orgProducts.id, { onDelete: "cascade" }),
+  email: text().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  notifiedAt: timestamp("notified_at"),
+  skipReason: text("skip_reason"),
+}, (t) => [
+  check("shop_waitlist_email_check", sql`char_length(${t.email}) BETWEEN 3 AND 254`),
+  uniqueIndex("shop_waitlist_waiting_uidx").on(t.productId, sql`lower(${t.email})`).where(sql`${t.notifiedAt} IS NULL`),
+  index("shop_waitlist_org_product_idx").on(t.organisationId, t.productId).where(sql`${t.notifiedAt} IS NULL`),
+]);
 
 // What UK consumer law needs a buyer to see (db/z-shop-settings.sql, src/utils/shop-settings.ts):
 // one row per workspace; the Delivery & returns page and the buyer's email are drawn from it.

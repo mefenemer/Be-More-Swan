@@ -36,7 +36,7 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { organisationId: orgId, userId } = ctx;
+    const { organisationId: orgId, userId, role } = ctx;
 
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
@@ -114,7 +114,7 @@ export default withLambda(async (event) => {
     if (action === 'answer') {
         const messageId = posInt(body.messageId);
         if (!messageId || typeof body.value !== 'string') return json(400, { error: 'messageId and value are required.' });
-        const r = await answerQuestion(db, { orgId, userId, messageId, value: body.value });
+        const r = await answerQuestion(db, { orgId, userId, role, messageId, value: body.value });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, { ok: true, said: r.said });
     }

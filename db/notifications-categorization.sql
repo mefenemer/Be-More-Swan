@@ -52,6 +52,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'onboarding_prompt' THEN 'suggested_action'
     WHEN 'onboarding_incomplete' THEN 'suggested_action'
     WHEN 'hitl_approval_required' THEN 'suggested_action'
+    WHEN 'email_needs_you' THEN 'suggested_action'          -- Email Assistant: time-critical email (call site passes category)
     WHEN 'review_red_urgency' THEN 'suggested_action'
     WHEN 'trial_expiring_soon' THEN 'suggested_action'
     WHEN 'task_limit_warning' THEN 'suggested_action'
@@ -152,6 +153,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'mentor_draft_ready' THEN 'state_change'        -- Business Mentor strategy draft ready (call site passes category)
     WHEN 'mentor_weekly_review' THEN 'state_change'      -- Business Mentor weekly review written (call site passes category)
     WHEN 'mentor_morning_summary' THEN 'state_change'    -- Business Mentor morning summary (call site passes category)
+    WHEN 'email_morning_digest' THEN 'state_change'      -- Email Assistant morning note (call site passes category)
     WHEN 'site_order_received' THEN 'state_change'       -- someone paid on the website (call site passes category)
     WHEN 'site_payments_ready' THEN 'state_change'       -- Stripe connected and able to take payments (call site passes category)
     -- celebratory

@@ -1,6 +1,7 @@
 // netlify/functions/poll-mailboxes.ts — every 10 minutes, wake a read for each mailbox that is due
-// (docs/email-assistant-plan.md §4.3, the Phase 1 mechanism; push notifications come in Phase 3 and
-// this stays as the safety net).
+// (docs/email-assistant-plan.md §4.2–4.3). With push on (Phase 3b, mailbox-push.ts) new mail arrives by
+// push and this is the safety net (a watched mailbox is read every 30 minutes); it also starts and
+// renews the watches.
 //
 // ⚠️ Netlify runs scheduled functions on PRODUCTION only, and answers a direct URL call to one with a
 // bare 403 before this handler runs. Staging is poked through run-poll-mailboxes.ts instead.
@@ -10,24 +11,57 @@ import { getDb } from '../../db/client';
 import { mailboxesDueForSync, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 import { pruneOldActions } from '../../src/utils/mailbox-actions';
 import { mayRunScheduled } from '../../src/utils/scheduled-run-auth';
+import { sendMorningDigest } from '../../src/utils/mailbox-notify';
+import { ensureWatches } from '../../src/utils/mailbox-push';
+import { mailboxes } from '../../db/schema';
+import { eq } from 'drizzle-orm';
 
 export const config = { schedule: '*/10 * * * *' };
 
 /** Who may run this (src/utils/scheduled-run-auth.ts): the cron secret or Netlify's scheduler. */
 export const mayPoll = mayRunScheduled;
 
+/**
+ * No new batch of reads starts this long after the run began. A batch waits up to 5 s, so the last one
+ * is done by ~15 s, leaving the watches, prune and digests their time. A mailbox not reached stays due
+ * and is first in line next run (logged as `deferred`).
+ */
+export const READ_DEADLINE_FROM_START_MS = 10_000;
+
+/**
+ * Watch work stops starting this long after the run began, leaving room for prune and digests inside the
+ * ~30 s a scheduled function gets (26 s for staging's run-poll-mailboxes). Counted from the START of the
+ * run, so slow read dispatch eats into it instead of pushing the run past its limit.
+ */
+export const WATCH_DEADLINE_FROM_START_MS = 16_000;
+
 /** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
 export async function pollDueMailboxes(): Promise<{ due: number; dispatched: number }> {
+    const runStart = Date.now();
     const due = await mailboxesDueForSync(getDb()).catch((err) => {
         // The table may not exist yet (z-mailboxes.sql not applied): nothing to do, not an outage.
         console.error('[poll-mailboxes] could not list mailboxes', err instanceof Error ? err.message : err);
         return [] as number[];
     });
+    // Most urgent first, so a run that hits its time limit loses the least: reads, then push, then the rest.
+    // Reads are dispatched 10 at a time (each waits up to 5 s for the background function to accept).
+    // Until READ_DEADLINE_FROM_START_MS into the run; the rest are read next run.
+    let dispatched = 0;
+    let deferred = 0;
+    for (let i = 0; i < due.length; i += 10) {
+        if (Date.now() - runStart >= READ_DEADLINE_FROM_START_MS) { deferred = due.length - i; break; }
+        dispatched += (await Promise.all(due.slice(i, i + 10).map((id) => triggerMailboxSync(id)))).filter(Boolean).length;
+    }
+    // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day — until
+    // WATCH_DEADLINE_FROM_START_MS into the run; anything left is first in line next run, logged as `deferred`.
+    const watches = await ensureWatches(getDb(), runStart + WATCH_DEADLINE_FROM_START_MS);
     // Drafted replies and clean-up records are kept 30 days after they were acted on, then deleted.
     const pruned = await pruneOldActions(getDb()).catch(() => 0);
-    let dispatched = 0;
-    for (const id of due) if (await triggerMailboxSync(id)) dispatched++;
-    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned });
+    // The Email Assistant's morning note, once a day per mailbox (07:00–11:59 local; latched in its settings).
+    let digests = 0;
+    const active = await getDb().select().from(mailboxes).where(eq(mailboxes.status, 'active')).catch(() => []);
+    for (const box of active) if (await sendMorningDigest(getDb(), box)) digests++;
+    console.log('[poll-mailboxes]', { due: due.length, dispatched, deferred, pruned, digests, watches });
     return { due: due.length, dispatched };
 }
 

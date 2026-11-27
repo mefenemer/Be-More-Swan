@@ -9,6 +9,7 @@
 //
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
+import { loadShopWatch, shopSnapshotForMentor, type ShopWatch } from './shop-mentor';
 import { and, asc, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { aiAssistants, discussionWatches, discussions, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { tierCanGenerateVideo } from './ai-credits';
@@ -78,6 +79,8 @@ export interface MentorSnapshotData {
      * site hasn't been read; undefined = not read (older fixtures).
      */
     websiteGaps?: string[];
+    /** The shop, as facts (shop-mentor.ts, online shop slice 8): null = no shop; undefined = not read (older fixtures). */
+    shop?: ShopWatch | null;
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -275,6 +278,8 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         const latest = g.latest === null ? 'not measured yet (unknown — never treat as 0)' : String(g.latest);
         return `- ${g.id ? `#${g.id} ` : ''}${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})${goalNotes(g)}`;
     }));
+
+    lines.push(...shopSnapshotForMentor(d.shop));
 
     if (d.websiteGaps?.length) {
         lines.push('', 'WEBSITE GAPS (from the pages read off their website — Business Information ▸ Website Pages; suggest the page, never write it yourself):');
@@ -474,6 +479,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
 
     // The site page directory's gaps (site-directory-store.ts). Never throws.
     const websiteGaps = await loadSiteDirectoryGaps(db, orgId);
+    // The shop's facts (shop-mentor.ts). Never throws; null = no shop.
+    const shop = await loadShopWatch(db, orgId);
 
     return {
         strategyDocs,
@@ -481,6 +488,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         discussions: discussionState,
         costs: await getTaskCosts(),
         websiteGaps,
+        shop,
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null, canMakeVideo: tierCanGenerateVideo(planRow?.tierKey ?? null) },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,

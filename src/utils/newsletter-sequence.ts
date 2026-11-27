@@ -78,11 +78,11 @@ export async function enrolInWelcomeSequence(
  */
 export async function enrolInSequence(
     db: Db,
-    args: { organisationId: number; contactId: number; email: string; sequenceId: number | null },
+    args: { organisationId: number; contactId: number; email: string; sequenceId: number | null; /** 'first_order' only from the shop (shop-first-order-flow.ts). */ via?: 'shop' },
 ): Promise<{ enrolled: boolean; reason?: string }> {
     try {
         const [seq] = await db
-            .select({ id: newsletterSequences.id, isEnabled: newsletterSequences.isEnabled })
+            .select({ id: newsletterSequences.id, isEnabled: newsletterSequences.isEnabled, triggerEvent: newsletterSequences.triggerEvent })
             .from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, args.organisationId),
@@ -98,6 +98,9 @@ export async function enrolInSequence(
             .limit(1);
 
         if (!seq) return { enrolled: false, reason: 'no_sequence' };
+        // review #903: a "first order" flow is started by the shop only — never by a sign-up form still linked to it
+        // by id (a flow moved from "form" to "first order"), which would send "thanks for your order" to sign-ups.
+        if (seq.triggerEvent === 'first_order' && args.via !== 'shop') return { enrolled: false, reason: 'no_sequence' };
         // Enrol even when it is disabled? No. An enrolment carries a next_send_at, and creating one
         // against a sequence nobody has switched on would fire the moment they did — sending a
         // "welcome" to somebody who subscribed weeks earlier.
@@ -189,11 +192,11 @@ export async function haltEnrolmentsForContact(
     }
 }
 
-async function deliverStep(
+export async function deliverStep(
     db: Db,
     route: SendRoute,
     organisationId: number,
-    msg: { to: string; subject: string; html: string; text: string; listUnsubscribe: string | null },
+    msg: { to: string; subject: string; html: string; text: string; listUnsubscribe: string | null; attachments?: Array<{ filename: string; content: string; contentType?: string }> },
 ): Promise<string | null> {
     // Returns the provider's message id where there is one (Resend) — the key the webhook matches
     // opens, clicks, bounces and complaints on. A mailbox send has none, so it is tracked as sent only.
@@ -208,12 +211,14 @@ async function deliverStep(
             headers: msg.listUnsubscribe
                 ? { 'List-Unsubscribe': msg.listUnsubscribe, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
                 : undefined,
+            ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
         });
         return (data as { id?: string } | null)?.id ?? null;
     }
     const common = {
         to: msg.to, subject: msg.subject, body: msg.text, html: msg.html,
         listUnsubscribe: msg.listUnsubscribe || undefined,
+        ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
     };
     if (route.provider === 'outlook') { await sendOutlookMessage(db, organisationId, common); return null; }
     await sendGmailMessage(db, organisationId, common);

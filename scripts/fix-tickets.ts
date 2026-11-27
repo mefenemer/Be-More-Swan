@@ -200,6 +200,10 @@ async function main() {
                        dev_merge_status = 'ready', dev_merged_at = NULL, dev_merge_result = NULL,
                        dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
                        dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
+                       -- A new fix PR: the release / hotfix that shipped an OLD fix must not count for it
+                       -- (issue-fix-live.ts would otherwise close a reopened ticket as live).
+                       prod_pr_url = NULL, dev_prod_status = NULL, dev_prod_result = NULL,
+                       approval_pr_url = NULL, approval_note = NULL, approval_requested_at = NULL,
                        dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
                  WHERE id = ${id}`);
             await note(id, `Fix ready: ${prUrl}${branch ? ` (branch ${branch})` : ''}.${sqlText ? ` Needs SQL (${safety}).` : ' No database change.'}\n\n${summary}`);

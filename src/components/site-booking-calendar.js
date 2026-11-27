@@ -133,8 +133,10 @@
       if (!sure) return;
     }
     try {
-      await post({ action: 'booking_decide', assistantId: cal.assistantId, id: b.id, decision });
-      window.showToast?.(decision === 'confirm' ? 'Confirmed — they have been emailed.' : decision === 'decline' ? 'Declined — they have been told.' : 'Cancelled — they have been told.', { icon: '✅' });
+      const r = await post({ action: 'booking_decide', assistantId: cal.assistantId, id: b.id, decision });
+      // Not emailed (booking emails go only from the owner's own address — business-email.ts): say so, never "emailed".
+      if (r && r.emailLine) window.alertModal?.(esc(r.emailLine));
+      else window.showToast?.(decision === 'confirm' ? 'Confirmed — they have been emailed.' : decision === 'decline' ? 'Declined — they have been told.' : 'Cancelled — they have been told.', { icon: '✅' });
     } catch (err) { window.alertModal?.(esc(err.message)); }
     load(cal);
   }

@@ -127,6 +127,88 @@ async function main() {
         assert.strictEqual(noCommit.skipped, 'no_commit');
     });
 
+    // Ticket #95 (2026-11-26): fix PR #891 merged into staging, then a fixes-only release (#896) COPIED it
+    // into main. #891's own merge commit never reaches main, so the ticket sat "not live" for ever. The
+    // prod PR recorded on the ticket (prod_pr_url, fix-tickets.ts prod-pr) counts once it is merged into
+    // main and inside the deploy.
+    const FIX_PR = 'https://github.com/mefenemer/Be-More-Swan/pull/891';
+    const PROD_PR = 'https://github.com/mefenemer/Be-More-Swan/pull/896';
+    const RELEASE = 'c'.repeat(40);
+    function releaseDb(prodPrUrl: string | null) {
+        const statements: string[] = [];
+        const db: any = {
+            execute: async (q: any) => {
+                const text = JSON.stringify(q);
+                if (text.includes('information_schema')) return [{ '?column?': 1 }];
+                statements.push(text);
+                if (text.includes('live_pr_url IS DISTINCT FROM dev_pr_url')) {
+                    return [{ id: 95, user_id: null, dev_pr_url: FIX_PR, prod_pr_url: prodPrUrl, dev_prod_status: 'failed', dev_prod_result: 'The hotfix workflow failed (failure).' }];
+                }
+                if (text.includes("SET status = 'closed', fixed_at = now(), live_at = now()")) return [{ id: 95 }];
+                return [];
+            },
+            insert: () => ({ values: async () => undefined }),
+        };
+        return { db, statements };
+    }
+    /** #891 diverged from the deploy; the release PR's answer is given per test. */
+    function releaseGitHub(release: { base: string; merged?: boolean; mergedAt?: string }) {
+        const urls: string[] = [];
+        const fetchImpl = async (url: string) => {
+            urls.push(url);
+            if (url.endsWith('/pulls/891')) return { ok: true, status: 200, json: async () => ({ merged: true, merge_commit_sha: MERGE, merged_at: '2026-11-26T05:41:00Z', base: { ref: 'staging' } }) };
+            if (url.endsWith('/pulls/896')) return { ok: true, status: 200, json: async () => ({ merged: release.merged ?? true, merge_commit_sha: RELEASE, merged_at: release.mergedAt ?? '2026-11-26T06:21:12Z', base: { ref: release.base } }) };
+            if (url.includes(`/compare/${MERGE}...`)) return { ok: true, status: 200, json: async () => ({ status: 'diverged' }) };
+            if (url.includes(`/compare/${RELEASE}...`)) return { ok: true, status: 200, json: async () => ({ status: 'ahead' }) };
+            return { ok: true, status: 200, json: async () => [] };
+        };
+        return { fetchImpl, urls };
+    }
+
+    await check('a fix copied into main by a recorded release PR goes live (#95)', async () => {
+        resetFixLiveColumnsCache();
+        const { db, statements } = releaseDb(PROD_PR);
+        const gh = releaseGitHub({ base: 'main' });
+        const r = await runFixLiveCheck(db, { token: 't', deployedSha: DEPLOYED, fetchImpl: gh.fetchImpl as any });
+        assert.strictEqual(r.live, 1, `live=${r.live} notYet=${r.notYet} errors=${r.errors}`);
+        assert.ok(statements.some((s) => s.includes("SET status = 'closed', fixed_at = now(), live_at = now()")));
+    });
+
+    await check('a recorded prod PR that went into staging, or is unmerged, does not count', async () => {
+        for (const release of [{ base: 'staging' }, { base: 'main', merged: false }]) {
+            resetFixLiveColumnsCache();
+            const { db } = releaseDb(PROD_PR);
+            const r = await runFixLiveCheck(db, { token: 't', deployedSha: DEPLOYED, fetchImpl: releaseGitHub(release).fetchImpl as any });
+            assert.strictEqual(r.live, 0, JSON.stringify(release));
+            assert.strictEqual(r.notYet, 1, JSON.stringify(release));
+        }
+    });
+
+    await check('a reopened ticket keeps its old release: a prod PR merged BEFORE the current fix does not count', async () => {
+        resetFixLiveColumnsCache();
+        const { db } = releaseDb(PROD_PR);
+        const r = await runFixLiveCheck(db, { token: 't', deployedSha: DEPLOYED, fetchImpl: releaseGitHub({ base: 'main', mergedAt: '2026-11-20T10:00:00Z' }).fetchImpl as any });
+        assert.strictEqual(r.live, 0);
+        assert.strictEqual(r.notYet, 1);
+    });
+
+    await check('recording a new fix PR clears the old prod PR and hotfix result', () => {
+        const ft = read('scripts/fix-tickets.ts');
+        const pr = ft.slice(ft.indexOf("} else if (cmd === 'pr') {"), ft.indexOf("} else if (cmd === 'staging-sql') {"));
+        assert.ok(pr.includes('prod_pr_url = NULL, dev_prod_status = NULL, dev_prod_result = NULL'));
+        // An Approve still showing for the old fix's prod PR would write it back into prod_pr_url (pr-approval.ts).
+        assert.ok(pr.includes('approval_pr_url = NULL, approval_note = NULL, approval_requested_at = NULL'));
+    });
+
+    await check('no prod PR recorded: still not live (nothing guessed)', async () => {
+        resetFixLiveColumnsCache();
+        const { db } = releaseDb(null);
+        const gh = releaseGitHub({ base: 'main' });
+        const r = await runFixLiveCheck(db, { token: 't', deployedSha: DEPLOYED, fetchImpl: gh.fetchImpl as any });
+        assert.strictEqual(r.live, 0);
+        assert.ok(!gh.urls.some((u) => u.endsWith('/pulls/896')));
+    });
+
     const src = read('src/utils/issue-fix-live.ts');
 
     await check('auto-close: 7 days, no reporter reply since, compare-and-swap on status', () => {
