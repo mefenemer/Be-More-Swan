@@ -21,6 +21,8 @@ import {
 import { createRecallBot, deleteRecallMedia, fetchRecallTranscript, getRecallBot, recallKey, removeRecallBot, RecallError } from './meeting-bot-recall';
 import { PICKUP_PLATFORM_LABELS, type MeetingSource, type PickupPlatform } from './meeting-pickup';
 import { getTaskCosts } from './task-costs';
+import { getIntegration } from './workspace-integrations';
+import { obfKey, obfTokenUrl, zoomMeetingNumber } from './zoom-bot';
 import { logServiceCost, recallBotBilling } from './ai-usage';
 import { TASK_LIMIT_MESSAGE, hasTaskCapacity, recordCompletedWork } from './work-metering';
 
@@ -105,7 +107,13 @@ export interface SendBotInput {
     videoTile?: BotVideoTile;
     /** Draws this workspace's own picture (meeting-bot-tile.ts drawBotTiles); `videoTile` is the fallback if it fails. */
     tileFor?: (names: { assistantName: string | null; businessName: string | null }) => Promise<BotVideoTile>;
+    /** This site's address, for the Zoom OBF token URL Recall calls (zoom-bot.ts). Needed for Zoom links only. */
+    baseUrl?: string | null;
 }
+
+/** A Zoom call is joined on behalf of the workspace's connected Zoom user, who must be in it (zoom-bot.ts). */
+export const ZOOM_CONNECT_MESSAGE = 'Connect Zoom first: the Note Taker joins a Zoom call on behalf of the Zoom account you connect, and that person must be in the call.';
+export const ZOOM_LINK_MESSAGE = 'Use the Zoom link with the meeting number in it (zoom.us/j/…). A personal link (zoom.us/my/…) can\'t be used.';
 
 /** Drawing the picture must never stop a bot: past this, the fallback picture goes instead. */
 export const TILE_DRAW_TIMEOUT_MS = 4000;
@@ -188,6 +196,15 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
     if (link.platform === 'zoom' && !(await isFeatureEnabled(i.organisationId, MEETING_BOT_ZOOM_FLAG))) {
         return fail(400, 'zoom_soon', 'The Note Taker can join Google Meet and Microsoft Teams calls. Zoom is coming soon.');
     }
+    // Zoom lets the bot in only "on behalf of" the connected Zoom user (OBF), with a token minted for this meeting number.
+    let zoomBase: string | null = null;
+    if (link.platform === 'zoom') {
+        if (!zoomMeetingNumber(link.url)) return fail(400, 'zoom_link', ZOOM_LINK_MESSAGE);
+        const zoom = await getIntegration(db, i.organisationId, 'zoom');
+        if (!zoom || zoom.status !== 'active') return fail(409, 'zoom_connect', ZOOM_CONNECT_MESSAGE);
+        zoomBase = i.baseUrl ?? null;
+        if (!zoomBase || !obfKey()) return fail(503, 'not_configured', 'The Note Taker can\'t join Zoom calls right now. Please try again later.');
+    }
     const when = cleanJoinAt(i.joinAt, now);
     if (!when.ok) return fail(400, 'bad_time', when.error);
     const title = typeof i.title === 'string' && i.title.trim() ? i.title.replace(/\s+/g, ' ').trim().slice(0, 200) : null;
@@ -249,6 +266,7 @@ export async function sendMeetingBot(db: Db, i: SendBotInput, now: Date = new Da
             meetingUrl: link.url, businessName: org?.name ?? null, joinAt: when.joinAt, scheduled: when.scheduled,
             lengthLimitMinutes, botRowId: row.id, organisationId: i.organisationId,
             videoTile,
+            ...(zoomBase ? { zoomObfTokenUrl: obfTokenUrl(zoomBase, row.id, obfKey()) } : {}),
         }));
     } catch (err) {
         const reason = err instanceof RecallError ? err.message : 'not_sent';

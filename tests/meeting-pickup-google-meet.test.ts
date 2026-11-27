@@ -147,7 +147,7 @@ import { speakerLines } from '../src/utils/meeting-pickup';
     await test('tokens refresh with the same client', () => {
         const w = readFileSync('src/utils/workspace-integrations.ts', 'utf8');
         assert.match(w, /if \(provider === 'google_meet'\) \{[\s\S]{0,700}GOOGLE_MEET_CLIENT_ID/);
-        assert.match(w, /'canva', 'google_meet',\n\]\);/, 'auto-refreshed');
+        assert.match(w, /'canva', 'google_meet',[^\]]*\n\]\);/, 'auto-refreshed');
     });
 
     await test('only flagged workspaces are read; the Note Taker policy includes meeting apps', () => {
