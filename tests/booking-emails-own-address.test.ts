@@ -9,7 +9,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { bookingEmailLine, bookingEmailsBlocked, sendBusinessEmail } from '../src/utils/business-email';
+import { bookingEmailLine, bookingEmailsBlocked, orgsWithRoute, sendBusinessEmail } from '../src/utils/business-email';
 import { gmailMime } from '../src/utils/gmail';
 
 let passed = 0;
@@ -35,6 +35,13 @@ async function main() {
         assert.strictEqual(r, 'sent');
         assert.strictEqual(seen[0].m.to, 'sam@x.example');
         assert.strictEqual(seen[0].route.replyTo, 'owner@willow.example');
+        // review #917: the owner wins over the domain's own reply-to ("reply to this email" to change a booking).
+        const seen2: string[] = [];
+        await sendBusinessEmail(db, 5, { business: 'W', to: 'a@b.example', subject: 's', html: 'h', replyTo: 'owner@willow.example' }, {
+            resolveRoute: (async () => ({ route: { provider: 'resend', from: 'W <x@w.example>', replyTo: 'domain@w.example', engagementTracked: false } })) as never,
+            deliver: (async (_db: unknown, route: { replyTo: string }) => { seen2.push(route.replyTo); return null; }) as never,
+        });
+        assert.deepStrictEqual(seen2, ['owner@willow.example']);
         assert.ok(!/bemoreswan/i.test(String(seen[0].route.from)));
         assert.ok(seen[0].m.text.includes('Monday') && !seen[0].m.text.includes('<'));
         assert.strictEqual(seen[0].m.attachments?.length, 1);
@@ -52,6 +59,14 @@ async function main() {
             deliver: (async () => { throw new Error('token expired'); }) as never,
         });
         assert.strictEqual(failed, 'failed');
+        // review #917: a slow mailbox never holds the caller past the budget.
+        const slow = await sendBusinessEmail(db, 5, { business: 'W', to: 'a@b.example', subject: 's', html: 'h' }, {
+            resolveRoute: (async () => ({ route: { provider: 'gmail', from: null, replyTo: null, engagementTracked: false } })) as never,
+            deliver: (() => new Promise(() => {})) as never, budgetMs: 30,
+        });
+        assert.strictEqual(slow, 'slow');
+        assert.ok(/Check your sent mail/.test(String(bookingEmailLine('slow'))));
+        assert.deepStrictEqual(await orgsWithRoute(db, [1, 2, 2, 3], (async (_d: unknown, id: number) => (id === 2 ? { route: {} } : { error: 'x' })) as never), [2]);
     });
 
     await check('the owner\'s lines and the Bookings tab warning', async () => {
@@ -73,19 +88,25 @@ async function main() {
     });
 
     await check('wired: no Be More Swan sender left for any booking email; Outlook carries files; owner told', () => {
-        for (const f of ['src/utils/bookings.ts', 'src/utils/stay-jobs.ts', 'src/utils/site-stay-booking.ts', 'netlify/functions/stripe-connect-webhook.ts']) {
+        for (const f of ['src/utils/bookings.ts', 'src/utils/stay-jobs.ts', 'src/utils/site-stay-booking.ts', 'netlify/functions/stripe-connect-webhook.ts', 'src/utils/class-sessions.ts']) {
             assert.ok(!/fromLine|\(via Be More Swan\)|from: .*noreply@/.test(read(f)), f);
         }
         const bk = read('src/utils/bookings.ts');
         assert.ok(bk.includes('const r = await sendBusinessEmail(db, b.organisationId, {') && bk.includes("filename: 'booking.ics'"));
         const announce = bk.slice(bk.indexOf('export async function announceNewBooking('));
         assert.ok(announce.indexOf('await emailCustomer(db, b,') < announce.indexOf('to: owner.email'), 'customer first, so the owner email can say');
+        assert.ok(announce.indexOf("createNotification(db, 'site_booking_received'") < announce.indexOf('await emailCustomer(db, b,'), 'review #917: the owner\'s card never waits on a mailbox');
         assert.ok(read('src/utils/outlook.ts').includes("'@odata.type': '#microsoft.graph.fileAttachment'"));
         assert.ok(read('src/utils/newsletter-sequence.ts').includes('...(msg.attachments?.length ? { attachments: msg.attachments } : {}),'));
         assert.ok(read('netlify/functions/sites.ts').includes('emailBlocked: await bookingEmailsBlocked(db, orgId)') && read('netlify/functions/sites.ts').includes('emailLine: r.emailLine'));
         assert.ok(read('src/components/assistant-site-editor.js').includes('data-booking-email-blocked') && read('src/components/site-booking-calendar.js').includes('if (r && r.emailLine)'));
         const stay = read('src/utils/stay-jobs.ts');
         assert.ok(stay.includes('else await db.update(bookings).set({ reminderSentAt: null })'), 'arrival details: retried once there is an address');
+        // review #917: due stays are looked for only where the owner has an address (no starvation); cards are charged regardless.
+        assert.ok((stay.match(/await routedOrgsFor\(db, /g) || []).length === 3);
+        assert.ok(stay.includes("or(eq(bookings.balanceCollection, 'auto'), inArray(bookings.organisationId, routed))"));
+        assert.ok(stay.includes('We could NOT email them a link to pay'), 'the owner is told the truth about the pay link');
+        assert.ok(read('src/utils/class-sessions.ts').includes('set({ offeredAt: null })'), 'a waitlist offer that couldn\'t go is made again later');
     });
 
     console.log(`\n${passed}/${total} passed`);

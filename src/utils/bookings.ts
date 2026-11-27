@@ -303,14 +303,17 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
     const { when, what } = describeBooking(b, ctx.timezone);
     const owner = await ownerOf(db, ctx.assistantId);
     const pending = b.status === 'pending';
-    // The customer's email first (own address only), so the owner's email can say when it couldn't go.
-    const customerLine = bookingEmailLine(await emailCustomer(db, b, pending ? 'received' : 'confirmed', ctx, owner?.email ?? null), pending ? 'request receipt' : 'confirmation');
+    // The owner's card first: it must never wait on (or be lost to) a slow mailbox send (review #917).
     if (owner) {
         await createNotification(db, 'site_booking_received', {
             userId: owner.userId, assistantId: ctx.assistantId ?? undefined, category: pending ? 'suggested_action' : 'state_change',
             context: { assistant: { name: owner.name }, booking: { who: b.customerName, what, when, next: pending ? 'Confirm or decline it on the Bookings tab.' : 'It is confirmed — it is on the Bookings tab.' } },
             metadata: { assistantId: ctx.assistantId, bookingId: b.id },
         }).catch((err) => console.error('[bookings] notification failed', err));
+    }
+    // Then the customer's email (own address only, capped at 4 s), so the owner's email can say when it couldn't go.
+    const customerLine = bookingEmailLine(await emailCustomer(db, b, pending ? 'received' : 'confirmed', ctx, owner?.email ?? null), pending ? 'request receipt' : 'confirmation');
+    if (owner) {
         if (owner.email) {
             await sendEmail({
                 to: owner.email, replyTo: b.customerEmail,
