@@ -10,17 +10,16 @@
 //   • Neutral wording, nothing to sell — a request for feedback, not marketing.
 //   • The Google link (if set) goes to EVERY customer, whatever they might say: no review gating.
 //   • A review sent in waits as 'pending' until the owner approves it; nothing is published unseen.
-//   • SHOP ORDERS go only from the owner's own verified sending domain or connected Gmail/Outlook (Email Marketing's
-//     resolveSendRoute; owner Q1 2026-11-26, online shop slice 7) — never "via Be More Swan". With no route the order
-//     is NOT claimed, so it is asked about once a route exists (within the look-back); the Shop tab says why.
-//     Bookings still go from fromLine() — the same problem, a separate fix.
+//   • Every request — after a SHOP ORDER (online shop slice 7, owner Q1 2026-11-26) or a BOOKING (owner 2026-11-27) —
+//     goes only from the owner's own verified sending domain or connected Gmail/Outlook (Email Marketing's
+//     resolveSendRoute), never "via Be More Swan". With no route nothing is claimed, so it is asked about once a route
+//     exists (within the look-back); the Shop tab and Audience ▸ Reviews say why.
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { and, eq, gt, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { bookings, organisations, orgProducts, reviewOptOuts, reviewRequests, reviewSettings, siteOrders, sites, users, aiAssistants } from '../../db/schema';
-import { emailKey, fromLine } from './bookings';
-import { sendEmail } from './email';
+import { emailKey } from './bookings';
 import { resolveSendRoute, type SendRoute } from './newsletter-send';
 import { deliverStep } from './newsletter-sequence';
 import { esc, REVIEW_PATH } from './site-render';
@@ -33,11 +32,16 @@ export const REVIEW_REQUEST_RULES = { notTwiceWithinDays: 30, lookbackDays: 30, 
 /** Shop orders (slice 7, review #909): asked at most this many days after their delay. */
 export const ORDER_LATE_DAYS = 21;
 /** Shop orders: at most this many per workspace per hourly run (a mailbox has a daily limit; the rest go next hour). */
-export const ORDERS_PER_WORKSPACE_PER_RUN = 25;
+export const REQUESTS_PER_WORKSPACE_PER_RUN = 25;
+/** The shop-order name for the same cap (slice 7 tests). */
+export const ORDERS_PER_WORKSPACE_PER_RUN = REQUESTS_PER_WORKSPACE_PER_RUN;
 /** Stop claiming new requests after this long, so a run finishes inside the scheduled function's 30 s. */
 export const RUN_BUDGET_MS = 20_000;
 /** A shop-order request claimed but neither sent nor skipped this long ago was cut off mid-run: it is asked again. */
 export const STALE_CLAIM_MINUTES = 60;
+/** Booking claims are released only from here on (review #916): an older one was made by the old noreply path, whose
+ *  email may already have gone. */
+export const BOOKING_RELEASE_FROM = '2026-11-27T00:00:00Z';
 
 // ── Settings ────────────────────────────────────────────────────────────────────────────────────
 
@@ -136,7 +140,8 @@ const firstNameOf = (name: string | null) => (name ? name.trim().split(/\s+/)[0]
 interface Candidate { organisationId: number; siteId: number | null; bookingId: number | null; orderId: number | null; name: string | null; email: string; about: string | null; }
 
 /** Confirmed bookings that ended at least the delay ago, after asking was switched on, not yet asked. */
-async function dueBookings(db: Db, now: Date): Promise<Candidate[]> {
+async function dueBookings(db: Db, now: Date, orgIds: number[]): Promise<Candidate[]> {
+    if (!orgIds.length) return [];
     const rows = await db.select({
         id: bookings.id, organisationId: bookings.organisationId, siteId: bookings.siteId, name: bookings.customerName, email: bookings.customerEmail,
         service: orgProducts.name, kind: bookings.kind,
@@ -145,6 +150,7 @@ async function dueBookings(db: Db, now: Date): Promise<Candidate[]> {
         .leftJoin(orgProducts, eq(orgProducts.id, bookings.serviceId))
         .where(and(
             eq(reviewSettings.askAfterBookings, true), isNotNull(reviewSettings.enabledAt), eq(bookings.status, 'confirmed'),
+            inArray(bookings.organisationId, orgIds),
             sql`${bookings.endsAt} <= ${now.toISOString()}::timestamptz - make_interval(hours => ${reviewSettings.bookingDelayHours})`,
             sql`${bookings.endsAt} >= ${reviewSettings.enabledAt}`,
             gt(bookings.endsAt, new Date(now.getTime() - REVIEW_REQUEST_RULES.lookbackDays * 86_400_000)),
@@ -186,28 +192,28 @@ export async function skipReason(db: Db, orgId: number, email: string, now: Date
 }
 
 /** One hourly run: claim each due booking / order, then email (or record why not). Returns emails sent. */
-/** The route a shop order's review request goes on, or why there is none. Pure-ish wrapper so tests can stub it. */
+/** The route a review request goes on, or why there is none. Pure-ish wrapper so tests can stub it. */
 export type RouteResolver = (db: Db, orgId: number, senderName: string) => Promise<{ route: SendRoute } | { error: string }>;
 const defaultRoute: RouteResolver = (db, orgId, senderName) => resolveSendRoute(db, orgId, { recipientCount: 1, senderName });
 
 export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: RouteResolver; deliver?: typeof deliverStep; clock?: () => number } = {}): Promise<number> {
     const clock = deps.clock ?? (() => Date.now());
     const started = clock();
-    // A shop-order request a killed run claimed but never sent: release it so it is due again (review #909).
+    // A request a killed run claimed but never sent: release it so it is due again (review #909).
     await db.execute(sql`
-        DELETE FROM review_requests WHERE order_id IS NOT NULL AND sent_at IS NULL AND skipped_reason IS NULL
+        DELETE FROM review_requests WHERE (order_id IS NOT NULL OR (booking_id IS NOT NULL AND created_at >= ${BOOKING_RELEASE_FROM}::timestamptz)) AND sent_at IS NULL AND skipped_reason IS NULL
            AND created_at < now() - make_interval(mins => ${STALE_CLAIM_MINUTES})`).catch((err: unknown) => console.error('[review-requests] stale claim release failed', err instanceof Error ? err.message : err));
-    // Shop orders go only on the owner's own route (slice 7): resolve it first for every workspace asking after orders,
-    // and look for due orders ONLY where one exists — so workspaces still waiting for a route can't fill the batch.
+    // Every request goes only on the owner's own route: resolve it first for every workspace that asks, and look for
+    // due bookings / orders ONLY where one exists — so workspaces still waiting for a route can't fill the batch.
     const routes = new Map<number, SendRoute>();
     const asking = await db.select({ id: reviewSettings.organisationId, name: organisations.name }).from(reviewSettings)
         .innerJoin(organisations, eq(organisations.id, reviewSettings.organisationId))
-        .where(and(eq(reviewSettings.askAfterOrders, true), isNotNull(reviewSettings.enabledAt)));
+        .where(and(sql`(${reviewSettings.askAfterOrders} OR ${reviewSettings.askAfterBookings})`, isNotNull(reviewSettings.enabledAt)));
     for (const o of asking) {
         const r = await (deps.route ?? defaultRoute)(db, o.id, o.name || 'Our business').catch((err) => ({ error: err instanceof Error ? err.message : String(err) }));
         if ('route' in r) routes.set(o.id, r.route);
     }
-    const due = [...await dueBookings(db, now), ...await dueOrders(db, now, [...routes.keys()])];
+    const due = [...await dueBookings(db, now, [...routes.keys()]), ...await dueOrders(db, now, [...routes.keys()])];
     if (!due.length) return 0;
     const orgIds = [...new Set(due.map((d) => d.organisationId))];
     const siteIds = [...new Set(due.map((d) => d.siteId).filter((x): x is number => x !== null))];
@@ -217,18 +223,16 @@ export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: R
         db.select().from(reviewSettings).where(inArray(reviewSettings.organisationId, orgIds)),
     ]);
     let sent = 0;
-    const ordersThisRun = new Map<number, number>();
+    const perWorkspace = new Map<number, number>();
     for (const d of due) {
         // Out of time: everything not yet claimed stays due for the next run (review #909).
         if (clock() - started > RUN_BUDGET_MS) break;
-        // A shop order is due only where its workspace has a route (above); without one it stays UNCLAIMED and goes later.
-        const orderRoute: SendRoute | null = d.orderId ? routes.get(d.organisationId) ?? null : null;
-        if (d.orderId && !orderRoute) continue;
-        if (d.orderId) {
-            const n = ordersThisRun.get(d.organisationId) ?? 0;
-            if (n >= ORDERS_PER_WORKSPACE_PER_RUN) continue;   // the rest go next hour, unclaimed
-            ordersThisRun.set(d.organisationId, n + 1);
-        }
+        // Due only where its workspace has a route (above); without one it stays UNCLAIMED and goes later.
+        const route = routes.get(d.organisationId);
+        if (!route) continue;
+        const n = perWorkspace.get(d.organisationId) ?? 0;
+        if (n >= REQUESTS_PER_WORKSPACE_PER_RUN) continue;   // the rest go next hour, unclaimed
+        perWorkspace.set(d.organisationId, n + 1);
         // Claim first: the unique index on booking_id / order_id means only one run gets the row.
         const [claim] = await db.insert(reviewRequests).values({
             organisationId: d.organisationId, siteId: d.siteId, bookingId: d.bookingId, orderId: d.orderId,
@@ -248,8 +252,7 @@ export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: R
         });
         try {
             // Replies reach the owner, as before, when the sending domain names no reply-to address (review #909).
-            if (orderRoute) await (deps.deliver ?? deliverStep)(db, { ...orderRoute, replyTo: orderRoute.replyTo || owner?.email || null }, d.organisationId, { to: d.email, subject, html, text, listUnsubscribe: null });
-            else await sendEmail({ to: d.email, from: fromLine(business), ...(owner?.email ? { replyTo: owner.email } : {}), subject, html });
+            await (deps.deliver ?? deliverStep)(db, { ...route, replyTo: route.replyTo || owner?.email || null }, d.organisationId, { to: d.email, subject, html, text, listUnsubscribe: null });
             await db.update(reviewRequests).set({ sentAt: new Date() }).where(eq(reviewRequests.id, claim.id));
             sent++;
         } catch (err) {
@@ -282,6 +285,19 @@ export async function orderReviewRequestsBlocked(db: Db, orgId: number, route: R
         if (!s.askAfterOrders) return null;
         const r = await route(db, orgId, '');
         return 'error' in r ? 'Review requests after orders are on, but none can be sent yet: they go only from your own address. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending, and waiting requests go out by themselves.' : null;
+    } catch (err) {
+        console.error('[review-requests] route check failed', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/** Audience ▸ Reviews: asking is on (after bookings or orders) but there is no own address to send from. Never throws. */
+export async function reviewRequestsBlocked(db: Db, orgId: number, route: RouteResolver = defaultRoute): Promise<string | null> {
+    try {
+        const s = await reviewSettingsFor(db, orgId);
+        if (!s.askAfterBookings && !s.askAfterOrders) return null;
+        const r = await route(db, orgId, '');
+        return 'error' in r ? 'No review requests can be sent yet: they go only from your own address. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending, and waiting requests go out by themselves.' : null;
     } catch (err) {
         console.error('[review-requests] route check failed', err instanceof Error ? err.message : err);
         return null;

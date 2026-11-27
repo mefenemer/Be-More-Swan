@@ -15,7 +15,7 @@ import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { orgReviews, reviewRequests } from '../../db/schema';
-import { cleanReviewRequestSettings, reviewSettingsFor, saveReviewRequestSettings } from '../../src/utils/review-requests';
+import { cleanReviewRequestSettings, reviewRequestsBlocked, reviewSettingsFor, saveReviewRequestSettings } from '../../src/utils/review-requests';
 import { requireTenant } from '../../src/utils/tenant';
 import { cleanReview, COUNTED_STATUSES, REVIEW_LIMITS, reviewSummary } from '../../src/utils/reviews';
 
@@ -40,7 +40,7 @@ export default withLambda(async (event) => {
             const since = new Date(Date.now() - 30 * 86_400_000);
             const [asked] = await db.select({ sent: sql<number>`count(*) filter (where ${reviewRequests.sentAt} is not null)::int`, answered: sql<number>`count(*) filter (where ${reviewRequests.respondedAt} is not null)::int` })
                 .from(reviewRequests).where(and(eq(reviewRequests.organisationId, orgId), gte(reviewRequests.createdAt, since)));
-            return json(200, { reviews, summary: reviewSummary(reviews), pending, settings: await reviewSettingsFor(db, orgId), asked: { sent: Number(asked?.sent ?? 0), answered: Number(asked?.answered ?? 0) } });
+            return json(200, { reviews, summary: reviewSummary(reviews), pending, settings: await reviewSettingsFor(db, orgId), routeBlocked: await reviewRequestsBlocked(db, orgId), asked: { sent: Number(asked?.sent ?? 0), answered: Number(asked?.answered ?? 0) } });
         }
 
         if (method === 'DELETE') {

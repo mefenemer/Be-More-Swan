@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { closeDbPools } from '../db/client';
-import { orderReviewRequestsBlocked, sendDueReviewRequests, ORDERS_PER_WORKSPACE_PER_RUN, ORDER_LATE_DAYS } from '../src/utils/review-requests';
+import { orderReviewRequestsBlocked, reviewRequestsBlocked, sendDueReviewRequests, ORDERS_PER_WORKSPACE_PER_RUN, ORDER_LATE_DAYS } from '../src/utils/review-requests';
 import { emailKey } from '../src/utils/bookings';
 
 let passed = 0;
@@ -143,6 +143,35 @@ async function main() {
                  VALUES (${C * 10}, ${C}, 'acct_x', 'cs_rr_old', 'Mug', 1, 800, 'gbp', 'late@gamma.example', 'paid', now() - interval '35 days') RETURNING id`))[0].id);
             await sendDueReviewRequests(db, new Date(), { route: routeC as never, deliver: deliverC });
             assert.strictEqual((await sql.unsafe(`SELECT 1 FROM review_requests WHERE order_id = ${old}`)).length, 0);
+        });
+        // ── bookings: own address only too (owner 2026-11-27) ──
+        const D = 24, E = 25;
+        for (const [org, slug] of [[D, 'delta'], [E, 'eps']] as const) {
+            await sql.unsafe(`INSERT INTO organisations (id, name, slug) VALUES (${org}, 'Salon ${slug}', 'rr-${slug}')`);
+            await sql.unsafe(`INSERT INTO sites (id, organisation_id, ai_assistant_id, slug, draft, status) VALUES (${org * 10}, ${org}, ${org * 10 + 1}, '${slug}', '{}'::jsonb, 'published')`);
+            await sql.unsafe(`INSERT INTO review_settings (organisation_id, ask_after_bookings, booking_delay_hours, enabled_at) VALUES (${org}, true, 2, now() - interval '30 days')`);
+        }
+        const booking = async (org: number, email: string) => Number((await sql.unsafe(
+            `INSERT INTO bookings (organisation_id, site_id, kind, starts_at, ends_at, customer_name, customer_email, status)
+             VALUES (${org}, ${org * 10}, 'appointment', now() - interval '1 day 1 hour', now() - interval '1 day', 'Ali Khan', $1, 'confirmed') RETURNING id`, [email]))[0].id);
+        let eHasRoute = false;
+        const routeDE = async (_db: unknown, orgId: number) => (orgId === D || (orgId === E && eHasRoute) ? ownRoute : { error: 'none' });
+        const bookingSent: Array<{ org: number; to: string }> = [];
+        const deliverDE = (async (_db: unknown, _r: unknown, org: number, m: { to: string }) => { bookingSent.push({ org, to: m.to }); return null; }) as never;
+        const bd = await booking(D, 'ali@delta.example');
+        const be = await booking(E, 'ali@eps.example');
+
+        await check('bookings: asked via the owner\'s own route; a workspace with no route is NOT claimed, then asked once it has one', async () => {
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeDE as never, deliver: deliverDE }), 1);
+            assert.deepStrictEqual(bookingSent, [{ org: D, to: 'ali@delta.example' }]);
+            assert.ok((await sql.unsafe(`SELECT sent_at FROM review_requests WHERE booking_id = ${bd}`))[0].sent_at);
+            assert.strictEqual((await sql.unsafe(`SELECT 1 FROM review_requests WHERE booking_id = ${be}`)).length, 0, 'no row: stays due');
+            assert.ok(/No review requests can be sent yet/.test(String(await reviewRequestsBlocked(db, E, routeDE as never))));
+            assert.strictEqual(await reviewRequestsBlocked(db, D, routeDE as never), null);
+            eHasRoute = true;
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeDE as never, deliver: deliverDE }), 1);
+            assert.deepStrictEqual(bookingSent.map((x) => x.to), ['ali@delta.example', 'ali@eps.example']);
+            assert.strictEqual(await sendDueReviewRequests(db, new Date(), { route: routeDE as never, deliver: deliverDE }), 0, 'never twice');
         });
     } finally {
         await sql.unsafe(`SET search_path TO public`).catch(() => {});
