@@ -148,6 +148,7 @@ check('Google Cloud notice (Gmail push): owners, both lists, every claim matches
     assert.ok(email.bodyHtml.includes('no email content') && tpl.message.includes('never email content'), 'a push carries only the address and historyId (mail-push-gmail.ts)');
     assert.ok(email.bodyHtml.includes('up to 7 days'), 'the subscription keeps undelivered messages 7 days');
     assert.doesNotMatch(email.bodyHtml + tpl.message, /as it does today/, 'Gmail is not live for customers yet (review of #921)');
+    assert.ok(email.bodyHtml.includes('at most 7 days afterwards') && tpl.message.includes('at most 7 days after you disconnect'), 'the notice matches the pages on the disconnect gap (review of #921)');
     assert.ok(email.bodyHtml.includes('until at least 14 days after this email'), 'production push waits for the notice');
     assert.doesNotMatch(email.bodyHtml, /within 14 days of (?:\d|[A-Z][a-z]+ \d)/, 'no fixed objection date: the 14 days run from the send');
     assert.doesNotMatch(email.bodyHtml + tpl.message, /\btrain|sorry|apolog|EU only|UK only/i, 'no promise the set-up does not keep (topic has no region policy)');
@@ -155,6 +156,7 @@ check('Google Cloud notice (Gmail push): owners, both lists, every claim matches
         const html = read(f);
         assert.match(html, /<td[^>]*>Google Cloud \(Pub\/Sub\)<\/td>/, `${f} lists it`);
         assert.ok(html.includes('US (Google LLC; global infrastructure)'), `${f}: location is not a storage promise (topic has no region policy)`);
+        assert.ok(html.includes('and for up to 7 days after one is disconnected'), `${f}: a Gmail watch can outlive a disconnect (no users.stop) — review of #921`);
         assert.match(html, /Google Cloud, (?:on|in) the list above, is different: it is our own\s+account/, `${f} says why it is not a connected platform`);
     }
 });

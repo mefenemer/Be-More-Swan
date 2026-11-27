@@ -27,6 +27,7 @@ Outlook push needs no notice: Microsoft Graph calls our endpoint directly, with 
 | US (Google LLC; global infrastructure) | Google LLC is the US party; the topic has no message storage region set, so we don't promise UK/EU or a storage country |
 | Not used for customer mailboxes until 14 days after the email | Production has none of the push env vars until then |
 | Nothing reaches Google Cloud without Gmail on an Email Assistant | Watches start only for connected Gmail mailboxes in workspaces with the flag on |
+| Up to 7 days after disconnect (page rows) | We never call Gmail `users.stop` (it would end push for every connection of that Google account, `stopWatch` in mailbox-push.ts); if Google's token revoke at disconnect fails, the watch runs out by itself within 7 days and the webhook ignores its notices |
 
 ## What changes in this PR
 
