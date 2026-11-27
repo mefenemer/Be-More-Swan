@@ -25,6 +25,9 @@ check('the picker: filesOnly drops the stock and AI tabs and never opens on stoc
     assert.ok(mp.includes('const filesOnly = !!opts.filesOnly;'));
     assert.ok(mp.includes("${tabBtn('files', 'Upload or library')}${filesOnly ? '' : `${tabBtn('stock', `Ask ${who} to find stock`)}${tabBtn('ai', `Ask ${who} to create one`)}`}"));
     assert.ok(mp.includes('if (opts.findNow && opts.topic && !filesOnly)'));
+    // review #926: a stock or AI picture already saved in the library can't be chosen either.
+    assert.ok(mp.includes('.filter((a) => !filesOnly || !a.provider);'));
+    assert.ok(mp.includes("None of your own photos in your library yet — upload one above."));
 });
 
 check('used by the Shop tab photo card and the Shopkeeper chat only', () => {

@@ -16,7 +16,7 @@
  *     (chat-session.js), where a document is read rather than shown. The window closes and hands the files back.
  *   topic: what the picture is for — the stock search and the AI prompt start from it.
  *   findNow: open on stock with `topic` already searched (the chat's "Choose a picture", design-studio.js).
- *   filesOnly: only "Upload or library" — no stock, no AI. For a photo that must show the real thing (the Shopkeeper's
+ *   filesOnly: only "Upload or library" — no stock, no AI, and the library lists only the owner's own uploads (no provider). For a photo that must show the real thing (the Shopkeeper's
  *     product from a photo, owner 2026-11-27: a stock or AI picture would list something the buyer doesn't get).
  *
  * Used by the Website Assistant's editor (assistant-site-editor.js). Uploads go through the
@@ -216,8 +216,11 @@
       .then((d) => {
         const groups = d.assets || {};
         const usable = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || [])
-          .filter((a) => (a.assetType === 'image' || (allowVideo && a.assetType === 'video')) && a.status !== 'rejected' && (a.storageUrl || a.externalUrl));
-        if (!usable.length) { grid.innerHTML = `<p class="text-xs text-gray-500">Nothing in your library yet — upload one above, or ask ${esc(who)} to find or create one.</p>`; return; }
+          .filter((a) => (a.assetType === 'image' || (allowVideo && a.assetType === 'video')) && a.status !== 'rejected' && (a.storageUrl || a.externalUrl))
+          // filesOnly (review #926): only the owner's OWN uploads (no provider) — never a saved stock photo (pexels), an AI
+          // picture (fal, stability…), a brand card, flyer or video render.
+          .filter((a) => !filesOnly || !a.provider);
+        if (!usable.length) { grid.innerHTML = `<p class="text-xs text-gray-500">${filesOnly ? 'None of your own photos in your library yet — upload one above.' : `Nothing in your library yet — upload one above, or ask ${esc(who)} to find or create one.`}</p>`; return; }
         grid.innerHTML = usable.map((a) => `
           <button type="button" data-mp-asset="${esc(a.id)}" class="text-left border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400">
             ${tileMedia(a.storageUrl || a.externalUrl, a.assetType === 'video')}
