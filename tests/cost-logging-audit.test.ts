@@ -291,7 +291,8 @@ check('fal background removal has a price (fal lists $0) and the AI presenter is
 
 check('Resend outbound email logs one email against the workspace', () => {
     assert.strictEqual(SERVICE_UNIT_PRICE_USD['resend-email'].fallback, 0.0009, '$0.90 per 1,000 (Resend Pro overage)');
-    assert.ok(/emailId = \(result as any\)\?\.data\?\.id \?\? null;\s*\/\/[^\n]*\n\s*if \(emailId\) await logServiceCost\('resend-email', 1, \{ workspaceId: orgId/.test(read('netlify/functions/send-outbound-email.ts')),
+    // Since 2026-11-27 it sends from the workspace's own address: a Resend cost only when that is their own domain.
+    assert.ok(read('netlify/functions/send-outbound-email.ts').includes("if (provider === 'resend') await logServiceCost('resend-email', 1, { workspaceId: orgId"),
         'send-outbound-email no longer logs the Resend send');
     const prev = process.env.RESEND_COST_USD_PER_EMAIL;
     process.env.RESEND_COST_USD_PER_EMAIL = '0.0004';

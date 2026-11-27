@@ -65,8 +65,8 @@ export const sendEmail = async ({ to, subject, html, text, from, replyTo, header
             from: from || 'Be More Swan <noreply@bemoreswan.com>',
             to,
             subject,
-            html,
-            ...(text ? { text } : {}),
+            // An empty html is a plain-text-only email (an assistant's outbound email): the text part alone.
+            ...(html ? { html, ...(text ? { text } : {}) } : { text: text ?? '' }),
             ...(replyTo ? { replyTo } : {}),
             ...(headers ? { headers } : {}),
             ...(attachments && attachments.length ? { attachments } : {}),

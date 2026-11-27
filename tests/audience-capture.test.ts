@@ -189,11 +189,11 @@ await check('a nameless subscriber is greeted, not left with "Hi ,"', () => {
     assert.ok(!/,\s*<\/h1>/.test(mail.html));
 });
 
-await check('the From line names the tenant while the address stays on our verified domain', () => {
+await check('it comes from the tenant\'s own address (owner 2026-11-27), never a Be More Swan sender', () => {
     const email = read('src/utils/audience-email.ts');
     const send = email.slice(landmark(email, 'export async function sendConfirmationEmail'));
-    assert.match(send, /via Be More Swan/, 'the recipient has never heard of us — say how we relate to the sender');
-    assert.match(send, /noreply@bemoreswan\.com/, 'the ADDRESS must stay on the domain Resend has verified');
+    assert.match(send, /sendBusinessEmail\(db, orgId,/, 'the recipient signed up with the business — it comes from the business');
+    assert.doesNotMatch(send, /noreply@bemoreswan\.com|via Be More Swan/);
     assert.match(send, /replace\(\/\["<>\\r\\n\]\/g/, 'a crafted organisation name must not restructure the header');
 });
 
