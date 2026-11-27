@@ -85,10 +85,10 @@ check('every manage action verifies the signature and the business before touchi
     }
     const cancel = src.slice(src.indexOf('async function cancelSubmit'), src.indexOf('async function moveSubmit'));
     assert.ok(cancel.indexOf('customerCanChange(') < cancel.indexOf('customerCancel('));
-    assert.ok(cancel.includes("emailCustomer(done, 'cancelled_by_you'") && cancel.includes("announceCustomerChange(b.db, 'cancelled'"));
+    assert.ok(cancel.includes("emailCustomer(b.db, done, 'cancelled_by_you'") && cancel.includes("announceCustomerChange(b.db, 'cancelled'"));
     const move = src.slice(src.indexOf('async function moveSubmit'));
     assert.ok(move.includes('replaceBookingId: old.id') && move.includes('customerEmail: old.customerEmail'), 'the booking\'s own details — nothing retyped');
-    assert.ok(move.includes("announceCustomerChange(b.db, 'moved', made.booking, ctx, old)"));
+    assert.ok(move.includes("announceCustomerChange(b.db, 'moved', made.booking, ctx, old, bookingEmailLine(told,"));
     assert.ok(src.includes("<button class=\"btn\" type=\"submit\">Yes, cancel it</button>"), 'cancelling asks first');
 });
 
@@ -98,7 +98,7 @@ check('reminder: confirmed, within 24 hours, booked more than a day ahead, claim
     const fn = read('netlify/functions/send-booking-reminders.ts');
     assert.ok(fn.includes("eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt)"));
     assert.ok(fn.includes("sql`${bookings.createdAt} < ${bookings.startsAt} - interval '24 hours'`"));
-    const send = fn.indexOf("emailCustomer(withLink, 'reminder'");
+    const send = fn.indexOf("emailCustomer(db, withLink, 'reminder'");
     assert.ok(send > -1 && fn.indexOf('.set({ reminderSentAt: new Date() })') < send, 'claimed first: two runs cannot both send');
     assert.ok(fn.indexOf('.set({ reminderSentAt: new Date() })') < fn.indexOf('ensureMeetingLink(db, b as BookingRow)'), 'and before any Teams / Meet link is made');
     assert.ok(read('netlify.toml').includes('[functions.send-booking-reminders]\n  schedule = "20 * * * *"'));

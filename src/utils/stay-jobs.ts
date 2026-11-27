@@ -23,7 +23,8 @@ import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { bookings, organisations, sites, stayTypes } from '../../db/schema';
 import { addDays, formatDate, formatTime } from './booking-time';
-import { describeBooking, fromLine, ownerOf, type BookingRow } from './bookings';
+import { describeBooking, ownerOf, type BookingRow } from './bookings';
+import { sendBusinessEmail, type BusinessEmailResult } from './business-email';
 import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { esc, BOOK_PATH } from './site-render';
@@ -61,8 +62,9 @@ async function tellOwner(db: Db, b: BookingRow, who: Who, change: string, next: 
     }
 }
 
-const guestEmail = (b: BookingRow, who: Who, subject: string, html: string) => sendEmail({ to: b.customerEmail, from: fromLine(who.business), subject, html })
-    .catch((err: unknown) => console.error('[stay-jobs] guest email failed', err instanceof Error ? err.message : err));
+/** A guest email, ONLY from the owner's own address (business-email.ts; owner 2026-11-27). Never throws. */
+const guestEmail = (db: Db, b: BookingRow, who: Who, subject: string, html: string): Promise<BusinessEmailResult> =>
+    sendBusinessEmail(db, b.organisationId, { business: who.business, to: b.customerEmail, subject, html });
 
 /** The email with the pay link (first ask, reminder, or after a card failed). */
 export function payLinkEmail(b: BookingRow, who: Who, kind: 'first' | 'reminder' | 'card_failed'): { subject: string; html: string } {
@@ -102,14 +104,14 @@ export async function collectDueBalances(db: Db, now: Date): Promise<number> {
             const r = await chargeBalanceOffSession(db, b);
             if (r.ok) {
                 const c = balanceCharge(b);
-                await guestEmail(r.booking, who, `Balance paid — ${who.business}`,
+                await guestEmail(db, r.booking, who, `Balance paid — ${who.business}`,
                     `<p>Hi ${esc(b.customerName)},</p><p>We've taken your remaining balance of <strong>${esc(m(c.balance))}</strong> for <strong>${esc(what)}</strong>, ${esc(when)}, from your card${c.damage ? `, with the refundable damage deposit of ${esc(m(c.damage))}` : ''}. You're all paid up — thank you.</p>`);
                 done++;
                 continue;
             }
             await db.update(bookings).set({ balanceStatus: 'failed' }).where(eq(bookings.id, b.id));
             const mail = payLinkEmail(b, who, 'card_failed');
-            await guestEmail(b, who, mail.subject, mail.html);
+            await guestEmail(db, b, who, mail.subject, mail.html);
             await tellOwner(db, b, who, `couldn't be charged the ${m(b.balancePence ?? 0)} balance for ${when}`,
                 'We emailed them a link to pay. Get in touch with them if it stays unpaid.',
                 `<p>We couldn't take the <strong>${esc(m(b.balancePence ?? 0))}</strong> balance for <strong>${esc(what)}</strong>, ${esc(when)}, from <strong>${esc(b.customerName)}</strong>'s card (${esc(r.reason)}).</p><p>We've emailed them a link to pay. Reply to this email to write to them.</p>`,
@@ -118,7 +120,9 @@ export async function collectDueBalances(db: Db, now: Date): Promise<number> {
             continue;
         }
         const mail = payLinkEmail(b, who, 'first');
-        await guestEmail(b, who, mail.subject, mail.html);
+        // Not sent (no own address yet): released, so the pay link goes on a later run — and the 3-day reminder
+        // counts from when it really went.
+        if (await guestEmail(db, b, who, mail.subject, mail.html) !== 'sent') { await db.update(bookings).set({ balanceRequestedAt: null }).where(eq(bookings.id, b.id)); continue; }
         done++;
     }
     return done;
@@ -141,7 +145,7 @@ export async function chaseUnpaidBalances(db: Db, now: Date): Promise<number> {
             const [b] = await db.update(bookings).set({ balanceRemindedAt: now }).where(and(eq(bookings.id, b0.id), isNull(bookings.balanceRemindedAt))).returning();
             if (!b) continue;
             const mail = payLinkEmail(b, who, 'reminder');
-            await guestEmail(b, who, mail.subject, mail.html);
+            await guestEmail(db, b, who, mail.subject, mail.html);
             done++;
         } else if (b0.balanceRequestedAt && b0.balanceRequestedAt <= sixDays) {
             const [b] = await db.update(bookings).set({ balanceOwnerToldAt: now }).where(and(eq(bookings.id, b0.id), isNull(bookings.balanceOwnerToldAt))).returning();
@@ -191,9 +195,10 @@ export async function sendArrivalDetails(db: Db, now: Date): Promise<number> {
         const who = await whoFor(db, b);
         const owner = await ownerOf(db, who.assistantId);
         const mail = arrivalEmail(b, stay, who.business);
-        await sendEmail({ to: b.customerEmail, from: fromLine(who.business), ...(owner?.email ? { replyTo: owner.email } : {}), subject: mail.subject, html: mail.html })
-            .catch((err: unknown) => console.error('[stay-jobs] arrival email failed', err instanceof Error ? err.message : err));
-        sent++;
+        // Own address only (never "via Be More Swan"). Not sent → the claim is released, so it goes on a later run once
+        // the owner has an address (until they arrive); the Bookings tab says why.
+        if (await sendBusinessEmail(db, b.organisationId, { business: who.business, to: b.customerEmail, replyTo: owner?.email ?? null, subject: mail.subject, html: mail.html }) === 'sent') sent++;
+        else await db.update(bookings).set({ reminderSentAt: null }).where(eq(bookings.id, b.id));
     }
     return sent;
 }
@@ -231,14 +236,14 @@ export async function returnDueDamageDeposits(db: Db, now: Date): Promise<number
         const r = await settleDamageDeposit(db, b, 0, null);
         if (r === 'none') continue;
         const who = await whoFor(db, b);
-        await damageEmail(b, who, r === 'returned' ? 0 : null, null);
+        await damageEmail(db, b, who, r === 'returned' ? 0 : null, null);
         done++;
     }
     return done;
 }
 
 /** The guest hears what happened to their damage deposit. `keep` null = the refund failed (the business will sort it). */
-export async function damageEmail(b: BookingRow, who: Who, keep: number | null, reason: string | null): Promise<void> {
+export async function damageEmail(db: Db, b: BookingRow, who: Who, keep: number | null, reason: string | null): Promise<void> {
     const { what } = describeBooking(b, 'UTC');
     const held = b.damageDepositPence ?? 0;
     const m = (n: number) => formatMoney(n, b.currency || 'GBP');
@@ -247,7 +252,7 @@ export async function damageEmail(b: BookingRow, who: Who, keep: number | null, 
         : keep === 0
             ? `<p>Hi ${esc(b.customerName)},</p><p>Thanks for staying at ${esc(what)}. Your <strong>${esc(m(held))}</strong> damage deposit is on its way back to your card — it usually arrives within 5–10 days.</p>`
             : `<p>Hi ${esc(b.customerName)},</p><p>Thanks for staying at ${esc(what)}. We've returned <strong>${esc(m(held - keep))}</strong> of your ${esc(m(held))} damage deposit to your card, and kept <strong>${esc(m(keep))}</strong>.</p><p><strong>Why:</strong> ${esc(reason || '')}</p><p>If you'd like to talk about it, reply to this email.</p>`;
-    await guestEmail(b, who, keep && keep > 0 ? `About your damage deposit — ${who.business}` : `Your damage deposit is on its way back — ${who.business}`, html);
+    await guestEmail(db, b, who, keep && keep > 0 ? `About your damage deposit — ${who.business}` : `Your damage deposit is on its way back — ${who.business}`, html);
 }
 
 /** Everything above, for the hourly run. Each part's failure is logged and never stops the others. */

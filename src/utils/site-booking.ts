@@ -11,6 +11,7 @@
 // (services, hours, rules) — the query string only says which of those were chosen, and each choice
 // is checked again before it is used.
 
+import { bookingEmailLine } from './business-email';
 import type { getDb } from '../../db/client';
 import type { BookingProps, BookingSectionKind, Section, SiteDefinition } from './site-definition';
 import { BOOK_PATH, BOOKING_PAGE_PATH, esc, FORM_SENT_PATH, renderSiteShell, sessionLink, type RenderContext } from './site-render';
@@ -365,8 +366,8 @@ async function cancelSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage
     if (done && done.paymentStatus === 'paid') done.paymentStatus = await refundDeposit(b.db, done) === 'refunded' ? 'refunded' : 'refund_failed';
     if (done) {
         const ctx = noticeCtx(b, setup);
-        await emailCustomer(done, 'cancelled_by_you', ctx, null);
-        await announceCustomerChange(b.db, 'cancelled', done, ctx).catch((err) => console.error('[site-booking] cancel notice failed', err));
+        const told = await emailCustomer(b.db, done, 'cancelled_by_you', ctx, null);
+        await announceCustomerChange(b.db, 'cancelled', done, ctx, undefined, bookingEmailLine(told, 'cancellation')).catch((err) => console.error('[site-booking] cancel notice failed', err));
         // A class place freed up: offer it to the waitlist.
         const cls = sectionForKind(b.def, 'class');
         if (done.sessionId && cls) await offerFreedPlaces(b.db, b.site.organisationId, done.sessionId, { business: b.def.settings.siteName, siteOrigin: b.ctx.origin, bookPath: (id) => sessionLink(cls, id) });
@@ -399,7 +400,7 @@ async function moveSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> 
     const ctx = noticeCtx(b, setup);
     // A move confirmed at once: the new booking gets its own Teams / Meet link before the email.
     if (made.booking.status === 'confirmed') made.booking = await ensureMeetingLink(b.db, made.booking);
-    await emailCustomer(made.booking, made.booking.status === 'confirmed' ? 'confirmed' : 'received', ctx, null);
-    await announceCustomerChange(b.db, 'moved', made.booking, ctx, old).catch((err) => console.error('[site-booking] move notice failed', err));
+    const told = await emailCustomer(b.db, made.booking, made.booking.status === 'confirmed' ? 'confirmed' : 'received', ctx, null);
+    await announceCustomerChange(b.db, 'moved', made.booking, ctx, old, bookingEmailLine(told, made.booking.status === 'confirmed' ? 'confirmation' : 'request receipt')).catch((err) => console.error('[site-booking] move notice failed', err));
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=${made.booking.status === 'confirmed' ? 'moved' : 'pending'}&b=${encodeURIComponent(found.pagePath)}` };
 }
