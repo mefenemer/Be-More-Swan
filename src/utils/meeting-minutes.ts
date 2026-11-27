@@ -150,17 +150,46 @@ export function actionItemLines(tasks: readonly { description: string; assignee:
  */
 export function withActionItems(body: string, tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
     if (!tasks.length) return body;
-    let replaced = false;
-    // Sentence by sentence (a sentence never crosses a line break): the first deferring sentence becomes the list, any
-    // later one is dropped (the list is already there).
-    const out = body.replace(/[^.!?\n]+[.!?]?/g, (sentence) => {
-        if (!defersActionItems(sentence)) return sentence;
-        if (replaced) return '';
-        replaced = true;
-        const lead = sentence.match(/^\s*/)?.[0] ?? '';
-        return `${lead}Action items:\n${actionItemLines(tasks)}`;
-    });
-    return out;
+    // Already in the email (each task's opening words appear): a put-off sentence is only dropped, never a second list.
+    const lower = body.toLowerCase();
+    const alreadyListed = tasks.every((t) => lower.includes(t.description.toLowerCase().slice(0, 40)));
+    let inserted = false;
+    const out: string[] = [];
+    for (const line of body.split('\n')) {
+        const parts = sentencesOf(line);
+        const keep = parts.filter((p) => !defersActionItems(p));
+        if (keep.length === parts.length) { out.push(line); continue; }
+        // The rest of the line stays as it was; the list goes on its own lines after it (review of #938, round 2).
+        const rest = keep.join(' ').trim();
+        if (rest) out.push(rest);
+        if (!inserted && !alreadyListed) {
+            out.push('Action items:', ...actionItemLines(tasks).split('\n'));
+            inserted = true;
+        }
+    }
+    return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * One line's sentences. A sentence ends at . ! or ? followed by the end of the line or a space and a capital letter, so
+ * "e.g. by Friday" stays one sentence. Pure.
+ */
+function sentencesOf(line: string): string[] {
+    const out: string[] = [];
+    let start = 0;
+    for (let i = 0; i < line.length; i++) {
+        if (!'.!?'.includes(line[i])) continue;
+        let j = i + 1;
+        while (j < line.length && '.!?'.includes(line[j])) j++;
+        const after = line.slice(j);
+        if (!after.trim() || /^\s+[A-Z0-9"'“(•\-]/.test(after)) {
+            out.push(line.slice(start, j).trim());
+            start = j;
+            i = j - 1;
+        }
+    }
+    if (line.slice(start).trim()) out.push(line.slice(start).trim());
+    return out.length ? out : [line];
 }
 
 /**

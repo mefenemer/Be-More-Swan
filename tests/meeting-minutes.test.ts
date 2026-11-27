@@ -136,6 +136,14 @@ assert.ok(form.includes('nothing is sent until you approve'));
     const twiceFixed = withActionItems(twice, tasks);
     assert.equal((twiceFixed.match(/Action items:/g) || []).length, 1, 'the first deferring sentence becomes the list');
     assert.ok(!/separately|shared later/.test(twiceFixed), 'a later deferring sentence is dropped');
+    // Review of #938 round 2: the next sentence never lands on a bullet; "e.g." doesn't split a sentence; no second list.
+    const mid = withActionItems('Thanks all. Action items will be shared later. See you soon.', tasks);
+    assert.equal(mid, 'Thanks all. See you soon.\nAction items:\n• Review the note-taker introduction wording (owner to be agreed)');
+    const eg = withActionItems('Action items will be sent separately, e.g. by Friday.\n\nThanks', tasks);
+    assert.ok(!/g\. by Friday|separately/.test(eg) && eg.startsWith('Action items:\n• Review'), eg);
+    const both = 'Hi,\n\n• Review the note-taker introduction wording (owner to be agreed)\n\nAction items will be shared separately once confirmed.\n\nThanks';
+    const bothFixed = withActionItems(both, tasks);
+    assert.ok(!/Action items:/.test(bothFixed) && !/separately/.test(bothFixed), 'already listed: the put-off sentence is only dropped');
     const card = normaliseMinutesCard({ type: 'action_item_assignment', meetingSummary: 'x', tasks, followupEmail: { subject: 'S', body } });
     assert.ok(card!.followupEmail!.body.includes('• Review the note-taker introduction wording'), 'applied when the card is cleaned (chat and bot both)');
 }
