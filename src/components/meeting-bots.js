@@ -27,6 +27,8 @@
     cancelled_by_user: 'You cancelled it.',
     assistant_or_workspace_removed: 'The assistant was archived.',
     not_sent: 'It couldn’t reach the meeting service.',
+    // Zoom (OBF): the bot is let in only while the person who connected Zoom is in the call.
+    zoom_obf_user_not_in_meeting: 'The person who connected Zoom wasn’t in the call, so Zoom didn’t let it in.',
   };
   /** A finished call whose minutes didn't reach the Inbox says why (staging test 2026-11-21: it used to vanish). */
   const WRITE_UP_WORDS = {
@@ -208,6 +210,44 @@
     return `Uses ${perFive(w)}. Nothing if it isn’t let in.`;
   }
 
+  /**
+   * The Zoom line in the dialog, only while Zoom is switched on for the workspace (GET `zoom`). Pure (tests read it
+   * through window.MeetingBots._zoomHtml). Zoom lets the bot in on behalf of the connected account, who must be in the call.
+   */
+  function zoomHtml(zoom, assistantId) {
+    if (!zoom) return '';
+    if (zoom.connected) {
+      const who = zoom.accountName ? esc(zoom.accountName) : 'the Zoom account you connected';
+      return `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" data-mb-zoom="connected">
+        <p><strong>Zoom:</strong> connected as ${who}. For a Zoom call, ${who} must be in the call: Zoom lets the Note Taker in on that account’s behalf.</p>
+        <button type="button" data-mb-zoom-disconnect style="min-height:44px" class="mt-1 btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Disconnect Zoom</button>
+      </div>`;
+    }
+    const href = `/api/oauth/zoom/connect?assistantId=${encodeURIComponent(assistantId)}&returnTo=inbox`;
+    return `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" data-mb-zoom="not_connected">
+      <p><strong>Zoom calls:</strong> connect Zoom first. Zoom lets the Note Taker in on behalf of the account you connect, and that person must be in the call.</p>
+      <a href="${href}" style="min-height:44px" class="mt-1 btn-primary inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-lg">Connect Zoom</a>
+    </div>`;
+  }
+
+  async function disconnectZoom() {
+    const ok = await (window.confirmModal
+      ? window.confirmModal('The Note Taker won’t be able to join Zoom calls until you connect Zoom again. Google Meet and Teams calls aren’t affected.',
+          { title: 'Disconnect Zoom?', confirmLabel: 'Yes, disconnect', cancelLabel: 'Keep it connected' })
+      : Promise.resolve(window.confirm('Disconnect Zoom?')));
+    if (!ok) return false;
+    try {
+      const res = await fetch('/api/oauth/zoom/disconnect', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not disconnect Zoom.');
+      window.showToast?.('Zoom disconnected.', { icon: '🔌' });
+      return true;
+    } catch (err) {
+      window.showToast?.(err.message, { icon: '⚠️' });
+      return false;
+    }
+  }
+
   function openDialog() {
     const d = st.data || {};
     const name = st.assistantName || 'Your Note Taker';
@@ -235,8 +275,9 @@
             <input name="meetingUrl" type="url" inputmode="url" autocomplete="off" required maxlength="500"
               placeholder="https://meet.google.com/abc-defg-hij"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">
-            <span class="block text-xs text-gray-500 mt-1">Google Meet or Microsoft Teams. Copy it from the meeting invite.</span>
+            <span class="block text-xs text-gray-500 mt-1">${d.zoom ? 'Google Meet, Microsoft Teams or Zoom' : 'Google Meet or Microsoft Teams'}. Copy it from the meeting invite.</span>
           </label>
+          ${zoomHtml(d.zoom, st.assistantId)}
           <label class="block">
             <span class="block text-sm font-bold text-gray-700 mb-1">Name <span class="font-normal text-gray-500">(optional)</span></span>
             <input name="title" type="text" maxlength="200" placeholder="Weekly team call"
@@ -282,6 +323,10 @@
       status.textContent = msg;
       status.className = `block text-sm font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
     };
+    const zoomOff = overlay.querySelector('[data-mb-zoom-disconnect]');
+    if (zoomOff) zoomOff.addEventListener('click', async () => {
+      if (await disconnectZoom()) { busy = false; close(); refresh(); }
+    });
     form.querySelectorAll('input[name="when"]').forEach((r) => r.addEventListener('change', () => {
       form.elements.joinAt.disabled = form.elements.when.value !== 'later';
       if (!form.elements.joinAt.disabled) form.elements.joinAt.focus();
@@ -329,5 +374,5 @@
     form.elements.meetingUrl.focus();
   }
 
-  window.MeetingBots = { mount, unmount, openDialog, refresh, _rowHtml: rowHtml, _stripHtml: stripHtml, _visibleBots: visibleBots, _costWords: costWords };
+  window.MeetingBots = { mount, unmount, openDialog, refresh, _rowHtml: rowHtml, _stripHtml: stripHtml, _visibleBots: visibleBots, _costWords: costWords, _zoomHtml: zoomHtml };
 })();

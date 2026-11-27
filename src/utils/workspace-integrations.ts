@@ -28,9 +28,9 @@ import { singleFlight } from './single-flight';
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'outlook_calendar' | 'google_calendar' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva' | 'google_meet';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'outlook_calendar' | 'google_calendar' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva' | 'google_meet' | 'zoom';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'outlook_calendar', 'google_calendar', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva', 'google_meet'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'outlook_calendar', 'google_calendar', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva', 'google_meet', 'zoom'];
 
 /**
  * Providers that carry an offline refresh token and are renewed silently by
@@ -45,7 +45,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 
  */
 export const AUTO_REFRESH_PROVIDERS: ReadonlySet<IntegrationProvider> = new Set<IntegrationProvider>([
     'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook', 'outlook_calendar', 'google_calendar',
-    'threads', 'tiktok', 'youtube', 'searchconsole', 'jira', 'asana', 'canva', 'google_meet',
+    'threads', 'tiktok', 'youtube', 'searchconsole', 'jira', 'asana', 'canva', 'google_meet', 'zoom',
 ]);
 
 /** True if the service silently auto-refreshes its access token (see AUTO_REFRESH_PROVIDERS). */
@@ -392,6 +392,20 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
+    if (provider === 'zoom') {
+        // The Note Taker's bot on Zoom (src/utils/zoom-bot.ts): OBF tokens are minted with this access token.
+        const credentials = Buffer.from(`${process.env.ZOOM_CLIENT_ID ?? ''}:${process.env.ZOOM_CLIENT_SECRET ?? ''}`).toString('base64');
+        const res = await fetch('https://zoom.us/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Zoom token refresh was rejected.', 401);
+        // Zoom issues a new refresh token on every refresh and the old one stops working: always persist it.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
     if (provider === 'google_meet') {
         // The Note Taker reading Meet transcripts (src/utils/meeting-sources/google-meet.ts). Same scope as authorize.
         const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -650,6 +664,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     asana: 'Asana',
     canva: 'Canva',
     google_meet: 'Google Meet',
+    zoom: 'Zoom',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

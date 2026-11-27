@@ -98,9 +98,10 @@ person approves.
    the start of this phase.
 3. **Teams (4–5 days plus publisher verification):** a new Microsoft scope consent, calendar → join link → meeting id →
    transcript .vtt, organiser-only. Help text for the admin-consent step.
-4. **Zoom (restarted 2026-11-27, own session):** Phase 0 script ready (scratchpad `zoom-phase0.mjs`, copy in the
-   session notes folder); review answers drafted in `docs/zoom-marketplace-review-pack.md`, which also proposes ONE Zoom
-   app for pick-up AND the bot's OBF (`user:read:token` + Meeting SDK), one review. Original plan:
+4. **Zoom: NOT BUILT (owner, 27 Nov 2026: bot only).** The Note Taker's bot covers Zoom once our Zoom app is
+   approved (OBF), so pick-up adds only a cheaper, bot-free route for paid accounts that record to the cloud. If
+   customers ask for it, add the four `cloud_recording`/`user:read:user` scopes below to the SAME Zoom app in a later
+   version. The bot's app and review: `docs/zoom-marketplace-review-pack.md`. Original plan:
    **Zoom (4–5 days plus Marketplace review):** a new Zoom app (General app, user-managed OAuth), the scopes, listing
    recordings and transcripts, and the Marketplace listing with a test plan. **Start the Zoom app and the review in
    Phase 1** so the wait overlaps.

@@ -117,7 +117,8 @@ await test('the dialog\'s cost line quotes the live weight (B3), and says nothin
 
 await test('the dialog: Meet and Teams only, the consent reminder, the DPA notice, and one send action with source link', () => {
     const src = read('src/components/meeting-bots.js');
-    assert.match(src, /Google Meet or Microsoft Teams\. Copy it from the meeting invite\./);
+    // Zoom joins the list only while meeting_bot_zoom is on (tests/zoom-bot.test.ts).
+    assert.match(src, /d\.zoom \? 'Google Meet, Microsoft Teams or Zoom' : 'Google Meet or Microsoft Teams'\}\. Copy it from the meeting invite\./);
     assert.match(src, /Tell everyone in the meeting<\/strong> that the Note Taker is recording\. In some places you need their consent\./);
     assert.match(src, /accept the updated Data Processing Agreement \(version 1\.2\)/);
     assert.ok(src.includes("action: 'send', assistantId: st.assistantId") && src.includes("source: 'link'"));
