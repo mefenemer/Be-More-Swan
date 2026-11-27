@@ -13,6 +13,7 @@
 // say at the time". Deleting the form to tidy up a settings page would quietly cut the one link
 // between a subscriber and the wording they agreed to.
 
+import { signupConfirmBlocked } from '../../src/utils/business-email';
 import { HandlerEvent } from '@netlify/functions';
 import { randomBytes } from 'crypto';
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
@@ -163,7 +164,11 @@ export default withLambda(async (event: HandlerEvent) => {
                 console.error('[audience-forms] quiz result counts unavailable', err);
             }
             // Every form carries a definition, whatever era it was saved in, so the builder has one shape.
+            // A form that asks people to confirm by email, with no own address to send it from (business-email.ts).
+            const confirmBlocked = forms.some((f) => (f.definition ? normaliseFormDefinition(f.definition).definition.audience.doubleOptIn : f.doubleOptIn) || (f.definition ? !!normaliseFormDefinition(f.definition).definition.reward : false))
+                ? await signupConfirmBlocked(db, ctx.organisationId) : null;
             return json(200, {
+                confirmBlocked,
                 forms: forms.map((f) => ({
                     ...f,
                     definition: f.definition ? normaliseFormDefinition(f.definition).definition : legacyToDefinition(f),

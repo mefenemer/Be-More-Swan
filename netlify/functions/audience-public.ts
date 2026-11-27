@@ -20,6 +20,7 @@
 // body, and so do the honeypot and timing rejections — a bot that can tell it was caught is a bot
 // that adapts.
 
+import { signupConfirmBlocked } from '../../src/utils/business-email';
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -551,6 +552,13 @@ export default withLambda(async (event: HandlerEvent) => {
     // the most tracking parameters. 2000 is the practical URL ceiling browsers agree on.
     const pageUrl = String(body.url || '').slice(0, 2000) || null;
 
+    // A form that emails the visitor — to confirm, or with its free download — needs the business's own address to send
+    // from (owner 2026-11-27): without one, refuse BEFORE writing anything, so no unconfirmable "pending" contact is
+    // left behind and no success message promises an email that can't come (review #919).
+    if ((form.doubleOptIn || !!resolveDefinition(form).reward) && await signupConfirmBlocked(db, orgId)) {
+        return json(503, { error: 'This sign-up form can\'t send its confirmation email right now. Please try again later.' }, origin);
+    }
+
     try {
         const [existing] = await db
             .select({ id: audienceContacts.id, status: audienceContacts.status })
@@ -750,7 +758,7 @@ export default withLambda(async (event: HandlerEvent) => {
         }
 
         try {
-            await sendConfirmationEmail({
+            await sendConfirmationEmail(db, orgId, {
                 to: email,
                 firstName: cleanName(answers.contact.first_name),
                 senderName: form.senderName || 'the sender',
