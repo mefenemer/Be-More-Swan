@@ -13,7 +13,10 @@ Recall can't do this for us. Every bot vendor needs the customer's own app appro
 Our development credentials only reach meetings on Be More Swan's own Zoom account, which is enough for testing and
 the demo video, but not for customers.
 
-**What's built (PR to staging, flag `meeting_bot_zoom` OFF):**
+**✅ Phase 0 passed on staging, 27 Nov 2026:** the bot joined a Zoom meeting hosted by hello@bemoreswan.com through
+our token URL, the minutes were written (record 931) and Recall's media was deleted. The app is created (§1, done).
+
+**What's built (#935, merged to staging; flag `meeting_bot_zoom` OFF on prod):**
 - **Connect Zoom** in the "Send to a call" dialog: `oauth-integrations.ts`, provider `zoom`.
 - **The signed OBF token URL** Recall calls as the bot joins: `zoom-obf-token.ts`. Each bot's Recall request carries
   `zoom.obf_token_url`.
@@ -29,16 +32,18 @@ Nothing is submitted yet.
 2. Name: **Be More Swan Note Taker**. Company: Be More Swan Ltd.
 3. **OAuth redirect URLs**, also on the allow list:
    - `https://staging--bemoreswan.netlify.app/api/oauth/zoom/callback`
-   - `https://bemoreswan.com/api/oauth/zoom/callback` (⚠️ confirm the prod host before submitting)
+   - `https://bemoreswan.com/api/oauth/zoom/callback` (set on the Production tab, strict mode)
 4. **Scopes:** `user:read:token` (mint the OBF token) and `user:read:user` (show which account is connected, and match
    a deauthorization to the right connection).
-5. **Features → Embed → Meeting SDK: on.** ⚠️ To confirm with Recall: whether Recall needs this app's Meeting SDK
-   credentials uploaded on their side (see §8).
-6. **Features → Access → Event subscription / deauthorization:** endpoint
-   `https://bemoreswan.com/.netlify/functions/zoom-deauthorize` (staging: the `staging--` host). Copy the
-   **Secret Token**.
+5. **Features → Embed → Meeting SDK: on**, with "Are you developing a meeting bot or AI notetaker use case?" ON (OBF
+   only, no ZAK) and "Request anonymous join exception" OFF. Recall needed nothing uploaded (Phase 0).
+6. **Uninstall notice:** Zoom's event list has NO "app deauthorized" event for General apps. It is the **Production tab →
+   Basic information → Deauthorization URL** box (the Development tab has none, so it can't be tested on staging):
+   `https://bemoreswan.com/.netlify/functions/zoom-deauthorize`, filled in once #935 is live on prod. The **Secret
+   Token** is on Features → Access.
 7. **Netlify (the owner pastes these; Claude never types them):**
-   - `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET`: Development first, Production after approval.
+   - `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET`: the Development keys on branch:staging, the Production-tab keys on
+     production (both set 27 Nov 2026).
    - `ZOOM_WEBHOOK_SECRET_TOKEN`: the secret token from step 6.
 
    The OBF token URL is signed with the client secret under its own label, so no extra secret is needed.
@@ -65,7 +70,7 @@ Development credentials reach only meetings on Be More Swan's own Zoom account, 
 - **Short description (≤ 100 characters):** Your Note Taker joins your Zoom call, then writes the minutes for you to approve.
 - **Long description:**
   > Be More Swan's Note Taker writes up your meetings for you. Paste your Zoom meeting link into Be More Swan and the
-  > Note Taker joins the call as a participant called "<your business> Note Taker". It shows a tile saying it is taking
+  > Note Taker joins the call as a participant called "Note Taker for <your business>". It shows a tile saying it is taking
   > notes and posts a message in the chat so everyone knows it is there. After the call it writes the minutes: a
   > summary, the decisions, and each action item with its owner. The minutes wait in your Be More Swan Inbox until you
   > approve them. Nothing is posted, emailed or shared before you approve it.
@@ -132,7 +137,7 @@ We don't read recordings, chat history, contacts, calendars or meetings the user
      used.
    - Press **Send the Note Taker**.
    - **The person who connected Zoom must be in the call**, or Zoom won't let the Note Taker in.
-3. **In the call:** the Note Taker shows up as "<business> Note Taker" with a tile, and posts a message in the chat.
+3. **In the call:** the Note Taker shows up as "Note Taker for <business>" with a tile, and posts a message in the chat.
    Tell everyone it is recording.
 4. **After the call:** the minutes appear in your Inbox for you to approve.
 5. **Remove:** Send to a call → **Disconnect Zoom**, or in Zoom: App Marketplace → Manage → Added apps → Remove.
@@ -153,7 +158,10 @@ We don't read recordings, chat history, contacts, calendars or meetings the user
   7. Remove the app in the Zoom Marketplace. Reopen Send to a call: it says Connect Zoom again.
 - **Demo video (≤ 5 min):** the same steps on our own account, showing the consent screen and each scope in use.
 
-## 8. Questions for Recall (send before Phase 0)
+## 8. Questions for Recall (sent 27 Nov 2026)
+
+Phase 0 answered 1 and 2 in practice: nothing was uploaded and no flag was needed; the bot joined with our token. 3 is
+still open (it only affects how we answer a failed request).
 
 1. For OBF, does Recall need **our** Zoom app's Meeting SDK client id and secret uploaded (dashboard or the Zoom
    OAuth app API), or does Recall's own SDK app accept OBF tokens minted by our app?
@@ -162,9 +170,9 @@ We don't read recordings, chat history, contacts, calendars or meetings the user
 
 ## 9. Before submitting (checklist)
 
-- [ ] Recall's answers to §8; Meeting SDK credentials set up wherever they need to go
-- [ ] App created (§1); env vars in Netlify (staging); flag SQL on both databases; flag on for org 58
-- [ ] Phase 0 (§2) passed: bot joined a call on our own account through the token URL; minutes written
+- [x] Recall's §8 questions sent; 1 and 2 answered by Phase 0 (nothing to upload)
+- [x] App created (§1); env vars in Netlify (staging + prod); flag SQL on both databases; flag on for org 58 (staging)
+- [x] Phase 0 (§2) passed: bot joined a call on our own account through the token URL; minutes written (record 931)
 - [ ] The "not in the call" failure shows its reason in the strip
 - [ ] Prod redirect URL and deauthorization endpoint set; Production credentials in Netlify after approval
 - [ ] Reviewer login on and dated; screenshots and demo video recorded

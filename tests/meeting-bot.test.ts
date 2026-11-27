@@ -60,7 +60,9 @@ await test('the bot\'s name and join notice name the business, and the notice fi
     assert.equal(botName(''), 'Note Taker for this business');
     assert.ok(botName('x'.repeat(300)).length <= 100);
     const m = joinMessage('Marmalade Productions');
-    assert.match(m, /Marmalade Productions's Be More Swan Note Taker/);
+    assert.match(m, /^Hi, I'm the Note Taker for Marmalade Productions\./);
+    assert.doesNotMatch(m, /Productions's|'s Be More Swan/, 'never mixes the business and Be More Swan into one name (owner 2026-11-27)');
+    assert.match(m, /Want your own note taker\? Contact Be More Swan\. Privacy: bemoreswan\.com\/privacy\.html#note-taker$/, 'the Be More Swan line comes right before the privacy link');
     assert.match(m, /transcript/);
     assert.match(m, /I'm recording this call/, 'says recording, not just transcript (legal review 2026-11-25)');
     assert.match(m, /recording is deleted/);

@@ -78,7 +78,7 @@ meetingTitle names this meeting in the user's Meeting Notes library — derive i
 
 attendees lists every person the transcript shows was present or is named as an owner, as { name, email }. Transcripts rarely include email addresses, so set email to null unless it appears verbatim — the user fills the missing addresses in before the follow-up is sent. Return an empty array when no people are named.
 
-followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. Set followupEmail to null only when there is no meeting content yet.
+followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. List every task from tasks in the email, one line each, with its owner ("owner to be agreed" when Unassigned) and its due date when one was given. Never say action items will be shared separately, later or once confirmed: they belong in this email. When tasks is empty, say that no action items were agreed. Set followupEmail to null only when there is no meeting content yet.
 ${o.trailingBlock ? `\n${o.trailingBlock}\n` : ''}
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -122,6 +122,77 @@ const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /**
+ * Whether one sentence of the email puts the action items off ("…will be shared separately once confirmed", "We will share
+ * the action items later"): it names action items, says they WILL BE shared/sent/circulated (or we will share/send them),
+ * and says when ("separately", "later", "once confirmed"…). A line that lists items ("Action items: Sam to send the deck
+ * later") or introduces a list (ends with ":") is never one. Review of #938. Pure.
+ */
+function defersActionItems(sentence: string): boolean {
+    const s = sentence.trim();
+    if (!/\baction items?\b/i.test(s) || /\baction items?\s*:/i.test(s) || s.endsWith(':')) return false;
+    const willShare = /\b(?:will|shall|would|to|are to|is to)\s+be\s+(?:shared|sent|circulated|confirmed)\b|\b(?:will|we'll|i'll|shall|we will|i will)\s+(?:share|send|circulate)\b/i;
+    const when = /\b(?:separately|later|once (?:they are |they're |they have been )?confirmed|in due course|shortly|to follow|in a separate)\b/i;
+    return willShare.test(s) && when.test(s);
+}
+
+/** The tasks as the email's list: "• description (owner, due …)". Pure. */
+export function actionItemLines(tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
+    return tasks.map((t) => {
+        const owner = !t.assignee || /^unassigned$/i.test(t.assignee) ? 'owner to be agreed' : t.assignee;
+        return `• ${t.description} (${owner}${t.dueDate ? `, due ${t.dueDate}` : ''})`;
+    }).join('\n');
+}
+
+/**
+ * The follow-up email must carry the action items (owner, staging test 2026-11-27: "Action items were noted during the
+ * meeting and will be shared separately once confirmed" with one task on the card). When the model puts them off and the
+ * card has tasks, that sentence becomes the list. Anything else is left as written. Pure.
+ */
+export function withActionItems(body: string, tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
+    if (!tasks.length) return body;
+    // Already in the email (each task's opening words appear): a put-off sentence is only dropped, never a second list.
+    const lower = body.toLowerCase();
+    const alreadyListed = tasks.every((t) => lower.includes(t.description.toLowerCase().slice(0, 40)));
+    let inserted = false;
+    const out: string[] = [];
+    for (const line of body.split('\n')) {
+        const parts = sentencesOf(line);
+        const keep = parts.filter((p) => !defersActionItems(p));
+        if (keep.length === parts.length) { out.push(line); continue; }
+        // The rest of the line stays as it was; the list goes on its own lines after it (review of #938, round 2).
+        const rest = keep.join(' ').trim();
+        if (rest) out.push(rest);
+        if (!inserted && !alreadyListed) {
+            out.push('Action items:', ...actionItemLines(tasks).split('\n'));
+            inserted = true;
+        }
+    }
+    return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * One line's sentences. A sentence ends at . ! or ? followed by the end of the line or a space and a capital letter, so
+ * "e.g. by Friday" stays one sentence. Pure.
+ */
+function sentencesOf(line: string): string[] {
+    const out: string[] = [];
+    let start = 0;
+    for (let i = 0; i < line.length; i++) {
+        if (!'.!?'.includes(line[i])) continue;
+        let j = i + 1;
+        while (j < line.length && '.!?'.includes(line[j])) j++;
+        const after = line.slice(j);
+        if (!after.trim() || /^\s+[A-Z0-9"'“(•\-]/.test(after)) {
+            out.push(line.slice(start, j).trim());
+            start = j;
+            i = j - 1;
+        }
+    }
+    if (line.slice(start).trim()) out.push(line.slice(start).trim());
+    return out.length ? out : [line];
+}
+
+/**
  * The model's card, cleaned: lists are lists of text, attendees carry a real address or null, tasks
  * have a description. Other keys the chat stamps on later (recordId, hubLink) are added after this.
  * Null when it is not a minutes card, or nothing was extracted (the chat then shows its reply alone).
@@ -147,7 +218,7 @@ export function normaliseMinutesCard(ui: unknown): MinutesCard | null {
     }).slice(0, 100);
     const fe = u.followupEmail && typeof u.followupEmail === 'object' ? u.followupEmail as Record<string, unknown> : null;
     const followupEmail = fe && (str(fe.subject, 300) || str(fe.body, 10000))
-        ? { subject: str(fe.subject, 300), body: str(fe.body, 10000) } : null;
+        ? { subject: str(fe.subject, 300), body: withActionItems(str(fe.body, 10000), tasks) } : null;
     const card: MinutesCard = {
         type: 'action_item_assignment',
         meetingTitle: str(u.meetingTitle, 300) || null,

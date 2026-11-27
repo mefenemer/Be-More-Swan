@@ -6,7 +6,7 @@ import { ROUTES, hubRecordsFromUiElement } from '../netlify/functions/chat-orche
 import { meetingFormMessage } from '../netlify/functions/meeting-minutes';
 import {
     FORM_CHANNEL_BLOCK, MEETING_MINUTES_MAX_TOKENS, MEETING_MINUTES_MODEL, buildMeetingMinutesPrompt,
-    meetingDestinationLabel, meetingHubRecord, normaliseMinutesCard,
+    meetingDestinationLabel, meetingHubRecord, normaliseMinutesCard, withActionItems, actionItemLines,
 } from '../src/utils/meeting-minutes';
 
 const read = (f: string) => readFileSync(f, 'utf8');
@@ -111,5 +111,41 @@ assert.ok(read('workspace.html').includes('<script src="/src/components/meeting-
 const form = read('src/components/meeting-minutes-form.js');
 assert.ok(form.includes("fetch('/.netlify/functions/meeting-minutes'") && form.includes('window.MeetingMinutesForm = { open };'));
 assert.ok(form.includes('nothing is sent until you approve'));
+
+// The follow-up email lists the action items (owner, staging test 2026-11-27: it said they would be "shared separately").
+{
+    const prompt = buildMeetingMinutesPrompt({} as never);
+    assert.ok(prompt.includes('List every task from tasks in the email, one line each'), 'the prompt asks for the list');
+    assert.ok(prompt.includes('Never say action items will be shared separately, later or once confirmed'));
+    const tasks = [{ description: 'Review the note-taker introduction wording', assignee: 'Unassigned', dueDate: null }];
+    const body = 'Hello Catherine,\n\nThe main risk is name confusion.\n\nAction items were noted during the meeting and will be shared separately once confirmed.\n\nKind regards,\nMarmalade Productions';
+    const fixed = withActionItems(body, tasks);
+    assert.ok(!/shared separately/.test(fixed));
+    assert.ok(fixed.includes('Action items:\n• Review the note-taker introduction wording (owner to be agreed)\n\nKind regards'), fixed);
+    assert.equal(withActionItems(body, []), body, 'no tasks: the email is left alone');
+    const listed = 'Hello,\n\nActions: Sam to send the deck by Friday.\n\nThanks';
+    assert.equal(withActionItems(listed, tasks), listed, 'an email that already lists them is untouched');
+    assert.equal(actionItemLines([{ description: 'Send the deck', assignee: 'Sam', dueDate: 'Friday' }]), '• Send the deck (Sam, due Friday)');
+    // Review of #938: verb-first wording is caught; a list heading or a line that lists items is never rewritten.
+    assert.ok(withActionItems('Hi,\n\nWe will share the action items separately once confirmed.\n\nThanks', tasks).includes('Action items:\n• Review the note-taker'));
+    const heading = 'Hi,\n\nAction items (a fuller note will be sent later):\n• Sam to send the deck\n\nThanks';
+    assert.equal(withActionItems(heading, tasks), heading, 'a heading that introduces a list keeps its own list (no duplicates)');
+    const listsOne = 'Hi,\n\nAction items: Sam to follow up with the client later.\n\nThanks';
+    assert.equal(withActionItems(listsOne, tasks), listsOne, 'a line that lists an item is not replaced');
+    const twice = 'Action items will be shared later. Action items will be sent separately.';
+    const twiceFixed = withActionItems(twice, tasks);
+    assert.equal((twiceFixed.match(/Action items:/g) || []).length, 1, 'the first deferring sentence becomes the list');
+    assert.ok(!/separately|shared later/.test(twiceFixed), 'a later deferring sentence is dropped');
+    // Review of #938 round 2: the next sentence never lands on a bullet; "e.g." doesn't split a sentence; no second list.
+    const mid = withActionItems('Thanks all. Action items will be shared later. See you soon.', tasks);
+    assert.equal(mid, 'Thanks all. See you soon.\nAction items:\n• Review the note-taker introduction wording (owner to be agreed)');
+    const eg = withActionItems('Action items will be sent separately, e.g. by Friday.\n\nThanks', tasks);
+    assert.ok(!/g\. by Friday|separately/.test(eg) && eg.startsWith('Action items:\n• Review'), eg);
+    const both = 'Hi,\n\n• Review the note-taker introduction wording (owner to be agreed)\n\nAction items will be shared separately once confirmed.\n\nThanks';
+    const bothFixed = withActionItems(both, tasks);
+    assert.ok(!/Action items:/.test(bothFixed) && !/separately/.test(bothFixed), 'already listed: the put-off sentence is only dropped');
+    const card = normaliseMinutesCard({ type: 'action_item_assignment', meetingSummary: 'x', tasks, followupEmail: { subject: 'S', body } });
+    assert.ok(card!.followupEmail!.body.includes('• Review the note-taker introduction wording'), 'applied when the card is cleaned (chat and bot both)');
+}
 
 console.log('meeting-minutes: all checks passed');
