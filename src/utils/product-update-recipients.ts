@@ -135,18 +135,24 @@ export async function readAudience(db: Db, digestId: number): Promise<AudienceGr
     }
 }
 
+/** Is the raw-SQL column there? Asked first, so a missing column never aborts the approve transaction. */
+async function hasAudienceColumn(db: Db): Promise<boolean> {
+    const res: any = await db.execute(sql`SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'product_update_digests' AND column_name = 'audience'`);
+    const rows = Array.isArray(res) ? res : res?.rows ?? [];
+    return rows.length > 0;
+}
+
 /** Writes the choice while the email is still 'ready'. Everyone = NULL, and a database without the
- *  column can still approve for everyone (there is nothing narrower to remember). */
+ *  column can still approve for everyone (there is nothing narrower to remember). Approve runs this
+ *  in the SAME transaction as the ready → sending claim: the row lock it takes makes a second,
+ *  simultaneous approve wait, then find the email no longer 'ready' and change nothing. */
 export async function writeAudience(db: Db, digestId: number, audience: AudienceGroup[]): Promise<void> {
     const everyone = isEveryone(audience);
-    const value = everyone ? sql`NULL` : sql`ARRAY[${sql.join(audience.map(g => sql`${g}`), sql`, `)}]::text[]`;
-    try {
-        await db.execute(sql`UPDATE product_update_digests SET audience = ${value} WHERE id = ${digestId} AND status = 'ready'`);
-    } catch (err: any) {
-        if (err?.code === MISSING_COLUMN || err?.cause?.code === MISSING_COLUMN) {
-            if (everyone) return;
-            throw new AudienceError('Sending to only some groups needs db/z-product-update-audience.sql on this database first. Tick every group, or apply the SQL.');
-        }
-        throw err;
+    if (!(await hasAudienceColumn(db))) {
+        if (everyone) return;
+        throw new AudienceError('Sending to only some groups needs db/z-product-update-audience.sql on this database first. Tick every group, or apply the SQL.');
     }
+    const value = everyone ? sql`NULL` : sql`ARRAY[${sql.join(audience.map(g => sql`${g}`), sql`, `)}]::text[]`;
+    await db.execute(sql`UPDATE product_update_digests SET audience = ${value} WHERE id = ${digestId} AND status = 'ready'`);
 }

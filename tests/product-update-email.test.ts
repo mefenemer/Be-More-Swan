@@ -198,7 +198,8 @@ check('send to: groups are validated, de-duplicated, put in display order, and n
 check('send to: approve requires the groups and saves them BEFORE the claim; the worker walks that list', () => {
     const approve = API.slice(landmark(API, "resource === 'approve'"), landmark(API, "resource === 'resume'"));
     assert.ok(landmark(approve, 'normaliseAudience(') < landmark(approve, 'if (!claimed)'));
-    assert.ok(landmark(approve, 'await writeAudience(db, id, audience)') < landmark(approve, "status: 'sending'"));
+    assert.ok(landmark(approve, 'db.transaction(') < landmark(approve, 'await writeAudience(tx'), 'groups saved inside the claim transaction');
+    assert.ok(landmark(approve, 'await writeAudience(tx') < landmark(approve, "status: 'sending'"));
     assert.match(approve, /countRecipients\(db, audience\)/);
     assert.match(WORKER, /const audience = await readAudience\(db, digestId\);/);
     assert.match(WORKER, /recipientPage\(db, afterId, PAGE, audience\)/);

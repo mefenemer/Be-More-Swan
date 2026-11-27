@@ -208,9 +208,9 @@ export default withLambda(async (event) => {
         const images = await db.select({ id: productUpdateImages.id, width: productUpdateImages.width, height: productUpdateImages.height })
             .from(productUpdateImages).where(eq(productUpdateImages.digestId, id));
         const preview = renderProductUpdateEmail(digest, { baseUrl, firstName: admin.firstName });
-        const recipients = digest.status === 'ready' ? await countRecipients(db) : digest.recipientCount;
-        const groups = digest.status === 'ready' ? await countByGroup(db) : null;
         const audience = await readAudience(db, id);
+        const recipients = digest.status === 'ready' ? await countRecipients(db, audience) : digest.recipientCount;
+        const groups = digest.status === 'ready' ? await countByGroup(db) : null;
         const [progress] = await db.select({
             sent: sql<number>`count(*) filter (where ${productUpdateSends.status} = 'sent')::int`,
             failed: sql<number>`count(*) filter (where ${productUpdateSends.status} = 'failed')::int`,
@@ -270,21 +270,30 @@ export default withLambda(async (event) => {
     if (resource === 'approve' && method === 'POST') {
         if (digest.status !== 'ready') return json(409, { error: `This email is already ${digest.status}.` });
         // Who to send to is required — never a silent default — so the count the admin confirmed
-        // is the list the worker walks. It is saved BEFORE the claim; the worker reads it back.
+        // is the list the worker walks. Saved in the SAME transaction as the claim: a second approve
+        // at the same moment waits on the row lock, then finds it no longer 'ready' and changes nothing.
         let audience;
-        try {
-            audience = normaliseAudience(JSON.parse(event.body || '{}').audience);
-            await writeAudience(db, id, audience);
-        } catch (err) {
+        try { audience = normaliseAudience(JSON.parse(event.body || '{}').audience); }
+        catch (err) {
             if (err instanceof AudienceError || err instanceof SyntaxError) return json(400, { error: err.message });
             throw err;
         }
         const recipients = await countRecipients(db, audience);
         if (recipients === 0) return json(409, { error: 'There is nobody in the groups you ticked to send this to.' });
-        // The status change IS the lock: only one approve can move 'ready' → 'sending'.
-        const [claimed] = await db.update(productUpdateDigests).set({
-            status: 'sending', approvedBy: admin.id, approvedAt: new Date(), recipientCount: recipients, updatedAt: new Date(),
-        }).where(and(eq(productUpdateDigests.id, id), eq(productUpdateDigests.status, 'ready'))).returning({ id: productUpdateDigests.id });
+        let claimed;
+        try {
+            claimed = await db.transaction(async (tx) => {
+                await writeAudience(tx as unknown as typeof db, id, audience);
+                // The status change IS the lock: only one approve can move 'ready' → 'sending'.
+                const [row] = await tx.update(productUpdateDigests).set({
+                    status: 'sending', approvedBy: admin.id, approvedAt: new Date(), recipientCount: recipients, updatedAt: new Date(),
+                }).where(and(eq(productUpdateDigests.id, id), eq(productUpdateDigests.status, 'ready'))).returning({ id: productUpdateDigests.id });
+                return row;
+            });
+        } catch (err) {
+            if (err instanceof AudienceError) return json(400, { error: err.message });
+            throw err;
+        }
         if (!claimed) return json(409, { error: 'Someone else has just approved or discarded this email.' });
         await insertAdminAuditLog({
             adminId: admin.id, action: 'product_update_approve', targetType: 'product_update_digest', targetId: id,

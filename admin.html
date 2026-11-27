@@ -13864,6 +13864,10 @@ let _puAudienceSeq = 0;
 async function puAudience(group, on) {
   const order = Object.keys(_puCurrent.audienceLabels || {});
   _puAudience = order.filter((g) => (g === group ? on : _puAudience.includes(g)));
+  await _puRecount();
+}
+// Ask how many the ticked groups reach. Latest ask wins (a quicker earlier reply is dropped).
+async function _puRecount() {
   const seq = ++_puAudienceSeq;
   const approve = document.getElementById('pu-approve');
   if (!_puAudience.length) { _puCurrent.recipients = 0; _puRender(); return; }
@@ -13924,7 +13928,11 @@ async function puSave() {
     }) });
     _puDirty = false;
     _puFlash('Saved. The preview now shows your changes.');
+    // Saving copy must not undo the Send to ticks: they are only stored at approve.
+    const keepAudience = [..._puAudience];
     await puOpen(_puCurrent.digest.id);
+    _puAudience = keepAudience;
+    await _puRecount();
     loadProductUpdates();
   } catch (e) {
     _puFlash(e.message, 'err');
