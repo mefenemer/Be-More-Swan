@@ -14,10 +14,12 @@ Nothing here is live. Every step that touches prod needs the owner's word.
   every 15 minutes), a sound check skipped as `no_meeting` with no charge, and minutes from Google's transcript text.
 - The Connections card already tells people to "start calls from the account you connect" and shows "Calls hosted by …"
   once connected. Only calls hosted by the connected account are listed (confirmed 21 Nov).
-- **New in this PR: if the Note Taker's bot was in the same call, pick-up skips it.** The call is matched on its join
-  link and time (`botCover` in `src/utils/meeting-pickup.ts`). The skip reason is `bot_joined`, there's no charge, and
-  the bot's minutes are kept. While a bot for that call hasn't settled yet, pick-up waits and looks again every
-  15 minutes, for up to 2 hours. The bot's own behaviour is unchanged.
+- **New in this PR: if the Note Taker's bot wrote minutes for the same call, pick-up skips it.** The call is matched on
+  its join link and time (`botCover` in `src/utils/meeting-pickup.ts`). The skip reason is `bot_joined` and there's no
+  charge. A bot that never got in, was withdrawn mid-call, or whose write-up was skipped or failed leaves the call to
+  pick-up, so a call is never left without minutes. While the bot is still in the call or still writing, pick-up waits
+  and looks again every 15 minutes, for up to 2 hours after the call. The bot's own behaviour is unchanged.
+  Known edge: a bot write-up held for the task limit can outlast that 2-hour wait, and then both could be written.
 
 ## 2. Last staging proof (owner, about 20 minutes)
 

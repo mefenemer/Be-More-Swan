@@ -180,10 +180,15 @@ export function transcriptRetryAt(endedAt: Date | null, now: Date): Date | null 
 // A workspace can have Google Meet connected AND send the Note Taker's bot to a call (docs/note-taker-bot-plan.md).
 // Without a rule the call would be written up twice and charged twice (1 task for the pick-up, plus the bot's minutes
 // in the call). The bot wins: someone chose to send it, and it is charged by its time in the call. A picked-up
-// meeting whose call the bot got into is skipped ('bot_joined'), free.
+// meeting is skipped ('bot_joined'), free, only once the bot's OWN minutes are written: a bot withdrawn mid-call, or
+// one whose write-up was skipped or failed, leaves the call to the pick-up, so it is never left with no minutes.
 
 /** A meeting_bots row, only the fields the rule reads. */
-export interface BotOnCall { meetingUrl: string; status: string; joinAt: Date; joinedAt: Date | null; leftAt: Date | null }
+export interface BotOnCall {
+    meetingUrl: string; status: string; joinAt: Date; joinedAt: Date | null; leftAt: Date | null;
+    /** Its own write-up (meeting_imports.status via meeting_bots.import_id), or null before there is one. */
+    importStatus: string | null;
+}
 
 /** Bot statuses that can still turn into "it got in" (meeting-bot.ts OPEN_BOT_STATUSES). */
 const BOT_STILL_OPEN = new Set(['scheduled', 'joining', 'waiting_room', 'in_call', 'ended']);
@@ -220,7 +225,12 @@ export function botCover(row: { link: string | null; startedAt: Date | null; end
         if (sameCallKey(b.meetingUrl) !== key) continue;
         if (b.joinedAt) {
             const left = (b.leftAt ?? now).getTime();
-            if (b.joinedAt.getTime() <= to && left >= from) return 'covered';
+            if (b.joinedAt.getTime() > to || left < from) continue;
+            // In this call. Withdrawn or failed: it writes nothing. Done: its write-up decides.
+            if (b.status === 'cancelled' || b.status === 'failed') continue;
+            if (b.status === 'done' && b.importStatus === 'written') return 'covered';
+            if (b.status === 'done' && (b.importStatus === 'skipped' || b.importStatus === 'failed')) continue;
+            wait = true; // still in the call, or its minutes are still being written
             continue;
         }
         const booked = b.joinAt.getTime();

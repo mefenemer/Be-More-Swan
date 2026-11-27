@@ -191,8 +191,8 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSo
             const start = (row.startedAt ?? row.endedAt).getTime();
             return db.select({
                 meetingUrl: meetingBots.meetingUrl, status: meetingBots.status, joinAt: meetingBots.joinAt,
-                joinedAt: meetingBots.joinedAt, leftAt: meetingBots.leftAt,
-            }).from(meetingBots).where(and(
+                joinedAt: meetingBots.joinedAt, leftAt: meetingBots.leftAt, importStatus: meetingImports.status,
+            }).from(meetingBots).leftJoin(meetingImports, eq(meetingImports.id, meetingBots.importId)).where(and(
                 eq(meetingBots.organisationId, organisationId),
                 eq(meetingBots.platform, row.platform),
                 // A bot booked up to an hour before the call, or one that joined late; botCover does the exact match.

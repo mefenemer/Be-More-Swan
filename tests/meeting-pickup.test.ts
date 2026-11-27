@@ -404,7 +404,7 @@ const LINK = 'https://meet.google.com/abc-defg-hij';
 const callRow = { link: LINK, startedAt: new Date(T0.getTime() - 30 * 60 * 1000), endedAt: T0 };
 const bot = (o: Partial<BotOnCall> = {}): BotOnCall => ({
     meetingUrl: LINK, status: 'done', joinAt: new Date(T0.getTime() - 31 * 60 * 1000),
-    joinedAt: new Date(T0.getTime() - 29 * 60 * 1000), leftAt: T0, ...o,
+    joinedAt: new Date(T0.getTime() - 29 * 60 * 1000), leftAt: T0, importStatus: 'written', ...o,
 });
 
 await test('sameCallKey: host + path, any case, no query or trailing slash', () => {
@@ -415,12 +415,15 @@ await test('sameCallKey: host + path, any case, no query or trailing slash', () 
     assert.equal(sameCallKey(null), null);
 });
 
-await test('botCover: a bot that got into the call covers it, whatever happened after', () => {
+await test('botCover: covered only once the bot that was in the call has its minutes written', () => {
     const now = new Date(T0.getTime() + 20 * 60 * 1000);
     assert.equal(botCover(callRow, [bot()], now), 'covered');
-    assert.equal(botCover(callRow, [bot({ status: 'removed', leftAt: new Date(T0.getTime() - 25 * 60 * 1000) })], now), 'covered');
-    // Still in the call as far as we know (no left time yet).
-    assert.equal(botCover(callRow, [bot({ status: 'in_call', leftAt: null })], now), 'covered');
+    // The host removed it after a minute: still its minutes (a joined bot that is removed ends 'done').
+    assert.equal(botCover(callRow, [bot({ leftAt: new Date(T0.getTime() - 28 * 60 * 1000) })], now), 'covered');
+    // Still in the call, or its write-up still running: wait.
+    assert.equal(botCover(callRow, [bot({ status: 'in_call', leftAt: null, importStatus: null })], now), 'wait');
+    assert.equal(botCover(callRow, [bot({ importStatus: 'writing' })], now), 'wait');
+    assert.equal(botCover(callRow, [bot({ importStatus: null })], now), 'wait');
     // Link written differently by the bot dialog.
     assert.equal(botCover(callRow, [bot({ meetingUrl: 'https://meet.google.com/ABC-DEFG-HIJ?authuser=0' })], now), 'covered');
 });
@@ -437,8 +440,20 @@ await test('botCover: a different call, or the same code another day, is clear',
 await test('botCover: a bot that never got in leaves the pick-up to write it', () => {
     const now = new Date(T0.getTime() + 20 * 60 * 1000);
     for (const status of ['not_admitted', 'failed', 'cancelled']) {
-        assert.equal(botCover(callRow, [bot({ status, joinedAt: null, leftAt: null })], now), 'clear', status);
+        assert.equal(botCover(callRow, [bot({ status, joinedAt: null, leftAt: null, importStatus: null })], now), 'clear', status);
     }
+});
+
+await test('botCover: a bot that got in but writes nothing leaves the pick-up to write it (review of #933)', () => {
+    const now = new Date(T0.getTime() + 20 * 60 * 1000);
+    // Withdrawn mid-call (assistant or workspace removed): cancelled with a join time, no write-up.
+    assert.equal(botCover(callRow, [bot({ status: 'cancelled', importStatus: null })], now), 'clear');
+    assert.equal(botCover(callRow, [bot({ status: 'failed', importStatus: null })], now), 'clear');
+    // Its write-up was skipped (nobody heard, task limit, assistant gone) or failed.
+    assert.equal(botCover(callRow, [bot({ importStatus: 'skipped' })], now), 'clear');
+    assert.equal(botCover(callRow, [bot({ importStatus: 'failed' })], now), 'clear');
+    // A write-up that never settles is waited for only up to BOT_WAIT_MS.
+    assert.equal(botCover(callRow, [bot({ importStatus: 'found' })], new Date(T0.getTime() + BOT_WAIT_MS + 1)), 'clear');
 });
 
 await test('botCover: an unsettled bot for this call means wait, but not for ever', () => {
