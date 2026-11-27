@@ -658,9 +658,10 @@ ${o.delivery ? `<p><strong>Delivery chosen:</strong> ${esc(deliveryLine(o.delive
 export const CONFIRMATION_MARKER_FROM = '2026-11-27T00:00:00Z';
 
 /** The order list's marker: a buyer with an email address but no confirmation recorded (no own address, refused or
- *  slow). Pure — the Shop tab and the website's Orders tab use it. */
+ *  slow). Cleared once the owner marks the order dealt with (review #923: it would otherwise bury the useful ones).
+ *  Pure — the Shop tab, the website's Orders tab and the Shopkeeper's chat snapshot use it. */
 export function confirmationNotSent(o: { customerEmail: string | null; buyerEmailedAt: Date | string | null; createdAt: Date | string; status?: string }): boolean {
-    if (!o.customerEmail || o.buyerEmailedAt || o.status === 'refunded') return false;
+    if (!o.customerEmail || o.buyerEmailedAt || o.status === 'refunded' || o.status === 'done') return false;
     return new Date(o.createdAt).getTime() >= Date.parse(CONFIRMATION_MARKER_FROM);
 }
 

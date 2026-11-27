@@ -28,6 +28,7 @@ check('marked: an email address, no confirmation recorded, from 27 Nov 2026', ()
     assert.strictEqual(confirmationNotSent({ customerEmail: null, buyerEmailedAt: null, createdAt: NEW }), false, 'no address: nothing to send');
     assert.strictEqual(confirmationNotSent({ customerEmail: 'a@b.example', buyerEmailedAt: null, createdAt: '2026-11-20T10:00:00Z' }), false, 'older orders: confirmed the old way');
     assert.strictEqual(confirmationNotSent({ customerEmail: 'a@b.example', buyerEmailedAt: null, createdAt: NEW, status: 'refunded' }), false, 'refunded: moot');
+    assert.strictEqual(confirmationNotSent({ customerEmail: 'a@b.example', buyerEmailedAt: null, createdAt: NEW, status: 'done' }), false, 'review #923: cleared once dealt with');
 });
 
 check('both order lists carry it, with the same words as the server', () => {
@@ -38,6 +39,7 @@ check('both order lists carry it, with the same words as the server', () => {
     }
     assert.ok(read('netlify/functions/shop.ts').includes('confirmationNotSent: confirmationNotSent({ ...o, buyerEmailedAt })'));
     assert.ok(read('netlify/functions/sites.ts').includes('confirmationNotSent: confirmationNotSent({ ...o, buyerEmailedAt })'));
+    assert.ok(read('src/utils/shop-snapshot.ts').includes('NO ORDER CONFIRMATION reached the buyer'), 'review #923: the chat sees it too');
 });
 
 console.log(`\n${passed}/${total} passed`);
