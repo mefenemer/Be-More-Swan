@@ -4672,6 +4672,9 @@ let tcForm = tcEmptyForm();
 // True from a successful announce until the next repaint: the old draft card is still on screen for ~3 s, and typing in
 // it must not turn Announce back on (review of #879 round 3; a second press only got the server's 409).
 let tcAnnounced = false;
+// Each load gets a number; a reply from an older load is dropped, so a slow earlier load can't repaint the old draft card
+// or clear tcAnnounced after an announce (review of #927).
+let tcLoadSeq = 0;
 
 /** The saved draft, if any. */
 const tcDraft = () => (tcState && tcState.changes || []).find((c) => c.id === tcState.draftChangeId && c.status === 'draft') || null;
@@ -4725,14 +4728,19 @@ const tcItemText = (c, i) => {
 async function loadTaskCostsAdmin() {
   const box = document.getElementById('tc-costs');
   if (!box) return;
+  const seq = ++tcLoadSeq;
   box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
   try {
     const res = await fetch(`${TC_API}?resource=state`);
     const d = await res.json();
+    if (seq !== tcLoadSeq) return; // a newer load is on its way
     if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
     tcState = d;
     tcAnnounced = false;
+    // A cost an announced change now locks shows today's value; forget what was typed for it (review of #927).
+    for (const key of Object.keys(tcState.lockedKeys || {})) delete tcForm.costs[key];
   } catch (err) {
+    if (seq !== tcLoadSeq) return; // an older load's failure must not paint over a newer one
     box.innerHTML = `<p class="text-sm text-rose-600">${bcEsc(err.message || 'Could not load the costs.')}</p>`;
     return;
   }

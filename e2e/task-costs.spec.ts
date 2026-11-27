@@ -301,6 +301,48 @@ test.describe('Admin → Money → Task costs', () => {
         await expect(page.locator('#tc-reason')).toHaveValue('Kept while cancelling.');
     });
 
+    test('a row that becomes locked shows today\'s cost and forgets what was typed; per-row Save clears only its own cost (review of #927)', async ({ page, signedIn, api }) => {
+        let state: any = STATE([]);
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { id: 8 } : state));
+        await openAdmin(page, api);
+        await page.locator('[data-tc-key="ai_music"]').fill('40');
+        await page.locator('[data-tc-key="chat_messages"]').fill('2');
+        await page.locator('[data-tc-key="ai_image"]').fill('3');
+        // Another admin announces a change to AI music: that row locks and shows today's 20.
+        state = STATE([ANNOUNCED]);
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('20');
+        await expect(page.locator('[data-tc-key="ai_music"]')).toBeDisabled();
+        // ...and if it is cancelled later, the old 40 does not come back.
+        state = STATE([]);
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('20');
+        await expect(page.locator('[data-tc-key="ai_image"]')).toHaveValue('3');
+        // Saving the cost nobody is charged clears only that one.
+        await page.locator('[data-tc-key="chat_messages"]').fill('2');
+        await page.locator('[data-tc-unused="chat_messages"]').click();
+        await expect(page.locator('#tc-status')).toContainText('no notice went out');
+        await expect(page.locator('[data-tc-key="ai_image"]')).toHaveValue('3');
+        await expect(page.locator('[data-tc-key="chat_messages"]')).toHaveValue('1');
+    });
+
+    test('a slow older load cannot repaint over a newer one (review of #927)', async ({ page, signedIn, api }) => {
+        let n = 0;
+        api.set('admin-task-costs', async (route: any) => {
+            if (route.request().method() === 'POST') return { ok: true };
+            n++;
+            if (n === 2) { await new Promise((r) => setTimeout(r, 1500)); return STATE([DRAFT]); }
+            return STATE([]);
+        });
+        await openAdmin(page, api);
+        await expect(page.locator('#tc-save')).toHaveText('Save as a draft');
+        // Load 2 is slow and would show a draft; load 3 answers first with no draft and must win.
+        await page.evaluate(() => { (window as any).loadTaskCostsAdmin(); (window as any).loadTaskCostsAdmin(); });
+        await page.waitForTimeout(2000);
+        await expect(page.locator('#tc-save')).toHaveText('Save as a draft');
+        await expect(page.locator('#tc-open')).not.toContainText('Draft: starts');
+    });
+
     test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Choose the date the change starts.' } }); return undefined; }
