@@ -39,7 +39,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, siteOrders, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { SHOPKEEPER_ROLE_KEY, WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { buyerConfirmationsBlocked, connectAccountFor, connectOnboardingLink, markShopOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { loadStockList, saveProductStock, stockWords } from '../../src/utils/shop-stock';
@@ -130,6 +130,8 @@ export default withLambda(async (event) => {
                 .catch((err) => { console.error('[shop] sales read failed', err instanceof Error ? err.message : err); return null; }) : null,
             // Review requests after orders are on but can't be sent from the owner's own address (review-requests.ts, slice 7).
             reviewBlocked: await orderReviewRequestsBlocked(db, orgId),
+            // Selling, but no own address for buyers' order confirmations (site-shop.ts; owner 2026-11-27).
+            confirmBlocked: await buyerConfirmationsBlocked(db, orgId),
             // People waiting to hear a product is back (shop-waitlist.ts, Phase 2 slice 6), by product id.
             waiting: await waitingCounts(db, orgId),
             // Abandoned-checkout reminders this week (shop-checkout-reminder.ts, Phase 2 slice 5), in words; null = none.
