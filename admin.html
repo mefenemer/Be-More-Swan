@@ -4665,7 +4665,13 @@ let tcState = null;
 // What the admin typed in the change form (date, reason), kept across repaints: a page reload after a refused save
 // must not put the date back to the earliest allowed day (owner 2026-11-25: two drafts saved with 25 December instead
 // of the 1 January they meant). Cleared after a successful save, so the saved draft's own values show.
-let tcForm = { date: null, reason: null };
+// Typed cost boxes are kept too (key → the box's text), so pressing "Send a test to me" (which repaints at once) never
+// quietly drops an unsaved cost (review of #879 round 3).
+const tcEmptyForm = () => ({ date: null, reason: null, costs: {} });
+let tcForm = tcEmptyForm();
+// True from a successful announce until the next repaint: the old draft card is still on screen for ~3 s, and typing in
+// it must not turn Announce back on (review of #879 round 3; a second press only got the server's 409).
+let tcAnnounced = false;
 
 /** The saved draft, if any. */
 const tcDraft = () => (tcState && tcState.changes || []).find((c) => c.id === tcState.draftChangeId && c.status === 'draft') || null;
@@ -4691,7 +4697,7 @@ function tcSyncUnsaved() {
   }
   const go = document.getElementById('tc-announce');
   const typed = document.getElementById('tc-confirm');
-  if (go && typed && d) go.disabled = unsaved || typed.value.trim() !== String(d.waiting);
+  if (go && typed && d) go.disabled = tcAnnounced || unsaved || typed.value.trim() !== String(d.waiting);
 }
 
 function showTcStatus(kind, msg, opts = {}) {
@@ -4725,6 +4731,7 @@ async function loadTaskCostsAdmin() {
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
     tcState = d;
+    tcAnnounced = false;
   } catch (err) {
     box.innerHTML = `<p class="text-sm text-rose-600">${bcEsc(err.message || 'Could not load the costs.')}</p>`;
     return;
@@ -4747,7 +4754,7 @@ function tcPaintCosts() {
   const draftValue = (key) => { const i = draft && draft.items.find((x) => x.key === key); return i ? i.newUnits : null; };
   const rows = tcState.costs.map((c) => {
     const set = draftValue(c.key);
-    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${set ?? c.value}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${locked[c.key] ? 'disabled' : ''}>${locked[c.key] ? `<span class="block text-xs text-gray-500 mt-1">Changing on ${bcEsc(tcLongDate(locked[c.key]))}</span>` : ''}`;
+    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${locked[c.key] ? c.value : (tcForm.costs[c.key] ?? set ?? c.value)}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${locked[c.key] ? 'disabled' : ''}>${locked[c.key] ? `<span class="block text-xs text-gray-500 mt-1">Changing on ${bcEsc(tcLongDate(locked[c.key]))}</span>` : ''}`;
     return `<tr class="border-t border-gray-100">
       <td class="px-4 py-2.5 text-gray-800">${bcEsc(c.label)}</td>
       <td class="px-4 py-2.5 text-gray-600">${bcEsc(c.text)}</td>
@@ -4788,7 +4795,7 @@ function tcPaintCosts() {
   dateBox.addEventListener('input', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
   dateBox.addEventListener('change', () => { tcForm.date = dateBox.value; sayDate(); tcSyncUnsaved(); });
   document.getElementById('tc-reason').addEventListener('input', (e) => { tcForm.reason = e.target.value; tcSyncUnsaved(); });
-  document.querySelectorAll('[data-tc-key]').forEach((i) => i.addEventListener('input', () => tcSyncUnsaved()));
+  document.querySelectorAll('[data-tc-key]').forEach((i) => i.addEventListener('input', () => { tcForm.costs[i.dataset.tcKey] = i.value; tcSyncUnsaved(); }));
   sayDate();
   tcSyncUnsaved();
   document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
@@ -4803,7 +4810,7 @@ async function tcSaveDraft(e) {
   btn.disabled = true;
   try {
     await tcCall('save', { items, effectiveDate: document.getElementById('tc-date').value, reason: document.getElementById('tc-reason').value });
-    tcForm = { date: null, reason: null };
+    tcForm = tcEmptyForm();
     showTcStatus('success', 'Saved as a draft. Read the notice below, then announce it when you are ready.');
     await loadTaskCostsAdmin();
   } catch (err) {
@@ -4825,6 +4832,7 @@ async function tcSaveUnused(btn) {
   btn.disabled = true;
   try {
     await tcCall('set_unused', { key, value: Number(input.value) });
+    delete tcForm.costs[key];
     showTcStatus('success', 'Saved. Nobody is charged this yet, so no notice went out.');
     await loadTaskCostsAdmin();
   } catch (err) {
@@ -4919,9 +4927,10 @@ async function tcRun(btn, resource, payload, say) {
   try {
     const d = await tcCall(resource, payload);
     announced = resource === 'announce';
+    if (announced) tcAnnounced = true;
     // The draft these typed values belonged to is gone (announced or discarded): start the next one clean.
     // Cancelling an announced change leaves the draft alone, so its typed values stay (review of #879 round 2).
-    if (resource === 'discard' || resource === 'announce') tcForm = { date: null, reason: null };
+    if (resource === 'discard' || resource === 'announce') tcForm = tcEmptyForm();
     showTcStatus('success', say(d));
     setTimeout(loadTaskCostsAdmin, resource === 'test' ? 0 : 3000);
   } catch (err) {
