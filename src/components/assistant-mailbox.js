@@ -19,7 +19,7 @@
   'use strict';
   const API = '/.netlify/functions/mailboxes';
   const state = {
-    assistantId: null, data: null, pill: 'needs', mailboxId: null, addOpen: false, pickNewest: false, open: new Set(), bodies: new Map(), busy: false,
+    assistantId: null, data: null, pill: 'needs', mailboxId: null, addOpen: false, loadSeq: 0, open: new Set(), bodies: new Map(), busy: false,
     // Phase 2a
     actions: [], cleanup: [], undoDays: 30, cleanupChunk: 25, archiveRules: [], labelsOn: false,
     drafting: new Set(),      // message ids with a draft being written
@@ -76,10 +76,7 @@
     const ok = (lifted && lifted.connected) || qp.get('mailbox') === 'connected';
     const err = (lifted && lifted.error) || qp.get('mailbox_error');
     if (!ok && !err) return;
-    if (ok) {
-      toast('Mailbox connected. Your Email Assistant is sorting the last 14 days now — it takes a minute or two.');
-      state.pickNewest = true; // show the mailbox just connected, not the first one (review of #922)
-    }
+    if (ok) toast('Mailbox connected. Your Email Assistant is sorting the last 14 days now — it takes a minute or two.');
     else if (window.alertModal) window.alertModal(CONNECT_ERRORS[err] || 'Connecting the mailbox did not work. Please try again.', { title: 'Mailbox not connected' });
     qp.delete('mailbox'); qp.delete('mailbox_error');
     history.replaceState(null, '', `${location.pathname}${qp.toString() ? `?${qp}` : ''}${location.hash}`);
@@ -87,14 +84,13 @@
 
   async function load() {
     // seen=1: this IS the Emails tab, so the "needs you now" notification has done its job (the Results cards don't send it).
+    // A newer load (the owner switched mailbox again) owns the screen: an older answer changes nothing.
+    const seq = ++state.loadSeq;
     const res = await fetch(API + '?seen=1', { credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
+    if (seq !== state.loadSeq) return;
     if (!res.ok) throw new Error(data.error || 'Could not load your email.');
     state.data = data;
-    if (state.pickNewest && (data.mailboxes || []).length) {
-      state.mailboxId = Math.max(...data.mailboxes.map((m) => Number(m.id)));
-      state.pickNewest = false;
-    }
     if (!state.mailboxId && data.mailboxes && data.mailboxes[0]) state.mailboxId = data.mailboxes[0].id;
     if (state.mailboxId && !(data.mailboxes || []).some((m) => m.id === state.mailboxId)) state.mailboxId = data.mailboxes[0]?.id ?? null;
     // Everything below is per mailbox: start from nothing, so a failed read never shows another mailbox's
@@ -106,7 +102,7 @@
       const r = await fetch(`${API}?mailboxId=${encodeURIComponent(wanted)}&actions=1`, { credentials: 'same-origin' });
       const a = await r.json().catch(() => ({}));
       // Switched again while this was loading: this answer belongs to a mailbox no longer shown.
-      if (state.mailboxId !== wanted) return;
+      if (seq !== state.loadSeq || state.mailboxId !== wanted) return;
       if (r.ok) {
         state.actions = a.actions || []; state.cleanup = a.cleanup || [];
         state.undoDays = a.undoDays || 30; state.cleanupChunk = a.cleanupChunk || 25;

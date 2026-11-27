@@ -930,25 +930,12 @@ check('Emails tab: a failed read of the picked mailbox never shows the previous 
     assert.ok(t.host.innerHTML.includes('Labels in Outlook: off'), 'nor its labels setting');
 });
 
-check('Emails tab: after connecting another mailbox, the tab opens on the new one (review of #922)', async () => {
-    const t = loadEmailsTab({
-        [`${API_URL}?seen=1`]: { body: { ...OWNER_BASE, mailboxes: [
-            { id: 1, address: 'me@gmail.com', provider: 'gmail', status: 'active' },
-            { id: 5, address: 'me@shop.co', provider: 'outlook', status: 'active' },
-        ] } },
-        [`${API_URL}?mailboxId=5&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [] } },
-    });
-    // workspace.html lifts ?mailbox=connected into window._mailboxConnectOutcome before init.
-    t.setOutcome({ connected: true });
-    await t.api.init({ assistantId: 64 });
-    assert.ok(/<option value="5" selected>/.test(t.host.innerHTML));
-    assert.ok(t.calls.includes(`${API_URL}?mailboxId=5&actions=1`));
-});
-
 check('Emails tab: switching is refused while a clean-up or undo runs (review of #922)', () => {
     const c = read('src/components/assistant-mailbox.js');
     assert.ok(/if \(state\.busy\) \{ sw\.value = String\(state\.mailboxId\);/.test(c));
-    assert.ok(/if \(state\.mailboxId !== wanted\) return;/.test(c), 'a stale actions answer is dropped');
+    assert.ok(/const seq = \+\+state\.loadSeq;[\s\S]{0,200}if \(seq !== state\.loadSeq\) return;/.test(c), 'an older load stops before touching state');
+    assert.ok(/if \(seq !== state\.loadSeq \|\| state\.mailboxId !== wanted\) return;/.test(c), 'a stale actions answer is dropped');
+    assert.ok(!/pickNewest/.test(c), 'reconnecting an old mailbox must not jump to the newest (review of #922)');
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
