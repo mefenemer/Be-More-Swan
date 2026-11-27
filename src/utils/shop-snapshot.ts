@@ -9,7 +9,7 @@
 import { desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { siteOrders } from '../../db/schema';
-import { buyerConfirmationsBlocked, connectAccountFor } from './site-shop';
+import { buyerConfirmationsBlocked, confirmationNotSent, connectAccountFor } from './site-shop';
 import { loadShopSettings, missingFields, RETURN_EXCEPTIONS, returnsSummaryText } from './shop-settings';
 import { formatMoney } from './product-price';
 import { loadStockList, stockWords, type StockItem } from './shop-stock';
@@ -30,7 +30,7 @@ export interface ShopSnapshotInput {
     connected: boolean;
     chargesEnabled: boolean;
     shop: Awaited<ReturnType<typeof loadShopSettings>>;
-    orders: { id: number; itemName: string; quantity: number; amountTotal: number; currency: string; customerName: string | null; status: string; refundedAmount: number; createdAt: Date }[];
+    orders: { id: number; itemName: string; quantity: number; amountTotal: number; currency: string; customerName: string | null; status: string; refundedAmount: number; createdAt: Date; customerEmail?: string | null; buyerEmailedAt?: Date | null }[];
     /** Stock (Phase 1, shop-stock.ts). Absent = not read. */
     stock?: { ready: boolean; items: StockItem[] };
     /** Options by product id (Phase 1, shop-options.ts). */
@@ -143,7 +143,9 @@ export function shopSnapshotText(input: ShopSnapshotInput): string {
         lines.push('', `ORDERS (newest ${input.orders.length}; ${fresh} NEW, not yet posted or dealt with):`);
         for (const o of input.orders) {
             const state = orderStateWords(o, input.posting?.[o.id]);
-            lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}`);
+            // review #923: the chat can say which buyers got no confirmation from the owner's address (site-shop.ts).
+            const unconfirmed = confirmationNotSent({ customerEmail: o.customerEmail ?? null, buyerEmailedAt: o.buyerEmailedAt ?? null, createdAt: o.createdAt, status: o.status }) ? ' — ⚠️ NO ORDER CONFIRMATION reached the buyer: the owner should email them one' : '';
+            lines.push(`- #${o.id} ${o.createdAt.toISOString().slice(0, 10)}: ${o.quantity} × ${o.itemName}, ${formatMoney(o.amountTotal, o.currency)}, ${o.customerName || 'a buyer'} — ${state}${unconfirmed}`);
         }
         if (input.postingOn === false) lines.push('- Marking orders as posted isn\'t switched on yet: don\'t offer the order_update card with status "posted".');
         lines.push(...salesSnapshotLines(input.sales));
@@ -158,6 +160,7 @@ export async function buildShopSnapshot(db: Db, orgId: number, assistantId: numb
         db.select({
             id: siteOrders.id, itemName: siteOrders.itemName, quantity: siteOrders.quantity, amountTotal: siteOrders.amountTotal, currency: siteOrders.currency,
             customerName: siteOrders.customerName, status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt,
+            customerEmail: siteOrders.customerEmail, buyerEmailedAt: siteOrders.buyerEmailedAt,
         }).from(siteOrders).where(eq(siteOrders.organisationId, orgId)).orderBy(desc(siteOrders.createdAt)).limit(SNAPSHOT_ORDERS),
         loadStockList(db, orgId).catch(() => undefined),
     ]);

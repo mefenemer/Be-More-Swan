@@ -1493,6 +1493,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       : `${head}${body}`, ready ? '' : 'border-amber-200');
   }
 
+  // Kept the same as site-shop.ts CONFIRMATION_NOT_SENT_LINE (a test checks).
+  const SITE_CONFIRM_NOT_SENT = 'No order confirmation reached the buyer from your address (or we couldn\'t confirm it went). Please email them one yourself: what they bought, the price, your business details and their 14 days to cancel.';
   function ordersPanel() {
     const list = state.orders;
     const top = paymentsCard() + shopSettingsCard();
@@ -1512,6 +1514,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             <p class="text-xs text-gray-500">${esc(new Date(o.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }))}</p>
           </div>
           <p class="text-xs text-gray-600 mt-1">${esc(o.customerName || '')}${o.customerEmail ? ` · <a class="underline" href="mailto:${esc(o.customerEmail)}">${esc(o.customerEmail)}</a>` : ''}</p>
+          ${o.confirmationNotSent ? `<p class="text-xs font-semibold text-amber-800 mt-1" data-order-not-confirmed>⚠️ ${esc(SITE_CONFIRM_NOT_SENT)}</p>` : ''}
           ${addr ? `<p class="text-xs text-gray-600 mt-1">Deliver to: ${esc(addr)}</p>` : ''}
           ${o.status === 'refunded' ? '' : `<div class="mt-2">${btn(`data-site-order="${esc(o.id)}" data-done="${o.status === 'done' ? '0' : '1'}"`, o.status === 'done' ? 'Mark as new' : 'Mark as dealt with')}</div>`}
         </li>`;

@@ -80,7 +80,7 @@ import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
 import { recheckAfterPublish } from '../../src/utils/site-audit-recheck';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
-import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
+import { confirmationNotSent, connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { loadShopSettings, missingFields, saveShopSettings, RETURN_EXCEPTIONS, type SettingsInput } from '../../src/utils/shop-settings';
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
@@ -680,9 +680,9 @@ export default withLambda(async (event) => {
         const rows = await db.select({
             id: siteOrders.id, itemName: siteOrders.itemName, quantity: siteOrders.quantity, amountTotal: siteOrders.amountTotal, currency: siteOrders.currency,
             customerName: siteOrders.customerName, customerEmail: siteOrders.customerEmail, shippingAddress: siteOrders.shippingAddress,
-            status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt,
+            status: siteOrders.status, refundedAmount: siteOrders.refundedAmount, createdAt: siteOrders.createdAt, buyerEmailedAt: siteOrders.buyerEmailedAt,
         }).from(siteOrders).where(and(eq(siteOrders.siteId, site.id), eq(siteOrders.organisationId, orgId))).orderBy(desc(siteOrders.createdAt));
-        return json(200, { orders: rows });
+        return json(200, { orders: rows.map(({ buyerEmailedAt, ...o }) => ({ ...o, confirmationNotSent: confirmationNotSent({ ...o, buyerEmailedAt }) })) });
     }
 
     if (action === 'order_done') {
