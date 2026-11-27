@@ -126,6 +126,8 @@ export async function checkFixDeployed(opts: {
     token: string;
     repo?: string;
     fetchImpl?: FetchLike;
+    /** Only count the PR if it was merged into this branch (a release PR must go into main). */
+    base?: string;
 }): Promise<FixDeployState> {
     const repo = opts.repo || DEFAULT_REPO;
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
@@ -141,6 +143,7 @@ export async function checkFixDeployed(opts: {
         const prBody = await pr.json();
         const mergeSha = prBody?.merged ? prBody?.merge_commit_sha : null;
         if (!isFullSha(mergeSha)) return 'not_merged';
+        if (opts.base && prBody?.base?.ref !== opts.base) return 'not_merged';
 
         const cmp = await f(`https://api.github.com/repos/${repo}/compare/${mergeSha}...${opts.deployedSha}`, { headers });
         // 404 here is normal for a deploy commit GitHub hasn't indexed yet, or a merge commit from
@@ -212,7 +215,8 @@ async function confirmLiveFixes(
     // Merged fixes whose CURRENT PR hasn't been confirmed live. A reopened issue keeps live_pr_url
     // pointing at its old PR, so it only comes back here once a new fix PR replaces dev_pr_url.
     const rows = await db.execute(sql`
-        SELECT id, user_id, dev_pr_url, dev_prod_status, dev_prod_result
+        SELECT id, user_id, dev_pr_url, dev_prod_status, dev_prod_result,
+               to_jsonb(issue_reports) ->> 'prod_pr_url' AS prod_pr_url
           FROM issue_reports
          WHERE dev_merge_status = 'merged'
            AND dev_pr_url IS NOT NULL
@@ -220,7 +224,7 @@ async function confirmLiveFixes(
            AND status NOT IN ('closed', 'roadmap')
            AND dev_sql_status IS DISTINCT FROM 'pending'
          ORDER BY dev_merged_at ASC NULLS LAST
-         LIMIT ${MAX_LIVE_CHECKS_PER_RUN}`) as Array<{ id: number; user_id: number | null; dev_pr_url: string; dev_prod_status: string | null; dev_prod_result: string | null }>;
+         LIMIT ${MAX_LIVE_CHECKS_PER_RUN}`) as Array<{ id: number; user_id: number | null; dev_pr_url: string; prod_pr_url: string | null; dev_prod_status: string | null; dev_prod_result: string | null }>;
 
     for (const row of rows) {
         const prNumber = parsePrNumber(row.dev_pr_url, o.repo);
@@ -234,6 +238,17 @@ async function confirmLiveFixes(
             if (hotfixPr) {
                 const hotfixState = await checkFixDeployed({ prNumber: hotfixPr, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl });
                 if (hotfixState === 'live' || hotfixState === 'error') state = hotfixState;
+            }
+        }
+        // Shipped inside a release PR that COPIED the fix into main (ticket #95: fixes-only release #896),
+        // so the staging merge commit never reaches main. The prod PR recorded on the ticket
+        // (fix-tickets.ts prod-pr; db/z-pr-approval.sql) counts once it is merged into main and deployed.
+        // to_jsonb above reads it as NULL on a database without that column.
+        if (state !== 'live' && row.prod_pr_url) {
+            const prodPr = parsePrNumber(row.prod_pr_url, o.repo);
+            if (prodPr && prodPr !== prNumber) {
+                const prodState = await checkFixDeployed({ prNumber: prodPr, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl, base: 'main' });
+                if (prodState === 'live' || prodState === 'error') state = prodState;
             }
         }
         if (state === 'not_yet' || state === 'not_merged') { result.notYet++; continue; }
