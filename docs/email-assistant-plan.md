@@ -707,7 +707,8 @@ page only — no real mailbox has been connected yet). As built:
     or a workspace without the flag, is tried again after 6 hours. Disconnect never calls Gmail's
     `users.stop` (it would end push for every connection of that Google account).
   - Tidied 2026-11-26 (second review of #906): the poll run dispatches reads in parallel, then watches
-    within a 12 s budget (leftovers logged as `deferred`, first next run), then prune and digests; a failed
+    until 16 s after the run began (leftovers logged as `deferred`, first next run), then prune and
+    digests; no new batch of reads starts after 10 s (the rest stay due for the next run); a failed
     watch also clears `last_push_at` (back on the 10-minute poll at once); a push for a workspace without
     the flag wakes no function.
   - Known, left: Gmail's watch also fires on our own label writes, so a labelling run is followed by one

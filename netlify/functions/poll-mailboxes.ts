@@ -21,7 +21,13 @@ export const config = { schedule: '*/10 * * * *' };
 /** Who may run this (src/utils/scheduled-run-auth.ts): the cron secret or Netlify's scheduler. */
 export const mayPoll = mayRunScheduled;
 
-/** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
+/**
+ * No new batch of reads starts this long after the run began. A batch waits up to 5 s, so the last one
+ * is done by ~15 s, leaving the watches, prune and digests their time. A mailbox not reached stays due
+ * and is first in line next run (logged as `deferred`).
+ */
+export const READ_DEADLINE_FROM_START_MS = 10_000;
+
 /**
  * Watch work stops starting this long after the run began, leaving room for prune and digests inside the
  * ~30 s a scheduled function gets (26 s for staging's run-poll-mailboxes). Counted from the START of the
@@ -29,6 +35,7 @@ export const mayPoll = mayRunScheduled;
  */
 export const WATCH_DEADLINE_FROM_START_MS = 16_000;
 
+/** Wake a read for every mailbox that is due. Shared with run-poll-mailboxes.ts (staging's trigger). */
 export async function pollDueMailboxes(): Promise<{ due: number; dispatched: number }> {
     const runStart = Date.now();
     const due = await mailboxesDueForSync(getDb()).catch((err) => {
@@ -38,8 +45,11 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
     });
     // Most urgent first, so a run that hits its time limit loses the least: reads, then push, then the rest.
     // Reads are dispatched 10 at a time (each waits up to 5 s for the background function to accept).
+    // Until READ_DEADLINE_FROM_START_MS into the run; the rest are read next run.
     let dispatched = 0;
+    let deferred = 0;
     for (let i = 0; i < due.length; i += 10) {
+        if (Date.now() - runStart >= READ_DEADLINE_FROM_START_MS) { deferred = due.length - i; break; }
         dispatched += (await Promise.all(due.slice(i, i + 10).map((id) => triggerMailboxSync(id)))).filter(Boolean).length;
     }
     // Push (Phase 3b): start a watch for mailboxes without one, renew any ending within a day — until
@@ -51,7 +61,7 @@ export async function pollDueMailboxes(): Promise<{ due: number; dispatched: num
     let digests = 0;
     const active = await getDb().select().from(mailboxes).where(eq(mailboxes.status, 'active')).catch(() => []);
     for (const box of active) if (await sendMorningDigest(getDb(), box)) digests++;
-    console.log('[poll-mailboxes]', { due: due.length, dispatched, pruned, digests, watches });
+    console.log('[poll-mailboxes]', { due: due.length, dispatched, deferred, pruned, digests, watches });
     return { due: due.length, dispatched };
 }
 

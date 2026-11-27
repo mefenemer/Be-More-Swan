@@ -215,6 +215,13 @@ check('the poll run reads first, then watches within a budget, then digests (rev
     const reads = c.indexOf('triggerMailboxSync(id)'), watches = c.indexOf('await ensureWatches(getDb(), runStart'), digests = c.indexOf('sendMorningDigest(getDb(), box)');
     assert.ok(reads > -1 && watches > reads && digests > watches);
     assert.ok(/due\.slice\(i, i \+ 10\)\.map/.test(c), 'reads dispatched in parallel batches');
+    assert.ok(/export const READ_DEADLINE_FROM_START_MS = 10_000;/.test(c), 'read dispatch has its own deadline');
+    assert.ok(/if \(Date\.now\(\) - runStart >= READ_DEADLINE_FROM_START_MS\) \{ deferred = due\.length - i; break; \}/.test(c),
+        'no new read batch after the read deadline, counted from run start');
+    assert.ok(c.indexOf('READ_DEADLINE_FROM_START_MS) {') !== -1 && c.indexOf('READ_DEADLINE_FROM_START_MS) {') < c.indexOf('await ensureWatches('),
+        'read deadline checked before the watches');
+    assert.ok(/\/\*\* Wake a read for every mailbox that is due\.[^\n]*\*\/\nexport async function pollDueMailboxes/.test(readFileSync(join(root, 'netlify/functions/poll-mailboxes.ts'), 'utf8')),
+        'doc comment sits on pollDueMailboxes');
     const p = code('src/utils/mailbox-push.ts');
     assert.ok(/if \(Date\.now\(\) > deadline\) \{ out\.deferred\+\+; continue; \}/.test(p));
     // The deadline counts from the START of the run (review of #912), and staging's trigger has the time for it.
