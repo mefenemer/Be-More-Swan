@@ -874,7 +874,8 @@ function loadEmailsTab(responses: Record<string, { status?: number; body: unknow
         window: win, document: { getElementById: (id: string) => els[id] ?? null }, fetch, console, URLSearchParams, setTimeout,
         location: { search: '', pathname: '/workspace.html', hash: '' }, history: { replaceState() {} },
     });
-    return { api: win.AssistantMailbox, host: els['datahub-table-host'], bar: els['datahub-toolbar'], calls };
+    return { api: win.AssistantMailbox, host: els['datahub-table-host'], bar: els['datahub-toolbar'], calls,
+        setOutcome: (o: unknown) => { win._mailboxConnectOutcome = o; } };
 }
 const OWNER_BASE = { available: true, access: 'owner', providers: { outlook: true, gmail: true }, messages: [] };
 
@@ -911,6 +912,43 @@ check('Emails tab: two mailboxes get a picker; switching loads the other mailbox
     assert.ok(t.calls.includes(`${API_URL}?mailboxId=2&actions=1`), 'actions for the newly picked mailbox');
     assert.ok(/<option value="2" selected>/.test(t.host.innerHTML), 'the picker shows the new choice');
     assert.ok(t.host.innerHTML.includes('Reconnect'), 'the picked mailbox\'s own reconnect banner shows');
+});
+
+check('Emails tab: a failed read of the picked mailbox never shows the previous mailbox\'s rules (review of #922)', async () => {
+    const t = loadEmailsTab({
+        [`${API_URL}?seen=1`]: { body: { ...OWNER_BASE, mailboxes: [
+            { id: 1, address: 'me@gmail.com', provider: 'gmail', status: 'active' },
+            { id: 2, address: 'me@shop.co', provider: 'outlook', status: 'active' },
+        ] } },
+        [`${API_URL}?mailboxId=1&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [{ id: 'r1' }, { id: 'r2' }], labelsOn: true } },
+        [`${API_URL}?mailboxId=2&actions=1`]: { status: 500, body: { error: 'down' } },
+    });
+    await t.api.init({ assistantId: 64 });
+    assert.ok(t.host.innerHTML.includes('Rules (2)') && t.host.innerHTML.includes('Labels in Gmail: on'));
+    for (const fn of t.host.listeners.change) await fn({ target: { closest: (sel: string) => (sel === '[data-mbx-switch]' ? { value: '2' } : null) } });
+    assert.ok(t.host.innerHTML.includes('Rules (0)'), 'mailbox 2 does not inherit mailbox 1\'s rules');
+    assert.ok(t.host.innerHTML.includes('Labels in Outlook: off'), 'nor its labels setting');
+});
+
+check('Emails tab: after connecting another mailbox, the tab opens on the new one (review of #922)', async () => {
+    const t = loadEmailsTab({
+        [`${API_URL}?seen=1`]: { body: { ...OWNER_BASE, mailboxes: [
+            { id: 1, address: 'me@gmail.com', provider: 'gmail', status: 'active' },
+            { id: 5, address: 'me@shop.co', provider: 'outlook', status: 'active' },
+        ] } },
+        [`${API_URL}?mailboxId=5&actions=1`]: { body: { actions: [], cleanup: [], archiveRules: [] } },
+    });
+    // workspace.html lifts ?mailbox=connected into window._mailboxConnectOutcome before init.
+    t.setOutcome({ connected: true });
+    await t.api.init({ assistantId: 64 });
+    assert.ok(/<option value="5" selected>/.test(t.host.innerHTML));
+    assert.ok(t.calls.includes(`${API_URL}?mailboxId=5&actions=1`));
+});
+
+check('Emails tab: switching is refused while a clean-up or undo runs (review of #922)', () => {
+    const c = read('src/components/assistant-mailbox.js');
+    assert.ok(/if \(state\.busy\) \{ sw\.value = String\(state\.mailboxId\);/.test(c));
+    assert.ok(/if \(state\.mailboxId !== wanted\) return;/.test(c), 'a stale actions answer is dropped');
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
