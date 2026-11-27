@@ -19,7 +19,6 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
-import { Resend } from 'resend';
 import { getDb } from '../../db/client';
 import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents, organisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
@@ -29,10 +28,10 @@ import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { sendBusinessEmail } from '../../src/utils/business-email';
 
 const jwtSecret = process.env.JWT_SECRET;
-const resend    = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
-const FROM_DOMAIN = process.env.OUTBOUND_EMAIL_DOMAIN || 'outbound.bemoreswan.com';
+const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export default withLambda(async (event) => {
     // US-ADM-1.2.1: never during an admin impersonation session (src/utils/impersonation.ts).
@@ -98,7 +97,7 @@ export default withLambda(async (event) => {
     }
 
     // The workspace's own AI-notice wording, which decides whether the assistant is named.
-    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText })
+    const [orgRow] = await db.select({ text: organisations.aiDisclosureFooterText, name: organisations.name })
         .from(organisations).where(eq(organisations.id, orgId)).limit(1);
     const workspaceText = orgRow?.text ?? null;
 
@@ -110,24 +109,22 @@ export default withLambda(async (event) => {
 
     // ── 7. Send email ──────────────────────────────────────────────────────────
     const sentAt = new Date();
-    let emailId: string | null = null;
 
-    if (process.env.RESEND_API_KEY) {
-        const result = await resend.emails.send({
-            from: `${assistant.name} via Be More Swan <assistant@${FROM_DOMAIN}>`,
-            to,
-            subject,
-            text: finalText,
-            ...(finalHtml ? { html: finalHtml } : {}),
-        });
-        emailId = (result as any)?.data?.id ?? null;
-        // One Resend email, caused by this workspace: logged against it (docs/cost-logging-audit.md).
-        if (emailId) await logServiceCost('resend-email', 1, { workspaceId: orgId, userId, assistantId, taskRunId, sessionId: 'outbound-email' });
-    } else {
-        // Dev mode — log instead of send
-        console.log(`[DEV] Outbound email to ${to}: subject="${subject}", footerVersion=${FOOTER_VERSION}`);
-        emailId = `dev_${Date.now()}`;
-    }
+    // From the workspace's OWN address only — its verified sending domain, else its connected Gmail/Outlook
+    // (business-email.ts; owner 2026-11-27) — never "via Be More Swan". With neither, nothing is sent.
+    const html = finalHtml ?? `<p>${escapeHtml(finalText).replace(/\r?\n/g, '<br>')}</p>`;
+    let emailId: string | null = null;
+    const sent = await sendBusinessEmail(db, orgId, { business: orgRow?.name || assistant.name, to: String(to), subject: String(subject), html, text: finalText }, {
+        // One Resend email (the workspace's own domain), caused by this workspace: logged against it (docs/cost-logging-audit.md).
+        // A Gmail/Outlook send costs us nothing, so nothing is logged for it.
+        onSent: async (provider, id) => {
+            emailId = id;
+            if (provider === 'resend') await logServiceCost('resend-email', 1, { workspaceId: orgId, userId, assistantId, taskRunId, sessionId: 'outbound-email' });
+        },
+    });
+    if (sent === 'no_route') return { statusCode: 409, body: JSON.stringify({ error: 'Nothing was sent: emails go only from your own address. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending.', code: 'NO_SENDING_ADDRESS' }) };
+    if (sent === 'failed') return { statusCode: 502, body: JSON.stringify({ error: 'Your email account refused the email. Please try again.' }) };
+    // 'slow': it may still go; the audit row below records the attempt (no provider id over a mailbox).
 
     // ── 8. Audit log — footerVersion per email send ────────────────────────────
     const [lastEvent] = await db.select({ eventIndex: agentRunEvents.eventIndex })

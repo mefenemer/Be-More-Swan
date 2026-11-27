@@ -6,13 +6,10 @@
 // The recipient typed their address into a form on the TENANT'S website and has never heard of Be
 // More Swan. An email headed "Be More Swan" is, from where they are sitting, a stranger emailing
 // them seconds after they signed up somewhere else — the single most reportable message this
-// product can produce. So the From line names the tenant and says how we relate to them:
-//
-//     Acme Ltd (via Be More Swan) <noreply@bemoreswan.com>
-//
-// The ADDRESS stays ours because it is the only domain Resend has verified for this account. When
-// per-tenant sending domains land (docs/newsletter-assistant-plan.md §6, option A) this is the
-// first thing that should move onto the tenant's own domain.
+// product can produce. It used to name the tenant on our address ("Acme Ltd (via Be More Swan)");
+// since 2026-11-27 (owner) it goes ONLY from the tenant's own address — their verified sending domain or connected
+// Gmail/Outlook (business-email.ts) — never "via Be More Swan". With neither, a double opt-in form can't take
+// sign-ups: audience-public.ts refuses before writing anything, and Audience ▸ Sign-up forms tells the owner.
 //
 // ── The link is a GET that renders a page, not a GET that confirms ──────────────────────────────
 // Mail scanners, corporate link rewriters and antivirus proxies fetch every URL in an email. A
@@ -21,7 +18,8 @@
 // that POSTs. lead-unsubscribe.ts solved the mirror-image problem (HEAD must not opt anyone out).
 
 import { createHash, randomBytes } from 'crypto';
-import { sendEmail } from './email';
+import type { getDb } from '../../db/client';
+import { sendBusinessEmail, type BusinessEmailDeps } from './business-email';
 
 /** How long a confirmation link lives. Long enough for a weekend and an inbox backlog. */
 export const CONFIRM_TTL_DAYS = 7;
@@ -106,15 +104,10 @@ export function buildConfirmationEmail(input: ConfirmationEmailInput): { subject
  * request, because a pending subscription whose confirmation never arrived is a contact that can
  * never be mailed and a visitor who thinks they subscribed.
  */
-export async function sendConfirmationEmail(input: ConfirmationEmailInput): Promise<void> {
+export async function sendConfirmationEmail(db: ReturnType<typeof getDb>, orgId: number, input: ConfirmationEmailInput, deps: BusinessEmailDeps = {}): Promise<void> {
     const { subject, html, text } = buildConfirmationEmail(input);
-    await sendEmail({
-        to: input.to,
-        subject,
-        html,
-        text,
-        // The display name is the tenant; the address stays on our verified domain. Quotes and
-        // angle brackets stripped so a crafted organisation name cannot restructure the header.
-        from: `${String(input.senderName || 'Be More Swan').replace(/["<>\r\n]/g, '').slice(0, 60)} (via Be More Swan) <noreply@bemoreswan.com>`,
-    });
+    // From the tenant's own address only; the display name is theirs (business-email.ts strips header characters).
+    const r = await sendBusinessEmail(db, orgId, { business: String(input.senderName || 'Our newsletter').replace(/["<>\r\n]/g, '').slice(0, 60), to: input.to, subject, html, text }, deps);
+    // 'slow' may still arrive, and the visitor can ask again; anything else is a confirmation that never went.
+    if (r !== 'sent' && r !== 'slow') throw new Error(r === 'no_route' ? 'No own address to send the confirmation from.' : 'The confirmation email could not be sent.');
 }

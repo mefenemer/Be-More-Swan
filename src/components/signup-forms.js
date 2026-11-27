@@ -16,6 +16,7 @@
   'use strict';
 
   const FORMS_API = '/.netlify/functions/audience-forms';
+  let confirmBlocked = null;
   const esc = (s) => (window.escapeHtml ? window.escapeHtml(s) : String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
   const $ = (id) => document.getElementById(id);
   let forms = [];
@@ -77,6 +78,7 @@
         return;
       }
       forms = data.forms || [];
+      confirmBlocked = data.confirmBlocked || null;
       render();
     } catch (err) {
       host.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
@@ -93,7 +95,9 @@
         </div>`;
       return;
     }
-    host.innerHTML = forms.map((f) => {
+    // No own address for confirmation / download emails (business-email.ts): said above the list.
+    const blocked = confirmBlocked ? `<p class="text-xs font-semibold text-amber-800 mb-2" data-sf-confirm-blocked>${esc(confirmBlocked)}</p>` : '';
+    host.innerHTML = blocked + forms.map((f) => {
       const d = f.definition || {};
       const embed = !d.delivery || !d.delivery.embed || d.delivery.embed.enabled !== false;
       const hosted = !!(d.delivery && d.delivery.hosted && d.delivery.hosted.enabled);

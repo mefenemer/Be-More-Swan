@@ -23,8 +23,14 @@ export interface BusinessEmail {
     /** Where replies go — the owner, ahead of the sending domain's own reply-to ("reply to this email" to change a booking). */
     replyTo?: string | null;
     attachments?: Array<{ filename: string; content: string; contentType?: string }>;
+    /** The plain-text part, when the caller has its own (else derived from the HTML). */
+    text?: string;
 }
-export interface BusinessEmailDeps { resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep; budgetMs?: number }
+export interface BusinessEmailDeps {
+    resolveRoute?: typeof resolveSendRoute; deliver?: typeof deliverStep; budgetMs?: number;
+    /** Told how it went out once sent: the provider and its message id (Resend only), e.g. to log a Resend cost. */
+    onSent?: (provider: string, id: string | null) => void | Promise<void>;
+}
 
 /** Send one customer email from the business's own address. Never throws. */
 export async function sendBusinessEmail(db: Db, orgId: number, m: BusinessEmail, deps: BusinessEmailDeps = {}): Promise<BusinessEmailResult> {
@@ -36,11 +42,13 @@ export async function sendBusinessEmail(db: Db, orgId: number, m: BusinessEmail,
         if ('error' in routed) return 'no_route';
         const route = { ...routed.route, replyTo: m.replyTo || routed.route.replyTo || null };
         const send = (deps.deliver ?? deliverStep)(db, route, orgId, {
-            to, subject: m.subject, html: m.html, text: htmlToPlainText(m.html), listUnsubscribe: null,
+            to, subject: m.subject, html: m.html, text: m.text ?? htmlToPlainText(m.html), listUnsubscribe: null,
             ...(m.attachments?.length ? { attachments: m.attachments } : {}),
         });
         const slow = new Promise<'slow'>((res) => { timer = setTimeout(() => res('slow'), deps.budgetMs ?? BUSINESS_EMAIL_BUDGET_MS); });
-        const r = await Promise.race([send.then(() => 'sent' as const), slow]);
+        let id: string | null = null;
+        const r = await Promise.race([send.then((x) => { id = x ?? null; return 'sent' as const; }), slow]);
+        if (r === 'sent' && deps.onSent) await Promise.resolve(deps.onSent(routed.route.provider, id)).catch(() => undefined);
         if (r === 'slow') { send.catch(() => undefined); console.error('[business-email] slow — may still go', { orgId }); }
         return r;
     } catch (err) {
@@ -68,6 +76,18 @@ export async function orgsWithRoute(db: Db, orgIds: number[], route: typeof reso
         if ('route' in r) out.push(id);
     }
     return out;
+}
+
+/** Audience ▸ Sign-up forms: a form asks people to confirm by email, but there is no own address to send it from,
+ *  so nobody can sign up on it until there is (owner 2026-11-27). null = fine or unknown. Never throws. */
+export async function signupConfirmBlocked(db: Db, orgId: number, route: typeof resolveSendRoute = resolveSendRoute): Promise<string | null> {
+    try {
+        const r = await route(db, orgId, { recipientCount: 1, senderName: 'Your business' });
+        return 'error' in r ? 'Nobody can sign up on a form that asks people to confirm by email: the confirmation goes only from your own address, and none is set up. Verify a sending domain or connect your Gmail or Outlook in Email Studio ▸ Sending, or turn off "confirm by email" on the form. Free downloads also go only from your own address.' : null;
+    } catch (err) {
+        console.error('[business-email] route check failed', err instanceof Error ? err.message : err);
+        return null;
+    }
 }
 
 /** The Bookings tab's warning: there is no own address, so customers get no booking emails. null = fine or unknown. */

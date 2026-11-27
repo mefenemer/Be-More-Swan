@@ -18,7 +18,7 @@ import type { getDb } from '../../db/client';
 import { audienceForms, organisations } from '../../db/schema';
 import { normaliseFormDefinition } from './form-definition';
 import { checkRateLimit } from './rate-limit';
-import { sendEmail } from './email';
+import { sendBusinessEmail } from './business-email';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -72,8 +72,10 @@ export async function deliverFormReward(db: Db, p: { formId: number | null; cont
         if (!limit.allowed) return false;
         const business = (form.orgName || 'us').replace(/[<>"\\\r\n]/g, '').slice(0, 60);
         const { subject, html } = rewardEmail({ business, label: reward.label, link: rewardDownloadUrl(p.baseUrl, form.id, reward.assetId) });
-        await sendEmail({ to: p.email, from: `${business} (via Be More Swan) <noreply@bemoreswan.com>`, subject, html });
-        return true;
+        // Own address only (business-email.ts; owner 2026-11-27): with none it isn't sent, and Audience ▸ Sign-up forms
+        // says so. The rate-limit slot is spent either way, so a missing route never turns into repeated tries.
+        const r = await sendBusinessEmail(db, form.organisationId, { business, to: p.email, subject, html });
+        return r === 'sent' || r === 'slow';
     } catch (err) {
         console.error('[form-reward] delivery failed', { formId: p.formId }, err instanceof Error ? err.message : err);
         return false;
