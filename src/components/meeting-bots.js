@@ -220,7 +220,9 @@
       const who = zoom.accountName ? esc(zoom.accountName) : 'the Zoom account you connected';
       return `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" data-mb-zoom="connected">
         <p><strong>Zoom:</strong> connected as ${who}. For a Zoom call, ${who} must be in the call: Zoom lets the Note Taker in on that account’s behalf.</p>
-        <button type="button" data-mb-zoom-disconnect style="min-height:44px" class="mt-1 btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Disconnect Zoom</button>
+        ${zoom.canDisconnect
+          ? '<button type="button" data-mb-zoom-disconnect style="min-height:44px" class="mt-1 btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Disconnect Zoom</button>'
+          : '<p class="mt-1 text-xs text-gray-500">An owner or admin of your workspace can disconnect it.</p>'}
       </div>`;
     }
     const href = `/api/oauth/zoom/connect?assistantId=${encodeURIComponent(assistantId)}&returnTo=inbox`;

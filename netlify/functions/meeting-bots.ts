@@ -4,7 +4,7 @@
 //
 //   GET  ?assistantId=N                                   → 200 { available, dpaAccepted, tasksPer5Min, bots: MeetingBotView[] }
 //        available = the meeting_bot flag is on for this workspace (the GUI shows nothing otherwise)
-//        zoom = { connected, accountName } while the meeting_bot_zoom flag is on (Connect Zoom in the dialog), else null
+//        zoom = { connected, accountName, canDisconnect } while the meeting_bot_zoom flag is on (Connect Zoom in the dialog), else null
 //   POST { action: 'send', assistantId, meetingUrl, title?, joinAt?, lengthLimitMinutes?, source? }
 //                                                         → 200 { bot, alreadySent } | 4xx/5xx { error, code }
 //   POST { action: 'remove', botId }                      → 200 { bot } | 4xx/5xx { error }
@@ -32,13 +32,14 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { userId, organisationId, assistantAccess } = ctx;
+    const { userId, organisationId, assistantAccess, role } = ctx;
 
     /** The workspace's Zoom connection, only while Zoom is switched on for it (plan B7: after Zoom's review). */
-    async function zoomState(orgId: number): Promise<{ connected: boolean; accountName: string | null } | null> {
+    async function zoomState(orgId: number): Promise<{ connected: boolean; accountName: string | null; canDisconnect: boolean } | null> {
         if (!(await isFeatureEnabled(orgId, MEETING_BOT_ZOOM_FLAG))) return null;
         const row = await getIntegration(db, orgId, 'zoom');
-        return { connected: !!row && row.status === 'active', accountName: row?.status === 'active' ? row.externalAccountName ?? null : null };
+        // Disconnecting is for owners and admins (oauth-integrations.ts disconnect); members are told who can.
+        return { connected: !!row && row.status === 'active', accountName: row?.status === 'active' ? row.externalAccountName ?? null : null, canDisconnect: role === 'owner' || role === 'admin' };
     }
 
     if (event.httpMethod === 'GET') {

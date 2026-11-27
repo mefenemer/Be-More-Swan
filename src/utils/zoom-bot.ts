@@ -25,7 +25,7 @@ export function zoomScopesGranted(scope: unknown): boolean {
 }
 
 /**
- * The numeric meeting number in a Zoom join link (/j/123…, /w/123…, /wc/join/123…, /wc/123/join), or null — a personal
+ * The numeric meeting number in a Zoom join link (/j/123…, /w/123…, /wc/join/123… — the forms cleanMeetingLink accepts), or null — a personal
  * link (/my/name) has no number, and an OBF token is minted for one meeting number. Pure.
  */
 export function zoomMeetingNumber(url: string): string | null {
@@ -33,7 +33,7 @@ export function zoomMeetingNumber(url: string): string | null {
     try { u = new URL(url); } catch { return null; }
     const host = u.hostname.toLowerCase();
     if (host !== 'zoom.us' && !host.endsWith('.zoom.us')) return null;
-    const m = u.pathname.match(/^\/(?:j|w|s|wc\/join|wc)\/(\d{9,12})(?:\/|$)/i);
+    const m = u.pathname.match(/^\/(?:j|w|wc\/join)\/(\d{9,12})(?:\/|$)/i);
     return m ? m[1] : null;
 }
 

@@ -25,7 +25,7 @@ const BOTS = [
     { id: 2, assistantId: 21, platform: 'teams', platformLabel: 'Microsoft Teams', title: 'Board meeting with a rather long name that has to wrap on a phone', meetingUrl: 'https://teams.microsoft.com/meet/1', joinAt: new Date(now + 26 * 3600_000).toISOString(), status: 'scheduled', statusWords: 'Booked', statusReason: null, joinedAt: null, leftAt: null, minutesInCall: null, recordId: null },
 ];
 
-function stub(api: ApiStub, opts: { available?: boolean; dpaAccepted?: boolean; zoom?: { connected: boolean; accountName: string | null } | null } = {}) {
+function stub(api: ApiStub, opts: { available?: boolean; dpaAccepted?: boolean; zoom?: { connected: boolean; accountName: string | null; canDisconnect?: boolean } | null } = {}) {
     const posts: Record<string, unknown>[] = [];
     api.set('meeting-bots', async (route, body) => {
         if (route.request().method() === 'GET') return { available: opts.available ?? true, dpaAccepted: opts.dpaAccepted ?? true, tasksPer5Min: 1, zoom: opts.zoom ?? null, bots: BOTS };
@@ -103,7 +103,7 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await noSideScroll(page);
             await page.keyboard.press('Escape');
 
-            stub(api, { zoom: { connected: true, accountName: 'kate@example.com' } });
+            stub(api, { zoom: { connected: true, accountName: 'kate@example.com', canDisconnect: true } });
             await page.reload();
             await page.locator('#detail-rq-bot-btn').click();
             dialog = page.getByRole('dialog', { name: 'Send to a call' });

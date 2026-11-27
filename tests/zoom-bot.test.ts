@@ -26,11 +26,10 @@ await test('scopes: both user:read:token and user:read:user are needed, space- o
     assert.equal(zoomScopesGranted(undefined), false);
 });
 
-await test('meeting number: from /j/, /w/, /wc/join/ and /wc/…/join on any zoom.us host; none for personal or foreign links', () => {
+await test('meeting number: from /j/, /w/ and /wc/join/ on any zoom.us host; none for personal or foreign links', () => {
     assert.equal(zoomMeetingNumber('https://us02web.zoom.us/j/81234567890?pwd=abc'), '81234567890');
     assert.equal(zoomMeetingNumber('https://zoom.us/w/123456789'), '123456789');
     assert.equal(zoomMeetingNumber('https://zoom.us/wc/join/123456789'), '123456789');
-    assert.equal(zoomMeetingNumber('https://zoom.us/wc/123456789/join'), '123456789');
     assert.equal(zoomMeetingNumber('https://zoom.us/my/kate'), null);
     assert.equal(zoomMeetingNumber('https://evilzoom.us/j/123456789'), null);
     assert.equal(zoomMeetingNumber('https://zoom.us.evil.com/j/123456789'), null);
@@ -159,9 +158,13 @@ await test('dialog: no Zoom line while Zoom is off; Connect Zoom back to the Inb
     const off = mb._zoomHtml({ connected: false, accountName: null }, 21);
     assert.match(off, /href="\/api\/oauth\/zoom\/connect\?assistantId=21&returnTo=inbox"/);
     assert.match(off, /that person must be in the call/);
-    const on = mb._zoomHtml({ connected: true, accountName: '<b>kate@example.com</b>' }, 21);
+    const on = mb._zoomHtml({ connected: true, accountName: '<b>kate@example.com</b>', canDisconnect: true }, 21);
     assert.match(on, /&lt;b&gt;kate@example\.com&lt;\/b&gt; must be in the call/);
     assert.match(on, /data-mb-zoom-disconnect/);
+    // A member can't disconnect (owner/admin only on the server): no button, they're told who can.
+    const member = mb._zoomHtml({ connected: true, accountName: 'kate@example.com', canDisconnect: false }, 21);
+    assert.doesNotMatch(member, /data-mb-zoom-disconnect/);
+    assert.match(member, /An owner or admin of your workspace can disconnect it/);
     const row = mb._rowHtml({ id: 1, status: 'failed', statusReason: 'zoom_obf_user_not_in_meeting', platformLabel: 'Zoom', title: 'Call', joinAt: '2026-11-27T10:00:00Z', statusWords: 'Couldn’t join' }, Date.parse('2026-11-27T10:05:00Z'));
     assert.match(row, /The person who connected Zoom wasn’t in the call/);
 });
