@@ -88,7 +88,7 @@
     const seq = ++state.loadSeq;
     const res = await fetch(API + '?seen=1', { credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
-    if (seq !== state.loadSeq) return;
+    if (seq !== state.loadSeq) return false;
     if (!res.ok) throw new Error(data.error || 'Could not load your email.');
     state.data = data;
     if (!state.mailboxId && data.mailboxes && data.mailboxes[0]) state.mailboxId = data.mailboxes[0].id;
@@ -102,7 +102,7 @@
       const r = await fetch(`${API}?mailboxId=${encodeURIComponent(wanted)}&actions=1`, { credentials: 'same-origin' });
       const a = await r.json().catch(() => ({}));
       // Switched again while this was loading: this answer belongs to a mailbox no longer shown.
-      if (seq !== state.loadSeq || state.mailboxId !== wanted) return;
+      if (seq !== state.loadSeq || state.mailboxId !== wanted) return false;
       if (r.ok) {
         state.actions = a.actions || []; state.cleanup = a.cleanup || [];
         state.undoDays = a.undoDays || 30; state.cleanupChunk = a.cleanupChunk || 25;
@@ -788,7 +788,8 @@
     const current = window._detailCurrentData;
     if (current && Number(current.id) !== Number(state.assistantId)) { state.assistantId = null; return; }
     try {
-      await load();
+      // false: a newer load owns the screen, so this one draws nothing (review of #922).
+      if (await load() === false) return;
       if (state.openDraftsAfterLoad) { state.openDraftsAfterLoad = false; openWaitingDrafts(); }
       render();
     }

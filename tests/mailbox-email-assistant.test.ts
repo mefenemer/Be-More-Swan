@@ -933,9 +933,11 @@ check('Emails tab: a failed read of the picked mailbox never shows the previous 
 check('Emails tab: switching is refused while a clean-up or undo runs (review of #922)', () => {
     const c = read('src/components/assistant-mailbox.js');
     assert.ok(/if \(state\.busy\) \{ sw\.value = String\(state\.mailboxId\);/.test(c));
-    assert.ok(/const seq = \+\+state\.loadSeq;[\s\S]{0,200}if \(seq !== state\.loadSeq\) return;/.test(c), 'an older load stops before touching state');
-    assert.ok(/if \(seq !== state\.loadSeq \|\| state\.mailboxId !== wanted\) return;/.test(c), 'a stale actions answer is dropped');
+    assert.ok(/const seq = \+\+state\.loadSeq;[\s\S]{0,200}if \(seq !== state\.loadSeq\) return false;/.test(c), 'an older load stops before touching state');
+    assert.ok(/if \(seq !== state\.loadSeq \|\| state\.mailboxId !== wanted\) return false;/.test(c), 'a stale actions answer is dropped');
     assert.ok(!/pickNewest/.test(c), 'reconnecting an old mailbox must not jump to the newest (review of #922)');
+    assert.ok(/if \(await load\(\) === false\) return;/.test(c), 'a stale load draws nothing');
+    assert.ok(/if \(seq !== state\.loadSeq\) return false;/.test(c) && /state\.mailboxId !== wanted\) return false;/.test(c));
 });
 
 void Promise.all(pendingChecks).then(() => console.log(`\n${passed} checks passed${process.exitCode ? ' — with FAILURES above' : ''}`));
