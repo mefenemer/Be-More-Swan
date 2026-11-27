@@ -253,6 +253,135 @@ test.describe('Admin → Money → Task costs', () => {
         await expect.poll(async () => page.locator('#tc-date').inputValue(), { timeout: 6000 }).toBe('2026-12-06');
     });
 
+    test('a typed cost survives a repaint (e.g. Send a test) and keeps the "Not saved yet" hold', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', STATE([DRAFT]));
+        await openAdmin(page, api);
+        await page.locator('[data-tc-key="ai_music"]').fill('40');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('40');
+        await expect(page.locator('#tc-unsaved')).toBeVisible();
+        await page.locator('#tc-confirm').fill('12');
+        await expect(page.locator('#tc-announce')).toBeDisabled();
+    });
+
+    test('after a successful announce, typing cannot turn Announce back on before the repaint; after a refusal it follows the hold', async ({ page, signedIn, api }) => {
+        let calls = 0;
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() !== 'POST') return STATE([DRAFT]);
+            calls++;
+            if (calls === 1) { route.fulfill({ status: 502, json: { error: 'The notice could not start.' } }); return undefined; }
+            return { started: true, waiting: 12, emailsGoToCustomers: false };
+        });
+        await openAdmin(page, api);
+        await page.locator('#tc-confirm').fill('12');
+        await page.locator('#tc-announce').click();
+        await expect(page.locator('#tc-status')).toContainText('could not start');
+        await expect(page.locator('#tc-announce')).toBeEnabled();
+        await page.locator('#tc-announce').click();
+        await expect(page.locator('#tc-status')).toContainText('Announced');
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
+        await page.locator('#tc-confirm').fill('');
+        await page.locator('#tc-confirm').fill('12');
+        // Read once, now: a retrying expect would pass anyway once the scheduled reload repaints 3 s later.
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
+    });
+
+    test('cancelling an announced change keeps the date and reason typed for the draft', async ({ page, signedIn, api }) => {
+        const second = { ...ANNOUNCED, id: 9, effectiveDate: '2027-01-01', items: [{ key: 'ai_image', oldUnits: 1, newUnits: 2 }], acceptance: { workspaces: 8, accepted: 0, waiting: [] } };
+        let cancelled = false;
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (cancelled = true, { cancelled: true }) : (cancelled ? STATE([DRAFT]) : STATE([second, DRAFT]))));
+        await openAdmin(page, api);
+        await page.locator('#tc-date').fill('2027-02-01');
+        await page.locator('#tc-reason').fill('Kept while cancelling.');
+        await page.locator('[data-tc-card="9"] [data-tc-cancel]').click();
+        await page.getByRole('button', { name: 'Cancel the change' }).click();
+        await expect(page.locator('#tc-status')).toContainText('Cancelled');
+        await expect.poll(async () => page.locator('[data-tc-card]').count(), { timeout: 6000 }).toBe(1);
+        await expect(page.locator('#tc-date')).toHaveValue('2027-02-01');
+        await expect(page.locator('#tc-reason')).toHaveValue('Kept while cancelling.');
+    });
+
+    test('a row that becomes locked shows today\'s cost and forgets what was typed; per-row Save clears only its own cost (review of #927)', async ({ page, signedIn, api }) => {
+        let state: any = STATE([]);
+        api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? { id: 8 } : state));
+        await openAdmin(page, api);
+        await page.locator('[data-tc-key="ai_music"]').fill('40');
+        await page.locator('[data-tc-key="chat_messages"]').fill('2');
+        await page.locator('[data-tc-key="ai_image"]').fill('3');
+        // Another admin announces a change to AI music: that row locks and shows today's 20.
+        state = STATE([ANNOUNCED]);
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('20');
+        await expect(page.locator('[data-tc-key="ai_music"]')).toBeDisabled();
+        // ...and if it is cancelled later, the old 40 does not come back.
+        state = STATE([]);
+        await page.evaluate(() => (window as any).loadTaskCostsAdmin());
+        await expect(page.locator('[data-tc-key="ai_music"]')).toHaveValue('20');
+        await expect(page.locator('[data-tc-key="ai_image"]')).toHaveValue('3');
+        // Saving the cost nobody is charged clears only that one.
+        await page.locator('[data-tc-key="chat_messages"]').fill('2');
+        await page.locator('[data-tc-unused="chat_messages"]').click();
+        await expect(page.locator('#tc-status')).toContainText('no notice went out');
+        await expect(page.locator('[data-tc-key="ai_image"]')).toHaveValue('3');
+        await expect(page.locator('[data-tc-key="chat_messages"]')).toHaveValue('1');
+    });
+
+    test('a slow older load cannot repaint over a newer one (review of #927)', async ({ page, signedIn, api }) => {
+        let n = 0;
+        api.set('admin-task-costs', async (route: any) => {
+            if (route.request().method() === 'POST') return { ok: true };
+            n++;
+            if (n === 2) { await new Promise((r) => setTimeout(r, 1500)); return STATE([DRAFT]); }
+            return STATE([]);
+        });
+        await openAdmin(page, api);
+        await expect(page.locator('#tc-save')).toHaveText('Save as a draft');
+        // Load 2 is slow and would show a draft; load 3 answers first with no draft and must win.
+        await page.evaluate(() => { (window as any).loadTaskCostsAdmin(); (window as any).loadTaskCostsAdmin(); });
+        await page.waitForTimeout(2000);
+        await expect(page.locator('#tc-save')).toHaveText('Save as a draft');
+        await expect(page.locator('#tc-open')).not.toContainText('Draft: starts');
+    });
+
+    test('a load that started before the announce cannot undo the hold (review of #927 round 2)', async ({ page, signedIn, api }) => {
+        api.set('admin-task-costs', (route: any) => {
+            if (route.request().method() !== 'POST') return STATE([DRAFT]);
+            return route.request().url().includes('resource=test') ? { inApp: true, emailed: false, to: 'admin@example.test' } : { started: true, waiting: 12, emailsGoToCustomers: false };
+        });
+        await openAdmin(page, api);
+        // Delay the NEXT state read inside the page (the reload the Test press starts), so the announce can finish while
+        // that stale read is still on its way — the stubbed network answers one request at a time.
+        await page.evaluate(() => {
+            const real = window.fetch.bind(window);
+            (window as any).__holdState = false;
+            window.fetch = (async (input: any, init?: any) => {
+                const url = String(input);
+                if ((window as any).__holdState && url.includes('resource=state')) {
+                    (window as any).__holdState = false;
+                    const res = await real(input, init);
+                    const body = await res.text();
+                    // Held until the test says so (after the announce), so the order is certain.
+                    await new Promise((r) => { (window as any).__release = r; });
+                    return new Response(body, { status: res.status, headers: res.headers });
+                }
+                return real(input, init);
+            }) as typeof window.fetch;
+        });
+        await page.evaluate(() => { (window as any).__holdState = true; });
+        await page.locator('#tc-test').click();            // starts a reload at once (held in the page)
+        await page.locator('#tc-confirm').fill('12');
+        await page.locator('#tc-announce').click();        // announce while that reload is in flight
+        await expect(page.locator('#tc-status')).toContainText('Announced');
+        await page.waitForFunction(() => typeof (window as any).__release === 'function');
+        await page.evaluate(() => (window as any).__release()); // now the stale reload (read before the announce) arrives
+        await page.waitForTimeout(300);
+        await page.locator('#tc-confirm').fill('');
+        await page.locator('#tc-confirm').fill('12');
+        // Read once, now: a retrying expect would pass anyway when the scheduled reload repaints 3 s later.
+        expect(await page.locator('#tc-announce').isDisabled()).toBe(true);
+    });
+
     test('a cleared date stays cleared, and a retry hides the old error while it runs', async ({ page, signedIn, api }) => {
         api.set('admin-task-costs', (route: any) => {
             if (route.request().method() === 'POST') { route.fulfill({ status: 400, json: { error: 'Choose the date the change starts.' } }); return undefined; }
