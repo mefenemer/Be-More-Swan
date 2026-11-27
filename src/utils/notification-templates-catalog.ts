@@ -1321,6 +1321,16 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // One-off (owner, 2026-11-27): booking emails need the business's own address (broadcast 'bookings_no_address').
+        templateKey: 'booking_emails_need_address_notice',
+        name: 'Booking emails need your own email address',
+        category: 'Connections',
+        type: 'booking_emails_need_address_notice',
+        title: 'Your booking emails need your own email address',
+        message: 'Customers now get booking confirmations, reminders and cancellations from your own email address, not Be More Swan. Your workspace has none set up, so they are not being sent. Connect Gmail or Outlook, or verify your domain, in Email Studio ▸ Sending. Until then, please confirm recent bookings with your customers yourself.',
+        variables: [],
+    },
+    {
         // A change to task costs (Admin → Money → Task costs). Each change has its own `type`
         // (task_cost_change_<id>), the once-each mark, so this one template serves all of them.
         templateKey: 'task_cost_change',

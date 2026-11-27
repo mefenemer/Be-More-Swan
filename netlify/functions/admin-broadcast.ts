@@ -25,7 +25,7 @@ import { renderTemplate, sendTemplatedEmail } from '../../src/utils/email';
 import { NOTIFICATION_DEFAULTS } from '../../src/utils/notification-templates-catalog';
 import { resolveEnvironment } from '../../src/utils/env-context';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { BROADCASTS, AUDIENCE_LABELS, BROADCAST_AUDIENCES, broadcastDef, pendingRecipients, alreadySentCount, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
+import { BROADCASTS, AUDIENCE_LABELS, audiencesFor, broadcastDef, pendingRecipients, alreadySentCount, emailsGoToCustomers, readAudience } from '../../src/utils/broadcast';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -79,13 +79,13 @@ export default withLambda(async (event) => {
                 ?? NOTIFICATION_DEFAULTS.find((t) => t.templateKey === b.key) ?? null;
             const email = await renderTemplate(b.key, { user: { first_name: admin.firstName || 'there' } });
             const waiting: Record<string, number> = {};
-            for (const a of BROADCAST_AUDIENCES) waiting[a] = (await pendingRecipients(db, b.key, a)).length;
+            for (const a of audiencesFor(b)) waiting[a] = (await pendingRecipients(db, b.key, a)).length;
             out.push({
                 ...b,
                 inApp: tpl ? { title: tpl.title, message: tpl.message } : null,
                 email: email ? { subject: email.subject, html: email.html } : null,
                 waiting,
-                audiences: BROADCAST_AUDIENCES.map((a) => ({ key: a, label: AUDIENCE_LABELS[a] })),
+                audiences: audiencesFor(b).map((a) => ({ key: a, label: AUDIENCE_LABELS[a] })),
                 alreadySent: await alreadySentCount(db, b.key),
                 // Switched off in Notification Templates: a send writes nothing and emails nobody, so the page says so.
                 switchedOff: await inAppSwitchedOff(b.key),
@@ -116,12 +116,12 @@ export default withLambda(async (event) => {
 
     if (resource === 'send') {
         const audience = readAudience(body.audience);
-        if (!audience) return json(400, { error: 'Choose who it goes to: workspace owners or everyone.' });
+        if (!audience || !audiencesFor(def).includes(audience)) return json(400, { error: 'Choose who it goes to from the list this notice offers.' });
         const waiting = (await pendingRecipients(db, def.key, audience)).length;
         if (!Number.isInteger(body.expected) || body.expected !== waiting) {
             return json(409, { error: `The number waiting has changed to ${waiting}. Check it again before sending.`, waiting });
         }
-        if (waiting === 0) return json(400, { error: audience === 'owners' ? 'Every workspace owner already has this notice.' : 'Everyone already has this notice.' });
+        if (waiting === 0) return json(400, { error: audience === 'everyone' ? 'Everyone already has this notice.' : 'Every owner it is meant for already has this notice.' });
         const secret = process.env.CRON_TRIGGER_SECRET;
         const base = resolveBaseUrl(event.headers);
         if (!secret || !base) return json(503, { error: !secret ? 'CRON_TRIGGER_SECRET is not set on this site.' : 'Could not work out this site\'s address.' });

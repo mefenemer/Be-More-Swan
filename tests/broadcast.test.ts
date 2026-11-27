@@ -13,7 +13,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BROADCASTS, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES, readAudience, BROADCAST_AUDIENCES } from '../src/utils/broadcast';
+import { BROADCASTS, audiencesFor, broadcastDef, emailsGoToCustomers, LIVE_PLAN_STATUSES, readAudience, BROADCAST_AUDIENCES } from '../src/utils/broadcast';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 import { TEMPLATE_DEFAULTS } from '../src/utils/email-templates-catalog';
 
@@ -160,22 +160,26 @@ check('Google Cloud notice (Gmail push): owners, both lists, every claim matches
 });
 
 check('audience (owner, 2026-11-20): owners or everyone, picked per send, never widened by a missing field', () => {
-    assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone']);
+    assert.deepStrictEqual([...BROADCAST_AUDIENCES], ['owners', 'everyone', 'bookings_no_address']);
+    // 2026-11-27: the targeted audience is offered only by the notice written for it.
+    assert.deepStrictEqual([...audiencesFor(broadcastDef('ai_video_per_second_notice')!)], ['owners', 'everyone']);
+    assert.deepStrictEqual([...audiencesFor(broadcastDef('booking_emails_need_address_notice')!)], ['bookings_no_address']);
     assert.strictEqual(readAudience('owners'), 'owners');
     assert.strictEqual(readAudience('everyone'), 'everyone');
     for (const bad of [undefined, null, '', 'admins', 'Owners']) assert.strictEqual(readAudience(bad), null);
     assert.strictEqual(broadcastDef('subprocessor_elevenlabs_notice')?.audience, 'owners', 'the DPA notice goes to owners');
     assert.strictEqual(broadcastDef('ai_video_per_second_notice')?.audience, 'everyone');
     const util = read('src/utils/broadcast.ts');
-    assert.match(util, /\$\{audience === 'owners' \? sql`AND uo\.role = 'owner'` : sql``\}/);
+    assert.match(util, /const owners = audience === 'owners' \|\| audience === 'bookings_no_address';/);
+    assert.match(util, /\$\{owners \? sql`AND uo\.role = 'owner'` : sql``\}/);
     const fn = read('netlify/functions/admin-broadcast.ts');
     assert.ok(fn.indexOf("const audience = readAudience(body.audience);") < fn.indexOf('const waiting = (await pendingRecipients(db, def.key, audience)).length;'), 'the count is checked for the audience picked');
-    assert.match(fn, /if \(!audience\) return json\(400,/);
+    assert.match(fn, /if \(!audience \|\| !audiencesFor\(def\)\.includes\(audience\)\) return json\(400,/);
     assert.match(fn, /body: JSON\.stringify\(\{ key: def\.key, adminId, audience \}\)/);
     const worker = read('netlify/functions/admin-broadcast-background.ts');
-    assert.match(worker, /if \(!audience\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
+    assert.match(worker, /if \(!audience \|\| !audiencesFor\(def\)\.includes\(audience\)\) return \{ statusCode: 400, body: 'audience required\.' \};/, 'no audience → no send, never everyone');
     assert.match(worker, /recipients = await pendingRecipients\(db, def\.key, audience\);/);
-    assert.match(util, /export async function pendingRecipients\(db: Db, key: string, audience: BroadcastAudience\): Promise/, 'no default: every caller says who');
+    assert.match(util, /export async function pendingRecipients\(db: Db, key: string, audience: BroadcastAudience, deps/, 'no default: every caller says who');
     // Review of #788: two sends of one notice at once must not reach anyone twice.
     assert.ok(worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') > 0
         && worker.indexOf('if (await alreadyHas(db, r.id, sentMark)) continue;') < worker.indexOf('const ok = await createNotification('), 'checked again just before each send');
