@@ -24,13 +24,13 @@ Outlook push needs no notice: Microsoft Graph calls our endpoint directly, with 
 | Only the mailbox's address and a reference number | `mail-push-gmail.ts` / `parsePubSubPush`: Google publishes `{ emailAddress, historyId }` |
 | No email content, subjects or senders | Same; the reader fetches changes from Gmail itself (`mail-reader/watch.ts` header) |
 | Undelivered notices kept up to 7 days, then deleted | Subscription `gmail-push-staging`: message retention 7 days (prod subscription to match) |
-| US | The topic has no message storage region set, so we don't promise UK/EU |
+| US (Google LLC; global infrastructure) | Google LLC is the US party; the topic has no message storage region set, so we don't promise UK/EU or a storage country |
 | Not used for customer mailboxes until 14 days after the email | Production has none of the push env vars until then |
 | Nothing reaches Google Cloud without Gmail on an Email Assistant | Watches start only for connected Gmail mailboxes in workspaces with the flag on |
 
 ## What changes in this PR
 
-- **trust.html** and **privacy.html** (kept the same): a Google Cloud (Pub/Sub) row, US, linking to
+- **trust.html** and **privacy.html** (kept the same): a Google Cloud (Pub/Sub) row, "US (Google LLC; global infrastructure)", linking to
   Google's Cloud Data Processing Addendum, plus one sentence saying why it is not a "platform you
   connect". The Trust page header date moves to 27 November 2026.
 - **Broadcast `subprocessor_google_cloud_notice`:** email and in-app notice, owners by default.
@@ -45,7 +45,8 @@ Outlook push needs no notice: Microsoft Graph calls our endpoint directly, with 
 2. **Press Test, then Send** (owners). Note the send date.
 3. **14 days after sending**, turn production push on: in Google Cloud create `gmail-push-prod` on
    topic `gmail-push` (push to `https://bemoreswan.com/.netlify/functions/mail-push-gmail`, auth with
-   `gmail-push-sender`, audience the same URL, ack 10 s, exponential backoff, never expire), then set
+   `gmail-push-sender`, audience the same URL, ack 10 s, exponential backoff, message retention 7 days
+   — the public copy promises "up to 7 days" — never expire), then set
    `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUSH_AUDIENCE`, `GMAIL_PUSH_SERVICE_ACCOUNT` and `GRAPH_NOTIFY_SECRET`
    for the Production context in Netlify, and redeploy.
 4. **Objections** to privacy@bemoreswan.com within the 14 days: the alternative is the 10-minute poll,
