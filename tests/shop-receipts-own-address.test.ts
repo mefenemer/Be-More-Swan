@@ -53,7 +53,7 @@ async function main() {
         assert.strictEqual(sent[0].to, 'jo@buyer.example');
         assert.strictEqual(sent[0].subject, 'Order confirmed — Willowbrook Coffee Ltd');
         assert.ok(!/bemoreswan|Be More Swan/i.test(String(sent[0].route.from)));
-        assert.strictEqual(sent[0].route.replyTo, 'hello@willowbrook.example', '"reply to this email" reaches the shop when the domain has no reply-to');
+        assert.strictEqual(sent[0].route.replyTo, 'hello@willowbrook.example', '"reply to this email" reaches the shop ');
         assert.ok(sent[0].text.includes('House Blend') && !sent[0].text.includes('<p>'), 'plain-text part for a mailbox send');
         assert.strictEqual(updates.length, 1);
     });
@@ -85,10 +85,28 @@ async function main() {
         assert.strictEqual(await sendBuyerConfirmation(db, { ...(ORDER as object), customerEmail: null } as never, SITE, '£12'), 'no_email');
     });
 
+    await check('review #914: the domain\'s own reply-to never beats the shop\'s contact email; a slow send → "slow", owner told to check', async () => {
+        const { db, updates } = fakeDb();
+        const seen: string[] = [];
+        await sendBuyerConfirmation(db, ORDER, SITE, '£12', null, null, {
+            resolveRoute: (async () => ({ route: { provider: 'resend', from: 'W <s@w.example>', replyTo: 'other@w.example', engagementTracked: false } })) as never,
+            deliver: (async (_db: unknown, route: { replyTo: string }) => { seen.push(route.replyTo); return null; }) as never,
+        });
+        assert.deepStrictEqual(seen, ['hello@willowbrook.example']);
+        const before = updates.length;
+        const r = await sendBuyerConfirmation(db, ORDER, SITE, '£12', null, null, {
+            resolveRoute: (async () => ({ route: { provider: 'gmail', from: null, replyTo: null, engagementTracked: false } })) as never,
+            deliver: (() => new Promise(() => {})) as never, budgetMs: 30,
+        });
+        assert.strictEqual(r, 'slow');
+        assert.strictEqual(updates.length, before, 'not marked emailed');
+        assert.ok(/Check your sent mail/.test(String(buyerConfirmationLine('slow'))));
+    });
+
     await check('Shop tab warning: only while selling with no route', async () => {
         const none = (async () => ({ error: 'none' })) as never;
         const ok = (async () => ({ route: { provider: 'gmail' } })) as never;
-        assert.ok(/no order confirmation email/.test(String(await buyerConfirmationsBlocked(fakeDb().db, 5, none))));
+        assert.ok(/won.t get an order confirmation email/.test(String(await buyerConfirmationsBlocked(fakeDb().db, 5, none))));
         assert.strictEqual(await buyerConfirmationsBlocked(fakeDb().db, 5, ok), null);
         assert.strictEqual(await buyerConfirmationsBlocked(fakeDb(null).db, 5, none), null, 'not selling yet: no warning');
     });
