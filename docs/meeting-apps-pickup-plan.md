@@ -2,6 +2,11 @@
 
 > **2026-11-19, owner:** most small businesses use free accounts, which make no transcript, so the Note Taker will **join the call itself** (`docs/note-taker-bot-plan.md`). That plan reuses this one's engine (#756) and pauses Phases 2–4 below until the bot is live (its decision B8, agreed by the owner 2026-11-19). The #756 engine stays.
 
+> **2026-11-27, owner: pick-up RESTARTED** for Meet, Teams and Zoom (it was skipped 22 Nov). Meet's launch steps,
+> legal drafts and Google verification pack are in `docs/meeting-pickup-meet-launch.md`. Pick-up now skips a call the
+> Note Taker's bot was in (`botCover`, skip reason `bot_joined`), so a call is never written up or charged twice.
+> Proposed D5 change: the transcript is **not kept** (the engine never stores it), instead of 30 days.
+
 **Status:** plan for the owner, 2026-11-18. Nothing built. The three cards on `/connections` say Coming soon (#729).
 **Goal:** after a call on Google Meet, Microsoft Teams or Zoom ends, its minutes appear in the Note Taker's Inbox
 without anyone pasting a transcript. They wait for approval exactly like pasted notes. Nothing is sent anywhere until a

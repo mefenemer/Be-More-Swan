@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
     CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, TASK_LIMIT_WAIT_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
+    BOT_WAIT_MS, BOT_WAIT_RETRY_MS, botCover, sameCallKey, type BotOnCall,
     checkWindowStart, discoverMeetings, pickedUpFrom, pickupMessage, speakerLines, transcriptRetryAt, writeImport,
     type FinishedMeeting, type ImportRelease, type ImportRow, type MeetingSource, type PickedTranscript,
     type PickupAccount, type PickupPlatform, type PickupStore, type WriterDeps,
@@ -396,6 +397,116 @@ await test('an Inbox edit can neither drop nor invent where a meeting came from'
 await test('scheduler auth is shared, not imported from another feature', () => {
     assert.match(readFileSync('netlify/functions/meeting-pickup.ts', 'utf8'), /from '\.\.\/\.\.\/src\/utils\/scheduled-run-auth'/);
     assert.match(readFileSync('src/utils/meeting-pickup-db.ts', 'utf8'), /Promise\.all\(due\.map/);
+});
+
+// ── The Note Taker's bot in the same call ────────────────────────────────────────────────────────
+const LINK = 'https://meet.google.com/abc-defg-hij';
+const callRow = { link: LINK, startedAt: new Date(T0.getTime() - 30 * 60 * 1000), endedAt: T0 };
+const bot = (o: Partial<BotOnCall> = {}): BotOnCall => ({
+    meetingUrl: LINK, status: 'done', joinAt: new Date(T0.getTime() - 31 * 60 * 1000),
+    joinedAt: new Date(T0.getTime() - 29 * 60 * 1000), leftAt: T0, importStatus: 'written', ...o,
+});
+
+await test('sameCallKey: host + path, any case, no query or trailing slash', () => {
+    assert.equal(sameCallKey('https://meet.google.com/ABC-defg-hij/?authuser=1&hs=122'), 'meet.google.com/abc-defg-hij');
+    assert.equal(sameCallKey('https://meet.google.com/abc-defg-hij'), sameCallKey('https://MEET.google.com/abc-defg-hij/'));
+    assert.equal(sameCallKey('https://meet.google.com/'), null);
+    assert.equal(sameCallKey('not a link'), null);
+    assert.equal(sameCallKey(null), null);
+});
+
+await test('botCover: covered only once the bot that was in the call has its minutes written', () => {
+    const now = new Date(T0.getTime() + 20 * 60 * 1000);
+    assert.equal(botCover(callRow, [bot()], now), 'covered');
+    // The host removed it after a minute: still its minutes (a joined bot that is removed ends 'done').
+    assert.equal(botCover(callRow, [bot({ leftAt: new Date(T0.getTime() - 28 * 60 * 1000) })], now), 'covered');
+    // Still in the call, or its write-up still running: wait.
+    assert.equal(botCover(callRow, [bot({ status: 'in_call', leftAt: null, importStatus: null })], now), 'wait');
+    assert.equal(botCover(callRow, [bot({ importStatus: 'writing' })], now), 'wait');
+    assert.equal(botCover(callRow, [bot({ importStatus: null })], now), 'wait');
+    // Link written differently by the bot dialog.
+    assert.equal(botCover(callRow, [bot({ meetingUrl: 'https://meet.google.com/ABC-DEFG-HIJ?authuser=0' })], now), 'covered');
+});
+
+await test('botCover: a different call, or the same code another day, is clear', () => {
+    const now = new Date(T0.getTime() + 20 * 60 * 1000);
+    assert.equal(botCover(callRow, [bot({ meetingUrl: 'https://meet.google.com/xyz-abcd-efg' })], now), 'clear');
+    const lastWeek = (ms: number) => new Date(ms - 7 * 24 * 60 * 60 * 1000);
+    assert.equal(botCover(callRow, [bot({ joinAt: lastWeek(T0.getTime() - 31 * 60 * 1000), joinedAt: lastWeek(T0.getTime() - 29 * 60 * 1000), leftAt: lastWeek(T0.getTime()) })], now), 'clear');
+    assert.equal(botCover({ ...callRow, link: null }, [bot()], now), 'clear');
+    assert.equal(botCover(callRow, [], now), 'clear');
+});
+
+await test('botCover: a bot that never got in leaves the pick-up to write it', () => {
+    const now = new Date(T0.getTime() + 20 * 60 * 1000);
+    for (const status of ['not_admitted', 'failed', 'cancelled']) {
+        assert.equal(botCover(callRow, [bot({ status, joinedAt: null, leftAt: null, importStatus: null })], now), 'clear', status);
+    }
+});
+
+await test('botCover: a bot that got in but writes nothing leaves the pick-up to write it (review of #933)', () => {
+    const now = new Date(T0.getTime() + 20 * 60 * 1000);
+    // Withdrawn mid-call (assistant or workspace removed): cancelled with a join time, no write-up.
+    assert.equal(botCover(callRow, [bot({ status: 'cancelled', importStatus: null })], now), 'clear');
+    assert.equal(botCover(callRow, [bot({ status: 'failed', importStatus: null })], now), 'clear');
+    // Its write-up was skipped (nobody heard, task limit, assistant gone) or failed.
+    assert.equal(botCover(callRow, [bot({ importStatus: 'skipped' })], now), 'clear');
+    assert.equal(botCover(callRow, [bot({ importStatus: 'failed' })], now), 'clear');
+    // A write-up that never settles is waited for only up to BOT_WAIT_MS.
+    assert.equal(botCover(callRow, [bot({ importStatus: 'found' })], new Date(T0.getTime() + BOT_WAIT_MS + 1)), 'clear');
+});
+
+await test('botCover: an unsettled bot for this call means wait, but not for ever', () => {
+    const open = bot({ status: 'waiting_room', joinedAt: null, leftAt: null });
+    assert.equal(botCover(callRow, [open], new Date(T0.getTime() + 20 * 60 * 1000)), 'wait');
+    assert.equal(botCover(callRow, [open], new Date(T0.getTime() + BOT_WAIT_MS + 1)), 'clear');
+    // A covering bot beats an open one.
+    assert.equal(botCover(callRow, [open, bot()], new Date(T0.getTime() + 20 * 60 * 1000)), 'covered');
+    // Booked long before the call: not for this call.
+    assert.equal(botCover(callRow, [bot({ status: 'scheduled', joinedAt: null, leftAt: null, joinAt: new Date(T0.getTime() - 3 * 60 * 60 * 1000) })], new Date(T0.getTime() + 20 * 60 * 1000)), 'clear');
+});
+
+await test('writeImport: the bot was in the call → skipped bot_joined, no transcript read, no write-up, no charge', async () => {
+    const { store, rows } = memStore();
+    const src = fakeSource({ meetings: [meeting('rec-bot')] });
+    let fetched = 0;
+    const counting = { ...src, async fetchTranscript() { fetched++; return GOOD; } };
+    await discoverMeetings(store, [counting], T0);
+    const { d, log } = deps(store, counting, { async botsOnCall() { return [bot()]; } });
+    const r = (await store.due(d.now(), 25))[0];
+    assert.equal(await writeImport(r, d), 'skipped_bot_joined');
+    assert.equal(rows.get(r)!.status, 'skipped');
+    assert.equal(rows.get(r)!.skipReason, 'bot_joined');
+    assert.equal(fetched, 0);
+    assert.deepEqual([log.written.length, log.filed.length, log.charged.length], [0, 0, 0]);
+});
+
+await test('writeImport: an unsettled bot → looked at again in 15 minutes, attempt given back', async () => {
+    const { store, rows } = memStore();
+    const src = fakeSource({ meetings: [meeting('rec-wait')] });
+    await discoverMeetings(store, [src], T0);
+    const { d, log } = deps(store, src, { async botsOnCall() { return [bot({ status: 'joining', joinedAt: null, leftAt: null, joinAt: new Date(T0.getTime() - 30 * 60 * 1000) })]; } });
+    const r = (await store.due(d.now(), 25))[0];
+    assert.equal(await writeImport(r, d), 'waiting_for_bot');
+    assert.equal(rows.get(r)!.status, 'found');
+    assert.equal(rows.get(r)!.attempts, 0);
+    assert.equal(rows.get(r)!.leaseUntil!.getTime(), d.now().getTime() + BOT_WAIT_RETRY_MS);
+    assert.equal(log.written.length, 0);
+});
+
+await test('writeImport: a bot meeting never checks for bots; a clear call is written as before', async () => {
+    const { store } = memStore();
+    const src = fakeSource({ meetings: [meeting('rec-clear')] });
+    await discoverMeetings(store, [src], T0);
+    let asked = 0;
+    const { d, log } = deps(store, src, { async botsOnCall() { asked++; return [bot({ meetingUrl: 'https://meet.google.com/other-call-xyz' })]; } });
+    const r = (await store.due(d.now(), 25))[0];
+    assert.equal(await writeImport(r, d), 'written');
+    assert.equal(asked, 1);
+    assert.equal(log.charged.length, 1);
+    // The engine only asks for picked-up meetings (via 'transcript').
+    const engine = readFileSync('src/utils/meeting-pickup.ts', 'utf8');
+    assert.match(engine, /\(row\.via \?\? 'transcript'\) === 'transcript' && d\.botsOnCall/);
 });
 
 console.log(`meeting-pickup: ${passed} passed`);
