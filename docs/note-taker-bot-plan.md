@@ -117,7 +117,7 @@ The help article says each of these in plain words. The Note Taker's live status
    Merged before any bot code ships.
 2. **Bot engine:** the `meeting_bots` SQL, the `via` column, `meeting-bot.ts`, the Recall client, `send-meeting-bot`, `recall-webhook`, auto-leave, the bot source into #756, metering (check before, charge actual minutes after) and media deletion. Proof: stubbed tests (send → webhook events → import → minutes record), a duplicate-send test, a not-admitted-costs-nothing test and a metering-order test.
 3. **GUI and chat:** dialog, Live & upcoming strip, statuses, settings, chat card, capabilities manifest. Proof: component harness at phone and desktop width; card and capabilities tests.
-4. **Zoom:**
+4. **Zoom:** ✅ **Built 2026-11-27, flag `meeting_bot_zoom` OFF** (Connect Zoom in the dialog, signed OBF token URL `zoom-obf-token.ts`, deauthorization `zoom-deauthorize.ts`). App set-up, Phase 0 on our own account, questions for Recall and the review answers: `docs/zoom-marketplace-review-pack.md`. Original plan:
    - a Zoom General App with the Meeting SDK and `user:read:token`;
    - a **Connect Zoom** card;
    - the token endpoint Recall calls to get a fresh OBF token for each meeting;

@@ -59,6 +59,8 @@ import {
 import { forgetMicrosoft, syncMicrosoft } from '../../src/utils/calendar-microsoft';
 import { forgetGoogle, GOOGLE_CALENDAR_SCOPE, syncGoogle } from '../../src/utils/calendar-google';
 import { GOOGLE_MEET_SCOPE, GOOGLE_MEET_READ_SCOPE } from '../../src/utils/meeting-sources/google-meet';
+import { MEETING_BOT_ZOOM_FLAG } from '../../src/utils/meeting-bot';
+import { fetchZoomUser, zoomScopesGranted } from '../../src/utils/zoom-bot';
 import { MEETING_PICKUP_FLAG } from '../../src/utils/meeting-pickup';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import { forgetSearchQueries } from '../../src/utils/gsc-queries';
@@ -99,6 +101,9 @@ const SCOPES: Record<IntegrationProvider, string> = {
     // participants and transcript entries. Sensitive, NOT Restricted: no Drive scope (the edited transcript Doc is not
     // read). openid email only labels the card. ⚠️ The Google console must list exactly these.
     google_meet: GOOGLE_MEET_SCOPE,
+    // The Note Taker's bot on Zoom (src/utils/zoom-bot.ts). Zoom takes its scopes from the app's settings, not the
+    // authorize URL: user:read:token (OBF tokens) + user:read:user (who is connected). Checked on the way back.
+    zoom: '',
     // Phase 4 actions: Threads post publishing, TikTok video uploads, YouTube video uploads.
     threads: 'threads_basic,threads_content_publish',
     tiktok: 'user.info.basic,video.upload',
@@ -178,6 +183,8 @@ function parseZendeskSubdomain(raw: string | undefined): string | null {
  */
 const RETURN_DESTINATIONS: Record<string, { tab: string; rqStatus?: string }> = {
     outreach: { tab: 'review-queue', rqStatus: 'approved' },
+    // The Note Taker's Inbox, where "Send to a call" lives (Connect Zoom starts from its dialog).
+    inbox: { tab: 'review-queue' },
 };
 
 /**
@@ -291,6 +298,10 @@ export default withLambda(async (event) => {
         if (!clientId) return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
         // Meeting pick-up is switched on per workspace until Google approves the Meet scope and the Terms notice has run.
         if (provider === 'google_meet' && !(await isFeatureEnabled(organisationId, MEETING_PICKUP_FLAG))) {
+            return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
+        }
+        // The bot on Zoom waits for Zoom's Marketplace review: switched on per workspace until then.
+        if (provider === 'zoom' && !(await isFeatureEnabled(organisationId, MEETING_BOT_ZOOM_FLAG))) {
             return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
         }
         // One signed-in booking calendar at a time: both write the business's busy times, and each would
@@ -435,6 +446,9 @@ export default withLambda(async (event) => {
             // offline + consent forces a refresh token for the 15-minute check; select_account so they pick the account
             // that HOSTS their calls (Meet lists only calls that account organised).
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.google_meet)}&access_type=offline&prompt=${encodeURIComponent('consent select_account')}&include_granted_scopes=false&state=${state}`;
+        } else if (provider === 'zoom') {
+            // Zoom user-managed OAuth: no scope parameter (the app's settings hold them) and refresh tokens come anyway.
+            authUrl = `https://zoom.us/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else if (provider === 'searchconsole') {
             // Google consent — offline + consent forces a refresh token for the daily ingest cron.
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.searchconsole)}&access_type=offline&prompt=consent&state=${state}`;
@@ -1015,6 +1029,28 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: emailAddress,
                     externalAccountName: emailAddress,
+                    scopes: grantedScopes(tokenData.scope),
+                });
+            } else if (provider === 'zoom') {
+                const credentials = Buffer.from(`${process.env.ZOOM_CLIENT_ID ?? ''}:${process.env.ZOOM_CLIENT_SECRET ?? ''}`).toString('base64');
+                const tokenRes = await fetch('https://zoom.us/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+                    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect('/integrations.html?oauth_error=token_exchange&provider=zoom');
+                // Without user:read:token no bot can be let into a Zoom call: a narrower grant is a failed connect.
+                if (!zoomScopesGranted(tokenData.scope)) return redirect('/integrations.html?oauth_error=scope_missing&provider=zoom');
+                // Zoom's user id is what a deauthorization names (zoom-deauthorize.ts); the email labels the card.
+                const zoomUser = await fetchZoomUser(tokenData.access_token);
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'zoom',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: zoomUser.id,
+                    externalAccountName: zoomUser.email,
                     scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'searchconsole') {

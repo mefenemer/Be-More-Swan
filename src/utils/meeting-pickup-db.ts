@@ -3,13 +3,13 @@
 
 import { and, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, masterAssistants, meetingImports, meetingPickupState } from '../../db/schema';
+import { aiAssistants, assistantRecords, masterAssistants, meetingBots, meetingImports, meetingPickupState } from '../../db/schema';
 import { resolveBaseUrl } from './base-url';
 import { persistHubRecordsWithTitles } from './hub-records';
 import { meetingHubRecord } from './meeting-minutes';
 import { writeMeetingMinutes } from './meeting-minutes-writer';
 import {
-    DUE_PER_RUN, LEASE_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, SETTLE_MS, discoverMeetings,
+    BOT_BOOKED_EARLY_MS, BOT_MATCH_SLACK_MS, DUE_PER_RUN, LEASE_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, SETTLE_MS, discoverMeetings,
     type ImportRow, type ImportVia, type MeetingSource, type PickupPlatform, type PickupStore, type WriterDeps,
 } from './meeting-pickup';
 import { googleMeetSource } from './meeting-sources/google-meet';
@@ -185,6 +185,20 @@ export function writerDeps(db: Db, sources: readonly MeetingSource[] = meetingSo
             // Its own meeting: the record writer never overwrites a meeting, it adds the time to a repeated title.
             const [saved] = await persistHubRecordsWithTitles(db, organisationId, assistantId, [meetingHubRecord(card)]);
             return saved?.id ?? null;
+        },
+        async botsOnCall(organisationId, row) {
+            if (!row.endedAt) return [];
+            const start = (row.startedAt ?? row.endedAt).getTime();
+            return db.select({
+                meetingUrl: meetingBots.meetingUrl, status: meetingBots.status, joinAt: meetingBots.joinAt,
+                joinedAt: meetingBots.joinedAt, leftAt: meetingBots.leftAt, importStatus: meetingImports.status,
+            }).from(meetingBots).leftJoin(meetingImports, eq(meetingImports.id, meetingBots.importId)).where(and(
+                eq(meetingBots.organisationId, organisationId),
+                eq(meetingBots.platform, row.platform),
+                // A bot booked up to an hour before the call, or one that joined late; botCover does the exact match.
+                gt(meetingBots.joinAt, new Date(start - BOT_MATCH_SLACK_MS - BOT_BOOKED_EARLY_MS)),
+                lt(meetingBots.joinAt, new Date(row.endedAt.getTime() + BOT_MATCH_SLACK_MS)),
+            )).limit(50);
         },
         async charge(organisationId, assistantId, importId, row) {
             if (row.via === 'bot') return chargeBotMeeting(db, organisationId, assistantId, importId);

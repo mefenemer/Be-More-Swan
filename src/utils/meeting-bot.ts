@@ -347,6 +347,8 @@ export interface BotRequestInput {
     /** Its picture in the call. Passed in (from netlify/functions/meeting-bots.ts) rather than imported, so the other
      *  functions that import this file don't bundle ~125 KB of pictures they never use. */
     videoTile?: BotVideoTile;
+    /** Zoom only: the signed URL Recall GETs for the OBF token when the bot joins (zoom-bot.ts obfTokenUrl). */
+    zoomObfTokenUrl?: string;
 }
 
 /**
@@ -380,6 +382,8 @@ export function recallBotRequest(i: BotRequestInput): Record<string, unknown> {
             everyone_left_timeout: { timeout: ALONE_TIMEOUT_S },
             in_call_recording_timeout: cleanLengthLimit(i.lengthLimitMinutes) * 60,
         },
+        // Zoom (OBF, since March 2026): Recall fetches a token for this one meeting from us as the bot joins.
+        ...(i.zoomObfTokenUrl ? { zoom: { obf_token_url: i.zoomObfTokenUrl } } : {}),
         // Echoed back on every webhook. Strings only (Recall). Never meeting text.
         metadata: { bms_bot_id: String(i.botRowId), bms_org_id: String(i.organisationId) },
     };

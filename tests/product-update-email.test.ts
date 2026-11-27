@@ -15,7 +15,7 @@ import {
     productUpdateImageUrl, verifyImageSignature, whatsNewUnsubscribeUrl, verifyUnsubscribeSignature, LIMITS,
 } from '../src/utils/product-update-email';
 import { PREF_CATEGORIES, isEmailEnabled } from '../src/utils/notification-prefs';
-import { EXCLUDED_RECIPIENT_EMAILS } from '../src/utils/product-update-recipients';
+import { EXCLUDED_RECIPIENT_EMAILS, normaliseAudience, isEveryone, AudienceError, AUDIENCE_GROUPS } from '../src/utils/product-update-recipients';
 import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -185,16 +185,42 @@ check('public routes are wired in netlify.toml', () => {
     assert.match(toml, /from = "\/api\/product-updates\/unsubscribe"\s+to = "\/\.netlify\/functions\/product-update-unsubscribe"/);
 });
 
+check('send to: groups are validated, de-duplicated, put in display order, and never empty', () => {
+    assert.deepEqual([...AUDIENCE_GROUPS], ['paying', 'trial', 'beta', 'no_plan']);
+    assert.deepEqual(normaliseAudience(['beta', 'paying', 'beta']), ['paying', 'beta']);
+    assert.throws(() => normaliseAudience([]), AudienceError);
+    assert.throws(() => normaliseAudience(['vip']), AudienceError);
+    assert.throws(() => normaliseAudience('paying'), AudienceError);
+    assert.ok(isEveryone(null) && isEveryone(['no_plan', 'beta', 'trial', 'paying']));
+    assert.ok(!isEveryone(['paying', 'trial', 'beta']));
+});
+
+check('send to: approve requires the groups and saves them BEFORE the claim; the worker walks that list', () => {
+    const approve = API.slice(landmark(API, "resource === 'approve'"), landmark(API, "resource === 'resume'"));
+    assert.ok(landmark(approve, 'normaliseAudience(') < landmark(approve, 'if (!claimed)'));
+    assert.ok(landmark(approve, 'db.transaction(') < landmark(approve, 'await writeAudience(tx'), 'groups saved inside the claim transaction');
+    assert.ok(landmark(approve, 'await writeAudience(tx') < landmark(approve, "status: 'sending'"));
+    assert.match(approve, /countRecipients\(db, audience\)/);
+    assert.match(WORKER, /const audience = await readAudience\(db, digestId\);/);
+    assert.match(WORKER, /recipientPage\(db, afterId, PAGE, audience\)/);
+    assert.match(read('db/z-product-update-audience.sql'), /ADD COLUMN IF NOT EXISTS audience TEXT\[\]/);
+    // Raw-SQL column: naming it in schema.ts would break every digest select until the SQL is applied.
+    assert.doesNotMatch(read('db/schema.ts'), /audience: text\("audience"\)/);
+});
+
 const A = read('admin.html');
 check('admin: the view exists, is in Growth, loads its data, and approve is blocked while unsaved', () => {
     assert.match(A, /<section id="view-product-updates" class="admin-view hidden/);
     assert.match(A, /\{ view: 'product-updates',\s+icon: '🆕', label: "What's New emails",\s+perm: 'manage_comms_templates',\s+group: 'Messages' \}/);
     assert.match(A, /if \(view === 'product-updates'\) loadProductUpdates\(\);/);
-    assert.match(A, /approve\.disabled = _puDirty;/);
+    assert.match(A, /approve\.disabled = _puDirty \|\| nobody;/);
     assert.match(A, /async function puApprove\(\) \{\n  if \(_puDirty\) return;/);
     // ⚠️ a sandboxed srcdoc iframe renders blank in Edge — the preview must use a data: URL.
     assert.match(A, /frame\.src = 'data:text\/html;charset=utf-8,' \+ encodeURIComponent/);
     assert.doesNotMatch(A, /id="pu-preview"[^>]*srcdoc/);
+    // Send to: the ticked groups go with the approve, and approve is off with none ticked.
+    assert.match(A, /body: JSON\.stringify\(\{ audience: _puAudience \}\)/);
+    assert.match(A, /if \(!_puAudience\.length\) return;/);
 });
 
 console.log(`\n${passed} checks passed`);

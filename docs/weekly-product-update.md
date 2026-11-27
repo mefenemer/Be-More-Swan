@@ -35,6 +35,10 @@ Your Mac (weekly Claude task)                 bemoreswan.com
 
 **Recipients:** every active customer account (`users.role = 'user'`, `status = 'active'`, not in its
 deletion cooling-off) that has not turned off **What's new at Be More Swan** (`email_preferences.whats_new`).
+**Send to** (2026-11-27): on each email the admin ticks plan groups — Paying, Free trial, Beta testers, No plan —
+all ticked by default (= everyone above). A person counts when ANY workspace they own or belong to has that kind of
+current plan; teammates are included. The choice is saved at approve and the sender walks that list. Narrowing it needs
+`db/z-product-update-audience.sql` on the database; "everyone" works without it.
 Customers can turn it off from the email's Unsubscribe link (or Gmail's one-click button), or from
 Account settings → Notification Preferences. Account, billing and security emails are unaffected.
 

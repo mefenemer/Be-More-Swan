@@ -25,10 +25,10 @@ const BOTS = [
     { id: 2, assistantId: 21, platform: 'teams', platformLabel: 'Microsoft Teams', title: 'Board meeting with a rather long name that has to wrap on a phone', meetingUrl: 'https://teams.microsoft.com/meet/1', joinAt: new Date(now + 26 * 3600_000).toISOString(), status: 'scheduled', statusWords: 'Booked', statusReason: null, joinedAt: null, leftAt: null, minutesInCall: null, recordId: null },
 ];
 
-function stub(api: ApiStub, opts: { available?: boolean; dpaAccepted?: boolean } = {}) {
+function stub(api: ApiStub, opts: { available?: boolean; dpaAccepted?: boolean; zoom?: { connected: boolean; accountName: string | null; canDisconnect?: boolean } | null } = {}) {
     const posts: Record<string, unknown>[] = [];
     api.set('meeting-bots', async (route, body) => {
-        if (route.request().method() === 'GET') return { available: opts.available ?? true, dpaAccepted: opts.dpaAccepted ?? true, tasksPer5Min: 1, bots: BOTS };
+        if (route.request().method() === 'GET') return { available: opts.available ?? true, dpaAccepted: opts.dpaAccepted ?? true, tasksPer5Min: 1, zoom: opts.zoom ?? null, bots: BOTS };
         posts.push(body as Record<string, unknown>);
         return { bot: { ...BOTS[0], id: 3, status: 'joining', statusWords: 'Joining the call' }, alreadySent: false };
     });
@@ -80,6 +80,38 @@ for (const [name, viewport] of [['wide screen', { width: 1440, height: 900 }], [
             await expect(dialog).toBeHidden();
             expect(posts).toHaveLength(1);
             expect(posts[0]).toMatchObject({ action: 'send', assistantId: 21, meetingUrl: 'https://meet.google.com/abc-defg-hij', joinAt: null, source: 'link', lengthLimitMinutes: 120 });
+            expect(pageErrors).toEqual([]);
+        });
+
+        test('Zoom off: no Zoom line; Zoom on: Connect Zoom back to the Inbox, then "connected as" with Disconnect', async ({ page, api, pageErrors }) => {
+            stub(api);
+            await open(page);
+            await page.locator('#detail-rq-bot-btn').click();
+            let dialog = page.getByRole('dialog', { name: 'Send to a call' });
+            await expect(dialog).toContainText('Google Meet or Microsoft Teams.');
+            await expect(dialog.locator('[data-mb-zoom]')).toHaveCount(0);
+            await page.keyboard.press('Escape');
+
+            stub(api, { zoom: { connected: false, accountName: null } });
+            await page.reload();
+            await page.locator('#detail-rq-bot-btn').click();
+            dialog = page.getByRole('dialog', { name: 'Send to a call' });
+            await expect(dialog).toContainText('Google Meet, Microsoft Teams or Zoom.');
+            const connect = dialog.getByRole('link', { name: 'Connect Zoom' });
+            await expect(connect).toHaveAttribute('href', '/api/oauth/zoom/connect?assistantId=21&returnTo=inbox');
+            expect((await connect.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+            await noSideScroll(page);
+            await page.keyboard.press('Escape');
+
+            stub(api, { zoom: { connected: true, accountName: 'kate@example.com', canDisconnect: true } });
+            await page.reload();
+            await page.locator('#detail-rq-bot-btn').click();
+            dialog = page.getByRole('dialog', { name: 'Send to a call' });
+            await expect(dialog).toContainText('connected as kate@example.com');
+            await expect(dialog).toContainText('must be in the call');
+            const off = dialog.getByRole('button', { name: 'Disconnect Zoom' });
+            expect((await off.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+            await noSideScroll(page);
             expect(pageErrors).toEqual([]);
         });
 

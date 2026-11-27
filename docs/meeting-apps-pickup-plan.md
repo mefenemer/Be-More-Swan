@@ -2,6 +2,19 @@
 
 > **2026-11-19, owner:** most small businesses use free accounts, which make no transcript, so the Note Taker will **join the call itself** (`docs/note-taker-bot-plan.md`). That plan reuses this one's engine (#756) and pauses Phases 2–4 below until the bot is live (its decision B8, agreed by the owner 2026-11-19). The #756 engine stays.
 
+> **2026-11-27, owner: pick-up RESTARTED** for Meet, Teams and Zoom (it was skipped 22 Nov). Meet's launch steps,
+> legal drafts and Google verification pack are in `docs/meeting-pickup-meet-launch.md`. Pick-up now skips a call the
+> Note Taker's bot was in (`botCover`, skip reason `bot_joined`), so a call is never written up or charged twice.
+> Proposed D5 change: the transcript is **not kept** (the engine never stores it), instead of 30 days.
+>
+> **2026-11-27, owner: Teams pick-up PARKED.** The Note Taker's bot already joins business Teams calls (proven 19 Nov),
+> so pick-up would mainly save customers tasks (1 per meeting instead of 1 per started 5 minutes) and the lobby step.
+> That does not yet justify the cost: `OnlineMeetingTranscript.Read.All` needs **admin consent** in every customer
+> organisation, the tenant can switch off Graph transcript access, and it only covers meetings with transcription on.
+> Revisit if customers ask, or if the bot's charge from 1 January 2027 puts them off. Nothing was built; Microsoft
+> facts checked on 27 Nov are in the Teams column below. Still worth checking: the bot in a business tenant that
+> restricts guests.
+
 **Status:** plan for the owner, 2026-11-18. Nothing built. The three cards on `/connections` say Coming soon (#729).
 **Goal:** after a call on Google Meet, Microsoft Teams or Zoom ends, its minutes appear in the Note Taker's Inbox
 without anyone pasting a transcript. They wait for approval exactly like pasted notes. Nothing is sent anywhere until a
@@ -48,8 +61,8 @@ person approves.
 | **Customer needs** | Google Workspace **Business Standard or higher**. Not Business Starter, free Gmail or personal accounts. | A Microsoft 365 **work or school** account. **Personal accounts (Hotmail/Outlook.com) are not supported.** | A **paid** Zoom plan with **cloud recording** and **audio transcript** switched on. |
 | **Per meeting** | Someone turns on **Transcripts** (or the organisation's auto setting). The transcript saves to the organiser's Drive. | Someone starts **transcription** (or the organisation's auto policy). | The meeting is **cloud-recorded** (manually or by auto-record), and Zoom makes the transcript afterwards. |
 | **How we read it** | Meet REST API: `conferenceRecords` → `transcripts` → `transcripts.entries` (speaker + text, paged, 100 at a time). **No Drive access needed.** | Graph: find the meeting from the calendar event's join link (`/me/onlineMeetings?$filter=JoinWebUrl eq '…'`), then `/me/onlineMeetings/{id}/transcripts/{id}/content` (a .vtt file). | Zoom API: list the user's cloud recordings, then fetch the transcript file (.vtt). |
-| **Scopes** | `meetings.space.readonly`: **Sensitive** (Google verification with a demo video, like `calendar.events`; no paid security assessment). | `OnlineMeetingTranscript.Read.All` and `OnlineMeetings.Read` (delegated). Likely **admin consent** in the customer's organisation (to confirm in Phase 0). Teams also has a new tenant setting for transcript API access. | Scopes roughly `cloud_recording:read:list_user_recordings` and `cloud_recording:read:meeting_transcript` (exact names to confirm). |
-| **Review on their side** | Add the scope to our existing Google project and **re-verify** (a demo video). | **Microsoft publisher verification** (still pending; the Outlook note already warns that work tenants may refuse consent until it is done). | **Zoom Marketplace review**: metadata and usability, then a security review. Forum reports say 7–10 business days at best, and longer with feedback. |
+| **Scopes** | `meetings.space.readonly`: **Sensitive** (Google verification with a demo video, like `calendar.events`; no paid security assessment). | `OnlineMeetingTranscript.Read.All` and `OnlineMeetings.Read` (delegated). Likely **admin consent** in the customer's organisation (to confirm in Phase 0). Teams also has a new tenant setting for transcript API access. | User-level granular scopes (confirmed in Zoom's scope reference 2026-11-27): `cloud_recording:read:list_user_recordings` (GET /users/me/recordings, max 1 month per call), `cloud_recording:read:list_recording_files` (GET /meetings/{uuid}/recordings), `cloud_recording:read:meeting_transcript` (GET /meetings/{uuid}/transcript), `user:read:user` (account label). The .vtt also downloads from the TRANSCRIPT file's `download_url` with the same token. A published app also needs a **deauthorization endpoint**. |
+| **Review on their side** | Add the scope to our existing Google project and **re-verify** (a demo video). | **Microsoft publisher verification: ✅ done 16 Oct 2026** (Be More Swan Ltd, for Outlook). Each customer organisation still needs an **admin to consent** to `OnlineMeetingTranscript.Read.All` (Microsoft marks it admin-consent-required, checked 27 Nov 2026). Personal accounts are not supported. Delegated `getAllTranscripts` does not exist (application only), so meetings are found through the calendar (`Calendars.Read`) → join link → `/me/onlineMeetings?$filter=JoinWebUrl eq …`. A tenant setting can block it (403 `GraphAccessToTranscriptsDisabled`); with speaker attribution off, text/vtt gives 403 `SpeakerAttributionNotAllowed` (plain text without speakers still works). | **Zoom Marketplace review**: metadata and usability, then a security review. Forum reports say 7–10 business days at best, and longer with feedback. |
 | **Push option (later)** | Workspace Events API: `transcript.v2.fileGenerated` through Google Pub/Sub (needs a Pub/Sub topic). | Graph change notifications (the "all transcripts" route is application-only, so polling with delegated access comes first). | `recording.transcript_completed` webhook (reported unreliable, so keep polling). |
 | **Which meetings** | Meetings the user organised or was invited to (Meet REST lists the user's conference records). | **Only meetings the user organised** (the delegated transcript route). | The user's own cloud recordings. |
 
@@ -91,9 +104,13 @@ person approves.
 2. **Google Meet (3–4 days plus Google re-verification):** add the scope to the Google project, poll
    `conferenceRecords`, fetch the transcript entries, and turn them into "Speaker: words". Submit the re-verification at
    the start of this phase.
-3. **Teams (4–5 days plus publisher verification):** a new Microsoft scope consent, calendar → join link → meeting id →
+3. **Teams: PARKED 2026-11-27 (see the note at the top).** Was: 4–5 days plus admin-consent help; a new Microsoft scope consent, calendar → join link → meeting id →
    transcript .vtt, organiser-only. Help text for the admin-consent step.
-4. **Zoom (4–5 days plus Marketplace review):** a new Zoom app (General app, user-managed OAuth), the scopes, listing
+4. **Zoom: NOT BUILT (owner, 27 Nov 2026: bot only).** The Note Taker's bot covers Zoom once our Zoom app is
+   approved (OBF), so pick-up adds only a cheaper, bot-free route for paid accounts that record to the cloud. If
+   customers ask for it, add the four `cloud_recording`/`user:read:user` scopes below to the SAME Zoom app in a later
+   version. The bot's app and review: `docs/zoom-marketplace-review-pack.md`. Original plan:
+   **Zoom (4–5 days plus Marketplace review):** a new Zoom app (General app, user-managed OAuth), the scopes, listing
    recordings and transcripts, and the Marketplace listing with a test plan. **Start the Zoom app and the review in
    Phase 1** so the wait overlaps.
 5. **Go-live per platform:** a real-account run like runs A–D, then that card moves to Live on `/connections`, with
