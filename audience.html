@@ -382,6 +382,7 @@
         </div>
       </div>
       <p id="rq-stats-line" class="text-xs text-gray-500 mt-2"></p>
+      <p id="rq-blocked-line" class="hidden text-xs font-semibold text-amber-800 mt-1" data-rq-blocked></p>
       <div id="rv-pending" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4"></div>
 
       <!-- Search, filter, group, sort. All client-side: a workspace keeps at most a few hundred. -->
@@ -453,6 +454,7 @@
       <h2 class="text-lg font-extrabold text-gray-900">Review Settings</h2>
       <p class="text-sm font-bold text-gray-900 mt-3">Ask customers for a review</p>
       <p class="text-sm text-gray-500 mt-0.5">One friendly email, sent once, after someone's visit or order through your website. They write the review on your own site; you approve it before it appears. Nobody is asked twice in 30 days, and anyone can say "don't ask me again".</p>
+      <p class="text-xs text-gray-500 mt-1" data-rq-route>Sent from your own address: your verified sending domain or your connected Gmail or Outlook (Email Studio ▸ Sending). Until you have one, nothing is sent; it goes once you do.</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
         <label class="sm:col-span-2 inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-bookings"> Ask after a booking from my website</label>
         <div><label for="rq-booking-delay" class="block text-sm font-semibold text-gray-700 mb-1">When</label>
@@ -460,7 +462,7 @@
             <option value="2">2 hours after it ends</option><option value="24">The next day</option><option value="48">2 days after</option><option value="72">3 days after</option><option value="168">A week after</option></select></div>
         <div></div>
         <div class="sm:col-span-2"><label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" id="rq-orders"> Ask after an order from my website</label>
-          <p class="text-xs text-gray-500 mt-1" data-rq-orders-route>Sent from your own address: your verified sending domain or your connected Gmail or Outlook (Email Studio ▸ Sending). Until you have one, nothing is sent; it goes once you do.</p></div>
+</div>
         <div><label for="rq-order-delay" class="block text-sm font-semibold text-gray-700 mb-1">Days after the order (time for it to arrive)</label>
           <input id="rq-order-delay" type="number" min="1" max="30" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
         <div class="sm:col-span-2"><label for="rq-google" class="block text-sm font-semibold text-gray-700 mb-1">Your Google review link (optional)</label>
@@ -468,6 +470,7 @@
           <p class="text-xs text-gray-500 mt-1">If you add it, every customer is also offered it — whatever they thought. (Google doesn't allow sending only happy customers.) Find it in your Google Business Profile under "Ask for reviews".</p></div>
       </div>
       <p id="rq-stats" class="text-xs text-gray-500 mt-3"></p>
+      <p id="rq-blocked" class="hidden text-xs font-semibold text-amber-800 mt-1"></p>
       <p id="rq-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mt-3"></p>
       <div class="flex items-center justify-end gap-2 mt-4">
         <button type="button" data-rq-close data-dialog-cancel class="btn-secondary border text-sm font-bold px-4 py-2 rounded-md">Cancel</button>
@@ -505,6 +508,8 @@
       const stats = asking() ? `Asking customers for reviews is on — in the last 30 days: ${a.sent || 0} asked, ${a.answered || 0} answered.` : 'Asking customers for reviews is off. Turn it on in Review Settings.';
       $('rq-stats').textContent = stats;
       $('rq-stats-line').textContent = stats;
+      // No own address to send from (review-requests.ts reviewRequestsBlocked): nothing goes until there is one.
+      for (const id of ['rq-blocked', 'rq-blocked-line']) { $(id).textContent = data.routeBlocked || ''; $(id).classList.toggle('hidden', !data.routeBlocked); }
       const p = data.pending || [];
       $('rv-pending').classList.toggle('hidden', !p.length);
       $('rv-pending').innerHTML = p.length ? `<p class="text-sm font-bold text-amber-900">Waiting for you (${p.length})</p>

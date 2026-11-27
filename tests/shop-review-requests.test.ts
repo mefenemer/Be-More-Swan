@@ -28,19 +28,20 @@ check('the email has a plain-text part with both links (a mailbox send needs one
     assert.ok(m.text.includes('review us on Google: https://g.page/r/x/review') && m.text.includes("Don't ask me for reviews again: https://k.example/_review?r=1&t=x&stop=1"));
 });
 
-check('shop orders: routes resolved first, due orders only where one exists, sent on it — bookings unchanged', () => {
+check('bookings and shop orders: routes resolved first, due only where one exists, sent on it', () => {
     const src = read('src/utils/review-requests.ts');
     const send = src.slice(src.indexOf('export async function sendDueReviewRequests('));
     assert.ok(send.indexOf("if ('route' in r) routes.set(o.id, r.route);") < send.indexOf('await dueOrders(db, now, [...routes.keys()])'));
     assert.ok(src.includes('inArray(siteOrders.organisationId, orgIds),'));
-    assert.ok(send.includes('if (d.orderId && !orderRoute) continue;'), 'no route: never claimed');
-    assert.ok(send.indexOf('if (d.orderId && !orderRoute) continue;') < send.indexOf('db.insert(reviewRequests)'));
-    assert.ok(send.includes('if (orderRoute) await (deps.deliver ?? deliverStep)(db, { ...orderRoute,'));
-    assert.ok(send.includes('else await sendEmail({ to: d.email, from: fromLine(business)'), 'bookings: a separate fix');
+    assert.ok(send.includes('if (!route) continue;'), 'no route: never claimed');
+    assert.ok(send.indexOf('if (!route) continue;') < send.indexOf('db.insert(reviewRequests)'));
+    assert.ok(send.includes('await (deps.deliver ?? deliverStep)(db, { ...route,'));
+    assert.ok(!/fromLine|sendEmail\(|noreply@/.test(src), 'bookings too (owner 2026-11-27): no Be More Swan sender left');
     // review #909: a time budget, a per-workspace cap, stale claims released, replies to the owner, a late window.
-    assert.ok(send.includes('if (clock() - started > RUN_BUDGET_MS) break;') && send.includes('if (n >= ORDERS_PER_WORKSPACE_PER_RUN) continue;'));
-    assert.ok(send.includes('DELETE FROM review_requests WHERE order_id IS NOT NULL AND sent_at IS NULL AND skipped_reason IS NULL'));
-    assert.ok(send.includes('replyTo: orderRoute.replyTo || owner?.email || null'));
+    assert.ok(send.includes('if (clock() - started > RUN_BUDGET_MS) break;') && send.includes('if (n >= REQUESTS_PER_WORKSPACE_PER_RUN) continue;'));
+    assert.ok(send.includes('DELETE FROM review_requests WHERE (order_id IS NOT NULL OR booking_id IS NOT NULL) AND sent_at IS NULL AND skipped_reason IS NULL'));
+    assert.ok(send.includes('replyTo: route.replyTo || owner?.email || null'));
+    assert.ok(src.includes('inArray(bookings.organisationId, orgIds),') && send.includes('await dueBookings(db, now, [...routes.keys()])'), 'bookings: only where a route exists');
     assert.ok(src.includes('make_interval(days => ${reviewSettings.orderDelayDays} + ${ORDER_LATE_DAYS})'));
 });
 
@@ -48,7 +49,9 @@ check('the owner is told: Shop tab line, chat snapshot, and beside the switch in
     assert.ok(read('netlify/functions/shop.ts').includes('reviewBlocked: await orderReviewRequestsBlocked(db, orgId),'));
     assert.ok(read('src/components/assistant-shop.js').includes('data-shop-review-blocked>${esc(d.reviewBlocked)}'));
     assert.ok(read('src/utils/shop-snapshot.ts').includes('REVIEW REQUESTS AFTER ORDERS'));
-    assert.ok(read('audience.html').includes('data-rq-orders-route>Sent from your own address'));
+    const aud = read('audience.html');
+    assert.ok(aud.includes('data-rq-route>Sent from your own address') && aud.includes("$(id).textContent = data.routeBlocked || ''"));
+    assert.ok(read('netlify/functions/org-reviews.ts').includes('routeBlocked: await reviewRequestsBlocked(db, orgId),'));
     assert.ok(read('.github/workflows/ci.yml').includes('run: npx tsx tests/shop-review-requests-db.test.ts'));
 });
 
