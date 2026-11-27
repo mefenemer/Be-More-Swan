@@ -78,7 +78,7 @@ meetingTitle names this meeting in the user's Meeting Notes library — derive i
 
 attendees lists every person the transcript shows was present or is named as an owner, as { name, email }. Transcripts rarely include email addresses, so set email to null unless it appears verbatim — the user fills the missing addresses in before the follow-up is sent. Return an empty array when no people are named.
 
-followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. Set followupEmail to null only when there is no meeting content yet.
+followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. List every task from tasks in the email, one line each, with its owner ("owner to be agreed" when Unassigned) and its due date when one was given. Never say action items will be shared separately, later or once confirmed: they belong in this email. When tasks is empty, say that no action items were agreed. Set followupEmail to null only when there is no meeting content yet.
 ${o.trailingBlock ? `\n${o.trailingBlock}\n` : ''}
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -121,6 +121,27 @@ export interface MinutesCard {
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+/** A sentence that puts the action items off ("…will be shared separately once confirmed"). */
+const DEFERRED_ACTIONS = /[^.!?\n]*\baction items?\b[^.!?\n]*\b(?:shared|sent|circulated|follow|confirmed)\b[^.!?\n]*\b(?:separately|later|once confirmed|in due course|to follow|shortly)\b[^.!?\n]*[.!?]?/i;
+
+/** The tasks as the email's list: "• description (owner, due …)". Pure. */
+export function actionItemLines(tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
+    return tasks.map((t) => {
+        const owner = !t.assignee || /^unassigned$/i.test(t.assignee) ? 'owner to be agreed' : t.assignee;
+        return `• ${t.description} (${owner}${t.dueDate ? `, due ${t.dueDate}` : ''})`;
+    }).join('\n');
+}
+
+/**
+ * The follow-up email must carry the action items (owner, staging test 2026-11-27: "Action items were noted during the
+ * meeting and will be shared separately once confirmed" with one task on the card). When the model puts them off and the
+ * card has tasks, that sentence becomes the list. Anything else is left as written. Pure.
+ */
+export function withActionItems(body: string, tasks: readonly { description: string; assignee: string; dueDate: string | null }[]): string {
+    if (!tasks.length || !DEFERRED_ACTIONS.test(body)) return body;
+    return body.replace(DEFERRED_ACTIONS, `Action items:\n${actionItemLines(tasks)}`);
+}
+
 /**
  * The model's card, cleaned: lists are lists of text, attendees carry a real address or null, tasks
  * have a description. Other keys the chat stamps on later (recordId, hubLink) are added after this.
@@ -147,7 +168,7 @@ export function normaliseMinutesCard(ui: unknown): MinutesCard | null {
     }).slice(0, 100);
     const fe = u.followupEmail && typeof u.followupEmail === 'object' ? u.followupEmail as Record<string, unknown> : null;
     const followupEmail = fe && (str(fe.subject, 300) || str(fe.body, 10000))
-        ? { subject: str(fe.subject, 300), body: str(fe.body, 10000) } : null;
+        ? { subject: str(fe.subject, 300), body: withActionItems(str(fe.body, 10000), tasks) } : null;
     const card: MinutesCard = {
         type: 'action_item_assignment',
         meetingTitle: str(u.meetingTitle, 300) || null,
