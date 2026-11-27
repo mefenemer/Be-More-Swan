@@ -19,7 +19,7 @@
   'use strict';
   const API = '/.netlify/functions/mailboxes';
   const state = {
-    assistantId: null, data: null, pill: 'needs', mailboxId: null, open: new Set(), bodies: new Map(), busy: false,
+    assistantId: null, data: null, pill: 'needs', mailboxId: null, addOpen: false, loadSeq: 0, open: new Set(), bodies: new Map(), busy: false,
     // Phase 2a
     actions: [], cleanup: [], undoDays: 30, cleanupChunk: 25, archiveRules: [], labelsOn: false,
     drafting: new Set(),      // message ids with a draft being written
@@ -84,16 +84,25 @@
 
   async function load() {
     // seen=1: this IS the Emails tab, so the "needs you now" notification has done its job (the Results cards don't send it).
+    // A newer load (the owner switched mailbox again) owns the screen: an older answer changes nothing.
+    const seq = ++state.loadSeq;
     const res = await fetch(API + '?seen=1', { credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
+    if (seq !== state.loadSeq) return false;
     if (!res.ok) throw new Error(data.error || 'Could not load your email.');
     state.data = data;
     if (!state.mailboxId && data.mailboxes && data.mailboxes[0]) state.mailboxId = data.mailboxes[0].id;
     if (state.mailboxId && !(data.mailboxes || []).some((m) => m.id === state.mailboxId)) state.mailboxId = data.mailboxes[0]?.id ?? null;
-    state.actions = []; state.cleanup = [];
+    // Everything below is per mailbox: start from nothing, so a failed read never shows another mailbox's
+    // rules or labels setting (review of #922).
+    state.actions = []; state.cleanup = []; state.archiveRules = []; state.labelsOn = false;
+    state.undoDays = 30; state.cleanupChunk = 25;
     if (state.mailboxId && (!data.access || data.access === 'owner')) {
-      const r = await fetch(`${API}?mailboxId=${encodeURIComponent(state.mailboxId)}&actions=1`, { credentials: 'same-origin' });
+      const wanted = state.mailboxId;
+      const r = await fetch(`${API}?mailboxId=${encodeURIComponent(wanted)}&actions=1`, { credentials: 'same-origin' });
       const a = await r.json().catch(() => ({}));
+      // Switched again while this was loading: this answer belongs to a mailbox no longer shown.
+      if (seq !== state.loadSeq || state.mailboxId !== wanted) return false;
       if (r.ok) {
         state.actions = a.actions || []; state.cleanup = a.cleanup || [];
         state.undoDays = a.undoDays || 30; state.cleanupChunk = a.cleanupChunk || 25;
@@ -118,6 +127,15 @@
       we fetch an email's text from your mailbox when you open it or when it's being sorted. Nothing is sent, moved or deleted unless you press the button for it; we add a "Swan" label showing each email's category, which you can turn off.</p>`;
   }
 
+  // Connect buttons for each provider this site can connect (mailboxes.ts `providers`). Used by the first
+  // connect and by "Add another mailbox" — the server allows several mailboxes per person (mailbox-oauth.ts).
+  function connectButtons() {
+    const prov = state.data.providers || {};
+    return `${prov.outlook !== false ? `<a href="${esc(connectUrl('outlook'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="outlook">Connect Outlook</a>` : ''}
+          ${prov.gmail ? `<a href="${esc(connectUrl('gmail'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="gmail">Connect Gmail</a>` : ''}
+          <span class="text-xs text-gray-500">${prov.gmail ? 'Outlook: Microsoft 365 and Outlook.com. Gmail: Gmail and Google Workspace.' : 'Microsoft 365 and Outlook.com. Gmail is coming soon.'}</span>`;
+  }
+
   function renderConnect() {
     bar().innerHTML = window._tabHead ? window._tabHead({ title: 'Emails' }) : '<h2 class="text-lg font-extrabold">Emails</h2>';
     host().innerHTML = `
@@ -126,9 +144,7 @@
         <p class="text-sm text-gray-700">Your Email Assistant reads your inbox, puts each email in a category, says what needs you today, and sums each one up in a line.</p>
         ${privacyNote()}
         <div class="flex flex-wrap items-center gap-3">
-          ${(state.data.providers || {}).outlook !== false ? `<a href="${esc(connectUrl('outlook'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="outlook">Connect Outlook</a>` : ''}
-          ${(state.data.providers || {}).gmail ? `<a href="${esc(connectUrl('gmail'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="gmail">Connect Gmail</a>` : ''}
-          <span class="text-xs text-gray-500">${(state.data.providers || {}).gmail ? 'Outlook: Microsoft 365 and Outlook.com. Gmail: Gmail and Google Workspace.' : 'Microsoft 365 and Outlook.com. Gmail is coming soon.'}</span>
+          ${connectButtons()}
         </div>
       </div>`;
   }
@@ -305,6 +321,7 @@
     const right = isOwner ? [
       window._tabSecBtn ? window._tabSecBtn('Refresh', 'data-mbx-refresh') : '',
       window._tabSecBtn ? window._tabSecBtn('Private senders', 'data-mbx-privlist') : '',
+      window._tabSecBtn ? window._tabSecBtn('Add another mailbox', `data-mbx-add aria-expanded="${state.addOpen}"`) : '',
     ].join('') : '';
     bar().innerHTML = window._tabHead ? window._tabHead({ title: 'Emails', chip: statusChip, right }) : '';
     if (!isOwner) {
@@ -326,7 +343,22 @@
     const content = state.pill === 'cleanup' ? cleanupHtml()
       : state.pill === 'done' ? doneHtml()
       : list.length ? `<ul class="mt-2">${list.map(rowHtml).join('')}</ul>` : `<p class="px-4 py-8 text-sm text-gray-600 text-center">${empty}</p>`;
-    host().innerHTML = `
+    // Several mailboxes: pick which one this tab shows. One mailbox: no picker.
+    const many = d.mailboxes.length > 1;
+    const switcher = many ? `
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <label for="mbx-switch" class="text-sm font-semibold text-gray-700">Mailbox</label>
+        <select id="mbx-switch" data-mbx-switch class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+          ${d.mailboxes.map((m) => `<option value="${m.id}"${m.id === box.id ? ' selected' : ''}>${esc(m.address)} (${esc(providerName(m.provider))})${m.status !== 'active' ? ' — needs reconnecting' : ''}</option>`).join('')}
+        </select>
+      </div>` : '';
+    const addPanel = state.addOpen ? `
+      <div class="tab-card p-5 mb-3 space-y-3">
+        <h3 class="text-base font-bold text-gray-900">Add another mailbox</h3>
+        <p class="text-sm text-gray-700">Connect another inbox you work from. Each mailbox is sorted on its own, and you switch between them here.</p>
+        <div class="flex flex-wrap items-center gap-3">${connectButtons()}</div>
+      </div>` : '';
+    host().innerHTML = `${switcher}${addPanel}
       <div class="tab-card">
         <div class="tab-pillbar">
           <div class="stage-pills" role="tablist" aria-label="Email categories">
@@ -512,7 +544,7 @@
     if (!root || root.dataset.mbxBound) return;
     root.dataset.mbxBound = '1';
     const onClick = async (e) => {
-      const t = e.target.closest('[data-mbx-pill],[data-mbx-open],[data-mbx-private],[data-mbx-disconnect],[data-mbx-refresh],[data-mbx-privlist],[data-mbx-draftnew],[data-mbx-redraft],[data-mbx-send],[data-mbx-savedraft],[data-mbx-dismiss],[data-mbx-cleanup],[data-mbx-cleanupopen],[data-mbx-undo],[data-mbx-rule],[data-mbx-rules],[data-mbx-labels],[data-mbx-unsub]');
+      const t = e.target.closest('[data-mbx-pill],[data-mbx-open],[data-mbx-private],[data-mbx-disconnect],[data-mbx-refresh],[data-mbx-privlist],[data-mbx-draftnew],[data-mbx-redraft],[data-mbx-send],[data-mbx-savedraft],[data-mbx-dismiss],[data-mbx-cleanup],[data-mbx-cleanupopen],[data-mbx-undo],[data-mbx-rule],[data-mbx-rules],[data-mbx-labels],[data-mbx-unsub],[data-mbx-add]');
       if (!t || state.busy) return;
       if (t.dataset.mbxPill) {
         state.pill = t.dataset.mbxPill;
@@ -555,6 +587,7 @@
       }
       if (t.dataset.mbxOpen) { openEmail(Number(t.dataset.mbxOpen)); return; }
       if (t.hasAttribute('data-mbx-privlist')) { managePrivate(); return; }
+      if (t.hasAttribute('data-mbx-add')) { state.addOpen = !state.addOpen; render(); return; }
       if (t.dataset.mbxPrivate) {
         try { const out = await post({ action: 'private_senders', mailboxId: state.mailboxId, add: t.dataset.mbxPrivate }); toast(out.message); await refresh(); }
         catch (err) { toast(err.message, 'error'); }
@@ -598,6 +631,15 @@
       post({ action: 'edit_reply', mailboxId: state.mailboxId, actionId: Number(ta.dataset.mbxDraft), body: ta.value }).catch(() => { /* kept on screen; saved with Send */ });
     });
     root.addEventListener('change', async (e) => {
+      const sw = e.target.closest('[data-mbx-switch]');
+      if (sw) {
+        // A clean-up or undo is running chunk by chunk against state.mailboxId: finish it on this mailbox first.
+        if (state.busy) { sw.value = String(state.mailboxId); toast('Please wait until the current action finishes.'); return; }
+        // Drafts, clean-up and rules are per mailbox (actions=1 is fetched for the selected one), so reload.
+        state.mailboxId = Number(sw.value); state.pill = 'needs'; state.addOpen = false;
+        state.open.clear(); state.bodies.clear(); state.cleanupSel.clear(); state.cleanupOpen.clear();
+        await refresh(); return;
+      }
       const tick = e.target.closest('[data-mbx-cleanuptick]');
       if (tick) {
         const set = state.cleanupSel.get(tick.dataset.mbxCleanuptick) || new Set();
@@ -746,7 +788,8 @@
     const current = window._detailCurrentData;
     if (current && Number(current.id) !== Number(state.assistantId)) { state.assistantId = null; return; }
     try {
-      await load();
+      // false: a newer load owns the screen, so this one draws nothing (review of #922).
+      if (await load() === false) return;
       if (state.openDraftsAfterLoad) { state.openDraftsAfterLoad = false; openWaitingDrafts(); }
       render();
     }
@@ -756,7 +799,7 @@
   async function init({ assistantId }) {
     if (!assistantId) return;
     state.assistantId = assistantId;
-    state.pill = 'needs'; state.open.clear(); state.bodies.clear(); state.mailboxId = null;
+    state.pill = 'needs'; state.open.clear(); state.bodies.clear(); state.mailboxId = null; state.addOpen = false;
     state.draftText.clear(); state.cleanupSel.clear(); state.cleanupOpen.clear(); state.drafting.clear();
     if (host()) host().innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
     bind();
