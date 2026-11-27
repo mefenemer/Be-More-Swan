@@ -39,7 +39,7 @@ check('bookings and shop orders: routes resolved first, due only where one exist
     assert.ok(!/fromLine|sendEmail\(|noreply@/.test(src), 'bookings too (owner 2026-11-27): no Be More Swan sender left');
     // review #909: a time budget, a per-workspace cap, stale claims released, replies to the owner, a late window.
     assert.ok(send.includes('if (clock() - started > RUN_BUDGET_MS) break;') && send.includes('if (n >= REQUESTS_PER_WORKSPACE_PER_RUN) continue;'));
-    assert.ok(send.includes('DELETE FROM review_requests WHERE (order_id IS NOT NULL OR booking_id IS NOT NULL) AND sent_at IS NULL AND skipped_reason IS NULL'));
+    assert.ok(send.includes('DELETE FROM review_requests WHERE (order_id IS NOT NULL OR (booking_id IS NOT NULL AND created_at >= ${BOOKING_RELEASE_FROM}::timestamptz)) AND sent_at IS NULL AND skipped_reason IS NULL'));
     assert.ok(send.includes('replyTo: route.replyTo || owner?.email || null'));
     assert.ok(src.includes('inArray(bookings.organisationId, orgIds),') && send.includes('await dueBookings(db, now, [...routes.keys()])'), 'bookings: only where a route exists');
     assert.ok(src.includes('make_interval(days => ${reviewSettings.orderDelayDays} + ${ORDER_LATE_DAYS})'));

@@ -39,6 +39,9 @@ export const ORDERS_PER_WORKSPACE_PER_RUN = REQUESTS_PER_WORKSPACE_PER_RUN;
 export const RUN_BUDGET_MS = 20_000;
 /** A shop-order request claimed but neither sent nor skipped this long ago was cut off mid-run: it is asked again. */
 export const STALE_CLAIM_MINUTES = 60;
+/** Booking claims are released only from here on (review #916): an older one was made by the old noreply path, whose
+ *  email may already have gone. */
+export const BOOKING_RELEASE_FROM = '2026-11-27T00:00:00Z';
 
 // ── Settings ────────────────────────────────────────────────────────────────────────────────────
 
@@ -198,7 +201,7 @@ export async function sendDueReviewRequests(db: Db, now: Date, deps: { route?: R
     const started = clock();
     // A request a killed run claimed but never sent: release it so it is due again (review #909).
     await db.execute(sql`
-        DELETE FROM review_requests WHERE (order_id IS NOT NULL OR booking_id IS NOT NULL) AND sent_at IS NULL AND skipped_reason IS NULL
+        DELETE FROM review_requests WHERE (order_id IS NOT NULL OR (booking_id IS NOT NULL AND created_at >= ${BOOKING_RELEASE_FROM}::timestamptz)) AND sent_at IS NULL AND skipped_reason IS NULL
            AND created_at < now() - make_interval(mins => ${STALE_CLAIM_MINUTES})`).catch((err: unknown) => console.error('[review-requests] stale claim release failed', err instanceof Error ? err.message : err));
     // Every request goes only on the owner's own route: resolve it first for every workspace that asks, and look for
     // due bookings / orders ONLY where one exists — so workspaces still waiting for a route can't fill the batch.
