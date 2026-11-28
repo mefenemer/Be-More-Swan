@@ -7,7 +7,8 @@
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { writeImport } from '../../src/utils/meeting-pickup';
+import { deleteBotMediaForImport } from '../../src/utils/meeting-bot-db';
+import { endedWithoutMinutes, writeImport } from '../../src/utils/meeting-pickup';
 import { writerDeps } from '../../src/utils/meeting-pickup-db';
 
 export default withLambda(async (event) => {
@@ -28,7 +29,11 @@ export default withLambda(async (event) => {
     try { importId = Number(JSON.parse(event.body || '{}').importId); } catch { /* handled below */ }
     if (!Number.isInteger(importId) || importId <= 0) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'importId required.' }) };
 
-    const outcome = await writeImport(importId, writerDeps(getDb()));
+    const db = getDb();
+    const outcome = await writeImport(importId, writerDeps(db));
+    // A bot meeting with no minutes (skipped or failed for good): Recall's copy goes now, as it does once minutes are
+    // filed (chargeBotMeeting), not at the next 15-minute sweep. A picked-up meeting has no bot, so this does nothing.
+    if (endedWithoutMinutes(outcome)) await deleteBotMediaForImport(db, importId);
     // The outcome only: never a title, a name or a word of the transcript in the logs.
     console.log('[meeting-import-background]', { importId, outcome });
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };

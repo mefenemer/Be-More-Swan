@@ -347,6 +347,22 @@ export type WriteOutcome =
     | 'skipped_no_transcript' | 'skipped_nobody_spoke' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
     | 'skipped_disconnected' | 'skipped_blocked' | 'skipped_bot_joined' | 'waiting_for_bot' | 'retry' | 'failed';
 
+/**
+ * True when writeImport finished a meeting WITHOUT minutes, for good: every skip, and a failure after the last attempt.
+ * For a bot meeting, the background writer then deletes Recall's copy straight away, as filing the minutes does, instead
+ * of leaving it for the 15-minute sweep (bots skipped as "no meeting" kept their audio for hours on staging).
+ */
+// Named one by one, not by the 'skipped_' prefix (review of #946): a new outcome that can still be retried must never
+// delete Recall's copy just because of its name. Each of these releases the row as 'skipped' or 'failed' for good.
+const ENDED_WITHOUT_MINUTES: ReadonlySet<WriteOutcome> = new Set<WriteOutcome>([
+    'skipped_no_transcript', 'skipped_nobody_spoke', 'skipped_no_meeting', 'skipped_task_limit', 'skipped_assistant_gone',
+    'skipped_disconnected', 'skipped_blocked', 'skipped_bot_joined', 'failed',
+]);
+
+export function endedWithoutMinutes(outcome: WriteOutcome): boolean {
+    return ENDED_WITHOUT_MINUTES.has(outcome);
+}
+
 export async function writeImport(importId: number, d: WriterDeps): Promise<WriteOutcome> {
     const now = d.now();
     const row = await d.store.claim(importId, now);

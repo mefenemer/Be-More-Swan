@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
     CHECK_OVERLAP_MS, FIRST_LOOKBACK_MS, MAX_ATTEMPTS, TASK_LIMIT_WAIT_MS, MEETING_PICKUP_FLAG, PICKUP_CHANNEL_BLOCK, TRANSCRIPT_WAIT_MS,
     BOT_WAIT_MS, BOT_WAIT_RETRY_MS, botCover, sameCallKey, type BotOnCall,
-    checkWindowStart, discoverMeetings, pickedUpFrom, pickupMessage, speakerLines, transcriptRetryAt, writeImport,
+    checkWindowStart, discoverMeetings, endedWithoutMinutes, pickedUpFrom, pickupMessage, speakerLines, transcriptRetryAt, writeImport,
     type FinishedMeeting, type ImportRelease, type ImportRow, type MeetingSource, type PickedTranscript,
     type PickupAccount, type PickupPlatform, type PickupStore, type WriterDeps,
 } from '../src/utils/meeting-pickup';
@@ -361,7 +361,7 @@ await test('functions: scheduled every 15 min, staging twin, secret-guarded back
     assert.match(readFileSync('.github/workflows/staging-crons.yml', 'utf8'), /run-meeting-pickup\s+900\s+60/);
     const bg = readFileSync('netlify/functions/meeting-import-background.ts', 'utf8');
     assert.match(bg, /if \(!secret\)/);
-    assert.match(bg, /writeImport\(importId, writerDeps\(getDb\(\)\)\)/);
+    assert.match(bg, /writeImport\(importId, writerDeps\(db\)\)/);
 });
 
 await test('the form and pick-up share one minutes writer', () => {
@@ -507,6 +507,24 @@ await test('writeImport: a bot meeting never checks for bots; a clear call is wr
     // The engine only asks for picked-up meetings (via 'transcript').
     const engine = readFileSync('src/utils/meeting-pickup.ts', 'utf8');
     assert.match(engine, /\(row\.via \?\? 'transcript'\) === 'transcript' && d\.botsOnCall/);
+});
+
+await test('a bot write-up that ends with no minutes deletes Recall\'s copy straight away, not at the next sweep', () => {
+    for (const o of ['skipped_no_meeting', 'skipped_nobody_spoke', 'skipped_no_transcript', 'skipped_task_limit', 'skipped_assistant_gone', 'skipped_blocked', 'failed'] as const) {
+        assert.equal(endedWithoutMinutes(o), true, o);
+    }
+    // Written is deleted by the charge; held or retried meetings still need the transcript.
+    for (const o of ['written', 'retry', 'waiting_for_transcript', 'waiting_for_tasks', 'waiting_for_bot', 'not_claimed', 'lost_latch'] as const) {
+        assert.equal(endedWithoutMinutes(o), false, o);
+    }
+    const fn = readFileSync('netlify/functions/meeting-import-background.ts', 'utf8');
+    assert.match(fn, /if \(endedWithoutMinutes\(outcome\)\) await deleteBotMediaForImport\(db, importId\);/);
+    const botDb = readFileSync('src/utils/meeting-bot-db.ts', 'utf8');
+    const helper = botDb.slice(botDb.indexOf('export async function deleteBotMediaForImport'), botDb.indexOf('export async function deleteBotMedia('));
+    assert.ok(helper.length > 0);
+    assert.match(helper, /eq\(meetingBots\.importId, importId\)/);
+    assert.match(helper, /FINAL_BOT_STATUSES\.includes/);
+    assert.match(helper, /catch \(err\)/);
 });
 
 console.log(`meeting-pickup: ${passed} passed`);
