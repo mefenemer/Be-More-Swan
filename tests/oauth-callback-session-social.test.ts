@@ -19,6 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+// Hard safety exit: a handler left waiting on the fake database must never hang CI (it did, on #942).
+setTimeout(() => { console.error('  ✗ timed out after 20s'); process.exit(1); }, 20_000).unref();
+
 (async () => {
     // session.ts and meta-oauth.ts read JWT_SECRET at module load: set a throwaway one before importing them.
     process.env.JWT_SECRET = 'test-only-secret-oauth-callback-session-social';
@@ -110,8 +113,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
         });
         await check("the starter's own session → passes the check and goes on to the database", async () => {
             const before = dbConnects;
-            const r = await call(handler, c.path, cookieFor(101)).catch(() => ({ status: 0, location: '' }));
-            assert.doesNotMatch(r.location, /invalid_session/);
+            // Don't wait for the handler to finish: postgres.js keeps retrying against the fake database,
+            // so the request may never resolve. Wait (up to 3s) for the first connection attempt instead.
+            let early: { location: string } | null = null;
+            call(handler, c.path, cookieFor(101)).then((r) => { early = r; }, () => {});
+            const deadline = Date.now() + 3000;
+            while (dbConnects === before && !early && Date.now() < deadline) await new Promise((ok) => setTimeout(ok, 25));
+            assert.doesNotMatch((early as { location: string } | null)?.location ?? '', /invalid_session/, 'not refused for a missing session');
             assert.ok(dbConnects > before, 'the handler went on to read the database');
         });
     }
