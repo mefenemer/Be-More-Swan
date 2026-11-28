@@ -291,7 +291,9 @@ export default withLambda(async (event) => {
 
     // ── CONNECT: redirect to the provider's authorization URL ──────────────────
     if (action === 'connect') {
-        const ctx = await requireTenant(event, db);
+        // mutates: an admin viewing as a customer is refused here, before the provider's consent screen, rather than
+        // after it at the callback (the callback's signed-in-user check would refuse it too).
+        const ctx = await requireTenant(event, db, { mutates: true });
         if ('error' in ctx) return redirect('/integrations.html?oauth_error=invalid_session');
         const { userId, organisationId } = ctx;
 

@@ -21,7 +21,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     process.env.JWT_SECRET = 'test-only-secret-oauth-callback-session';
     // getDb() needs a URL to build its client, but both refusals return before any query: point it nowhere, so a
     // regression that reaches the database fails loudly instead of touching a real one.
-    process.env.NETLIFY_DATABASE_URL = 'postgres://nobody:nothing@127.0.0.1:9/none';
+    // A local listener stands in for the database and records any connection: the refusals must open none (the vault
+    // read swallows errors, so without this a refusal that reached the database could still look right).
+    const net = await import('node:net');
+    let dbConnections = 0;
+    const fakeDb = net.createServer((sock) => { dbConnections++; sock.destroy(); });
+    await new Promise<void>((resolve) => fakeDb.listen(0, '127.0.0.1', () => resolve()));
+    const port = (fakeDb.address() as { port: number }).port;
+    process.env.NETLIFY_DATABASE_URL = `postgres://nobody:nothing@127.0.0.1:${port}/none`;
     const jwt = (await import('jsonwebtoken')).default;
     const handler = (await import('../netlify/functions/oauth-integrations')).default as unknown as (req: Request, ctx: object) => Promise<Response>;
 
@@ -47,11 +54,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
         const r = await call();
         assert.strictEqual(r.status, 302);
         assert.match(r.location, /oauth_error=invalid_session&provider=zoom/);
+        assert.strictEqual(dbConnections, 0, 'no database connection');
     });
     await check("another user's session → refused with csrf_fail", async () => {
         const r = await call(cookieFor(202));
         assert.strictEqual(r.status, 302);
         assert.match(r.location, /oauth_error=csrf_fail&provider=zoom/);
+        assert.strictEqual(dbConnections, 0, 'refused before the CSRF entry is read: no database connection');
     });
     await check('the check sits before the CSRF entry is read or consumed, and membership is checked after', () => {
         const src = readFileSync(join(root, 'netlify/functions/oauth-integrations.ts'), 'utf8');
@@ -88,5 +97,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
         }
     });
 
+    fakeDb.close();
     console.log(`\n${passed} passed`);
 })().catch((err) => { console.error(err); process.exit(1); });
