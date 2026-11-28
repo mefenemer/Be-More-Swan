@@ -24,7 +24,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     process.env.JWT_SECRET = 'test-only-secret-oauth-callback-session-social';
     process.env.META_APP_ID = 'test-app';
     process.env.META_APP_SECRET = 'test-app-secret';
-    process.env.NETLIFY_DATABASE_URL = 'postgres://nobody:nothing@127.0.0.1:9/none';
+    // The database is a local socket that counts connection attempts and hangs up at once: the refusals must
+    // never reach it, and the right user's session must (proof the new check doesn't lock everyone out).
+    const net = await import('node:net');
+    let dbConnects = 0;
+    const fakeDb = net.createServer((sock) => { dbConnects++; sock.destroy(); });
+    await new Promise<void>((ok) => fakeDb.listen(0, '127.0.0.1', ok));
+    const dbPort = (fakeDb.address() as import('node:net').AddressInfo).port;
+    process.env.NETLIFY_DATABASE_URL = `postgres://nobody:nothing@127.0.0.1:${dbPort}/none`;
     delete process.env.DATABASE_URL;
     const jwt = (await import('jsonwebtoken')).default;
     const { createHmac } = await import('node:crypto');
@@ -88,14 +95,24 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
         console.log(c.name);
         const handler = await load(c.file);
         await check('no session → refused with invalid_session, before any database read', async () => {
+            const before = dbConnects;
             const r = await call(handler, c.path);
             assert.strictEqual(r.status, 302);
             assert.match(r.location, c.noSession);
+            assert.strictEqual(dbConnects, before, 'no database connection attempted');
         });
         await check("another user's session → refused, before any database read", async () => {
+            const before = dbConnects;
             const r = await call(handler, c.path, cookieFor(202));
             assert.strictEqual(r.status, 302);
             assert.match(r.location, c.wrongUser);
+            assert.strictEqual(dbConnects, before, 'no database connection attempted');
+        });
+        await check("the starter's own session → passes the check and goes on to the database", async () => {
+            const before = dbConnects;
+            const r = await call(handler, c.path, cookieFor(101)).catch(() => ({ status: 0, location: '' }));
+            assert.doesNotMatch(r.location, /invalid_session/);
+            assert.ok(dbConnects > before, 'the handler went on to read the database');
         });
     }
 
@@ -118,5 +135,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
         });
     }
 
+    fakeDb.close();
     console.log(`\n${passed} passed`);
+    process.exit(process.exitCode ?? 0); // postgres.js may keep a retry timer alive
 })().catch((err) => { console.error(err); process.exit(1); });
