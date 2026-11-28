@@ -21,6 +21,8 @@ import { listAdministeredPages } from '../../src/utils/linkedin-page';
 import { optInLinkedInBlogDestination } from '../../src/utils/blog-linkedin-optin';
 import { bindLinkedInPage, linkedInPageVaultKey, linkedInPagePickKey, LINKEDIN_PAGE_PICK_TTL_MS, type PendingPagePick } from '../../src/utils/linkedin-page-bind';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requireSession } from '../../src/utils/session';
+import { requireOrgMembership } from '../../src/utils/tenant';
 
 function parseState(raw: string): Record<string, string> | null {
     try { return JSON.parse(Buffer.from(raw, 'base64url').toString()); }
@@ -51,6 +53,21 @@ export default withLambda(async (event) => {
     }
 
     const userId = parseInt(state.userId);
+
+    // ⚠️ THE PERSON FINISHING THE CONNECT MUST BE THE ONE WHO STARTED IT (security scan M1, 28 Nov 2026).
+    // The CSRF entry proves state.userId started this connect, not that the browser landing here is
+    // theirs: without this, someone could start a connect, send LinkedIn's / X's consent link to another
+    // person, and that person's account would be saved into the sender's workspace (who could then post
+    // as them). The session cookie is SameSite=Lax, so it rides on the provider's top-level GET redirect.
+    // Checked before the CSRF entry is read or consumed, so a stranger's visit can't burn it.
+    const session = requireSession(event);
+    if ('error' in session) {
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=invalid_session&platform=${platform}` }, body: '' };
+    }
+    if (session.userId !== userId) {
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=csrf_fail&platform=${platform}` }, body: '' };
+    }
+
     const db = getDb();
 
     // AC1.1.2: verify CSRF against server-side vault entry and enforce 10-minute TTL
@@ -63,6 +80,10 @@ export default withLambda(async (event) => {
     }
 
     const organisationId = parseInt(storedState.organisationId ?? '0');
+    // Still a member of the workspace the connect was started in (removed in the 10 minutes since = refused).
+    if (!organisationId || !(await requireOrgMembership(db, userId, organisationId))) {
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=csrf_fail&platform=${platform}` }, body: '' };
+    }
     // Where the person started: every redirect below returns them to this assistant's page.
     const returnAssistantId = storedState.assistantId ? parseInt(storedState.assistantId) : null;
     // Who the connection is BOUND to. Usually the same assistant; null (the workspace pool) when it

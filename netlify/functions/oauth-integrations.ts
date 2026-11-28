@@ -42,7 +42,8 @@ import { and, eq } from 'drizzle-orm';
 import { meetingPickupState, workspaceIntegrations } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { requireTenant } from '../../src/utils/tenant';
+import { requireOrgMembership, requireTenant } from '../../src/utils/tenant';
+import { requireSession } from '../../src/utils/session';
 import {
     INTEGRATION_PROVIDERS,
     OUTLOOK_SCOPE,
@@ -290,7 +291,9 @@ export default withLambda(async (event) => {
 
     // ── CONNECT: redirect to the provider's authorization URL ──────────────────
     if (action === 'connect') {
-        const ctx = await requireTenant(event, db);
+        // mutates: an admin viewing as a customer is refused here, before the provider's consent screen, rather than
+        // after it at the callback (the callback's signed-in-user check would refuse it too).
+        const ctx = await requireTenant(event, db, { mutates: true });
         if ('error' in ctx) return redirect('/integrations.html?oauth_error=invalid_session');
         const { userId, organisationId } = ctx;
 
@@ -510,6 +513,16 @@ export default withLambda(async (event) => {
         }
         const userId = parseInt(state.userId);
 
+        // ⚠️ THE PERSON FINISHING THE CONNECT MUST BE THE ONE WHO STARTED IT (security scan M1, 28 Nov 2026).
+        // The CSRF entry proves the connect was started by state.userId, not that the browser landing here
+        // belongs to them: without this, someone could start a connect, send the provider's consent link to
+        // another person, and their account (their Zoom, their mailbox) would be saved into the sender's
+        // workspace. The session cookie is SameSite=Lax, so it rides along on the provider's top-level
+        // redirect back here. Checked before the CSRF entry is consumed, so a stranger's visit can't burn it.
+        const session = requireSession(event);
+        if ('error' in session) return redirect(`/integrations.html?oauth_error=invalid_session&provider=${provider}`);
+        if (session.userId !== userId) return redirect(`/integrations.html?oauth_error=csrf_fail&provider=${provider}`);
+
         // Verify + consume the server-side CSRF entry (one-time use, 10-minute TTL).
         const csrfKey = `oauth_csrf:${userId}:${provider}`;
         const stored = await getSecret(db, csrfKey).catch(() => null) as { csrf?: string; expiresAt?: number; organisationId?: string; zendeskSubdomain?: string; codeVerifier?: string } | null;
@@ -519,6 +532,10 @@ export default withLambda(async (event) => {
         }
         const organisationId = parseInt(stored.organisationId ?? '0');
         if (!organisationId) return redirect(`/integrations.html?oauth_error=csrf_fail&provider=${provider}`);
+        // Still a member of the workspace the connect was started in (removed in the 10 minutes since = refused).
+        if (!(await requireOrgMembership(db, userId, organisationId))) {
+            return redirect(`/integrations.html?oauth_error=csrf_fail&provider=${provider}`);
+        }
 
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
 

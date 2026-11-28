@@ -15,6 +15,8 @@ import {
     fetchGrantedPermissions, fetchMetaAdAccounts, fetchMetaPages, metaAdsGraphVersion,
 } from '../../src/utils/ad-networks/meta';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requireSession } from '../../src/utils/session';
+import { requireOrgMembership } from '../../src/utils/tenant';
 
 const redirect = (to: string) => ({ statusCode: 302, headers: { Location: to }, body: '' });
 
@@ -39,6 +41,15 @@ export default withLambda(async (event) => {
     const userId = Number(parsed.userId);
     if (!Number.isFinite(userId)) return redirect('/integrations.html?meta_ads_error=invalid_state');
 
+    // ⚠️ THE PERSON FINISHING THE CONNECT MUST BE THE ONE WHO STARTED IT (security scan M1, 28 Nov 2026).
+    // Otherwise someone could start an ads connect, send Meta's consent link to another person, and
+    // that person's ad accounts would be saved into the sender's workspace (who could then spend as
+    // them). The session cookie is SameSite=Lax, so it rides on Meta's top-level GET redirect.
+    // Checked before the CSRF entry is read or burned, so a stranger's visit can't use it up.
+    const session = requireSession(event);
+    if ('error' in session) return redirect('/integrations.html?meta_ads_error=invalid_session');
+    if (session.userId !== userId) return redirect('/integrations.html?meta_ads_error=invalid_state');
+
     const db = getDb();
     const stored = await getSecret(db, metaAdsCsrfKey(userId)) as
         { csrf?: string; expiresAt?: number; organisationId?: string } | null;
@@ -49,6 +60,11 @@ export default withLambda(async (event) => {
     }
     const organisationId = Number(stored.organisationId);
     if (!Number.isFinite(organisationId)) return redirect('/integrations.html?meta_ads_error=invalid_state');
+    // Still a member of the workspace the connect was started in (removed in the 10 minutes since = refused).
+    if (!(await requireOrgMembership(db, userId, organisationId))) {
+        await deleteSecret(db, metaAdsCsrfKey(userId));
+        return redirect('/integrations.html?meta_ads_error=invalid_state');
+    }
     // One-time use: burned before the exchange so a replayed callback cannot mint a second token.
     await deleteSecret(db, metaAdsCsrfKey(userId));
 

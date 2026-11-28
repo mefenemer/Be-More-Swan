@@ -39,7 +39,7 @@ Nothing is submitted yet.
    only, no ZAK) and "Request anonymous join exception" OFF. Recall needed nothing uploaded (Phase 0).
 6. **Uninstall notice:** Zoom's event list has NO "app deauthorized" event for General apps. It is the **Production tab →
    Basic information → Deauthorization URL** box (the Development tab has none, so it can't be tested on staging):
-   `https://bemoreswan.com/.netlify/functions/zoom-deauthorize`, filled in once #935 is live on prod. The **Secret
+   `https://bemoreswan.com/.netlify/functions/zoom-deauthorize` (✅ filled in 28 Nov 2026; #935 is on prod). The **Secret
    Token** is on Features → Access.
 7. **Netlify (the owner pastes these; Claude never types them):**
    - `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET`: the Development keys on branch:staging, the Production-tab keys on
@@ -82,8 +82,9 @@ Development credentials reach only meetings on Be More Swan's own Zoom account, 
   - Privacy Policy: `https://bemoreswan.com/privacy.html` (its "Meetings the Note Taker joins" section already covers
     the bot).
   - Terms: `https://bemoreswan.com/terms_of_service.html` (clause 9.3 covers meetings).
-  - Support: ⚠️ confirm the help URL.
-  - Documentation: the help article in §6.
+  - Support: `https://bemoreswan.com/contact.html` (form plus hello@bemoreswan.com; the Help Centre links to it).
+  - Documentation: `https://bemoreswan.com/help#the-note-taker-on-zoom` (§6; `db/help-articles-note-taker-zoom-2026-11-28.sql`,
+    inserted unpublished: publish it on submission day so the link works for the reviewer).
 - **Screenshots (1280×720), from staging:**
   1. "Send to a call" with the Zoom line;
   2. Zoom's consent screen;
@@ -145,9 +146,13 @@ We don't read recordings, chat history, contacts, calendars or meetings the user
 
 ## 7. Test plan for the reviewer
 
-- **Test account:**
-  - a Be More Swan staging workspace with the Note Taker, DPA 1.2 accepted, and the `meeting_bot_zoom` flag on;
-  - signed in through the env-gated reviewer login (`review-login.ts`), switched off after the review.
+- **Test account: on PROD, not staging.** Zoom's reviewers install the app with its **Production** credentials, whose
+  redirect URL is bemoreswan.com. Staging runs the Development credentials, which only work for meetings on our own
+  Zoom account, so a reviewer can't use it.
+  - The existing reviewer slot `meta-review@bemoreswan.com` (prod user 47, workspace 46, `/review-login.html`,
+    `META_REVIEW_LOGIN_EXPIRES` 2027-11-30), already shared with LinkedIn's review.
+  - Workspace 46 needs: a Note Taker, DPA 1.2 accepted, Terms 2.5 accepted by user 47, and `meeting_bot_zoom` on for
+    it only (`allowed_workspace_ids = {46}` on prod). The other workspaces stay off.
 - **Steps:**
   1. Sign in.
   2. Open the Note Taker → Inbox → Send to a call → Connect Zoom → authorise with the reviewer's Zoom account.
@@ -174,7 +179,8 @@ still open (it only affects how we answer a failed request).
 - [x] App created (§1); env vars in Netlify (staging + prod); flag SQL on both databases; flag on for org 58 (staging)
 - [x] Phase 0 (§2) passed: bot joined a call on our own account through the token URL; minutes written (record 931)
 - [ ] The "not in the call" failure shows its reason in the strip
-- [ ] Prod redirect URL and deauthorization endpoint set; Production credentials in Netlify after approval
-- [ ] Reviewer login on and dated; screenshots and demo video recorded
+- [x] Prod redirect URL and deauthorization endpoint set; Production credentials in Netlify (28 Nov 2026)
+- [ ] Reviewer workspace 46 on prod ready (Note Taker, DPA 1.2, Terms 2.5, `meeting_bot_zoom` allowed {46})
+- [ ] Help article published; screenshots and demo video recorded
 - [ ] After approval: turn `meeting_bot_zoom` on for everyone; update /connections, the help article, the chat's
       capability wording ("Meet or Teams" → "Meet, Teams or Zoom") and What's New
