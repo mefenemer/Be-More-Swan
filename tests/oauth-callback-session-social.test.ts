@@ -94,9 +94,13 @@ setTimeout(() => { console.error('  ✗ timed out after 20s'); process.exit(1); 
         },
     ];
 
+    // Every refusal runs first, while nothing has touched the database, so a request still retrying from a
+    // right-user case below can never be counted against a refusal (review of #942).
+    const handlers = new Map<string, H>();
+    for (const c of cases) handlers.set(c.file, await load(c.file));
     for (const c of cases) {
-        console.log(c.name);
-        const handler = await load(c.file);
+        console.log(`${c.name}: refusals`);
+        const handler = handlers.get(c.file)!;
         await check('no session → refused with invalid_session, before any database read', async () => {
             const before = dbConnects;
             const r = await call(handler, c.path);
@@ -111,6 +115,12 @@ setTimeout(() => { console.error('  ✗ timed out after 20s'); process.exit(1); 
             assert.match(r.location, c.wrongUser);
             assert.strictEqual(dbConnects, before, 'no database connection attempted');
         });
+    }
+
+    const { closeDbPools } = await import('../db/client');
+    for (const c of cases) {
+        console.log(`${c.name}: the right user`);
+        const handler = handlers.get(c.file)!;
         await check("the starter's own session → passes the check and goes on to the database", async () => {
             const before = dbConnects;
             // Don't wait for the handler to finish: postgres.js keeps retrying against the fake database,
@@ -122,6 +132,9 @@ setTimeout(() => { console.error('  ✗ timed out after 20s'); process.exit(1); 
             assert.doesNotMatch((early as { location: string } | null)?.location ?? '', /invalid_session/, 'not refused for a missing session');
             assert.ok(dbConnects > before, 'the handler went on to read the database');
         });
+        // Drop the cached client so this request stops retrying and the next case's count is its own.
+        await Promise.race([closeDbPools().catch(() => {}), new Promise((ok) => setTimeout(ok, 500))]);
+        await new Promise((ok) => setTimeout(ok, 100));
     }
 
     // Order in the source: the session check sits before the CSRF entry is read or consumed (so a stranger's
