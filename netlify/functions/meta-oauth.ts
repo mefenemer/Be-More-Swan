@@ -21,7 +21,8 @@ import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
 import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../../src/utils/connection-collision';
-import { requireTenant } from '../../src/utils/tenant';
+import { requireOrgMembership, requireTenant } from '../../src/utils/tenant';
+import { requireSession } from '../../src/utils/session';
 import {
     accountsFor, connectedAccountNotShared, renderAccountPicker, pendingRefKey, signPickerHandle, parsePickerHandle,
     PENDING_TTL_MS, type IgPage, type MetaAccount, type PendingConnect,
@@ -290,11 +291,12 @@ export default withLambda(async (event) => {
         const platform = event.queryStringParameters?.platform === 'instagram' ? 'instagram' : 'facebook';
         const csrf = csrfToken();
         const csrfHmac = createHmac('sha256', jwtSecret).update(csrf).digest('hex');
-        // `userId` rides in the state for the same reason `organisationId` does: the callback is a
-        // top-level redirect back from Meta and cannot rely on the session cookie being present.
-        // Without it the stored connection had NO owner — and `user_id IS NULL` is the sentinel
+        // `userId` rides in the state so the callback knows who started the connect; the callback also
+        // insists the signed-in user (SameSite=Lax session cookie, sent on Meta's top-level redirect) is
+        // that same person and still a member of `organisationId` (security scan M1, 28 Nov 2026).
+        // (Before it rode here, the stored connection had NO owner — and `user_id IS NULL` is the sentinel
         // integrations.ts uses for a global catalog row, so every Facebook/Instagram connection
-        // was served to every workspace as an unconnected "platform definition".
+        // was served to every workspace as an unconnected "platform definition".)
         const state = signState({ organisationId: String(organisationId), userId: String(userId), assistantId: assistantId ?? '', platform, csrf, csrfHmac });
 
         const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPES}&state=${state}&response_type=code`;
@@ -321,6 +323,23 @@ export default withLambda(async (event) => {
         const state = parseState(rawState);
         if (!state) return { statusCode: 400, body: 'Invalid state parameter' };
 
+        // ⚠️ THE PERSON FINISHING THE CONNECT MUST BE THE ONE WHO STARTED IT (security scan M1, 28 Nov 2026).
+        // The csrf/csrfHmac pair proves this state was minted here, but the HMAC covers only the csrf, not
+        // the workspace or user riding beside it, and nothing proved the browser landing here belongs to
+        // the person who started. Without this, someone could start a connect, send Meta's consent link to
+        // another person, and that person's Facebook Page / Instagram account would be saved into the
+        // sender's workspace (who could then post as them). The session cookie is SameSite=Lax, so it rides
+        // on Meta's top-level GET redirect. Checked before anything else is read.
+        {
+            const plat = state.platform === 'instagram' ? 'instagram' : 'facebook';
+            const aId = state.assistantId && /^\d+$/.test(state.assistantId) ? parseInt(state.assistantId) : null;
+            const session = requireSession(event);
+            if ('error' in session) return { statusCode: 302, headers: { Location: metaErrUrl('invalid_session', plat, aId) }, body: '' };
+            if (!state.userId || session.userId !== parseInt(state.userId)) {
+                return { statusCode: 302, headers: { Location: metaErrUrl('csrf_fail', plat, aId) }, body: '' };
+            }
+        }
+
         // Validate CSRF
         const expectedHmac = createHmac('sha256', jwtSecret).update(state.csrf ?? '').digest('hex');
         if (expectedHmac !== state.csrfHmac) {
@@ -337,6 +356,12 @@ export default withLambda(async (event) => {
         // and labels the toast for the platform they were connecting. workspace.html reads
         // assistantId + platform to route back and colour the message.
         const metaErr = (code: string) => metaErrUrl(code, platform, assistantId);
+
+        // The workspace rides in the state unsigned (the HMAC covers only the csrf), so the signed-in
+        // user must actually be a member of it — this also refuses someone removed since they started.
+        if (!organisationId || !stateUserId || !(await requireOrgMembership(getDb(), stateUserId, organisationId))) {
+            return { statusCode: 302, headers: { Location: metaErr('csrf_fail') }, body: '' };
+        }
 
         // Connection sandboxing: if this connect was initiated for a specific
         // assistant, the platform being connected must be relevant to that assistant's role.
