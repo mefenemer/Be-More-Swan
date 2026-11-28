@@ -572,6 +572,22 @@ export async function withdrawMeetingBots(db: Db, organisationId: number, assist
     }
 }
 
+/**
+ * Deletes Recall's copy for the bot behind one meeting write-up, once that write-up ended without minutes (skipped or
+ * failed). No bot (a picked-up meeting, not a bot one) or already deleted: nothing to do. Never throws; the 15-minute
+ * sweep in pollMeetingBots stays the safety net if Recall refuses now.
+ */
+export async function deleteBotMediaForImport(db: Db, importId: number): Promise<boolean> {
+    try {
+        const [row] = await db.select().from(meetingBots).where(eq(meetingBots.importId, importId)).limit(1);
+        if (!row || !FINAL_BOT_STATUSES.includes(row.status as BotStatus)) return false;
+        return await deleteBotMedia(db, row);
+    } catch (err) {
+        console.error('[meeting-bot] media delete after write-up failed', { importId, err: err instanceof Error ? err.message : err });
+        return false;
+    }
+}
+
 /** Deletes Recall's copy of the recording; marks the row once Recall agrees. */
 export async function deleteBotMedia(db: Db, row: BotRow, timeoutMs?: number): Promise<boolean> {
     if (!row.recallBotId || row.mediaDeletedAt) return false;

@@ -347,6 +347,15 @@ export type WriteOutcome =
     | 'skipped_no_transcript' | 'skipped_nobody_spoke' | 'skipped_no_meeting' | 'skipped_task_limit' | 'skipped_assistant_gone'
     | 'skipped_disconnected' | 'skipped_blocked' | 'skipped_bot_joined' | 'waiting_for_bot' | 'retry' | 'failed';
 
+/**
+ * True when writeImport finished a meeting WITHOUT minutes, for good: every skip, and a failure after the last attempt.
+ * For a bot meeting, the background writer then deletes Recall's copy straight away, as filing the minutes does, instead
+ * of leaving it for the 15-minute sweep (bots skipped as "no meeting" kept their audio for hours on staging).
+ */
+export function endedWithoutMinutes(outcome: WriteOutcome): boolean {
+    return outcome === 'failed' || outcome.startsWith('skipped_');
+}
+
 export async function writeImport(importId: number, d: WriterDeps): Promise<WriteOutcome> {
     const now = d.now();
     const row = await d.store.claim(importId, now);
