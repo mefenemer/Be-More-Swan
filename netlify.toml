@@ -640,6 +640,104 @@ node_bundler = "esbuild"
   [headers.values]
     Cache-Control = "no-cache"
 
+# ── Security headers (Zoom Marketplace security scan M2, 28 Nov 2026) ─────────────────────────────
+# Every static response: HSTS (browsers then refuse plain HTTP for a year; no includeSubDomains, so no
+# other host under bemoreswan.com is bound by it) and nosniff (a file is only ever run as the type we
+# serve it as). Netlify merges these with the rules below, which set different headers.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=31536000"
+    X-Content-Type-Options = "nosniff"
+
+# Clickjacking: the signed-in app pages may only be framed by our own pages (the workspace frames some
+# of its own views). ⚠️ NOT site-wide: forms, widgets, booking pages and hosted sign-up pages are meant
+# to be embedded on customers' websites, and a frame ban there would break every embed.
+[[headers]]
+  for = "/workspace*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/admin*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/login*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/review-login*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/integrations*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/billing*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/checkout*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/user-settings*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/dashboard*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/onboarding*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/accept-invite*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/verify-account*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/assistant-*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+[[headers]]
+  for = "/blog-studio*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Content-Security-Policy = "frame-ancestors 'self'"
+
+
 # Fonts for Website Assistant sites, served here for the editor's preview (site-preview.ts). The live
 # sites serve the same files from sites-host/public/site-fonts. They never change once published.
 [[headers]]
